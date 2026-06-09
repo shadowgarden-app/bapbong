@@ -2,9 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig(() => ({
   root: __dirname,
-  cacheDir: '../../node_modules/.vite/packages/shadow-editor',
+  cacheDir: '../../node_modules/.vite/packages/editor',
   test: {
-    name: 'shadow-editor',
+    name: 'bapbong-editor',
     watch: false,
     globals: true,
     environment: 'node',

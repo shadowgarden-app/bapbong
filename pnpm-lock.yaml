@@ -84,7 +84,7 @@ importers:
         specifier: ~4.1.0
         version: 4.1.8(@types/node@20.19.9)(@vitest/coverage-v8@4.1.8)(vite@8.0.16(@types/node@20.19.9)(terser@5.48.0)(yaml@2.9.0))
 
-  packages/shadow-editor: {}
+  packages/editor: {}
 
 packages:
 

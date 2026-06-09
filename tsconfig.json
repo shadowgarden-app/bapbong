@@ -4,7 +4,7 @@
   "files": [],
   "references": [
     {
-      "path": "./packages/shadow-editor"
+      "path": "./packages/editor"
     }
   ]
 }

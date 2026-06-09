@@ -1,7 +1,7 @@
 {
-  "name": "@shadow-editor/source",
+  "name": "@shadow-garden/source",
   "version": "0.0.0",
-  "description": "shadow-editor monorepo — canvas-rendered DOCX editor (Nx workspace)",
+  "description": "bapbong monorepo — canvas-rendered DOCX editor (Nx workspace)",
   "license": "MIT",
   "scripts": {},
   "private": true,
