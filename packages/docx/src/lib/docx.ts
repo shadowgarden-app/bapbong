@@ -27,6 +27,10 @@ export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 export interface DocxImport {
   doc: PMNode;
   rawDocumentXml: string;
+  /** Header stories keyed by w:type ("default" | "first" | "even"). */
+  headers: Record<string, PMNode>;
+  /** Footer stories keyed by w:type. */
+  footers: Record<string, PMNode>;
 }
 
 interface Ctx {
@@ -249,6 +253,19 @@ async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
   return entry ? entry.async('string') : undefined;
 }
 
+/** Rels file that accompanies a part: "word/header1.xml" → "word/_rels/header1.xml.rels". */
+async function readPartRels(zip: JSZip, partPath: string): Promise<OoxmlNode | undefined> {
+  const slash = partPath.lastIndexOf('/');
+  const relsPath = `${partPath.slice(0, slash + 1)}_rels/${partPath.slice(slash + 1)}.rels`;
+  const xml = await readPart(zip, relsPath);
+  return xml ? parseXml(xml) : undefined;
+}
+
+function storyDoc(blocks: PMNode[]): PMNode {
+  // doc content is `block+` — guarantee at least one paragraph.
+  return schema.nodes.doc.create(null, blocks.length > 0 ? blocks : [schema.nodes.paragraph.create()]);
+}
+
 async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
   const media = new Map<string, string>();
   for (const path of Object.keys(zip.files)) {
@@ -279,22 +296,49 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
 
   const stylesXml = await readPart(zip, 'word/styles.xml');
   const numberingXml = await readPart(zip, 'word/numbering.xml');
-  const relsXml = await readPart(zip, 'word/_rels/document.xml.rels');
   const themeXml = await readPart(zip, 'word/theme/theme1.xml');
+
+  // Stateless/shared pieces; numbering counters are per-story (built fresh below).
   const resolveTheme = buildThemeResolver(themeXml ? parseXml(themeXml) : undefined);
-  const ctx: Ctx = {
-    styles: buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined, resolveTheme),
-    numbering: buildNumbering(numberingXml ? parseXml(numberingXml) : undefined),
-    rels: buildRels(relsXml ? parseXml(relsXml) : undefined),
-    media: await extractMedia(zip),
+  const styles = buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined, resolveTheme);
+  const numberingRoot = numberingXml ? parseXml(numberingXml) : undefined;
+  const media = await extractMedia(zip);
+  const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
+    styles,
+    numbering: buildNumbering(numberingRoot),
+    rels,
+    media,
     resolveTheme,
-  };
+  });
+
+  const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
+  const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
-  const blocks = body ? parseBlocks(body, ctx) : [];
+  const doc = storyDoc(body ? parseBlocks(body, ctx) : []);
 
-  // doc content is `block+` — guarantee at least one paragraph.
-  if (blocks.length === 0) blocks.push(schema.nodes.paragraph.create());
+  // Headers/footers referenced by the section properties.
+  const headers: Record<string, PMNode> = {};
+  const footers: Record<string, PMNode> = {};
+  const sectPr = body ? child(body, 'w:sectPr') : undefined;
+  if (sectPr) {
+    const collect = async (refName: string, store: Record<string, PMNode>, root: string) => {
+      for (const ref of children(sectPr, refName)) {
+        const type = attrOf(ref, 'w:type') ?? 'default';
+        const rId = attrOf(ref, 'r:id');
+        const target = rId ? ctx.rels.get(rId)?.target : undefined;
+        if (!target || store[type]) continue;
+        const partPath = `word/${target.replace(/^\/+/, '')}`;
+        const xml = await readPart(zip, partPath);
+        if (!xml) continue;
+        const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
+        const el = child(parseXml(xml), root);
+        store[type] = storyDoc(el ? parseBlocks(el, partCtx) : []);
+      }
+    };
+    await collect('w:headerReference', headers, 'w:hdr');
+    await collect('w:footerReference', footers, 'w:ftr');
+  }
 
-  return { doc: schema.nodes.doc.create(null, blocks), rawDocumentXml };
+  return { doc, rawDocumentXml, headers, footers };
 }

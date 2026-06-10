@@ -35,6 +35,7 @@ async function makeDocx(
   relsXml?: string,
   media?: Record<string, string>,
   themeXml?: string,
+  parts?: Record<string, string>, // extra zip entries by full path, e.g. word/header1.xml
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
@@ -55,6 +56,7 @@ async function makeDocx(
     }
   }
   if (themeXml) zip.file('word/theme/theme1.xml', themeXml);
+  if (parts) for (const [path, content] of Object.entries(parts)) zip.file(path, content);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -312,6 +314,34 @@ describe('importDocx', () => {
     expect(markMap(doc.child(0).child(0).marks).textColor.color).toBe('#4472C4');
     // shade 0x80/255 ≈ 0.502 → 4472C4 darkened ≈ 223962
     expect(markMap(doc.child(1).child(0).marks).textColor.color).toBe('#223962');
+  });
+
+  it('parses header/footer parts referenced by sectPr', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>
+      <w:p><w:r><w:t>body</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:headerReference w:type="default" r:id="rIdH"/>
+        <w:footerReference w:type="default" r:id="rIdF"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
+      <Relationship Id="rIdH" Type="${R_NS}/header" Target="header1.xml"/>
+      <Relationship Id="rIdF" Type="${R_NS}/footer" Target="footer1.xml"/>
+    </Relationships>`;
+    const headerXml = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Header text</w:t></w:r></w:p></w:hdr>`;
+    const footerXml = `<?xml version="1.0"?><w:ftr xmlns:w="${W_NS}"><w:p><w:r><w:t>Footer text</w:t></w:r></w:p></w:ftr>`;
+
+    const { doc, headers, footers } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, undefined, undefined, {
+        'word/header1.xml': headerXml,
+        'word/footer1.xml': footerXml,
+      }),
+    );
+
+    expect(doc.textContent).toBe('body');
+    expect(headers.default.textContent).toBe('Header text');
+    expect(headers.default.child(0).child(0).marks.map((m) => m.type.name)).toContain('strong');
+    expect(footers.default.textContent).toBe('Footer text');
   });
 
   it('throws when word/document.xml is missing', async () => {
