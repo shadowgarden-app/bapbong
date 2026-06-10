@@ -19,9 +19,24 @@ export const schema = new Schema({
       // `list` is null for normal paragraphs, or ListInfo for list items.
       // DOCX stores lists flat (each w:p carries w:numPr), so we keep them
       // flat and let the marker be computed by the numbering counter.
-      attrs: { list: { default: null } },
+      //
+      // `align` mirrors w:jc ('left'|'center'|'right'|'justify'), null = default.
+      // `indent` mirrors w:ind, all measured in CSS px (Indent | null):
+      //   { left, right, firstLine, hanging }. firstLine and hanging are
+      //   mutually exclusive in OOXML; hanging wins if both appear.
+      attrs: {
+        list: { default: null },
+        align: { default: null },
+        indent: { default: null },
+      },
+      // No getAttrs: nothing in the pipeline parses paragraphs from the DOM
+      // yet (the importer builds nodes directly). align/indent still round-trip
+      // out through toDOM. Revisit when HTML paste lands.
       parseDOM: [{ tag: 'p' }],
-      toDOM: () => ['p', 0],
+      toDOM(node) {
+        const style = paragraphStyle(node.attrs as ParagraphAttrs);
+        return ['p', style ? { style } : {}, 0];
+      },
     },
 
     text: { group: 'inline' },
@@ -146,6 +161,41 @@ export const schema = new Schema({
 
 /** Concrete schema type, handy for typing Node/Mark across packages. */
 export type BapbongSchema = typeof schema;
+
+/** Paragraph horizontal alignment (mirrors w:jc). */
+export type Align = 'left' | 'center' | 'right' | 'justify';
+
+/** Paragraph indentation in CSS px (mirrors w:ind). `firstLine` and `hanging`
+ *  are mutually exclusive; if both are present, `hanging` takes precedence. */
+export interface Indent {
+  left?: number;
+  right?: number;
+  firstLine?: number;
+  hanging?: number;
+}
+
+/** Shape of the paragraph node's attrs (for typed toDOM/serialization). */
+export interface ParagraphAttrs {
+  list: ListInfo | null;
+  align: Align | null;
+  indent: Indent | null;
+}
+
+/** Build an inline CSS `style` string for a paragraph's align/indent, or ''
+ *  when nothing applies. Used by toDOM (and the DOM preview in playground). */
+function paragraphStyle(attrs: ParagraphAttrs): string {
+  const parts: string[] = [];
+  if (attrs.align) parts.push(`text-align: ${attrs.align}`);
+  const ind = attrs.indent;
+  if (ind) {
+    if (ind.left) parts.push(`margin-left: ${ind.left}px`);
+    if (ind.right) parts.push(`margin-right: ${ind.right}px`);
+    // hanging wins over firstLine; negative text-indent renders the hang.
+    if (ind.hanging) parts.push(`text-indent: ${-ind.hanging}px`);
+    else if (ind.firstLine) parts.push(`text-indent: ${ind.firstLine}px`);
+  }
+  return parts.join('; ');
+}
 
 /** Value of a list paragraph's `list` attribute. `marker` is the resolved
  *  number/bullet string (e.g. "1.", "2.a", "•"); the numbering engine owns

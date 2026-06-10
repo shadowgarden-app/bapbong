@@ -344,6 +344,34 @@ describe('importDocx', () => {
     expect(footers.default.textContent).toBe('Footer text');
   });
 
+  it('maps w:jc to paragraph alignment', async () => {
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>c</w:t></w:r></w:p>
+      <w:p><w:pPr><w:jc w:val="both"/></w:pPr><w:r><w:t>j</w:t></w:r></w:p>
+      <w:p><w:pPr><w:jc w:val="end"/></w:pPr><w:r><w:t>r</w:t></w:r></w:p>
+      <w:p><w:r><w:t>default</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(xml));
+    expect(doc.child(0).attrs['align']).toBe('center');
+    expect(doc.child(1).attrs['align']).toBe('justify');
+    expect(doc.child(2).attrs['align']).toBe('right');
+    expect(doc.child(3).attrs['align']).toBeNull();
+  });
+
+  it('maps w:ind (twips) to indentation in px, hanging winning over firstLine', async () => {
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:ind w:left="720" w:right="360" w:hanging="240" w:firstLine="480"/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>
+      <w:p><w:pPr><w:ind w:start="1440" w:firstLine="240"/></w:pPr><w:r><w:t>y</w:t></w:r></w:p>
+      <w:p><w:r><w:t>none</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(xml));
+    // 720/15=48, 360/15=24, 240/15=16; hanging present so firstLine dropped.
+    expect(doc.child(0).attrs['indent']).toEqual({ left: 48, right: 24, hanging: 16 });
+    // w:start aliases w:left; 1440/15=96, 240/15=16.
+    expect(doc.child(1).attrs['indent']).toEqual({ left: 96, firstLine: 16 });
+    expect(doc.child(2).attrs['indent']).toBeNull();
+  });
+
   it('throws when word/document.xml is missing', async () => {
     const zip = new JSZip();
     zip.file('hello.txt', 'nope');

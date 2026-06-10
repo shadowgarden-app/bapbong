@@ -1,11 +1,13 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
 import type {
+  Align,
   FlowBlock,
   FontSpec,
   InlineRun,
   LayoutConfig,
   LayoutLine,
   LayoutSegment,
+  ParagraphIndent,
   ResolvedLayout,
   ResolvedPage,
 } from '@shadow-garden/bapbong-contracts';
@@ -53,7 +55,15 @@ export function toFlowBlocks(doc: PMNode, defaultFont: Partial<FontSpec> = {}): 
       if (child.isText) runs.push(resolveRun(child, base));
     });
     const list = node.attrs['list'] as { marker?: string } | null;
-    blocks.push({ type: 'paragraph', runs, marker: list?.marker || undefined });
+    const align = node.attrs['align'] as Align | null | undefined;
+    const indent = node.attrs['indent'] as ParagraphIndent | null | undefined;
+    blocks.push({
+      type: 'paragraph',
+      runs,
+      marker: list?.marker || undefined,
+      align: align ?? undefined,
+      indent: indent ?? undefined,
+    });
   });
   return blocks;
 }
@@ -100,43 +110,91 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
     y = top;
   };
 
-  const pushLine = (segments: LayoutSegment[], height: number) => {
+  const pushLine = (segments: LayoutSegment[], x: number, width: number, height: number) => {
     if (y + height > bottom && lines.length > 0) finalizePage();
-    lines.push({ x: left, y, width: right - left, height, baseline: height * BASELINE_FACTOR, segments });
+    lines.push({ x, y, width, height, baseline: height * BASELINE_FACTOR, segments });
     y += height;
   };
 
   for (const block of blocks) {
+    const indent = block.indent;
+    const paraLeft = left + (indent?.left ?? 0);
+    const paraRight = right - (indent?.right ?? 0);
+    // hanging outdents the first line; firstLine indents it. Mutually exclusive.
+    const firstLineDelta = indent?.hanging != null ? -indent.hanging : indent?.firstLine ?? 0;
+    const align: Align = block.align ?? 'left';
+
     const tokens = block.runs.flatMap((run) => tokenize(run, measureText));
 
+    // List marker hangs at the first line's start; text follows after it, and
+    // wrapped lines align under that text (hanging indent).
     let marker: LayoutSegment | null = null;
-    let indent = left;
+    let markerWidth = 0;
     if (block.marker) {
-      marker = { x: left, text: block.marker, font: base };
-      indent = left + measureText(`${block.marker} `, base);
+      marker = { x: paraLeft + firstLineDelta, text: block.marker, font: base };
+      markerWidth = measureText(`${block.marker} `, base);
     }
+    const firstLineStart = marker ? marker.x + markerWidth : paraLeft + firstLineDelta;
+    const contStart = marker ? marker.x + markerWidth : paraLeft;
 
-    let segments: LayoutSegment[] = [];
-    let x = indent;
+    let lineTokens: Token[] = [];
+    let lineWidth = 0; // running width of the current line's tokens
+    let firstLine = true;
     let maxSize = sizePx(base);
 
-    const flushLine = () => {
+    const lineStart = () => (firstLine ? firstLineStart : contStart);
+
+    const flushLine = (isLast: boolean) => {
+      const startX = lineStart();
+      const avail = paraRight - startX;
+
+      // Trailing whitespace doesn't count toward alignment, nor is it painted.
+      let end = lineTokens.length;
+      let contentWidth = lineWidth;
+      while (end > 0 && lineTokens[end - 1].isSpace) {
+        contentWidth -= lineTokens[end - 1].width;
+        end--;
+      }
+
+      let x = startX;
+      let extraPerGap = 0;
+      if (align === 'justify' && !isLast) {
+        const gaps = lineTokens.slice(0, end).filter((t) => t.isSpace).length;
+        if (gaps > 0) extraPerGap = (avail - contentWidth) / gaps;
+      } else if (align === 'center') {
+        x += Math.max(0, (avail - contentWidth) / 2);
+      } else if (align === 'right') {
+        x += Math.max(0, avail - contentWidth);
+      }
+
+      const segments: LayoutSegment[] = [];
+      for (let i = 0; i < end; i++) {
+        const t = lineTokens[i];
+        segments.push({ x, text: t.text, font: t.font, color: t.color, link: t.link });
+        x += t.width + (t.isSpace ? extraPerGap : 0);
+      }
+
       const height = maxSize * LINE_HEIGHT_FACTOR;
-      pushLine(marker ? [marker, ...segments] : segments, height);
-      marker = null; // marker only on the paragraph's first line
-      segments = [];
-      x = left; // wrapped lines start at the margin (no hanging indent yet)
+      const painted = firstLine && marker ? [marker, ...segments] : segments;
+      pushLine(painted, startX, paraRight - startX, height);
+
+      lineTokens = [];
+      lineWidth = 0;
       maxSize = sizePx(base);
+      firstLine = false;
     };
 
     for (const token of tokens) {
-      if (token.isSpace && segments.length === 0) continue; // no leading space
-      if (!token.isSpace && segments.length > 0 && x + token.width > right) flushLine();
-      segments.push({ x, text: token.text, font: token.font, color: token.color, link: token.link });
-      x += token.width;
+      if (token.isSpace && lineTokens.length === 0) continue; // no leading space
+      const cursor = lineStart() + lineWidth;
+      if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > paraRight) {
+        flushLine(false);
+      }
+      lineTokens.push(token);
+      lineWidth += token.width;
       maxSize = Math.max(maxSize, sizePx(token.font));
     }
-    flushLine(); // emit the paragraph's last (or only/empty) line
+    flushLine(true); // emit the paragraph's last (or only/empty) line
   }
 
   if (lines.length > 0 || pages.length === 0) finalizePage();

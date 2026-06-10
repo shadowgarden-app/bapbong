@@ -59,6 +59,67 @@ describe('layoutBlocks', () => {
   it('always emits at least one page', () => {
     expect(layoutBlocks([], config()).pages).toHaveLength(1);
   });
+
+  // content box is x ∈ [20, 220] (width 200); "aaaa" measures 40px.
+  const aligned = (align: 'center' | 'right'): FlowBlock => ({
+    type: 'paragraph',
+    runs: [{ text: 'aaaa', font: font() }],
+    align,
+  });
+
+  it('centers a line within the content box', () => {
+    const { pages } = layoutBlocks([aligned('center')], config());
+    // offset = (200 - 40) / 2 = 80 → 20 + 80.
+    expect(pages[0].lines[0].segments[0].x).toBe(100);
+  });
+
+  it('right-aligns a line within the content box', () => {
+    const { pages } = layoutBlocks([aligned('right')], config());
+    expect(pages[0].lines[0].segments[0].x).toBe(180); // 20 + (200 - 40)
+  });
+
+  it('justifies all lines but the last', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc dddd eeee', font: font() }],
+      align: 'justify',
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [line0, line1] = pages[0].lines;
+    // line0 = "aaaa bbbb cccc dddd": content 190, slack 10 over 3 gaps → +3.333/gap.
+    expect(line0.segments[0].x).toBe(20); // first word pinned left
+    expect(line0.segments[1].text).toBe(' ');
+    expect(line0.segments[2].x).toBeCloseTo(73.333, 2); // "bbbb": 20 + 40 + 10 + 3.333
+    // last line is not justified — left-aligned at the margin.
+    expect(line1.segments[0].text).toBe('eeee');
+    expect(line1.segments[0].x).toBe(20);
+  });
+
+  it('hangs a list marker and aligns wrapped lines under the text', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc dddd', font: font() }],
+      marker: '1.',
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [line0, line1] = pages[0].lines;
+    expect(line0.segments[0]).toMatchObject({ text: '1.', x: 20 }); // marker hangs at margin
+    expect(line0.segments[1]).toMatchObject({ text: 'aaaa', x: 50 }); // 20 + measure("1. ")
+    // wrapped line aligns under the text (x = 50), not back at the margin (20).
+    expect(line1.segments[0]).toMatchObject({ text: 'dddd', x: 50 });
+  });
+
+  it('applies left + firstLine indent to the first line', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc dddd', font: font() }],
+      indent: { left: 10, firstLine: 15 },
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [line0, line1] = pages[0].lines;
+    expect(line0.segments[0].x).toBe(45); // 20 + 10 (left) + 15 (firstLine)
+    expect(line1.segments[0].x).toBe(30); // continuation at left indent only (20 + 10)
+  });
 });
 
 describe('toFlowBlocks', () => {

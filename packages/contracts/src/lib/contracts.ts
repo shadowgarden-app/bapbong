@@ -29,12 +29,28 @@ export interface InlineRun {
   link?: string;
 }
 
+/** Paragraph horizontal alignment (mirrors w:jc / CSS text-align). */
+export type Align = 'left' | 'center' | 'right' | 'justify';
+
+/** Paragraph indentation in CSS px (mirrors w:ind). `firstLine` and `hanging`
+ *  are mutually exclusive; if both are present, `hanging` takes precedence. */
+export interface ParagraphIndent {
+  left?: number;
+  right?: number;
+  firstLine?: number;
+  hanging?: number;
+}
+
 /** A block flattened and ready for layout (paragraph only, for now). */
 export interface FlowParagraph {
   type: 'paragraph';
   runs: InlineRun[];
   /** List marker text (e.g. "1.", "•") if this paragraph is a list item. */
   marker?: string;
+  /** Horizontal alignment; defaults to 'left' when omitted. */
+  align?: Align;
+  /** Indentation in CSS px; defaults to no indent when omitted. */
+  indent?: ParagraphIndent;
 }
 
 export type FlowBlock = FlowParagraph;

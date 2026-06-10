@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { Node as PMNode, Mark } from 'prosemirror-model';
-import { schema, type ListInfo } from '@shadow-garden/bapbong-model';
+import { schema, type Align, type Indent, type ListInfo } from '@shadow-garden/bapbong-model';
 import {
   attrOf,
   child,
@@ -141,6 +141,8 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(ctx.styles.docDefaults, ctx.styles.resolveStyle(pStyleId));
   const list = parseList(pPr, ctx.numbering);
+  const align = parseAlign(pPr);
+  const indent = parseIndent(pPr);
 
   const inline: PMNode[] = [];
   for (const node of p.children) {
@@ -155,7 +157,53 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       }
     }
   }
-  return schema.nodes.paragraph.create(list ? { list } : null, inline);
+  const attrs: { list?: ListInfo; align?: Align; indent?: Indent } = {};
+  if (list) attrs.list = list;
+  if (align) attrs.align = align;
+  if (indent) attrs.indent = indent;
+  return schema.nodes.paragraph.create(attrs, inline);
+}
+
+/** Map w:jc to an alignment, or null when absent/unrecognized. */
+function parseAlign(pPr: OoxmlNode | undefined): Align | null {
+  switch (attrOf(child(pPr, 'w:jc'), 'w:val')) {
+    case 'center':
+      return 'center';
+    case 'right':
+    case 'end':
+      return 'right';
+    case 'both':
+    case 'distribute':
+      return 'justify';
+    case 'left':
+    case 'start':
+      return 'left';
+    default:
+      return null;
+  }
+}
+
+/** Map w:ind (twips) to an Indent in px, or null when absent/empty.
+ *  w:start/w:end are the OOXML-strict aliases for w:left/w:right. */
+function parseIndent(pPr: OoxmlNode | undefined): Indent | null {
+  const ind = child(pPr, 'w:ind');
+  if (!ind) return null;
+  const px = (attr: string): number | undefined => {
+    const v = attrOf(ind, attr);
+    return v === undefined ? undefined : twipsToPx(Number(v));
+  };
+  const left = px('w:left') ?? px('w:start');
+  const right = px('w:right') ?? px('w:end');
+  const hanging = px('w:hanging');
+  const firstLine = px('w:firstLine');
+
+  const out: Indent = {};
+  if (left !== undefined) out.left = left;
+  if (right !== undefined) out.right = right;
+  // hanging and firstLine are mutually exclusive; hanging wins.
+  if (hanging !== undefined) out.hanging = hanging;
+  else if (firstLine !== undefined) out.firstLine = firstLine;
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** Read a paragraph's list membership (w:numPr) and advance the counter. */
