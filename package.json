@@ -64,6 +64,8 @@
     "@angular/forms": "~21.2.0",
     "@angular/platform-browser": "~21.2.0",
     "@angular/router": "~21.2.0",
+    "fast-xml-parser": "^5.8.0",
+    "jszip": "^3.10.1",
     "prosemirror-model": "^1.25.7",
     "rxjs": "~7.8.0"
   }

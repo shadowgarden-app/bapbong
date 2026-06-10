@@ -26,6 +26,12 @@ importers:
       '@angular/router':
         specifier: ~21.2.0
         version: 21.2.16(@angular/common@21.2.16(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2))(@angular/platform-browser@21.2.16(@angular/common@21.2.16(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2)))(rxjs@7.8.2)
+      fast-xml-parser:
+        specifier: ^5.8.0
+        version: 5.8.0
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
       prosemirror-model:
         specifier: ^1.25.7
         version: 1.25.7
