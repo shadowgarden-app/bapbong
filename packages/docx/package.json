@@ -4,16 +4,17 @@
   "description": "bapbong — DOCX (OOXML) import / export",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.esm.js",
-  "module": "./dist/index.esm.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
     ".": {
       "@shadow-garden/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.esm.js",
-      "default": "./dist/index.esm.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -24,7 +25,22 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:io"]
+    "tags": ["scope:io"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/docx/dist",
+          "main": "packages/docx/src/index.ts",
+          "tsConfig": "packages/docx/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/docx/src",
+          "generatePackageJson": false,
+          "external": ["@shadow-garden/bapbong-model"]
+        }
+      }
+    }
   },
   "dependencies": {
     "@shadow-garden/bapbong-model": "workspace:^",

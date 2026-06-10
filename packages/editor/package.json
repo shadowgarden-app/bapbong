@@ -4,16 +4,17 @@
   "description": "bapbong — canvas-rendered DOCX editor for the browser (work in progress)",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.esm.js",
-  "module": "./dist/index.esm.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
     ".": {
       "@shadow-garden/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.esm.js",
-      "default": "./dist/index.esm.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -24,7 +25,21 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:app"]
+    "tags": ["scope:app"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/editor/dist",
+          "main": "packages/editor/src/index.ts",
+          "tsConfig": "packages/editor/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/editor/src",
+          "generatePackageJson": false
+        }
+      }
+    }
   },
   "dependencies": {}
 }

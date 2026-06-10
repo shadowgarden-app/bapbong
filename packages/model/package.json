@@ -4,16 +4,17 @@
   "description": "bapbong — ProseMirror document model / schema",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.esm.js",
-  "module": "./dist/index.esm.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
     ".": {
       "@shadow-garden/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.esm.js",
-      "default": "./dist/index.esm.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -24,7 +25,21 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:model"]
+    "tags": ["scope:model"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/model/dist",
+          "main": "packages/model/src/index.ts",
+          "tsConfig": "packages/model/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/model/src",
+          "generatePackageJson": false
+        }
+      }
+    }
   },
   "dependencies": {
     "prosemirror-model": "^1.25.7"
