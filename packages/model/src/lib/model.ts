@@ -26,6 +26,27 @@ export const schema = new Schema({
 
     text: { group: 'inline' },
 
+    // Inline image. `src` is typically a data URL (the importer inlines the
+    // embedded media); width/height are CSS pixels, null if unspecified.
+    image: {
+      inline: true,
+      group: 'inline',
+      draggable: true,
+      attrs: {
+        src: {},
+        alt: { default: '' },
+        width: { default: null },
+        height: { default: null },
+      },
+      toDOM(node) {
+        const a = node.attrs;
+        const attrs: Record<string, string> = { src: a.src as string, alt: a.alt as string };
+        if (a.width != null) attrs.width = String(a.width);
+        if (a.height != null) attrs.height = String(a.height);
+        return ['img', attrs];
+      },
+    },
+
     // Tables: kept structural (table → row → cell → block+). Horizontal spans
     // map to colspan; vertical merges aren't collapsed yet (rowspan default 1).
     table: {
@@ -110,6 +131,14 @@ export const schema = new Schema({
       parseDOM: [{ style: 'font-family', getAttrs: (value) => ({ family: value as string }) }],
       toDOM(mark) {
         return ['span', { style: `font-family: ${mark.attrs.family as string}` }, 0];
+      },
+    },
+    // w:hyperlink — external URL or "#anchor"
+    link: {
+      attrs: { href: {} },
+      inclusive: false,
+      toDOM(mark) {
+        return ['a', { href: mark.attrs.href as string, rel: 'noopener', target: '_blank' }, 0];
       },
     },
   },

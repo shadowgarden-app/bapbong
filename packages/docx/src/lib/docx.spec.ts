@@ -3,6 +3,14 @@ import { Mark } from 'prosemirror-model';
 import { importDocx } from './docx';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+// 1x1 transparent PNG.
+const PNG_1x1 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 const DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="${W_NS}">
@@ -24,6 +32,8 @@ async function makeDocx(
   documentXml: string,
   stylesXml?: string,
   numberingXml?: string,
+  relsXml?: string,
+  media?: Record<string, string>,
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
@@ -37,6 +47,12 @@ async function makeDocx(
   zip.file('word/document.xml', documentXml);
   if (stylesXml) zip.file('word/styles.xml', stylesXml);
   if (numberingXml) zip.file('word/numbering.xml', numberingXml);
+  if (relsXml) zip.file('word/_rels/document.xml.rels', relsXml);
+  if (media) {
+    for (const [name, base64] of Object.entries(media)) {
+      zip.file(`word/media/${name}`, base64, { base64: true });
+    }
+  }
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -237,6 +253,44 @@ describe('importDocx', () => {
     expect(table.child(1).child(0).attrs.rowspan).toBe(1);
     expect(table.child(2).childCount).toBe(1);
     expect(table.child(2).child(0).textContent).toBe('R3');
+  });
+
+  it('applies link marks from hyperlinks resolved via relationships', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>
+      <w:p>
+        <w:hyperlink r:id="rId5"><w:r><w:t>click here</w:t></w:r></w:hyperlink>
+        <w:r><w:t xml:space="preserve"> and plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId5" Type="${R_NS}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, undefined, undefined, relsXml));
+    const p = doc.child(0);
+    expect(p.child(0).text).toBe('click here');
+    expect(markMap(p.child(0).marks).link.href).toBe('https://example.com/');
+    expect(p.child(1).text).toBe(' and plain');
+    expect(p.child(1).marks).toHaveLength(0);
+  });
+
+  it('imports inline images as image nodes with data-URL src and px size', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
+      <w:p><w:r><w:drawing><wp:inline>
+        <wp:extent cx="952500" cy="476250"/>
+        <wp:docPr id="1" name="Picture 1" descr="a cat"/>
+        <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image1.png': PNG_1x1 }),
+    );
+    const img = doc.child(0).child(0);
+    expect(img.type.name).toBe('image');
+    expect(img.attrs.src).toBe(`data:image/png;base64,${PNG_1x1}`);
+    expect(img.attrs.width).toBe(100); // 952500 EMU / 9525
+    expect(img.attrs.height).toBe(50); // 476250 / 9525
+    expect(img.attrs.alt).toBe('a cat');
   });
 
   it('throws when word/document.xml is missing', async () => {

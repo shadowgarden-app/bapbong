@@ -73,6 +73,17 @@ export function attrOf(node: OoxmlNode | undefined, name: string): string | unde
   return node?.attrs[name];
 }
 
+/** Depth-first search for the first descendant with the given tag name. */
+export function findDescendant(node: OoxmlNode | undefined, name: string): OoxmlNode | undefined {
+  if (!node) return undefined;
+  for (const c of node.children) {
+    if (c.name === name) return c;
+    const found = findDescendant(c, name);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 const OFF = new Set(['false', '0', 'off']);
 
 /** OOXML on/off toggle. `undefined` when absent (cascade keeps inherited value). */

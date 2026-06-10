@@ -33,6 +33,14 @@ describe('schema', () => {
     expect((p.attrs.list as { marker: string }).marker).toBe('1.');
   });
 
+  it('supports the link mark and image node', () => {
+    expect(schema.marks.link.create({ href: 'https://x' }).attrs.href).toBe('https://x');
+    const img = schema.nodes.image.create({ src: 'data:,', width: 10, height: 20, alt: 'a' });
+    expect(img.type.name).toBe('image');
+    expect(img.attrs.width).toBe(10);
+    expect(img.isInline).toBe(true);
+  });
+
   it('can build a table (row -> cell -> block) with colspan', () => {
     const cell = schema.nodes.table_cell.create({ colspan: 2 }, [
       schema.nodes.paragraph.create(null, [schema.text('x')]),

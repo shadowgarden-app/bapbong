@@ -5,6 +5,7 @@ import {
   attrOf,
   child,
   children,
+  findDescendant,
   mergeRunProps,
   OoxmlNode,
   parseRunProps,
@@ -13,6 +14,7 @@ import {
 } from './ooxml';
 import { buildStyleRegistry, StyleRegistry } from './styles';
 import { buildNumbering, NumberingResolver } from './numbering';
+import { buildRels, Relationship } from './rels';
 
 export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 
@@ -29,10 +31,40 @@ export interface DocxImport {
 interface Ctx {
   styles: StyleRegistry;
   numbering: NumberingResolver;
+  rels: Map<string, Relationship>;
+  media: Map<string, string>; // zip path → data URL
 }
 
 /** 1440 twips = 1 inch = 96 px. */
 const twipsToPx = (twips: number) => Math.round(twips / 15);
+/** 914400 EMU = 1 inch = 96 px → 9525 EMU/px. */
+function emuToPx(emu: string | undefined): number | null {
+  const n = Number(emu ?? '0');
+  return Number.isNaN(n) || n === 0 ? null : Math.round(n / 9525);
+}
+
+function mimeOf(path: string): string {
+  switch (path.slice(path.lastIndexOf('.') + 1).toLowerCase()) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'bmp':
+      return 'image/bmp';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'webp':
+      return 'image/webp';
+    case 'tif':
+    case 'tiff':
+      return 'image/tiff';
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 /** Turn resolved run properties into ProseMirror marks. */
 function propsToMarks(p: RunProps): Mark[] {
@@ -54,14 +86,46 @@ function runText(run: OoxmlNode): string {
     .join('');
 }
 
-/** Read a paragraph's list membership (w:numPr) and advance the counter. */
-function parseList(pPr: OoxmlNode | undefined, numbering: NumberingResolver): ListInfo | null {
-  const numPr = child(pPr, 'w:numPr');
-  const numId = attrOf(child(numPr, 'w:numId'), 'w:val');
-  if (numId === undefined || numId === '0') return null; // 0 cancels numbering
-  const ilvl = Number(attrOf(child(numPr, 'w:ilvl'), 'w:val') ?? '0');
-  const level = Number.isNaN(ilvl) ? 0 : ilvl;
-  return { numId, level, marker: numbering.next(numId, level) };
+/** Extract an inline image from a run's w:drawing, if any. */
+function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const drawing = child(run, 'w:drawing');
+  if (!drawing) return null;
+  const blip = findDescendant(drawing, 'a:blip');
+  const embed = attrOf(blip, 'r:embed') ?? attrOf(blip, 'r:link');
+  const rel = embed ? ctx.rels.get(embed) : undefined;
+  if (!rel) return null;
+  const target = rel.target.replace(/^\/+/, '');
+  const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
+  if (!src) return null;
+
+  const extent = findDescendant(drawing, 'wp:extent');
+  const docPr = findDescendant(drawing, 'wp:docPr');
+  return schema.nodes.image.create({
+    src,
+    width: emuToPx(attrOf(extent, 'cx')),
+    height: emuToPx(attrOf(extent, 'cy')),
+    alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
+  });
+}
+
+/** Map one w:r into inline nodes (image or marked text), optionally hyperlinked. */
+function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string | null): PMNode[] {
+  const rPr = child(run, 'w:rPr');
+  const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
+  // Cascade: docDefaults+paraStyle → run style → inline rPr (later wins).
+  const effective = [paraBase, ctx.styles.resolveStyle(rStyleId), parseRunProps(rPr)].reduce(
+    mergeRunProps,
+    {} as RunProps,
+  );
+  const marks = propsToMarks(effective);
+  if (href) marks.push(schema.marks.link.create({ href }));
+
+  const image = parseImage(run, ctx);
+  if (image) return [href ? image.mark([schema.marks.link.create({ href })]) : image];
+
+  const text = runText(run);
+  if (text.length === 0) return [];
+  return [schema.text(text, marks)];
 }
 
 function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
@@ -72,21 +136,29 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const list = parseList(pPr, ctx.numbering);
 
   const inline: PMNode[] = [];
-  for (const run of children(p, 'w:r')) {
-    const text = runText(run);
-    if (text.length === 0) continue;
-
-    const rPr = child(run, 'w:rPr');
-    const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
-    // Cascade: docDefaults+paraStyle → run style → inline rPr (later wins).
-    const effective = [paraBase, ctx.styles.resolveStyle(rStyleId), parseRunProps(rPr)].reduce(
-      mergeRunProps,
-      {} as RunProps,
-    );
-
-    inline.push(schema.text(text, propsToMarks(effective)));
+  for (const node of p.children) {
+    if (node.name === 'w:r') {
+      inline.push(...runToInline(node, paraBase, ctx, null));
+    } else if (node.name === 'w:hyperlink') {
+      const rel = attrOf(node, 'r:id') ? ctx.rels.get(attrOf(node, 'r:id') as string) : undefined;
+      const anchor = attrOf(node, 'w:anchor');
+      const href = rel?.target ?? (anchor ? `#${anchor}` : null);
+      for (const run of children(node, 'w:r')) {
+        inline.push(...runToInline(run, paraBase, ctx, href));
+      }
+    }
   }
   return schema.nodes.paragraph.create(list ? { list } : null, inline);
+}
+
+/** Read a paragraph's list membership (w:numPr) and advance the counter. */
+function parseList(pPr: OoxmlNode | undefined, numbering: NumberingResolver): ListInfo | null {
+  const numPr = child(pPr, 'w:numPr');
+  const numId = attrOf(child(numPr, 'w:numId'), 'w:val');
+  if (numId === undefined || numId === '0') return null; // 0 cancels numbering
+  const ilvl = Number(attrOf(child(numPr, 'w:ilvl'), 'w:val') ?? '0');
+  const level = Number.isNaN(ilvl) ? 0 : ilvl;
+  return { numId, level, marker: numbering.next(numId, level) };
 }
 
 interface LogicalCell {
@@ -153,7 +225,10 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     return schema.nodes.table_row.create(null, emitted.length > 0 ? emitted : [emptyCell()]);
   });
 
-  return schema.nodes.table.create(null, rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])]);
+  return schema.nodes.table.create(
+    null,
+    rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])],
+  );
 }
 
 /** Walk an element's children in document order, mapping w:p / w:tbl to blocks. */
@@ -171,14 +246,25 @@ async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
   return entry ? entry.async('string') : undefined;
 }
 
+async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
+  const media = new Map<string, string>();
+  for (const path of Object.keys(zip.files)) {
+    if (!path.startsWith('word/media/')) continue;
+    const entry = zip.file(path);
+    if (!entry || entry.dir) continue;
+    media.set(path, `data:${mimeOf(path)};base64,${await entry.async('base64')}`);
+  }
+  return media;
+}
+
 /**
  * Parse the bytes of a .docx file into a bapbong ProseMirror document.
  *
- * Scope so far: paragraphs, tables, and text runs with the run-property cascade
- * (docDefaults → paragraph/run styles → inline) resolved to bold / italic /
- * underline / strike / color / size / font marks, plus flat list paragraphs
- * with multilevel numbering markers. Vertical cell merges, headers/footers, and
- * export are later milestones; unmodeled XML is preserved on `rawDocumentXml`.
+ * Scope so far: paragraphs, tables (col/row spans), text runs with the
+ * run-property cascade resolved to bold/italic/underline/strike/color/size/font
+ * marks, flat list paragraphs with multilevel numbering, hyperlinks (link mark),
+ * and inline images (data-URL). Headers/footers, theme colors, and export are
+ * later milestones; unmodeled XML is preserved on `rawDocumentXml`.
  */
 export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const zip = await JSZip.loadAsync(input);
@@ -190,9 +276,12 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
 
   const stylesXml = await readPart(zip, 'word/styles.xml');
   const numberingXml = await readPart(zip, 'word/numbering.xml');
+  const relsXml = await readPart(zip, 'word/_rels/document.xml.rels');
   const ctx: Ctx = {
     styles: buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined),
     numbering: buildNumbering(numberingXml ? parseXml(numberingXml) : undefined),
+    rels: buildRels(relsXml ? parseXml(relsXml) : undefined),
+    media: await extractMedia(zip),
   };
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
