@@ -20,16 +20,38 @@ export default [
           // Key invariants: word-layout/contracts stay pure; painter-canvas
           // may NOT import the layout engine (it only consumes ResolvedLayout).
           depConstraints: [
-            { sourceTag: 'scope:pure', onlyDependOnLibsWithTags: ['scope:pure'] },
-            { sourceTag: 'scope:model', onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'] },
-            { sourceTag: 'scope:measuring', onlyDependOnLibsWithTags: ['scope:pure'] },
+            {
+              sourceTag: 'scope:pure',
+              onlyDependOnLibsWithTags: ['scope:pure'],
+            },
+            {
+              sourceTag: 'scope:model',
+              onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'],
+            },
+            {
+              sourceTag: 'scope:measuring',
+              onlyDependOnLibsWithTags: ['scope:pure'],
+            },
             {
               sourceTag: 'scope:engine',
-              onlyDependOnLibsWithTags: ['scope:pure', 'scope:model', 'scope:measuring'],
+              onlyDependOnLibsWithTags: [
+                'scope:pure',
+                'scope:model',
+                'scope:measuring',
+              ],
             },
-            { sourceTag: 'scope:painter', onlyDependOnLibsWithTags: ['scope:pure'] },
-            { sourceTag: 'scope:io', onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'] },
-            { sourceTag: 'scope:adapter', onlyDependOnLibsWithTags: ['scope:app'] },
+            {
+              sourceTag: 'scope:painter',
+              onlyDependOnLibsWithTags: ['scope:pure'],
+            },
+            {
+              sourceTag: 'scope:io',
+              onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'],
+            },
+            {
+              sourceTag: 'scope:adapter',
+              onlyDependOnLibsWithTags: ['scope:app'],
+            },
             { sourceTag: 'scope:app', onlyDependOnLibsWithTags: ['*'] },
           ],
         },

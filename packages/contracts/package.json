@@ -1,0 +1,44 @@
+{
+  "name": "@shadow-garden/bapbong-contracts",
+  "version": "0.0.1",
+  "description": "bapbong — shared layout contracts/types (pure, no runtime deps)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@shadow-garden/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "nx": {
+    "tags": ["scope:pure"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/contracts/dist",
+          "main": "packages/contracts/src/index.ts",
+          "tsConfig": "packages/contracts/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/contracts/src"
+        }
+      }
+    }
+  },
+  "dependencies": {}
+}
