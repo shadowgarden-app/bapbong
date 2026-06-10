@@ -1,0 +1,86 @@
+.wrap {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #1c1c1e;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+}
+.sub {
+  color: #6b6b70;
+  margin-top: 4px;
+}
+h2 {
+  margin: 28px 0 8px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #444;
+}
+.dim {
+  color: #9a9aa0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+.file {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border: 1px dashed #b8b8c0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.hint {
+  color: #6b6b70;
+}
+.err {
+  color: #c0392b;
+}
+.meta {
+  font-size: 13px;
+  color: #555;
+}
+
+.preview {
+  border: 1px solid #e3e3e8;
+  border-radius: 10px;
+  padding: 24px 32px;
+  background: #fff;
+  min-height: 80px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.preview table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.preview td,
+.preview th {
+  border: 1px solid #c8c8d0;
+  padding: 4px 8px;
+  vertical-align: top;
+}
+.preview img {
+  max-width: 100%;
+}
+.preview a {
+  color: #2563eb;
+}
+
+.json {
+  background: #1e1e24;
+  color: #e6e6ea;
+  padding: 16px;
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 420px;
+  font-size: 12px;
+  line-height: 1.5;
+}

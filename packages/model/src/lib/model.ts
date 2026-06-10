@@ -40,9 +40,9 @@ export const schema = new Schema({
       },
       toDOM(node) {
         const a = node.attrs;
-        const attrs: Record<string, string> = { src: a.src as string, alt: a.alt as string };
-        if (a.width != null) attrs.width = String(a.width);
-        if (a.height != null) attrs.height = String(a.height);
+        const attrs: Record<string, string> = { src: a['src'] as string, alt: a['alt'] as string };
+        if (a['width'] != null) attrs['width'] = String(a['width']);
+        if (a['height'] != null) attrs['height'] = String(a['height']);
         return ['img', attrs];
       },
     },
@@ -72,8 +72,8 @@ export const schema = new Schema({
       parseDOM: [{ tag: 'td' }, { tag: 'th' }],
       toDOM(node) {
         const attrs: Record<string, string> = {};
-        if (node.attrs.colspan !== 1) attrs.colspan = String(node.attrs.colspan);
-        if (node.attrs.rowspan !== 1) attrs.rowspan = String(node.attrs.rowspan);
+        if (node.attrs['colspan'] !== 1) attrs['colspan'] = String(node.attrs['colspan']);
+        if (node.attrs['rowspan'] !== 1) attrs['rowspan'] = String(node.attrs['rowspan']);
         return ['td', attrs, 0];
       },
     },
@@ -106,7 +106,7 @@ export const schema = new Schema({
       attrs: { color: {} },
       parseDOM: [{ style: 'color', getAttrs: (value) => ({ color: value as string }) }],
       toDOM(mark) {
-        return ['span', { style: `color: ${mark.attrs.color as string}` }, 0];
+        return ['span', { style: `color: ${mark.attrs['color'] as string}` }, 0];
       },
     },
     // w:sz — size in points
@@ -122,7 +122,7 @@ export const schema = new Schema({
         },
       ],
       toDOM(mark) {
-        return ['span', { style: `font-size: ${mark.attrs.size as number}pt` }, 0];
+        return ['span', { style: `font-size: ${mark.attrs['size'] as number}pt` }, 0];
       },
     },
     // w:rFonts — font family
@@ -130,7 +130,7 @@ export const schema = new Schema({
       attrs: { family: {} },
       parseDOM: [{ style: 'font-family', getAttrs: (value) => ({ family: value as string }) }],
       toDOM(mark) {
-        return ['span', { style: `font-family: ${mark.attrs.family as string}` }, 0];
+        return ['span', { style: `font-family: ${mark.attrs['family'] as string}` }, 0];
       },
     },
     // w:hyperlink — external URL or "#anchor"
@@ -138,7 +138,7 @@ export const schema = new Schema({
       attrs: { href: {} },
       inclusive: false,
       toDOM(mark) {
-        return ['a', { href: mark.attrs.href as string, rel: 'noopener', target: '_blank' }, 0];
+        return ['a', { href: mark.attrs['href'] as string, rel: 'noopener', target: '_blank' }, 0];
       },
     },
   },

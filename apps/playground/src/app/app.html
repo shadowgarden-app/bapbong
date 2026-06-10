@@ -1,0 +1,31 @@
+<main class="wrap">
+  <h1>bapbong playground</h1>
+  <p class="sub">Import a <code>.docx</code> and inspect what <code>&#64;shadow-garden/bapbong-docx</code> parses.</p>
+
+  <label class="file">
+    <input type="file" accept=".docx" (change)="onFile($event)" />
+    <span>Choose a .docx file…</span>
+  </label>
+
+  @if (loading()) {
+    <p class="hint">Parsing…</p>
+  }
+  @if (error(); as e) {
+    <p class="err">⚠ {{ e }}</p>
+  }
+  @if (fileName(); as name) {
+    <p class="meta">
+      <strong>{{ name }}</strong>
+      · headers: {{ headerKeys().length ? headerKeys().join(', ') : 'none' }}
+      · footers: {{ footerKeys().length ? footerKeys().join(', ') : 'none' }}
+    </p>
+  }
+
+  <h2>Rendered <span class="dim">(via schema toDOM)</span></h2>
+  <div #preview class="preview"></div>
+
+  @if (json(); as j) {
+    <h2>Document model <span class="dim">(JSON)</span></h2>
+    <pre class="json">{{ j }}</pre>
+  }
+</main>

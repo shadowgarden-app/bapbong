@@ -11,6 +11,9 @@
     },
     {
       "path": "./packages/docx"
+    },
+    {
+      "path": "./apps/playground"
     }
   ]
 }
