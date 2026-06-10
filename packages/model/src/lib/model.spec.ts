@@ -7,10 +7,24 @@ describe('schema', () => {
     expect(schema.nodes.text).toBeDefined();
   });
 
-  it('defines the four character marks', () => {
+  it('defines character + formatting marks', () => {
     expect(Object.keys(schema.marks)).toEqual(
-      expect.arrayContaining(['strong', 'em', 'underline', 'strike']),
+      expect.arrayContaining([
+        'strong',
+        'em',
+        'underline',
+        'strike',
+        'textColor',
+        'fontSize',
+        'fontFamily',
+      ]),
     );
+  });
+
+  it('formatting marks carry attributes', () => {
+    expect(schema.marks.textColor.create({ color: '#FF0000' }).attrs.color).toBe('#FF0000');
+    expect(schema.marks.fontSize.create({ size: 12 }).attrs.size).toBe(12);
+    expect(schema.marks.fontFamily.create({ family: 'Calibri' }).attrs.family).toBe('Calibri');
   });
 
   it('can build a paragraph with a marked text node', () => {

@@ -44,6 +44,39 @@ export const schema = new Schema({
       parseDOM: [{ tag: 's' }, { tag: 'strike' }],
       toDOM: () => ['s', 0],
     },
+
+    // w:color — hex "#RRGGBB"
+    textColor: {
+      attrs: { color: {} },
+      parseDOM: [{ style: 'color', getAttrs: (value) => ({ color: value as string }) }],
+      toDOM(mark) {
+        return ['span', { style: `color: ${mark.attrs.color as string}` }, 0];
+      },
+    },
+    // w:sz — size in points
+    fontSize: {
+      attrs: { size: {} },
+      parseDOM: [
+        {
+          style: 'font-size',
+          getAttrs: (value) => {
+            const pt = parseFloat(value as string);
+            return Number.isNaN(pt) ? false : { size: pt };
+          },
+        },
+      ],
+      toDOM(mark) {
+        return ['span', { style: `font-size: ${mark.attrs.size as number}pt` }, 0];
+      },
+    },
+    // w:rFonts — font family
+    fontFamily: {
+      attrs: { family: {} },
+      parseDOM: [{ style: 'font-family', getAttrs: (value) => ({ family: value as string }) }],
+      toDOM(mark) {
+        return ['span', { style: `font-family: ${mark.attrs.family as string}` }, 0];
+      },
+    },
   },
 });
 
