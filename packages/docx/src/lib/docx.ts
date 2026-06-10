@@ -89,41 +89,71 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   return schema.nodes.paragraph.create(list ? { list } : null, inline);
 }
 
+interface LogicalCell {
+  startCol: number; // grid column this cell starts at
+  colspan: number;
+  vMerge: 'restart' | 'continue' | null;
+  colwidth: number[] | null;
+  content: PMNode[];
+}
+
+function emptyCell(): PMNode {
+  return schema.nodes.table_cell.create(null, [schema.nodes.paragraph.create()]);
+}
+
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const grid = children(child(tbl, 'w:tblGrid'), 'w:gridCol').map((c) =>
     Number(attrOf(c, 'w:w') ?? '0'),
   );
 
-  const rows: PMNode[] = [];
-  for (const tr of children(tbl, 'w:tr')) {
-    const cells: PMNode[] = [];
+  // Phase 1: logical grid — every w:tc (incl. vMerge-continue placeholders),
+  // tracking each cell's starting grid column.
+  const logicalRows: LogicalCell[][] = children(tbl, 'w:tr').map((tr) => {
+    const cells: LogicalCell[] = [];
     let col = 0;
     for (const tc of children(tr, 'w:tc')) {
       const tcPr = child(tc, 'w:tcPr');
       const colspan = Number(attrOf(child(tcPr, 'w:gridSpan'), 'w:val') ?? '1') || 1;
+      const vMergeEl = child(tcPr, 'w:vMerge');
+      const vMerge = !vMergeEl
+        ? null
+        : attrOf(vMergeEl, 'w:val') === 'restart'
+          ? 'restart'
+          : 'continue'; // omitted w:val defaults to continue
       const widths = grid.length ? grid.slice(col, col + colspan).map(twipsToPx) : [];
-      col += colspan;
-
       const content = parseBlocks(tc, ctx);
       if (content.length === 0) content.push(schema.nodes.paragraph.create());
-      cells.push(
+      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, content });
+      col += colspan;
+    }
+    return cells;
+  });
+
+  const colIndex = logicalRows.map((cells) => new Map(cells.map((c) => [c.startCol, c])));
+
+  // Phase 2: drop continue cells; non-continue cells absorb the continues
+  // directly below them in the same column as rowspan.
+  const rows: PMNode[] = logicalRows.map((cells, r) => {
+    const emitted: PMNode[] = [];
+    for (const cell of cells) {
+      if (cell.vMerge === 'continue') continue; // absorbed by the cell above
+      let rowspan = 1;
+      for (let r2 = r + 1; r2 < logicalRows.length; r2++) {
+        const below = colIndex[r2].get(cell.startCol);
+        if (below && below.vMerge === 'continue') rowspan++;
+        else break;
+      }
+      emitted.push(
         schema.nodes.table_cell.create(
-          { colspan, rowspan: 1, colwidth: widths.length ? widths : null },
-          content,
+          { colspan: cell.colspan, rowspan, colwidth: cell.colwidth },
+          cell.content,
         ),
       );
     }
-    if (cells.length > 0) rows.push(schema.nodes.table_row.create(null, cells));
-  }
+    return schema.nodes.table_row.create(null, emitted.length > 0 ? emitted : [emptyCell()]);
+  });
 
-  if (rows.length === 0) {
-    rows.push(
-      schema.nodes.table_row.create(null, [
-        schema.nodes.table_cell.create(null, [schema.nodes.paragraph.create()]),
-      ]),
-    );
-  }
-  return schema.nodes.table.create(null, rows);
+  return schema.nodes.table.create(null, rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])]);
 }
 
 /** Walk an element's children in document order, mapping w:p / w:tbl to blocks. */

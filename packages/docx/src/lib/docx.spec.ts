@@ -202,6 +202,43 @@ describe('importDocx', () => {
     expect(merged.textContent).toBe('spanned');
   });
 
+  it('collapses vertical merges (w:vMerge) into rowspan', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr>
+          <w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>L</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p><w:r><w:t>R1</w:t></w:r></w:p></w:tc>
+        </w:tr>
+        <w:tr>
+          <w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>
+          <w:tc><w:p><w:r><w:t>R2</w:t></w:r></w:p></w:tc>
+        </w:tr>
+        <w:tr>
+          <w:tc><w:tcPr><w:vMerge w:val="continue"/></w:tcPr><w:p/></w:tc>
+          <w:tc><w:p><w:r><w:t>R3</w:t></w:r></w:p></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const table = doc.child(0);
+    expect(table.childCount).toBe(3); // three rows
+
+    // Left column: one cell spanning all three rows.
+    const topLeft = table.child(0).child(0);
+    expect(topLeft.textContent).toBe('L');
+    expect(topLeft.attrs.rowspan).toBe(3);
+    expect(table.child(0).childCount).toBe(2);
+
+    // Rows 2 and 3 only keep their right-column cell (continue cells dropped).
+    expect(table.child(1).childCount).toBe(1);
+    expect(table.child(1).child(0).textContent).toBe('R2');
+    expect(table.child(1).child(0).attrs.rowspan).toBe(1);
+    expect(table.child(2).childCount).toBe(1);
+    expect(table.child(2).child(0).textContent).toBe('R3');
+  });
+
   it('throws when word/document.xml is missing', async () => {
     const zip = new JSZip();
     zip.file('hello.txt', 'nope');
