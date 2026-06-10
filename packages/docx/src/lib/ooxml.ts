@@ -1,51 +1,90 @@
 import { XMLParser } from 'fast-xml-parser';
 
-/** Shared OOXML parser. `trimValues:false` keeps significant whitespace in
- *  <w:t> (e.g. xml:space="preserve" "Hello "). Repeated elements are forced to
- *  arrays so walkers can treat single/multiple uniformly. */
-export const parser = new XMLParser({
+/**
+ * A normalized OOXML element. We parse with `preserveOrder: true` (so the
+ * document's block order — paragraphs vs tables — is faithful) and flatten the
+ * verbose fast-xml-parser shape into this simple tree: ordered `children`,
+ * attribute map (without the `@_` prefix), and concatenated `text`.
+ */
+export interface OoxmlNode {
+  name: string;
+  attrs: Record<string, string>;
+  children: OoxmlNode[];
+  text: string;
+}
+
+const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
+  preserveOrder: true,
+  // Keep significant whitespace in <w:t> (e.g. xml:space="preserve" "Hello ").
   trimValues: false,
-  isArray: (name) =>
-    name === 'w:p' ||
-    name === 'w:r' ||
-    name === 'w:t' ||
-    name === 'w:style' ||
-    name === 'w:abstractNum' ||
-    name === 'w:num' ||
-    name === 'w:lvl',
 });
 
-export function toArray<T>(v: T | T[] | undefined | null): T[] {
-  if (v == null) return [];
-  return Array.isArray(v) ? v : [v];
+function buildNode(entry: Record<string, unknown>): OoxmlNode {
+  const name = Object.keys(entry).find((k) => k !== ':@') ?? '';
+
+  const attrs: Record<string, string> = {};
+  const rawAttrs = entry[':@'] as Record<string, unknown> | undefined;
+  if (rawAttrs) {
+    for (const [k, v] of Object.entries(rawAttrs)) {
+      attrs[k.startsWith('@_') ? k.slice(2) : k] = v == null ? '' : String(v);
+    }
+  }
+
+  const raw = entry[name];
+  const rawChildren = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
+  const children: OoxmlNode[] = [];
+  let text = '';
+  for (const c of rawChildren) {
+    if (Object.prototype.hasOwnProperty.call(c, '#text')) {
+      text += String((c as Record<string, unknown>)['#text'] ?? '');
+    } else {
+      children.push(buildNode(c));
+    }
+  }
+  return { name, attrs, children, text };
 }
 
-export function asRecord(v: unknown): Record<string, unknown> | undefined {
-  return v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+/** Parse an OOXML part into a synthetic `#root` node holding the top-level elements. */
+export function parseXml(xml: string): OoxmlNode {
+  const top = parser.parse(xml) as Record<string, unknown>[];
+  const children = top
+    .filter((e) => {
+      const key = Object.keys(e).find((k) => k !== ':@');
+      return !!key && key !== '#text' && !key.startsWith('?');
+    })
+    .map(buildNode);
+  return { name: '#root', attrs: {}, children, text: '' };
 }
 
-/** Read an attribute (e.g. `@_w:val`) off an element, coercing to string. */
-export function attr(el: unknown, name: string): string | undefined {
-  const v = asRecord(el)?.[name];
-  return v == null ? undefined : String(v);
+/** First child element with the given tag name. */
+export function child(node: OoxmlNode | undefined, name: string): OoxmlNode | undefined {
+  return node?.children.find((c) => c.name === name);
+}
+
+/** All child elements with the given tag name (in document order). */
+export function children(node: OoxmlNode | undefined, name: string): OoxmlNode[] {
+  return node ? node.children.filter((c) => c.name === name) : [];
+}
+
+/** An attribute value (name without the `@_`/`w:` mangling, e.g. "w:val"). */
+export function attrOf(node: OoxmlNode | undefined, name: string): string | undefined {
+  return node?.attrs[name];
 }
 
 const OFF = new Set(['false', '0', 'off']);
 
-/** OOXML on/off toggle. Returns `undefined` when the element is absent (so the
- *  cascade leaves the inherited value untouched), else the resolved boolean. */
-export function toggle(el: unknown): boolean | undefined {
-  if (el === undefined) return undefined;
-  const v = attr(el, '@_w:val');
+/** OOXML on/off toggle. `undefined` when absent (cascade keeps inherited value). */
+function toggle(el: OoxmlNode | undefined): boolean | undefined {
+  if (!el) return undefined;
+  const v = attrOf(el, 'w:val');
   return v === undefined ? true : !OFF.has(v.toLowerCase());
 }
 
-/** Underline variant: `w:val="none"` (and falsy) means off. */
-export function underlineToggle(el: unknown): boolean | undefined {
-  if (el === undefined) return undefined;
-  const v = attr(el, '@_w:val');
+function underlineToggle(el: OoxmlNode | undefined): boolean | undefined {
+  if (!el) return undefined;
+  const v = attrOf(el, 'w:val');
   if (v === undefined) return true;
   const lower = v.toLowerCase();
   return lower !== 'none' && !OFF.has(lower);
@@ -62,33 +101,33 @@ export interface RunProps {
   fontFamily?: string;
 }
 
-/** Parse a `w:rPr` element into normalized run properties. Only sets a key
- *  when the property is present, so merging preserves inherited values. */
-export function parseRunProps(rPr: Record<string, unknown> | undefined): RunProps {
+/** Parse a `w:rPr` element into normalized run properties (only present keys). */
+export function parseRunProps(rPr: OoxmlNode | undefined): RunProps {
   if (!rPr) return {};
   const props: RunProps = {};
 
-  const b = toggle(rPr['w:b']);
+  const b = toggle(child(rPr, 'w:b'));
   if (b !== undefined) props.bold = b;
-  const i = toggle(rPr['w:i']);
+  const i = toggle(child(rPr, 'w:i'));
   if (i !== undefined) props.italic = i;
-  const u = underlineToggle(rPr['w:u']);
+  const u = underlineToggle(child(rPr, 'w:u'));
   if (u !== undefined) props.underline = u;
-  const s = toggle(rPr['w:strike']);
+  const s = toggle(child(rPr, 'w:strike'));
   if (s !== undefined) props.strike = s;
 
-  const color = attr(rPr['w:color'], '@_w:val');
+  const color = attrOf(child(rPr, 'w:color'), 'w:val');
   if (color && color.toLowerCase() !== 'auto') {
     props.color = color.startsWith('#') ? color.toUpperCase() : `#${color.toUpperCase()}`;
   }
 
-  const sz = attr(rPr['w:sz'], '@_w:val');
+  const sz = attrOf(child(rPr, 'w:sz'), 'w:val');
   if (sz !== undefined) {
     const halfPoints = Number(sz);
     if (!Number.isNaN(halfPoints)) props.sizePt = halfPoints / 2;
   }
 
-  const family = attr(rPr['w:rFonts'], '@_w:ascii') ?? attr(rPr['w:rFonts'], '@_w:hAnsi');
+  const rFonts = child(rPr, 'w:rFonts');
+  const family = attrOf(rFonts, 'w:ascii') ?? attrOf(rFonts, 'w:hAnsi');
   if (family) props.fontFamily = family;
 
   return props;

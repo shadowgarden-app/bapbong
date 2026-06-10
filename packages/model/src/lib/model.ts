@@ -25,6 +25,37 @@ export const schema = new Schema({
     },
 
     text: { group: 'inline' },
+
+    // Tables: kept structural (table → row → cell → block+). Horizontal spans
+    // map to colspan; vertical merges aren't collapsed yet (rowspan default 1).
+    table: {
+      group: 'block',
+      content: 'table_row+',
+      isolating: true,
+      parseDOM: [{ tag: 'table' }],
+      toDOM: () => ['table', ['tbody', 0]],
+    },
+    table_row: {
+      content: 'table_cell+',
+      parseDOM: [{ tag: 'tr' }],
+      toDOM: () => ['tr', 0],
+    },
+    table_cell: {
+      content: 'block+',
+      isolating: true,
+      attrs: {
+        colspan: { default: 1 },
+        rowspan: { default: 1 },
+        colwidth: { default: null }, // px widths of the spanned columns, or null
+      },
+      parseDOM: [{ tag: 'td' }, { tag: 'th' }],
+      toDOM(node) {
+        const attrs: Record<string, string> = {};
+        if (node.attrs.colspan !== 1) attrs.colspan = String(node.attrs.colspan);
+        if (node.attrs.rowspan !== 1) attrs.rowspan = String(node.attrs.rowspan);
+        return ['td', attrs, 0];
+      },
+    },
   },
 
   marks: {

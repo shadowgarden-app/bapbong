@@ -1,4 +1,4 @@
-import { asRecord, attr, mergeRunProps, parseRunProps, RunProps, toArray } from './ooxml';
+import { attrOf, child, children, mergeRunProps, OoxmlNode, parseRunProps, RunProps } from './ooxml';
 
 interface StyleDef {
   basedOn?: string;
@@ -16,24 +16,19 @@ export interface StyleRegistry {
 
 const EMPTY: RunProps = {};
 
-export function buildStyleRegistry(
-  stylesTree: Record<string, unknown> | undefined,
-): StyleRegistry {
-  const stylesEl = asRecord(stylesTree?.['w:styles']);
+export function buildStyleRegistry(stylesRoot: OoxmlNode | undefined): StyleRegistry {
+  const stylesEl = child(stylesRoot, 'w:styles');
 
-  const rPrDefault = asRecord(
-    asRecord(asRecord(stylesEl?.['w:docDefaults'])?.['w:rPrDefault'])?.['w:rPr'],
-  );
+  const rPrDefault = child(child(child(stylesEl, 'w:docDefaults'), 'w:rPrDefault'), 'w:rPr');
   const docDefaults = parseRunProps(rPrDefault);
 
   const defs = new Map<string, StyleDef>();
-  for (const styleUnknown of toArray(stylesEl?.['w:style'])) {
-    const style = asRecord(styleUnknown);
-    const id = attr(style, '@_w:styleId');
-    if (!style || !id) continue;
+  for (const style of children(stylesEl, 'w:style')) {
+    const id = attrOf(style, 'w:styleId');
+    if (id === undefined) continue;
     defs.set(id, {
-      basedOn: attr(style['w:basedOn'], '@_w:val'),
-      rPr: parseRunProps(asRecord(style['w:rPr'])),
+      basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
+      rPr: parseRunProps(child(style, 'w:rPr')),
     });
   }
 

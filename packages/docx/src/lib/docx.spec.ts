@@ -161,6 +161,47 @@ describe('importDocx', () => {
     expect(marker(2)).toBe('II)');
   });
 
+  it('imports tables in document order with colspan and column widths', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>before</w:t></w:r></w:p>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="2880"/><w:gridCol w:w="1440"/></w:tblGrid>
+        <w:tr>
+          <w:tc><w:p><w:r><w:t>A1</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc>
+        </w:tr>
+        <w:tr>
+          <w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>spanned</w:t></w:r></w:p></w:tc>
+        </w:tr>
+      </w:tbl>
+      <w:p><w:r><w:t>after</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+
+    // Block order (paragraph, table, paragraph) is preserved.
+    expect(doc.childCount).toBe(3);
+    expect(doc.child(0).textContent).toBe('before');
+    expect(doc.child(2).textContent).toBe('after');
+
+    const table = doc.child(1);
+    expect(table.type.name).toBe('table');
+    expect(table.childCount).toBe(2);
+
+    const row0 = table.child(0);
+    expect(row0.childCount).toBe(2);
+    expect(row0.child(0).type.name).toBe('table_cell');
+    expect(row0.child(0).textContent).toBe('A1');
+    expect(row0.child(0).attrs.colspan).toBe(1);
+    expect(row0.child(0).attrs.colwidth).toEqual([192]); // 2880 twips / 15
+    expect(row0.child(1).attrs.colwidth).toEqual([96]); // 1440 / 15
+
+    const merged = table.child(1).child(0);
+    expect(merged.attrs.colspan).toBe(2);
+    expect(merged.attrs.colwidth).toEqual([192, 96]);
+    expect(merged.textContent).toBe('spanned');
+  });
+
   it('throws when word/document.xml is missing', async () => {
     const zip = new JSZip();
     zip.file('hello.txt', 'nope');

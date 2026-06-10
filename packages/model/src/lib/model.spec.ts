@@ -33,6 +33,16 @@ describe('schema', () => {
     expect((p.attrs.list as { marker: string }).marker).toBe('1.');
   });
 
+  it('can build a table (row -> cell -> block) with colspan', () => {
+    const cell = schema.nodes.table_cell.create({ colspan: 2 }, [
+      schema.nodes.paragraph.create(null, [schema.text('x')]),
+    ]);
+    const table = schema.nodes.table.create(null, [schema.nodes.table_row.create(null, [cell])]);
+    expect(table.type.name).toBe('table');
+    expect(table.firstChild?.firstChild?.attrs.colspan).toBe(2);
+    expect(table.textContent).toBe('x');
+  });
+
   it('can build a paragraph with a marked text node', () => {
     const p = schema.nodes.paragraph.create(null, [
       schema.text('hi', [schema.marks.strong.create()]),

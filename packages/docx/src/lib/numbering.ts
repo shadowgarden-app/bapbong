@@ -1,4 +1,4 @@
-import { asRecord, attr, toArray } from './ooxml';
+import { attrOf, child, children, OoxmlNode } from './ooxml';
 
 interface LevelDef {
   numFmt: string;
@@ -56,33 +56,29 @@ function formatCounter(n: number, fmt: string): string {
   }
 }
 
-export function buildNumbering(tree: Record<string, unknown> | undefined): NumberingResolver {
-  const numberingEl = asRecord(tree?.['w:numbering']);
+export function buildNumbering(numberingRoot: OoxmlNode | undefined): NumberingResolver {
+  const numberingEl = child(numberingRoot, 'w:numbering');
 
   const abstract = new Map<string, Map<number, LevelDef>>();
-  for (const abstractUnknown of toArray(numberingEl?.['w:abstractNum'])) {
-    const abstractNum = asRecord(abstractUnknown);
-    const id = attr(abstractNum, '@_w:abstractNumId');
-    if (!abstractNum || id === undefined) continue;
+  for (const abstractNum of children(numberingEl, 'w:abstractNum')) {
+    const id = attrOf(abstractNum, 'w:abstractNumId');
+    if (id === undefined) continue;
     const levels = new Map<number, LevelDef>();
-    for (const lvlUnknown of toArray(abstractNum['w:lvl'])) {
-      const lvl = asRecord(lvlUnknown);
-      if (!lvl) continue;
-      const ilvl = Number(attr(lvl, '@_w:ilvl') ?? '0');
+    for (const lvl of children(abstractNum, 'w:lvl')) {
+      const ilvl = Number(attrOf(lvl, 'w:ilvl') ?? '0');
       levels.set(Number.isNaN(ilvl) ? 0 : ilvl, {
-        numFmt: attr(lvl['w:numFmt'], '@_w:val') ?? 'decimal',
-        lvlText: attr(lvl['w:lvlText'], '@_w:val') ?? '',
-        start: Number(attr(lvl['w:start'], '@_w:val') ?? '1') || 1,
+        numFmt: attrOf(child(lvl, 'w:numFmt'), 'w:val') ?? 'decimal',
+        lvlText: attrOf(child(lvl, 'w:lvlText'), 'w:val') ?? '',
+        start: Number(attrOf(child(lvl, 'w:start'), 'w:val') ?? '1') || 1,
       });
     }
     abstract.set(id, levels);
   }
 
   const numToAbstract = new Map<string, string>();
-  for (const numUnknown of toArray(numberingEl?.['w:num'])) {
-    const num = asRecord(numUnknown);
-    const numId = attr(num, '@_w:numId');
-    const absId = attr(num?.['w:abstractNumId'], '@_w:val');
+  for (const num of children(numberingEl, 'w:num')) {
+    const numId = attrOf(num, 'w:numId');
+    const absId = attrOf(child(num, 'w:abstractNumId'), 'w:val');
     if (numId !== undefined && absId !== undefined) numToAbstract.set(numId, absId);
   }
 
