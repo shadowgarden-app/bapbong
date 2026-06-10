@@ -1,8 +1,9 @@
 import JSZip from 'jszip';
 import { Node as PMNode, Mark } from 'prosemirror-model';
-import { schema } from '@shadow-garden/bapbong-model';
+import { schema, type ListInfo } from '@shadow-garden/bapbong-model';
 import { asRecord, attr, mergeRunProps, parseRunProps, parser, RunProps, toArray } from './ooxml';
 import { buildStyleRegistry, StyleRegistry } from './styles';
+import { buildNumbering, NumberingResolver } from './numbering';
 
 export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 
@@ -39,10 +40,29 @@ function runText(run: Record<string, unknown>): string {
     .join('');
 }
 
-function parseParagraph(p: Record<string, unknown>, styles: StyleRegistry): PMNode {
-  const pStyleId = attr(asRecord(p['w:pPr'])?.['w:pStyle'], '@_w:val');
+/** Read a paragraph's list membership (w:numPr) and advance the counter. */
+function parseList(
+  pPr: Record<string, unknown> | undefined,
+  numbering: NumberingResolver,
+): ListInfo | null {
+  const numPr = asRecord(pPr?.['w:numPr']);
+  const numId = attr(numPr?.['w:numId'], '@_w:val');
+  if (numId === undefined || numId === '0') return null; // 0 cancels numbering
+  const ilvl = Number(attr(numPr?.['w:ilvl'], '@_w:val') ?? '0');
+  const level = Number.isNaN(ilvl) ? 0 : ilvl;
+  return { numId, level, marker: numbering.next(numId, level) };
+}
+
+function parseParagraph(
+  p: Record<string, unknown>,
+  styles: StyleRegistry,
+  numbering: NumberingResolver,
+): PMNode {
+  const pPr = asRecord(p['w:pPr']);
+  const pStyleId = attr(pPr?.['w:pStyle'], '@_w:val');
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(styles.docDefaults, styles.resolveStyle(pStyleId));
+  const list = parseList(pPr, numbering);
 
   const inline: PMNode[] = [];
   for (const runUnknown of toArray(p['w:r'])) {
@@ -61,7 +81,7 @@ function parseParagraph(p: Record<string, unknown>, styles: StyleRegistry): PMNo
 
     inline.push(schema.text(text, propsToMarks(effective)));
   }
-  return schema.nodes.paragraph.create(null, inline);
+  return schema.nodes.paragraph.create(list ? { list } : null, inline);
 }
 
 async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
@@ -69,13 +89,18 @@ async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
   return entry ? entry.async('string') : undefined;
 }
 
+function parseOptionalPart(xml: string | undefined): Record<string, unknown> | undefined {
+  return xml ? (parser.parse(xml) as Record<string, unknown>) : undefined;
+}
+
 /**
  * Parse the bytes of a .docx file into a bapbong ProseMirror document.
  *
  * Scope so far: paragraphs and text runs with the run-property cascade
  * (docDefaults → paragraph/run styles → inline) resolved to bold / italic /
- * underline / strike / color / size / font marks. Lists, tables, headers, and
- * export are later milestones; unmodeled XML is preserved on `rawDocumentXml`.
+ * underline / strike / color / size / font marks, plus flat list paragraphs
+ * with multilevel numbering markers. Tables, headers, and export are later
+ * milestones; unmodeled XML is preserved on `rawDocumentXml`.
  */
 export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const zip = await JSZip.loadAsync(input);
@@ -84,15 +109,14 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   if (rawDocumentXml === undefined) {
     throw new Error('bapbong-docx: word/document.xml not found in archive');
   }
-  const stylesXml = await readPart(zip, 'word/styles.xml');
-  const styles = buildStyleRegistry(
-    stylesXml ? (parser.parse(stylesXml) as Record<string, unknown>) : undefined,
-  );
+
+  const styles = buildStyleRegistry(parseOptionalPart(await readPart(zip, 'word/styles.xml')));
+  const numbering = buildNumbering(parseOptionalPart(await readPart(zip, 'word/numbering.xml')));
 
   const tree = parser.parse(rawDocumentXml) as Record<string, unknown>;
   const body = asRecord(asRecord(tree['w:document'])?.['w:body']);
   const paragraphs = toArray(body?.['w:p']).map((p) =>
-    parseParagraph(asRecord(p) ?? {}, styles),
+    parseParagraph(asRecord(p) ?? {}, styles, numbering),
   );
 
   // doc content is `block+` — guarantee at least one paragraph.

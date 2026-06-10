@@ -16,6 +16,10 @@ export const schema = new Schema({
     paragraph: {
       group: 'block',
       content: 'inline*',
+      // `list` is null for normal paragraphs, or ListInfo for list items.
+      // DOCX stores lists flat (each w:p carries w:numPr), so we keep them
+      // flat and let the marker be computed by the numbering counter.
+      attrs: { list: { default: null } },
       parseDOM: [{ tag: 'p' }],
       toDOM: () => ['p', 0],
     },
@@ -82,3 +86,12 @@ export const schema = new Schema({
 
 /** Concrete schema type, handy for typing Node/Mark across packages. */
 export type BapbongSchema = typeof schema;
+
+/** Value of a list paragraph's `list` attribute. `marker` is the resolved
+ *  number/bullet string (e.g. "1.", "2.a", "•"); the numbering engine owns
+ *  recomputation when the document is edited. */
+export interface ListInfo {
+  numId: string;
+  level: number;
+  marker: string;
+}

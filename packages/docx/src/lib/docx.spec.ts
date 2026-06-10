@@ -20,7 +20,11 @@ const DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </w:document>`;
 
 /** Build a minimal in-memory .docx (only the parts the importer reads). */
-async function makeDocx(documentXml: string, stylesXml?: string): Promise<Uint8Array> {
+async function makeDocx(
+  documentXml: string,
+  stylesXml?: string,
+  numberingXml?: string,
+): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
@@ -32,7 +36,13 @@ async function makeDocx(documentXml: string, stylesXml?: string): Promise<Uint8A
   );
   zip.file('word/document.xml', documentXml);
   if (stylesXml) zip.file('word/styles.xml', stylesXml);
+  if (numberingXml) zip.file('word/numbering.xml', numberingXml);
   return zip.generateAsync({ type: 'uint8array' });
+}
+
+/** A w:p that belongs to list `numId` at indent `ilvl` with the given text. */
+function listP(numId: string, ilvl: number, text: string): string {
+  return `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
 }
 
 /** Map a node's marks to `{ name: attrs }` for order-independent assertions. */
@@ -103,6 +113,52 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
     expect(doc.child(0).child(0).marks).toHaveLength(0);
+  });
+
+  it('numbers list paragraphs with multilevel counters', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2"/><w:start w:val="1"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'first')}
+      ${listP('1', 0, 'second')}
+      ${listP('1', 1, 'sub a')}
+      ${listP('1', 1, 'sub b')}
+      ${listP('1', 0, 'third')}
+      <w:p><w:r><w:t>plain</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
+
+    const markers: (string | null)[] = [];
+    doc.forEach((node) => markers.push((node.attrs.list as { marker: string } | null)?.marker ?? null));
+    expect(markers).toEqual(['1.', '2.', '2.a', '2.b', '3.', null]);
+    expect(doc.child(0).attrs.list).toMatchObject({ numId: '1', level: 0 });
+    expect(doc.child(5).attrs.list).toBeNull();
+  });
+
+  it('formats bullet and roman markers, with independent counters per numId', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl></w:abstractNum>
+      <w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="upperRoman"/><w:lvlText w:val="%1)"/><w:start w:val="1"/></w:lvl></w:abstractNum>
+      <w:num w:numId="10"><w:abstractNumId w:val="0"/></w:num>
+      <w:num w:numId="11"><w:abstractNumId w:val="1"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('10', 0, 'bullet')}
+      ${listP('11', 0, 'roman one')}
+      ${listP('11', 0, 'roman two')}
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
+    const marker = (i: number) => (doc.child(i).attrs.list as { marker: string }).marker;
+    expect(marker(0)).toBe('•');
+    expect(marker(1)).toBe('I)');
+    expect(marker(2)).toBe('II)');
   });
 
   it('throws when word/document.xml is missing', async () => {

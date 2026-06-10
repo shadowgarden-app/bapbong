@@ -27,6 +27,12 @@ describe('schema', () => {
     expect(schema.marks.fontFamily.create({ family: 'Calibri' }).attrs.family).toBe('Calibri');
   });
 
+  it('paragraph carries an optional list attribute (default null)', () => {
+    expect(schema.nodes.paragraph.create().attrs.list).toBeNull();
+    const p = schema.nodes.paragraph.create({ list: { numId: '1', level: 0, marker: '1.' } });
+    expect((p.attrs.list as { marker: string }).marker).toBe('1.');
+  });
+
   it('can build a paragraph with a marked text node', () => {
     const p = schema.nodes.paragraph.create(null, [
       schema.text('hi', [schema.marks.strong.create()]),

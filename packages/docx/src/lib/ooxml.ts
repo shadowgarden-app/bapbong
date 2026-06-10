@@ -8,7 +8,13 @@ export const parser = new XMLParser({
   attributeNamePrefix: '@_',
   trimValues: false,
   isArray: (name) =>
-    name === 'w:p' || name === 'w:r' || name === 'w:t' || name === 'w:style',
+    name === 'w:p' ||
+    name === 'w:r' ||
+    name === 'w:t' ||
+    name === 'w:style' ||
+    name === 'w:abstractNum' ||
+    name === 'w:num' ||
+    name === 'w:lvl',
 });
 
 export function toArray<T>(v: T | T[] | undefined | null): T[] {
