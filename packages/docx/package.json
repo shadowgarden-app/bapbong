@@ -1,7 +1,7 @@
 {
-  "name": "@shadow-garden/bapbong-editor",
+  "name": "@shadow-garden/bapbong-docx",
   "version": "0.0.1",
-  "description": "bapbong — canvas-rendered DOCX editor for the browser (work in progress)",
+  "description": "bapbong — DOCX (OOXML) import / export",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.esm.js",
@@ -24,7 +24,12 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:app"]
+    "tags": ["scope:io"]
   },
-  "dependencies": {}
+  "dependencies": {
+    "@shadow-garden/bapbong-model": "workspace:^",
+    "fast-xml-parser": "^5.8.0",
+    "jszip": "^3.10.1",
+    "prosemirror-model": "^1.25.7"
+  }
 }

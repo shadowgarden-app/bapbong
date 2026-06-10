@@ -1,7 +1,7 @@
 {
-  "name": "@shadow-garden/bapbong-editor",
+  "name": "@shadow-garden/bapbong-model",
   "version": "0.0.1",
-  "description": "bapbong — canvas-rendered DOCX editor for the browser (work in progress)",
+  "description": "bapbong — ProseMirror document model / schema",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.esm.js",
@@ -24,7 +24,9 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:app"]
+    "tags": ["scope:model"]
   },
-  "dependencies": {}
+  "dependencies": {
+    "prosemirror-model": "^1.25.7"
+  }
 }

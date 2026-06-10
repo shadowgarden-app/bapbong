@@ -5,6 +5,12 @@
   "references": [
     {
       "path": "./packages/editor"
+    },
+    {
+      "path": "./packages/model"
+    },
+    {
+      "path": "./packages/docx"
     }
   ]
 }
