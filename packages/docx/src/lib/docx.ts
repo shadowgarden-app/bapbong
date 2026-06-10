@@ -15,6 +15,7 @@ import {
 import { buildStyleRegistry, StyleRegistry } from './styles';
 import { buildNumbering, NumberingResolver } from './numbering';
 import { buildRels, Relationship } from './rels';
+import { buildThemeResolver, ThemeResolver } from './theme';
 
 export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 
@@ -33,6 +34,7 @@ interface Ctx {
   numbering: NumberingResolver;
   rels: Map<string, Relationship>;
   media: Map<string, string>; // zip path → data URL
+  resolveTheme: ThemeResolver;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -113,10 +115,11 @@ function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string 
   const rPr = child(run, 'w:rPr');
   const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
   // Cascade: docDefaults+paraStyle → run style → inline rPr (later wins).
-  const effective = [paraBase, ctx.styles.resolveStyle(rStyleId), parseRunProps(rPr)].reduce(
-    mergeRunProps,
-    {} as RunProps,
-  );
+  const effective = [
+    paraBase,
+    ctx.styles.resolveStyle(rStyleId),
+    parseRunProps(rPr, ctx.resolveTheme),
+  ].reduce(mergeRunProps, {} as RunProps);
   const marks = propsToMarks(effective);
   if (href) marks.push(schema.marks.link.create({ href }));
 
@@ -277,11 +280,14 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const stylesXml = await readPart(zip, 'word/styles.xml');
   const numberingXml = await readPart(zip, 'word/numbering.xml');
   const relsXml = await readPart(zip, 'word/_rels/document.xml.rels');
+  const themeXml = await readPart(zip, 'word/theme/theme1.xml');
+  const resolveTheme = buildThemeResolver(themeXml ? parseXml(themeXml) : undefined);
   const ctx: Ctx = {
-    styles: buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined),
+    styles: buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined, resolveTheme),
     numbering: buildNumbering(numberingXml ? parseXml(numberingXml) : undefined),
     rels: buildRels(relsXml ? parseXml(relsXml) : undefined),
     media: await extractMedia(zip),
+    resolveTheme,
   };
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');

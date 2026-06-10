@@ -34,6 +34,7 @@ async function makeDocx(
   numberingXml?: string,
   relsXml?: string,
   media?: Record<string, string>,
+  themeXml?: string,
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
@@ -53,6 +54,7 @@ async function makeDocx(
       zip.file(`word/media/${name}`, base64, { base64: true });
     }
   }
+  if (themeXml) zip.file('word/theme/theme1.xml', themeXml);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -291,6 +293,25 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100); // 952500 EMU / 9525
     expect(img.attrs.height).toBe(50); // 476250 / 9525
     expect(img.attrs.alt).toBe('a cat');
+  });
+
+  it('resolves theme colors (w:themeColor) via theme1.xml, incl. shade', async () => {
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
+      <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+      <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+    </a:clrScheme></a:themeElements></a:theme>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:rPr><w:color w:themeColor="accent1"/></w:rPr><w:t>accent</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:color w:themeColor="accent1" w:themeShade="80"/></w:rPr><w:t>shaded</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, undefined, undefined, themeXml),
+    );
+    expect(markMap(doc.child(0).child(0).marks).textColor.color).toBe('#4472C4');
+    // shade 0x80/255 ≈ 0.502 → 4472C4 darkened ≈ 223962
+    expect(markMap(doc.child(1).child(0).marks).textColor.color).toBe('#223962');
   });
 
   it('throws when word/document.xml is missing', async () => {

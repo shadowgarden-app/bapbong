@@ -1,4 +1,13 @@
-import { attrOf, child, children, mergeRunProps, OoxmlNode, parseRunProps, RunProps } from './ooxml';
+import {
+  attrOf,
+  child,
+  children,
+  mergeRunProps,
+  OoxmlNode,
+  parseRunProps,
+  RunProps,
+  ThemeColorResolver,
+} from './ooxml';
 
 interface StyleDef {
   basedOn?: string;
@@ -16,11 +25,14 @@ export interface StyleRegistry {
 
 const EMPTY: RunProps = {};
 
-export function buildStyleRegistry(stylesRoot: OoxmlNode | undefined): StyleRegistry {
+export function buildStyleRegistry(
+  stylesRoot: OoxmlNode | undefined,
+  resolveTheme?: ThemeColorResolver,
+): StyleRegistry {
   const stylesEl = child(stylesRoot, 'w:styles');
 
   const rPrDefault = child(child(child(stylesEl, 'w:docDefaults'), 'w:rPrDefault'), 'w:rPr');
-  const docDefaults = parseRunProps(rPrDefault);
+  const docDefaults = parseRunProps(rPrDefault, resolveTheme);
 
   const defs = new Map<string, StyleDef>();
   for (const style of children(stylesEl, 'w:style')) {
@@ -28,7 +40,7 @@ export function buildStyleRegistry(stylesRoot: OoxmlNode | undefined): StyleRegi
     if (id === undefined) continue;
     defs.set(id, {
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
-      rPr: parseRunProps(child(style, 'w:rPr')),
+      rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme),
     });
   }
 

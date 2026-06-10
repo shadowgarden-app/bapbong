@@ -112,8 +112,18 @@ export interface RunProps {
   fontFamily?: string;
 }
 
+/** Resolve a `w:themeColor` (+ optional tint/shade) to "#RRGGBB". */
+export type ThemeColorResolver = (
+  themeColor: string,
+  tint?: string,
+  shade?: string,
+) => string | undefined;
+
 /** Parse a `w:rPr` element into normalized run properties (only present keys). */
-export function parseRunProps(rPr: OoxmlNode | undefined): RunProps {
+export function parseRunProps(
+  rPr: OoxmlNode | undefined,
+  resolveTheme?: ThemeColorResolver,
+): RunProps {
   if (!rPr) return {};
   const props: RunProps = {};
 
@@ -126,9 +136,20 @@ export function parseRunProps(rPr: OoxmlNode | undefined): RunProps {
   const s = toggle(child(rPr, 'w:strike'));
   if (s !== undefined) props.strike = s;
 
-  const color = attrOf(child(rPr, 'w:color'), 'w:val');
-  if (color && color.toLowerCase() !== 'auto') {
-    props.color = color.startsWith('#') ? color.toUpperCase() : `#${color.toUpperCase()}`;
+  const colorEl = child(rPr, 'w:color');
+  const colorVal = attrOf(colorEl, 'w:val');
+  if (colorVal && colorVal.toLowerCase() !== 'auto') {
+    props.color = colorVal.startsWith('#') ? colorVal.toUpperCase() : `#${colorVal.toUpperCase()}`;
+  } else if (resolveTheme) {
+    const themeColor = attrOf(colorEl, 'w:themeColor');
+    if (themeColor) {
+      const hex = resolveTheme(
+        themeColor,
+        attrOf(colorEl, 'w:themeTint'),
+        attrOf(colorEl, 'w:themeShade'),
+      );
+      if (hex) props.color = hex;
+    }
   }
 
   const sz = attrOf(child(rPr, 'w:sz'), 'w:val');
