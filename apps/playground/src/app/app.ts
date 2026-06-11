@@ -1,4 +1,4 @@
-import { Component, ElementRef, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, signal, viewChild } from '@angular/core';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from '@shadow-garden/bapbong-docx';
@@ -13,10 +13,12 @@ import {
 } from '@shadow-garden/bapbong-input-bridge';
 import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
 import type {
+  CaretRect,
   MeasureMetrics,
   MeasureText,
   PageConfig,
   ResolvedLayout,
+  SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
 /** A4 at 96 dpi with 1in margins. */
@@ -26,12 +28,14 @@ const A4: PageConfig = {
   margin: { top: 96, right: 96, bottom: 96, left: 96 },
 };
 
+const CARET_BLINK_MS = 530;
+
 @Component({
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App {
+export class App implements OnDestroy {
   protected readonly fileName = signal<string | null>(null);
   protected readonly error = signal<string | null>(null);
   protected readonly json = signal<string | null>(null);
@@ -52,6 +56,11 @@ export class App {
   private dragAnchor: number | null = null;
   // Incremental re-layout: unchanged paragraphs skip measuring on each keystroke.
   private readonly layoutCache = createLayoutCache();
+  // Caret blink state (solid on every interaction, toggling while idle).
+  private lastCaret: CaretRect | null = null;
+  private lastSelection: SelectionRect[] = [];
+  private caretVisible = true;
+  private blinkTimer: ReturnType<typeof setInterval> | null = null;
 
   protected async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -98,7 +107,12 @@ export class App {
     this.bridge?.destroy();
     this.bridge = new InputBridge({
       doc,
-      keys: { ArrowUp: this.verticalCmd(-1), ArrowDown: this.verticalCmd(1) },
+      keys: {
+        ArrowUp: this.verticalCmd(-1),
+        ArrowDown: this.verticalCmd(1),
+        'Shift-ArrowUp': this.verticalCmd(-1, true),
+        'Shift-ArrowDown': this.verticalCmd(1, true),
+      },
       onUpdate: (state) => this.refresh(state),
     });
     // Same scroll container as the canvas, so IME anchoring scrolls along.
@@ -115,14 +129,18 @@ export class App {
       this.layoutCache,
     );
     const sel = state.selection;
-    const caret = caretRect(this.resolved, sel.head, this.measureText);
-    const rects = sel.empty ? [] : selectionRects(this.resolved, sel.from, sel.to, this.measureText);
-    this.painter.paint(this.resolved, { caret, selection: rects });
+    this.lastCaret = caretRect(this.resolved, sel.head, this.measureText);
+    this.lastSelection = sel.empty
+      ? []
+      : selectionRects(this.resolved, sel.from, sel.to, this.measureText);
+    this.restartBlink(); // caret shows solid on every interaction
+    this.repaintOverlay();
     this.pageCount.set(this.resolved.pages.length);
     this.json.set(JSON.stringify(state.doc.toJSON(), null, 2));
     this.renderPreview(state.doc);
 
     // Anchor the hidden editor (and its IME popup) at the painted caret.
+    const caret = this.lastCaret;
     if (caret && this.bridge) {
       const canvas = this.canvasHost()?.nativeElement;
       const pt = this.painter.pageToCanvas({ pageIndex: caret.pageIndex, x: caret.x, y: caret.y });
@@ -132,16 +150,40 @@ export class App {
     }
   }
 
+  /** Repaint the current layout with the caret in its current blink phase. */
+  private repaintOverlay(): void {
+    if (!this.painter || !this.resolved) return;
+    this.painter.paint(this.resolved, {
+      caret: this.caretVisible ? this.lastCaret : null,
+      selection: this.lastSelection,
+    });
+  }
+
+  /** Show the caret solid now, then blink while idle. */
+  private restartBlink(): void {
+    if (this.blinkTimer != null) clearInterval(this.blinkTimer);
+    this.caretVisible = true;
+    this.blinkTimer = setInterval(() => {
+      this.caretVisible = !this.caretVisible;
+      this.repaintOverlay();
+    }, CARET_BLINK_MS);
+  }
+
+  ngOnDestroy(): void {
+    if (this.blinkTimer != null) clearInterval(this.blinkTimer);
+    this.bridge?.destroy();
+  }
+
   /** ArrowUp/ArrowDown against the canvas layout (the hidden DOM's own line
-   *  wrapping is meaningless). */
-  private verticalCmd(dir: -1 | 1): Command {
+   *  wrapping is meaningless). With `extend`, Shift+arrow grows the selection. */
+  private verticalCmd(dir: -1 | 1, extend = false): Command {
     return moveCaretCommand((state) => {
       if (!this.resolved || !this.measureText) return null;
       const head = state.selection.head;
       const cr = caretRect(this.resolved, head, this.measureText);
       if (!cr) return null;
       return verticalCaret(this.resolved, head, dir, cr.x, this.measureText);
-    });
+    }, extend);
   }
 
   protected onCanvasMouseDown(ev: MouseEvent): void {

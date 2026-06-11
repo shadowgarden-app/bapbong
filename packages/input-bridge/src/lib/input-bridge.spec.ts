@@ -1,7 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { undo } from 'prosemirror-history';
-import { createEditingState, wordRangeAt } from './input-bridge.js';
+import { createEditingState, moveCaretCommand, wordRangeAt } from './input-bridge.js';
 
 // EditorView needs a real DOM, so the headless tests cover the state side:
 // plugins, typing transactions and history. The view itself is exercised in
@@ -38,6 +38,24 @@ describe('createEditingState', () => {
     state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 3)));
     state = state.apply(state.tr.insertText('xy', 1));
     expect(state.selection.head).toBe(5); // shifted by the 2 inserted chars
+  });
+});
+
+describe('moveCaretCommand', () => {
+  it('collapses by default and extends from the anchor with extend=true', () => {
+    let state = createEditingState(doc); // 'hello'
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 2)));
+
+    moveCaretCommand(() => 4)(state, (tr) => (state = state.apply(tr)));
+    expect(state.selection.empty).toBe(true);
+    expect(state.selection.head).toBe(4);
+
+    moveCaretCommand(() => 6, true)(state, (tr) => (state = state.apply(tr)));
+    expect(state.selection.anchor).toBe(4); // anchor kept
+    expect(state.selection.head).toBe(6); // head moved
+
+    // compute → null leaves the key to the next handler
+    expect(moveCaretCommand(() => null)(state, () => undefined)).toBe(false);
   });
 });
 

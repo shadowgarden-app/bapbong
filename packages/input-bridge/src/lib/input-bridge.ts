@@ -10,13 +10,21 @@ import { EditorView } from 'prosemirror-view';
 export type { Command, EditorState, Transaction } from 'prosemirror-state';
 
 /** A command that moves the caret to the position computed by `compute`
- *  (e.g. layout-aware ArrowUp/ArrowDown from bapbong-selection). Returns
- *  false — leaving the key to the next handler — when `compute` yields null. */
-export function moveCaretCommand(compute: (state: EditorState) => number | null): Command {
+ *  (e.g. layout-aware ArrowUp/ArrowDown from bapbong-selection). With `extend`,
+ *  the anchor stays put and only the head moves (Shift+arrow selection).
+ *  Returns false — leaving the key to the next handler — when `compute`
+ *  yields null. */
+export function moveCaretCommand(
+  compute: (state: EditorState) => number | null,
+  extend = false,
+): Command {
   return (state, dispatch) => {
     const pos = compute(state);
     if (pos == null) return false;
-    dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+    const sel = extend
+      ? TextSelection.create(state.doc, state.selection.anchor, pos)
+      : TextSelection.create(state.doc, pos);
+    dispatch?.(state.tr.setSelection(sel));
     return true;
   };
 }
