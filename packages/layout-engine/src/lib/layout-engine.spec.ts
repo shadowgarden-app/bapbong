@@ -337,6 +337,50 @@ describe('layoutBlocks', () => {
     expect(f1?.cells[0].lines[0].segments[0].pos).toBeDefined();
   });
 
+  it('fills the remaining page space before splitting an oversize row', () => {
+    // content 60; a paragraph line (16) leaves 44px. The single row holds
+    // 6 lines (96px) — taller than even a FULL page, so Word starts it in the
+    // leftover space instead of abandoning it as a blank gap.
+    const para6: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const tallCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+      content: Array.from({ length: 6 }, (_, i) => para(`l${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [tallCell] }] };
+    const { pages } = layoutBlocks([para6, t], config({ height: 100 }));
+    expect(pages).toHaveLength(3);
+    // page 1: the paragraph + the row's first 2 lines fill the 44px leftover.
+    const f1 = pages[0].tables?.[0];
+    expect(f1?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l1', 'l2']);
+    expect(f1?.y).toBe(36); // right below the paragraph, no blank gap
+    // pages 2–3: the re-stacked remainder continues from each page top.
+    expect(pages[1].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual([
+      'l3',
+      'l4',
+      'l5',
+    ]);
+    expect(pages[2].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l6']);
+  });
+
+  it('still moves a row whole when it fits a fresh page', () => {
+    // content 60; paragraph (16) leaves 44px; one row of 3 lines (48px) does
+    // not fit the leftover but DOES fit a full page → moves whole (no split).
+    const para1: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const rowCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+      content: Array.from({ length: 3 }, (_, i) => para(`l${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell] }] };
+    const { pages } = layoutBlocks([para1, t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    expect(pages[0].tables ?? []).toHaveLength(0); // gap left intentionally
+    expect(pages[1].tables?.[0]?.cells[0].lines).toHaveLength(3); // intact row
+  });
+
   it('splits a row taller than the page mid-row and re-stacks the remainder', () => {
     // content height 60. Row 1: cell with 5 paragraphs (80px) > full page.
     const tallCell: FlowTableCell = {

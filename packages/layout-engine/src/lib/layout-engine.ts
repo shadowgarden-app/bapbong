@@ -871,14 +871,27 @@ function placeBlocks(
           if (cell.y > hb && cell.y <= avail) cut = Math.max(cut, cell.y);
         }
         if (cut === 0) {
-          if (pageHasContent()) {
+          // No row boundary fits the remaining space. Word only moves the row
+          // to a fresh page when it would fit one whole; a row taller than a
+          // full page starts right here and splits mid-row (no blank gap).
+          let firstRowBottom = table.height;
+          for (const cell of table.cells) {
+            if (cell.y > hb && cell.y < firstRowBottom) firstRowBottom = cell.y;
+          }
+          const fitsFullPage = firstRowBottom - hb <= bottom - top;
+          if (fitsFullPage && pageHasContent()) {
             finalizePage(); // retry with a full fresh page
             continue;
           }
-          cut = avail; // first row alone exceeds a full page → split mid-row
+          cut = avail; // split the oversize row in the space we have
         }
         if (cut <= hb) {
-          // Degenerate (header taller than the page space) — place whole.
+          // Header band swallows the remaining space — try a fresh page, or
+          // place whole when the geometry is truly degenerate.
+          if (pageHasContent()) {
+            finalizePage();
+            continue;
+          }
           offsetTable(table, y);
           tables.push(table);
           y += table.height;
@@ -892,6 +905,15 @@ function placeBlocks(
           tables.push(table);
           y += table.height;
           break;
+        }
+        const topHasContent = topFrag.cells.some(
+          (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
+        );
+        if (!topHasContent && pageHasContent()) {
+          // Not even one line fits the leftover space — don't paint an empty
+          // table stub; start on the next page instead.
+          finalizePage();
+          continue;
         }
         if (hb > 0) {
           const ghosts = cloneHeaderCells(table, hb);
