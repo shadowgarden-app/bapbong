@@ -6,7 +6,7 @@ import type {
   LayoutConfig,
   MeasureText,
 } from '@shadow-garden/bapbong-contracts';
-import { layoutBlocks, toFlowBlocks } from './layout-engine.js';
+import { createLayoutCache, layout, layoutBlocks, toFlowBlocks } from './layout-engine.js';
 
 // 10px per character, font-agnostic — keeps wrapping math predictable.
 const measure: MeasureText = (text) => text.length * 10;
@@ -369,5 +369,71 @@ describe('toFlowBlocks', () => {
       const inner = block.rows[0].cells[0].content[0];
       expect(inner.type).toBe('paragraph');
     }
+  });
+});
+
+describe('layout with LayoutCache', () => {
+  const schema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const p = (text: string) => schema.node('paragraph', null, [schema.text(text)]);
+
+  /** MeasureText that records every measured string. */
+  const counting = () => {
+    const calls: string[] = [];
+    const fn: MeasureText = (text) => {
+      calls.push(text);
+      return text.length * 10;
+    };
+    return { fn, calls };
+  };
+
+  it('skips measuring entirely on an identical second layout', () => {
+    const doc = schema.node('doc', null, [p('aa bb'), p('cc dd')]);
+    const cache = createLayoutCache();
+    const m = counting();
+    const cfg = { ...config(), measureText: m.fn };
+    const first = layout(doc, cfg, cache);
+    expect(m.calls.length).toBeGreaterThan(0);
+    m.calls.length = 0;
+    const second = layout(doc, cfg, cache);
+    expect(m.calls).toEqual([]); // every paragraph came from the cache
+    expect(second).toEqual(first);
+  });
+
+  it('re-measures only the changed paragraph and shifts the rest', () => {
+    const pA = p('aa');
+    const pC = p('cc');
+    const doc1 = schema.node('doc', null, [pA, p('bb'), pC]);
+    const cache = createLayoutCache();
+    const m = counting();
+    const cfg = { ...config(), measureText: m.fn };
+    layout(doc1, cfg, cache);
+
+    // Replace the middle paragraph with a longer one; A and C keep identity.
+    const doc2 = schema.node('doc', null, [pA, p('bbbb xx'), pC]);
+    m.calls.length = 0;
+    const result = layout(doc2, cfg, cache);
+    expect(m.calls).toEqual(['bbbb', ' ', 'xx']); // only the new paragraph
+    // C moved: 'bbbb xx' has nodeSize 9 → C's node sits at 13, content at 14.
+    // The cached drafts must be position-shifted without re-measuring.
+    const lineC = result.pages[0].lines[2];
+    expect(lineC.from).toBe(14);
+    expect(lineC.segments[0].pos).toBe(14);
+  });
+
+  it('invalidates on content-width change', () => {
+    const doc = schema.node('doc', null, [p('aa')]);
+    const cache = createLayoutCache();
+    const m = counting();
+    layout(doc, { ...config(), measureText: m.fn }, cache);
+    m.calls.length = 0;
+    layout(doc, { ...config({ width: 300 }), measureText: m.fn }, cache);
+    expect(m.calls).toEqual(['aa']); // width changed → re-wrapped
   });
 });

@@ -2,7 +2,7 @@ import { Component, ElementRef, signal, viewChild } from '@angular/core';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from '@shadow-garden/bapbong-docx';
-import { layout } from '@shadow-garden/bapbong-layout-engine';
+import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
 import { createCanvasMeasurer, createCanvasMetrics } from '@shadow-garden/bapbong-measuring';
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import {
@@ -50,6 +50,8 @@ export class App {
   private bridge: InputBridge | null = null;
   private resolved: ResolvedLayout | null = null;
   private dragAnchor: number | null = null;
+  // Incremental re-layout: unchanged paragraphs skip measuring on each keystroke.
+  private readonly layoutCache = createLayoutCache();
 
   protected async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -107,11 +109,11 @@ export class App {
   /** Layout → paint (with caret/selection) → sync side panels. */
   private refresh(state: EditorState): void {
     if (!this.painter || !this.measureText || !this.measureMetrics) return;
-    this.resolved = layout(state.doc, {
-      page: A4,
-      measureText: this.measureText,
-      measureMetrics: this.measureMetrics,
-    });
+    this.resolved = layout(
+      state.doc,
+      { page: A4, measureText: this.measureText, measureMetrics: this.measureMetrics },
+      this.layoutCache,
+    );
     const sel = state.selection;
     const caret = caretRect(this.resolved, sel.head, this.measureText);
     const rects = sel.empty ? [] : selectionRects(this.resolved, sel.from, sel.to, this.measureText);

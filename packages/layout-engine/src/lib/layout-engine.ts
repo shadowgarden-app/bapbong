@@ -552,19 +552,21 @@ function layoutTable(
   return { x: contentLeft, y: 0, width: tableWidth, height: rowY[nrows], cells };
 }
 
-/** Lay out already-flattened blocks into paginated pages. Pure (no DOM);
- *  measurement is injected. */
-export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): ResolvedLayout {
-  const base: FontSpec = { ...DEFAULT_FONT, ...config.defaultFont };
-  const { page } = config;
-  const ctx: Ctx = {
-    base,
+/** One laid-out top-level block awaiting vertical placement. */
+type BlockItem = { drafts: LineDraft[] } | { table: ResolvedTable };
+
+function buildCtx(config: LayoutConfig): Ctx {
+  return {
+    base: { ...DEFAULT_FONT, ...config.defaultFont },
     measure: config.measureText,
     metrics: config.measureMetrics,
     tabWidth: config.tabWidth ?? DEFAULT_TAB_WIDTH,
   };
-  const left = page.margin.left;
-  const right = page.width - page.margin.right;
+}
+
+/** Stack laid-out blocks onto pages (the paginator). */
+function placeBlocks(items: Iterable<BlockItem>, config: LayoutConfig): ResolvedLayout {
+  const { page } = config;
   const top = page.margin.top;
   const bottom = page.height - page.margin.bottom;
 
@@ -585,24 +587,19 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
   /** Whether the current page already holds content (so a break is meaningful). */
   const pageHasContent = () => lines.length > 0 || tables.length > 0;
 
-  const placeLine = (d: LineDraft) => {
-    if (y + d.height > bottom && pageHasContent()) finalizePage();
-    lines.push(draftToLine(d, y));
-    y += d.height;
-  };
-
-  const placeTable = (table: ResolvedTable) => {
-    if (y + table.height > bottom && pageHasContent()) finalizePage();
-    offsetTable(table, y); // table was laid out relative to y = 0
-    tables.push(table);
-    y += table.height;
-  };
-
-  for (const block of blocks) {
-    if (block.type === 'paragraph') {
-      for (const d of layoutParagraph(block, left, right, ctx)) placeLine(d);
+  for (const item of items) {
+    if ('drafts' in item) {
+      for (const d of item.drafts) {
+        if (y + d.height > bottom && pageHasContent()) finalizePage();
+        lines.push(draftToLine(d, y));
+        y += d.height;
+      }
     } else {
-      placeTable(layoutTable(block, left, right, ctx));
+      const table = item.table;
+      if (y + table.height > bottom && pageHasContent()) finalizePage();
+      offsetTable(table, y); // table was laid out relative to y = 0
+      tables.push(table);
+      y += table.height;
     }
   }
 
@@ -610,7 +607,82 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
   return { pages };
 }
 
-/** Lay out a ProseMirror document into paint-ready pages. */
-export function layout(doc: PMNode, config: LayoutConfig): ResolvedLayout {
-  return layoutBlocks(toFlowBlocks(doc, config.defaultFont), config);
+/** Lay out already-flattened blocks into paginated pages. Pure (no DOM);
+ *  measurement is injected. */
+export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): ResolvedLayout {
+  const ctx = buildCtx(config);
+  const left = config.page.margin.left;
+  const right = config.page.width - config.page.margin.right;
+  const items: BlockItem[] = blocks.map((block) =>
+    block.type === 'paragraph'
+      ? { drafts: layoutParagraph(block, left, right, ctx) }
+      : { table: layoutTable(block, left, right, ctx) },
+  );
+  return placeBlocks(items, config);
+}
+
+// ── Incremental re-layout (M4+) ─────────────────────────────────────
+
+/** Shift every PM position in the drafts by `delta` (geometry is unchanged —
+ *  the paragraph's text and wrap are identical, it just moved in the doc). */
+function shiftDrafts(drafts: LineDraft[], delta: number): LineDraft[] {
+  return drafts.map((d) => ({
+    ...d,
+    from: d.from != null ? d.from + delta : d.from,
+    to: d.to != null ? d.to + delta : d.to,
+    segments: d.segments.map((s) => (s.pos != null ? { ...s, pos: s.pos + delta } : s)),
+    images: d.images.map((im) => (im.pos != null ? { ...im, pos: im.pos + delta } : im)),
+  }));
+}
+
+interface ParagraphCacheEntry {
+  left: number;
+  right: number;
+  /** Content-start position the cached drafts were computed at. */
+  basePos: number;
+  drafts: LineDraft[];
+}
+
+/**
+ * Paragraph-level layout cache keyed on ProseMirror node identity (PM keeps
+ * unchanged nodes identical across transactions). An unchanged paragraph skips
+ * measuring/wrapping entirely; one that merely moved in the document gets its
+ * positions shifted. Tables are not cached (laid out fresh every time).
+ */
+export class LayoutCache {
+  readonly paragraphs = new WeakMap<PMNode, ParagraphCacheEntry>();
+}
+
+export function createLayoutCache(): LayoutCache {
+  return new LayoutCache();
+}
+
+/** Lay out a ProseMirror document into paint-ready pages. With a `cache`,
+ *  only paragraphs whose node changed since the previous call are re-measured. */
+export function layout(doc: PMNode, config: LayoutConfig, cache?: LayoutCache): ResolvedLayout {
+  const ctx = buildCtx(config);
+  const left = config.page.margin.left;
+  const right = config.page.width - config.page.margin.right;
+
+  const items: BlockItem[] = [];
+  doc.forEach((node, offset) => {
+    if (node.type.name === 'paragraph') {
+      const contentStart = offset + 1;
+      const hit = cache?.paragraphs.get(node);
+      if (hit && hit.left === left && hit.right === right) {
+        if (hit.basePos !== contentStart) {
+          hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
+          hit.basePos = contentStart;
+        }
+        items.push({ drafts: hit.drafts });
+        return;
+      }
+      const drafts = layoutParagraph(paragraphToFlow(node, ctx.base, offset), left, right, ctx);
+      cache?.paragraphs.set(node, { left, right, basePos: contentStart, drafts });
+      items.push({ drafts });
+    } else if (node.type.name === 'table') {
+      items.push({ table: layoutTable(tableToFlow(node, ctx.base, offset), left, right, ctx) });
+    }
+  });
+  return placeBlocks(items, config);
 }
