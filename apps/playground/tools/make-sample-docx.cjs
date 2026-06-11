@@ -178,10 +178,21 @@ function buildDocumentXml() {
     ${p(run('Tài liệu mẫu nhiều trang: đậm/nghiêng/màu, danh sách đa cấp, bảng gộp ô, ảnh inline, hyperlink, canh lề và thụt lề.', '<w:i/>'), jc('center'))}
     ${chapters.join('\n')}
     ${tail}
-    <w:sectPr/>
+    <w:sectPr>
+      <w:headerReference w:type="default" r:id="rId20"/>
+      <w:footerReference w:type="default" r:id="rId21"/>
+    </w:sectPr>
   </w:body>
 </w:document>`;
 }
+
+const HEADER_XML = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}">
+  ${p(run('bapbong sample — tài liệu mẫu nhiều trang', '<w:i/><w:color w:val="6B6B70"/>'), jc('right'))}
+</w:hdr>`;
+
+const FOOTER_XML = `<?xml version="1.0"?><w:ftr xmlns:w="${W_NS}">
+  ${p(run('— bapbong playground —', '<w:i/><w:color w:val="6B6B70"/>'), jc('center'))}
+</w:ftr>`;
 
 const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
   <w:abstractNum w:abstractNumId="0">
@@ -199,6 +210,8 @@ const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/>
   <Relationship Id="rId8" Type="${R_NS}/image" Target="media/image2.png"/>
   <Relationship Id="rId9" Type="${R_NS}/hyperlink" Target="https://prosemirror.net/" TargetMode="External"/>
+  <Relationship Id="rId20" Type="${R_NS}/header" Target="header1.xml"/>
+  <Relationship Id="rId21" Type="${R_NS}/footer" Target="footer1.xml"/>
 </Relationships>`;
 
 async function main() {
@@ -214,6 +227,8 @@ async function main() {
   zip.file('word/document.xml', buildDocumentXml());
   zip.file('word/numbering.xml', NUMBERING_XML);
   zip.file('word/_rels/document.xml.rels', RELS_XML);
+  zip.file('word/header1.xml', HEADER_XML);
+  zip.file('word/footer1.xml', FOOTER_XML);
   zip.file('word/media/image1.png', PNG_RED, { base64: true });
   zip.file('word/media/image2.png', PNG_BLUE, { base64: true });
 

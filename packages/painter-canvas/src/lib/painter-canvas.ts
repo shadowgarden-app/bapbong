@@ -133,6 +133,14 @@ export class CanvasPainter {
     for (const page of layout.pages) {
       const contentVisible = yOffset + page.height >= vTop && yOffset <= vBottom;
       this.paintPage(page, yOffset, o, this.overlayCtx == null, contentVisible);
+      if (contentVisible) {
+        // Page chrome (header/footer) repeats on every page.
+        for (const chrome of [layout.pageHeader, layout.pageFooter]) {
+          if (!chrome) continue;
+          for (const line of chrome.lines) this.paintLine(line, yOffset, o);
+          for (const table of chrome.tables) this.paintTable(table, yOffset, o);
+        }
+      }
       yOffset += page.height + o.pageGap;
     }
     if (this.overlayCtx) this.renderOverlay();

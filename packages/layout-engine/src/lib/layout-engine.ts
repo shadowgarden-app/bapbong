@@ -18,6 +18,7 @@ import type {
   MeasureText,
   ParagraphIndent,
   ResolvedCell,
+  ResolvedChrome,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
@@ -726,11 +727,16 @@ function buildCtx(config: LayoutConfig): Ctx {
   };
 }
 
-/** Stack laid-out blocks onto pages (the paginator). */
-function placeBlocks(items: Iterable<BlockItem>, config: LayoutConfig): ResolvedLayout {
+/** Stack laid-out blocks onto pages (the paginator). `band` overrides the
+ *  vertical content bounds (e.g. pushed in by a tall page header/footer). */
+function placeBlocks(
+  items: Iterable<BlockItem>,
+  config: LayoutConfig,
+  band?: { top: number; bottom: number },
+): ResolvedLayout {
   const { page } = config;
-  const top = page.margin.top;
-  const bottom = page.height - page.margin.bottom;
+  const top = band?.top ?? page.margin.top;
+  const bottom = band?.bottom ?? page.height - page.margin.bottom;
 
   const pages: ResolvedPage[] = [];
   let lines: LayoutLine[] = [];
@@ -873,12 +879,79 @@ export function createLayoutCache(): LayoutCache {
   return new LayoutCache();
 }
 
+/** Word's default header/footer distance from the page edge (720 twips). */
+const CHROME_DISTANCE = 48;
+
+/** Repeating page furniture passed alongside the body document. */
+export interface PageChrome {
+  header?: PMNode;
+  footer?: PMNode;
+}
+
+/** Strip PM positions from chrome content: the band belongs to a separate
+ *  document, so its positions must never be caret-addressable. */
+function stripPositions(lines: LayoutLine[], tables: ResolvedTable[]): void {
+  for (const line of lines) {
+    delete line.from;
+    delete line.to;
+    for (const seg of line.segments) delete seg.pos;
+    if (line.images) for (const im of line.images) delete im.pos;
+  }
+  for (const t of tables) {
+    for (const c of t.cells) stripPositions(c.lines, c.tables ?? []);
+  }
+}
+
+/** Lay out one chrome document (header/footer) and pin it at `topY`. */
+function layoutChrome(
+  doc: PMNode,
+  topY: number,
+  left: number,
+  right: number,
+  ctx: Ctx,
+): ResolvedChrome {
+  const flow = layoutFlow(toFlowBlocks(doc, ctx.base), left, right, ctx);
+  const lines = flow.lines.map((l) => ({ ...l, y: l.y + topY }));
+  flow.tables.forEach((t) => offsetTable(t, topY));
+  stripPositions(lines, flow.tables);
+  return { lines, tables: flow.tables, height: flow.height };
+}
+
 /** Lay out a ProseMirror document into paint-ready pages. With a `cache`,
- *  only paragraphs whose node changed since the previous call are re-measured. */
-export function layout(doc: PMNode, config: LayoutConfig, cache?: LayoutCache): ResolvedLayout {
+ *  only paragraphs whose node changed since the previous call are re-measured.
+ *  `chrome` (page header/footer documents) repeats on every page; the body
+ *  band shrinks when a chrome band is taller than the page margin. */
+export function layout(
+  doc: PMNode,
+  config: LayoutConfig,
+  cache?: LayoutCache,
+  chrome?: PageChrome,
+): ResolvedLayout {
   const ctx = buildCtx(config);
-  const left = config.page.margin.left;
-  const right = config.page.width - config.page.margin.right;
+  const { page } = config;
+  const left = page.margin.left;
+  const right = page.width - page.margin.right;
+
+  // Page chrome first — a tall header/footer pushes the body band inward.
+  let pageHeader: ResolvedChrome | undefined;
+  let pageFooter: ResolvedChrome | undefined;
+  let top = page.margin.top;
+  let bottom = page.height - page.margin.bottom;
+  if (chrome?.header) {
+    pageHeader = layoutChrome(chrome.header, CHROME_DISTANCE, left, right, ctx);
+    top = Math.max(top, CHROME_DISTANCE + pageHeader.height);
+  }
+  if (chrome?.footer) {
+    const flow = layoutChrome(chrome.footer, 0, left, right, ctx);
+    const topY = page.height - CHROME_DISTANCE - flow.height;
+    pageFooter = {
+      lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
+      tables: flow.tables,
+      height: flow.height,
+    };
+    pageFooter.tables.forEach((t) => offsetTable(t, topY));
+    bottom = Math.min(bottom, topY);
+  }
 
   const items: BlockItem[] = [];
   doc.forEach((node, offset) => {
@@ -900,5 +973,8 @@ export function layout(doc: PMNode, config: LayoutConfig, cache?: LayoutCache): 
       items.push({ table: layoutTable(tableToFlow(node, ctx.base, offset), left, right, ctx) });
     }
   });
-  return placeBlocks(items, config);
+  const resolved = placeBlocks(items, config, { top, bottom });
+  if (pageHeader) resolved.pageHeader = pageHeader;
+  if (pageFooter) resolved.pageFooter = pageFooter;
+  return resolved;
 }

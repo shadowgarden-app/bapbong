@@ -57,6 +57,9 @@ export class App implements OnDestroy {
   private measureMetrics: MeasureMetrics | null = null;
   private bridge: InputBridge | null = null;
   private resolved: ResolvedLayout | null = null;
+  // Page chrome from the imported docx ('default' header/footer).
+  private chromeHeader: ProseMirrorNode | undefined;
+  private chromeFooter: ProseMirrorNode | undefined;
   private dragAnchor: number | null = null;
   // Incremental re-layout: unchanged paragraphs skip measuring on each keystroke.
   private readonly layoutCache = createLayoutCache();
@@ -99,6 +102,8 @@ export class App implements OnDestroy {
       const { doc, headers, footers } = await importDocx(bytes);
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
+      this.chromeHeader = headers['default'];
+      this.chromeFooter = footers['default'];
       this.setupEditor(doc);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : String(err));
@@ -142,6 +147,7 @@ export class App implements OnDestroy {
         state.doc,
         { page: A4, measureText: this.measureText, measureMetrics: this.measureMetrics },
         this.layoutCache,
+        { header: this.chromeHeader, footer: this.chromeFooter },
       );
       this.pageCount.set(this.resolved.pages.length);
       this.schedulePanelSync(state);

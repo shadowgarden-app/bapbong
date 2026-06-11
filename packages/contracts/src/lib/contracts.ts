@@ -205,9 +205,20 @@ export interface ResolvedPage {
   tables?: ResolvedTable[];
 }
 
+/** Repeating page furniture (a header or footer band). Coordinates are
+ *  page-local; the painter stamps it onto every page. Not caret-addressable —
+ *  PM positions are stripped (the band belongs to a separate document). */
+export interface ResolvedChrome {
+  lines: LayoutLine[];
+  tables: ResolvedTable[];
+  height: number;
+}
+
 /** The paint-ready result the canvas painter consumes (M3). */
 export interface ResolvedLayout {
   pages: ResolvedPage[];
+  pageHeader?: ResolvedChrome;
+  pageFooter?: ResolvedChrome;
 }
 
 // ── Interaction (M4): caret, selection, hit-testing ────────────────

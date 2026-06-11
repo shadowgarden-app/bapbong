@@ -469,6 +469,51 @@ describe('toFlowBlocks', () => {
   });
 });
 
+describe('layout with page chrome (header/footer)', () => {
+  const schema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const p = (text: string) => schema.node('paragraph', null, [schema.text(text)]);
+  const docOf = (...texts: string[]) => schema.node('doc', null, texts.map(p));
+
+  it('pins the header/footer bands and shrinks the body band', () => {
+    // page 300 tall, margins 20 — chrome distance 48 dominates the margins.
+    const cfg = { ...config({ height: 300 }) };
+    const resolved = layout(docOf('body'), cfg, undefined, {
+      header: docOf('head'),
+      footer: docOf('foot'),
+    });
+    // header pinned at 48; its PM positions are stripped.
+    expect(resolved.pageHeader?.lines[0]).toMatchObject({ y: 48 });
+    expect(resolved.pageHeader?.lines[0].segments[0].pos).toBeUndefined();
+    expect(resolved.pageHeader?.lines[0].from).toBeUndefined();
+    // footer bottom sits at pageHeight − 48.
+    const f = resolved.pageFooter?.lines[0];
+    expect((f?.y ?? 0) + (f?.height ?? 0)).toBeCloseTo(300 - 48);
+    // body starts below the header band (48 + 16 > margin 20).
+    expect(resolved.pages[0].lines[0]).toMatchObject({ y: 64 });
+  });
+
+  it('paginates against the shrunken body band', () => {
+    // content band: top 64, bottom 300−48−16 = 236 → 172px ≈ 10 lines of 16.
+    const cfg = { ...config({ height: 300 }) };
+    const body = schema.node('doc', null, Array.from({ length: 12 }, (_, i) => p(`p${i}`)));
+    const resolved = layout(body, cfg, undefined, {
+      header: docOf('head'),
+      footer: docOf('foot'),
+    });
+    expect(resolved.pages).toHaveLength(2);
+    expect(resolved.pages[0].lines.length).toBe(10);
+    const last = resolved.pages[0].lines.at(-1);
+    expect((last?.y ?? 0) + (last?.height ?? 0)).toBeLessThanOrEqual(236.01);
+  });
+});
+
 describe('layout with LayoutCache', () => {
   const schema = new Schema({
     nodes: {

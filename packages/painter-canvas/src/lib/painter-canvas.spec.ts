@@ -216,6 +216,21 @@ describe('CanvasPainter', () => {
     expect(widthSets).toBe(1);
   });
 
+  it('stamps page chrome (header/footer) onto every page', () => {
+    const ctx = new RecordingCtx();
+    const headerLine = { ...helloLine, y: 5, segments: [{ x: 20, text: 'hdr', font: font() }] };
+    new CanvasPainter(makeCanvas(ctx)).paint(
+      {
+        pages: [page([]), page([], 1)],
+        pageHeader: { lines: [headerLine], tables: [], height: 16 },
+      },
+      { devicePixelRatio: 1, pageGap: 10 },
+    );
+    const hdrCalls = ctx.of('fillText').filter((c) => c.args[0] === 'hdr');
+    expect(hdrCalls).toHaveLength(2); // once per page
+    expect(hdrCalls.map((c) => c.args[2])).toEqual([5 + 12, 310 + 5 + 12]); // y + baseline, page-offset
+  });
+
   it('virtualizes pages outside the viewport (background only)', () => {
     const ctx = new RecordingCtx();
     const painter = new CanvasPainter(makeCanvas(ctx));
