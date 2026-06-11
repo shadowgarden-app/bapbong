@@ -242,6 +242,14 @@ export class CanvasPainter {
       ctx.font = fontCss(seg.font);
       ctx.fillStyle = seg.color ?? o.textColor;
       ctx.fillText(seg.text, seg.x, baselineY);
+      // Text decorations use the width measured at layout time — the painter
+      // never measures.
+      if ((seg.underline || seg.strike) && seg.width) {
+        const em = seg.font.sizePt * (96 / 72);
+        const thickness = Math.max(1, em * 0.05);
+        if (seg.underline) ctx.fillRect(seg.x, baselineY + Math.max(1, em * 0.1), seg.width, thickness);
+        if (seg.strike) ctx.fillRect(seg.x, baselineY - em * 0.27, seg.width, thickness);
+      }
     }
     for (const img of line.images ?? []) {
       const el = this.requestImage(img.src);

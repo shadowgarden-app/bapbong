@@ -195,6 +195,24 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[2]).toMatchObject({ x: 20, y: 36, width: 80 });
   });
 
+  it('carries underline/strike flags and measured width onto segments', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'ab cd', font: font(), underline: true, strike: true }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [s0] = pages[0].lines[0].segments;
+    expect(s0).toMatchObject({ text: 'ab', underline: true, strike: true, width: 20 });
+  });
+
+  it('pads cell content by the Word default cell margin', () => {
+    const t = table([[cell('a', { colwidth: [100] })]]);
+    const { pages } = layoutBlocks([t], config());
+    const line = pages[0].tables?.[0]?.cells[0].lines[0];
+    expect(line?.segments[0].x).toBeCloseTo(20 + 7.2); // cell.x + 108 twips
+    expect(line?.width).toBeCloseTo(100 - 2 * 7.2);
+  });
+
   it('spans columns via colspan', () => {
     const t = table([
       [cell('wide', { colspan: 2, colwidth: [80, 120] })],

@@ -106,6 +106,23 @@ describe('CanvasPainter', () => {
     expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 310 + 32]);
   });
 
+  it('draws underline and strike from layout-measured widths', () => {
+    const ctx = new RecordingCtx();
+    const decorated = {
+      ...helloLine,
+      segments: [{ x: 20, text: 'Hi', font: font(), underline: true, strike: true, width: 30 }],
+    };
+    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [page([decorated])] }, { devicePixelRatio: 1 });
+    const rects = ctx.of('fillRect').slice(1); // [0] is the page background
+    // 11pt → em ≈ 14.67px: underline ≈ baseline+1.47, strike ≈ baseline−3.96.
+    expect(rects).toHaveLength(2);
+    const [under, strike] = rects;
+    expect(under.args[0]).toBe(20);
+    expect(under.args[2]).toBe(30); // layout width, not re-measured
+    expect(under.args[1] as number).toBeGreaterThan(32);
+    expect(strike.args[1] as number).toBeLessThan(32);
+  });
+
   it('strokes table cell borders and paints cell content', () => {
     const ctx = new RecordingCtx();
     const p = {

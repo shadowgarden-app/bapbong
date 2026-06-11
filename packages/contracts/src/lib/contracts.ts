@@ -38,6 +38,8 @@ export interface InlineRun {
   font: FontSpec;
   color?: string;
   link?: string;
+  underline?: boolean;
+  strike?: boolean;
   /** Absolute ProseMirror position of the run's first character. */
   pos?: number;
 }
@@ -129,6 +131,11 @@ export interface LayoutSegment {
   font: FontSpec;
   color?: string;
   link?: string;
+  underline?: boolean;
+  strike?: boolean;
+  /** Measured width (px) — lets the painter draw text decorations without
+   *  re-measuring at paint time. */
+  width?: number;
   /** Absolute PM position of the segment's first character. Segments without
    *  a position (list markers) are decoration — not addressable by a caret. */
   pos?: number;

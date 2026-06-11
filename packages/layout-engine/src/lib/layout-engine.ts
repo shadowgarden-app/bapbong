@@ -28,9 +28,10 @@ const PT_TO_PX = 96 / 72;
 const LINE_HEIGHT_FACTOR = 1.2;
 const BASELINE_FACTOR = 0.8;
 const DEFAULT_TAB_WIDTH = 48; // 0.5in, Word's default tab interval
-// Cell padding (px). 0 for now — Word's default cell margins (~5.4pt left/right)
-// are a later refinement; keeping 0 makes table coordinates predictable.
-const CELL_PAD_X = 0;
+// Cell padding (px). Word's default cell margins (w:tblCellMar): 108 twips
+// (= 7.2px) left/right, 0 top/bottom. Per-table w:tblCellMar overrides are a
+// later refinement.
+const CELL_PAD_X = 7.2;
 const CELL_PAD_Y = 0;
 
 const sizePx = (font: FontSpec) => font.sizePt * PT_TO_PX;
@@ -60,13 +61,16 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   if (family) font.family = String(family.attrs['family'] ?? base.family);
   const color = findMark(marks, 'textColor');
   const link = findMark(marks, 'link');
-  return {
+  const run: InlineRun = {
     text: node.text ?? '',
     font,
     color: color ? String(color.attrs['color']) : undefined,
     link: link ? String(link.attrs['href']) : undefined,
     pos,
   };
+  if (findMark(marks, 'underline')) run.underline = true;
+  if (findMark(marks, 'strike')) run.strike = true;
+  return run;
 }
 
 /** Resolve an image node into an InlineImage. Missing dimensions become 0
@@ -161,6 +165,8 @@ interface Token {
   font: FontSpec;
   color?: string;
   link?: string;
+  underline?: boolean;
+  strike?: boolean;
   width: number;
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
@@ -201,6 +207,8 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         font: inline.font,
         color: inline.color,
         link: inline.link,
+        underline: inline.underline,
+        strike: inline.strike,
         width: isTab ? 0 : ctx.measure(part, inline.font),
         isSpace,
         isTab,
@@ -261,7 +269,12 @@ function layoutParagraph(
   let marker: LayoutSegment | null = null;
   let markerWidth = 0;
   if (block.marker) {
-    marker = { x: paraLeft + firstLineDelta, text: block.marker, font: base };
+    marker = {
+      x: paraLeft + firstLineDelta,
+      text: block.marker,
+      font: base,
+      width: measure(block.marker, base),
+    };
     markerWidth = measure(`${block.marker} `, base);
   }
   const firstLineStart = marker ? marker.x + markerWidth : paraLeft + firstLineDelta;
@@ -326,7 +339,17 @@ function layoutParagraph(
           pos: t.pos,
         });
       } else {
-        segments.push({ x, text: t.text ?? '', font: t.font, color: t.color, link: t.link, pos: t.pos });
+        segments.push({
+          x,
+          text: t.text ?? '',
+          font: t.font,
+          color: t.color,
+          link: t.link,
+          underline: t.underline,
+          strike: t.strike,
+          width: t.width,
+          pos: t.pos,
+        });
       }
       x += t.width + (t.isSpace && !t.isTab ? extraPerGap : 0);
     }
