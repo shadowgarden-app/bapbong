@@ -12,7 +12,11 @@
     "emitDeclarationOnly": false,
     "paths": {
       "@shadow-garden/bapbong-model": ["../../packages/model/src/index.ts"],
-      "@shadow-garden/bapbong-docx": ["../../packages/docx/src/index.ts"]
+      "@shadow-garden/bapbong-docx": ["../../packages/docx/src/index.ts"],
+      "@shadow-garden/bapbong-contracts": ["../../packages/contracts/src/index.ts"],
+      "@shadow-garden/bapbong-measuring": ["../../packages/measuring/src/index.ts"],
+      "@shadow-garden/bapbong-layout-engine": ["../../packages/layout-engine/src/index.ts"],
+      "@shadow-garden/bapbong-painter-canvas": ["../../packages/painter-canvas/src/index.ts"]
     }
   },
   "angularCompilerOptions": {

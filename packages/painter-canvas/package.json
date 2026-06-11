@@ -1,0 +1,47 @@
+{
+  "name": "@shadow-garden/bapbong-painter-canvas",
+  "version": "0.0.1",
+  "description": "bapbong — paints ResolvedLayout onto a Canvas 2D context",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@shadow-garden/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "nx": {
+    "tags": ["scope:painter"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/painter-canvas/dist",
+          "main": "packages/painter-canvas/src/index.ts",
+          "tsConfig": "packages/painter-canvas/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/painter-canvas/src",
+          "external": ["@shadow-garden/bapbong-contracts"]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@shadow-garden/bapbong-contracts": "workspace:^"
+  }
+}

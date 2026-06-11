@@ -13,9 +13,6 @@
       "path": "./packages/docx"
     },
     {
-      "path": "./apps/playground"
-    },
-    {
       "path": "./packages/contracts"
     },
     {
@@ -23,6 +20,9 @@
     },
     {
       "path": "./packages/layout-engine"
+    },
+    {
+      "path": "./packages/painter-canvas"
     }
   ]
 }

@@ -2,10 +2,13 @@
   <h1>bapbong playground</h1>
   <p class="sub">Import a <code>.docx</code> and inspect what <code>&#64;shadow-garden/bapbong-docx</code> parses.</p>
 
-  <label class="file">
-    <input type="file" accept=".docx" (change)="onFile($event)" />
-    <span>Choose a .docx file…</span>
-  </label>
+  <div class="actions">
+    <label class="file">
+      <input type="file" accept=".docx" (change)="onFile($event)" />
+      <span>Choose a .docx file…</span>
+    </label>
+    <button type="button" class="sample" (click)="loadSample()">Load sample</button>
+  </div>
 
   @if (loading()) {
     <p class="hint">Parsing…</p>
@@ -20,6 +23,13 @@
       · footers: {{ footerKeys().length ? footerKeys().join(', ') : 'none' }}
     </p>
   }
+
+  <section [hidden]="!pageCount()">
+    <h2>Canvas <span class="dim">(layout-engine → painter-canvas · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
+    <div class="canvas-wrap">
+      <canvas #docCanvas></canvas>
+    </div>
+  </section>
 
   <h2>Rendered <span class="dim">(via schema toDOM)</span></h2>
   <div #preview class="preview"></div>

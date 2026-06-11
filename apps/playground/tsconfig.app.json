@@ -12,6 +12,18 @@
     },
     {
       "path": "../../packages/model/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/measuring/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/layout-engine/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/painter-canvas/tsconfig.lib.json"
     }
   ]
 }
