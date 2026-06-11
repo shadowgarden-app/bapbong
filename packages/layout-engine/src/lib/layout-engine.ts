@@ -47,8 +47,9 @@ function findMark(marks: readonly Mark[], name: string): Mark | undefined {
   return marks.find((m) => m.type.name === name);
 }
 
-/** Resolve a text node's marks into an InlineRun (font + color + link). */
-function resolveRun(node: PMNode, base: FontSpec): InlineRun {
+/** Resolve a text node's marks into an InlineRun (font + color + link).
+ *  `pos` is the absolute PM position of the run's first character. */
+function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const marks = node.marks;
   const font: FontSpec = { ...base };
   if (findMark(marks, 'strong')) font.bold = true;
@@ -64,12 +65,13 @@ function resolveRun(node: PMNode, base: FontSpec): InlineRun {
     font,
     color: color ? String(color.attrs['color']) : undefined,
     link: link ? String(link.attrs['href']) : undefined,
+    pos,
   };
 }
 
 /** Resolve an image node into an InlineImage. Missing dimensions become 0
  *  (the image then takes no space until real sizing is available). */
-function resolveImage(node: PMNode): InlineImage {
+function resolveImage(node: PMNode, pos: number): InlineImage {
   const a = node.attrs;
   const link = findMark(node.marks, 'link');
   return {
@@ -77,15 +79,18 @@ function resolveImage(node: PMNode): InlineImage {
     width: Number(a['width']) || 0,
     height: Number(a['height']) || 0,
     link: link ? String(link.attrs['href']) : undefined,
+    pos,
   };
 }
 
-/** Flatten one paragraph node into a FlowParagraph (text + inline images). */
-function paragraphToFlow(node: PMNode, base: FontSpec): FlowParagraph {
+/** Flatten one paragraph node into a FlowParagraph (text + inline images).
+ *  `nodePos` is the absolute PM position of the paragraph node itself. */
+function paragraphToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowParagraph {
+  const contentStart = nodePos + 1;
   const runs: FlowInline[] = [];
-  node.forEach((child) => {
-    if (child.isText) runs.push(resolveRun(child, base));
-    else if (child.type.name === 'image') runs.push(resolveImage(child));
+  node.forEach((child, offset) => {
+    if (child.isText) runs.push(resolveRun(child, base, contentStart + offset));
+    else if (child.type.name === 'image') runs.push(resolveImage(child, contentStart + offset));
   });
   const list = node.attrs['list'] as { marker?: string } | null;
   const align = node.attrs['align'] as Align | null | undefined;
@@ -96,26 +101,30 @@ function paragraphToFlow(node: PMNode, base: FontSpec): FlowParagraph {
     marker: list?.marker || undefined,
     align: align ?? undefined,
     indent: indent ?? undefined,
+    pos: contentStart,
+    end: contentStart + node.content.size,
   };
 }
 
 /** Flatten a block-level node (paragraph or table) into a FlowBlock, or null
- *  for node types we don't model yet. */
-function nodeToBlock(node: PMNode, base: FontSpec): FlowBlock | null {
-  if (node.type.name === 'paragraph') return paragraphToFlow(node, base);
-  if (node.type.name === 'table') return tableToFlow(node, base);
+ *  for node types we don't model yet. `nodePos` is its absolute PM position. */
+function nodeToBlock(node: PMNode, base: FontSpec, nodePos: number): FlowBlock | null {
+  if (node.type.name === 'paragraph') return paragraphToFlow(node, base, nodePos);
+  if (node.type.name === 'table') return tableToFlow(node, base, nodePos);
   return null;
 }
 
 /** Flatten a table node (table → table_row → table_cell → block+). */
-function tableToFlow(node: PMNode, base: FontSpec): FlowTable {
+function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
   const rows: FlowTableRow[] = [];
-  node.forEach((rowNode) => {
+  node.forEach((rowNode, rowOffset) => {
+    const rowPos = nodePos + 1 + rowOffset;
     const cells: FlowTableCell[] = [];
-    rowNode.forEach((cellNode) => {
+    rowNode.forEach((cellNode, cellOffset) => {
+      const cellPos = rowPos + 1 + cellOffset;
       const content: FlowBlock[] = [];
-      cellNode.forEach((child) => {
-        const block = nodeToBlock(child, base);
+      cellNode.forEach((child, childOffset) => {
+        const block = nodeToBlock(child, base, cellPos + 1 + childOffset);
         if (block) content.push(block);
       });
       const a = cellNode.attrs;
@@ -135,8 +144,8 @@ function tableToFlow(node: PMNode, base: FontSpec): FlowTable {
 export function toFlowBlocks(doc: PMNode, defaultFont: Partial<FontSpec> = {}): FlowBlock[] {
   const base: FontSpec = { ...DEFAULT_FONT, ...defaultFont };
   const blocks: FlowBlock[] = [];
-  doc.forEach((node) => {
-    const block = nodeToBlock(node, base);
+  doc.forEach((node, offset) => {
+    const block = nodeToBlock(node, base, offset);
     if (block) blocks.push(block);
   });
   return blocks;
@@ -154,20 +163,37 @@ interface Token {
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
   isTab?: boolean;
+  /** Absolute PM position of the token's first character / atom. */
+  pos?: number;
+  /** Size in PM positions (text length, or 1 for an image atom). */
+  size: number;
 }
 
 /** Tokenize one inline item: words / spaces / tabs for text, a single atom for
  *  images. Tab widths are placeholders, resolved against tab stops at layout. */
 function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
   if ('src' in inline) {
-    return [{ image: inline, font: ctx.base, link: inline.link, width: inline.width, isSpace: false }];
+    return [
+      {
+        image: inline,
+        font: ctx.base,
+        link: inline.link,
+        width: inline.width,
+        isSpace: false,
+        pos: inline.pos,
+        size: 1,
+      },
+    ];
   }
+  let offset = 0;
   return inline.text
     .split(/(\t| +)/)
     .filter((part) => part.length > 0)
     .map((part) => {
       const isTab = part === '\t';
       const isSpace = isTab || /^ +$/.test(part);
+      const pos = inline.pos != null ? inline.pos + offset : undefined;
+      offset += part.length;
       return {
         text: part,
         font: inline.font,
@@ -176,6 +202,8 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         width: isTab ? 0 : ctx.measure(part, inline.font),
         isSpace,
         isTab,
+        pos,
+        size: part.length,
       };
     });
 }
@@ -189,6 +217,8 @@ interface LineDraft {
   baseline: number;
   segments: LayoutSegment[];
   images: LayoutImageSegment[];
+  from?: number;
+  to?: number;
 }
 
 function draftToLine(d: LineDraft, y: number): LayoutLine {
@@ -201,6 +231,8 @@ function draftToLine(d: LineDraft, y: number): LayoutLine {
     segments: d.segments,
   };
   if (d.images.length > 0) line.images = d.images;
+  if (d.from != null) line.from = d.from;
+  if (d.to != null) line.to = d.to;
   return line;
 }
 
@@ -241,6 +273,7 @@ function layoutParagraph(
   let lineTokens: Token[] = [];
   let lineWidth = 0; // running width of the current line's tokens
   let firstLine = true;
+  let prevTo: number | undefined; // caret slot after the previous line's content
   let maxFontPx = sizePx(base); // tallest text (fallback line-height mode)
   let maxImagePx = 0; // tallest inline image on the line
   let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
@@ -282,12 +315,34 @@ function layoutParagraph(
     for (let i = 0; i < end; i++) {
       const t = lineTokens[i];
       if (t.image) {
-        images.push({ x, src: t.image.src, width: t.image.width, height: t.image.height, link: t.link });
+        images.push({
+          x,
+          src: t.image.src,
+          width: t.image.width,
+          height: t.image.height,
+          link: t.link,
+          pos: t.pos,
+        });
       } else {
-        segments.push({ x, text: t.text ?? '', font: t.font, color: t.color, link: t.link });
+        segments.push({ x, text: t.text ?? '', font: t.font, color: t.color, link: t.link, pos: t.pos });
       }
       x += t.width + (t.isSpace && !t.isTab ? extraPerGap : 0);
     }
+
+    // Caret bounds: first painted token's start … last painted token's end.
+    // An empty line (empty paragraph) collapses to the paragraph's content pos;
+    // continuation lines fall back to the position after the previous content.
+    const firstPos = lineTokens.find((t, i) => i < end && t.pos != null)?.pos;
+    let lastEnd: number | undefined;
+    for (let i = end - 1; i >= 0; i--) {
+      const t = lineTokens[i];
+      if (t.pos != null) {
+        lastEnd = t.pos + t.size;
+        break;
+      }
+    }
+    const from = firstPos ?? prevTo ?? block.pos;
+    const to = lastEnd ?? from;
 
     let height: number;
     let baseline: number;
@@ -301,7 +356,8 @@ function layoutParagraph(
       baseline = height * BASELINE_FACTOR;
     }
     const painted = firstLine && marker ? [marker, ...segments] : segments;
-    drafts.push({ x: startX, width: paraRight - startX, height, baseline, segments: painted, images });
+    drafts.push({ x: startX, width: paraRight - startX, height, baseline, segments: painted, images, from, to });
+    prevTo = to;
 
     lineTokens = [];
     lineWidth = 0;

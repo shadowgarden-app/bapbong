@@ -16,7 +16,9 @@
       "@shadow-garden/bapbong-contracts": ["../../packages/contracts/src/index.ts"],
       "@shadow-garden/bapbong-measuring": ["../../packages/measuring/src/index.ts"],
       "@shadow-garden/bapbong-layout-engine": ["../../packages/layout-engine/src/index.ts"],
-      "@shadow-garden/bapbong-painter-canvas": ["../../packages/painter-canvas/src/index.ts"]
+      "@shadow-garden/bapbong-painter-canvas": ["../../packages/painter-canvas/src/index.ts"],
+      "@shadow-garden/bapbong-selection": ["../../packages/selection/src/index.ts"],
+      "@shadow-garden/bapbong-input-bridge": ["../../packages/input-bridge/src/index.ts"]
     }
   },
   "angularCompilerOptions": {

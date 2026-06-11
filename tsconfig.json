@@ -23,6 +23,12 @@
     },
     {
       "path": "./packages/painter-canvas"
+    },
+    {
+      "path": "./packages/selection"
+    },
+    {
+      "path": "./packages/input-bridge"
     }
   ]
 }

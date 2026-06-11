@@ -1,9 +1,12 @@
 import type {
+  CaretRect,
   FontSpec,
   LayoutLine,
+  PagePoint,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
+  SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
 export interface PaintOptions {
@@ -18,18 +21,27 @@ export interface PaintOptions {
   tableBorder?: string;
   /** Fallback text color for segments without an explicit color. */
   textColor?: string;
+  /** Caret to draw (page-local coords), e.g. from bapbong-selection. */
+  caret?: CaretRect | null;
+  /** Selection highlight rects (page-local coords), drawn under the text. */
+  selection?: SelectionRect[];
+  caretColor?: string;
+  selectionColor?: string;
 }
 
 type Required_<T> = { [K in keyof T]-?: T[K] };
-type ResolvedOptions = Required_<Omit<PaintOptions, 'devicePixelRatio'>>;
+type ResolvedOptions = Required_<Omit<PaintOptions, 'devicePixelRatio' | 'caret' | 'selection'>> &
+  Pick<PaintOptions, 'caret' | 'selection'>;
 
-const DEFAULTS: ResolvedOptions = {
+const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   zoom: 1,
   pageGap: 24,
   pageBackground: '#ffffff',
   pageBorder: '#c8c8c8',
   tableBorder: '#b0b0b0',
   textColor: '#000000',
+  caretColor: '#1a1a1a',
+  selectionColor: 'rgba(59, 130, 246, 0.30)',
 };
 
 /** CSS font shorthand. Duplicated from bapbong-measuring: the painter may only
@@ -96,8 +108,21 @@ export class CanvasPainter {
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
 
+    // Selection sits under the text.
+    ctx.fillStyle = o.selectionColor;
+    for (const r of o.selection ?? []) {
+      if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+    }
+
     for (const line of page.lines) this.paintLine(line, yOffset, o);
     for (const table of page.tables ?? []) this.paintTable(table, yOffset, o);
+
+    // Caret on top.
+    const caret = o.caret;
+    if (caret && caret.pageIndex === page.index) {
+      ctx.fillStyle = o.caretColor;
+      ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
+    }
   }
 
   private paintLine(line: LayoutLine, yOffset: number, o: ResolvedOptions): void {
@@ -128,6 +153,43 @@ export class CanvasPainter {
       for (const line of cell.lines) this.paintLine(line, yOffset, o);
       for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o);
     }
+  }
+
+  /** Canvas CSS-px point → page-local point. Points in the gap between pages
+   *  clamp to the nearer page edge; null before the first paint. */
+  canvasToPage(cssX: number, cssY: number): PagePoint | null {
+    if (!this.lastLayout) return null;
+    const zoom = this.lastOptions.zoom ?? DEFAULTS.zoom;
+    const gap = this.lastOptions.pageGap ?? DEFAULTS.pageGap;
+    const x = cssX / zoom;
+    const y = cssY / zoom;
+    let yOffset = 0;
+    const pages = this.lastLayout.pages;
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const isLast = i === pages.length - 1;
+      // Claim half the trailing gap so clicks between pages snap sensibly.
+      const claim = page.height + (isLast ? Infinity : gap / 2);
+      if (y < yOffset + claim) {
+        return { pageIndex: i, x, y: Math.min(Math.max(y - yOffset, 0), page.height) };
+      }
+      yOffset += page.height + gap;
+    }
+    return null;
+  }
+
+  /** Page-local point → canvas CSS-px point; null before the first paint. */
+  pageToCanvas(point: PagePoint): { x: number; y: number } | null {
+    if (!this.lastLayout) return null;
+    const zoom = this.lastOptions.zoom ?? DEFAULTS.zoom;
+    const gap = this.lastOptions.pageGap ?? DEFAULTS.pageGap;
+    let yOffset = 0;
+    for (let i = 0; i < point.pageIndex; i++) {
+      const page = this.lastLayout.pages[i];
+      if (!page) return null;
+      yOffset += page.height + gap;
+    }
+    return { x: point.x * zoom, y: (yOffset + point.y) * zoom };
   }
 
   /** Return the cached image for `src`, kicking off a load (and a repaint on

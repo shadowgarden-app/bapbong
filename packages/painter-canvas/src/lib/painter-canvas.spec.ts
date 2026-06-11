@@ -129,6 +129,40 @@ describe('CanvasPainter', () => {
     expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]);
   });
 
+  it('draws selection under the text and the caret on top, page-offset', () => {
+    const ctx = new RecordingCtx();
+    new CanvasPainter(makeCanvas(ctx)).paint(
+      { pages: [page([]), page([helloLine], 1)] },
+      {
+        devicePixelRatio: 1,
+        pageGap: 10,
+        selection: [{ pageIndex: 1, x: 20, y: 20, width: 30, height: 16 }],
+        caret: { pageIndex: 1, x: 50, y: 20, height: 16 },
+      },
+    );
+    // page 1 starts at y = 310; selection rect lands at 330, caret at 330.
+    const fills = ctx.of('fillRect');
+    const sel = fills.find((c) => c.fillStyle.startsWith('rgba'));
+    expect(sel?.args).toEqual([20, 330, 30, 16]);
+    const caret = fills[fills.length - 1];
+    expect(caret.args).toEqual([50, 330, 1.5, 16]);
+    // selection painted before the line's text, caret after.
+    const textIdx = ctx.calls.findIndex((c) => c.method === 'fillText');
+    expect(ctx.calls.indexOf(sel as never)).toBeLessThan(textIdx);
+    expect(ctx.calls.indexOf(caret)).toBeGreaterThan(textIdx);
+  });
+
+  it('maps canvas coords to page-local coords and back (zoom + gap aware)', () => {
+    const ctx = new RecordingCtx();
+    const painter = new CanvasPainter(makeCanvas(ctx));
+    painter.paint({ pages: [page([]), page([], 1)] }, { devicePixelRatio: 1, zoom: 2, pageGap: 10 });
+    // CSS y = (300 + 10 + 5) * 2 = 630 → page 1, y = 5.
+    expect(painter.canvasToPage(40, 630)).toEqual({ pageIndex: 1, x: 20, y: 5 });
+    // Gap point clamps to the nearer edge (here: bottom of page 0).
+    expect(painter.canvasToPage(0, (300 + 2) * 2)).toEqual({ pageIndex: 0, x: 0, y: 300 });
+    expect(painter.pageToCanvas({ pageIndex: 1, x: 20, y: 5 })).toEqual({ x: 40, y: 630 });
+  });
+
   it('skips images where Image is unavailable, draws after async load', async () => {
     const ctx = new RecordingCtx();
     const imageLine = {

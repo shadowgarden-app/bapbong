@@ -38,6 +38,8 @@ export interface InlineRun {
   font: FontSpec;
   color?: string;
   link?: string;
+  /** Absolute ProseMirror position of the run's first character. */
+  pos?: number;
 }
 
 /** An atomic inline image laid out inline with text. Dimensions are CSS px. */
@@ -46,6 +48,8 @@ export interface InlineImage {
   width: number;
   height: number;
   link?: string;
+  /** Absolute ProseMirror position of the image node (occupies 1 position). */
+  pos?: number;
 }
 
 /** One piece of a paragraph's inline content. Distinguish with `'src' in x`. */
@@ -74,6 +78,10 @@ export interface FlowParagraph {
   align?: Align;
   /** Indentation in CSS px; defaults to no indent when omitted. */
   indent?: ParagraphIndent;
+  /** Absolute PM position where the paragraph's content starts (nodePos + 1). */
+  pos?: number;
+  /** Absolute PM position after the paragraph's last character. */
+  end?: number;
 }
 
 /** A table cell, holding nested flow content (paragraphs / tables). */
@@ -118,6 +126,9 @@ export interface LayoutSegment {
   font: FontSpec;
   color?: string;
   link?: string;
+  /** Absolute PM position of the segment's first character. Segments without
+   *  a position (list markers) are decoration — not addressable by a caret. */
+  pos?: number;
 }
 
 /** A painted inline image; (x) is its left edge, sitting on the line baseline.
@@ -128,6 +139,8 @@ export interface LayoutImageSegment {
   width: number;
   height: number;
   link?: string;
+  /** Absolute PM position of the image node (occupies 1 position). */
+  pos?: number;
 }
 
 /** A laid-out line; (x, y) is its top-left in page coordinates (px). */
@@ -141,6 +154,10 @@ export interface LayoutLine {
   segments: LayoutSegment[];
   /** Inline images on this line, positioned like segments. */
   images?: LayoutImageSegment[];
+  /** PM position of the line's first caret slot. */
+  from?: number;
+  /** PM position after the line's last painted content. */
+  to?: number;
 }
 
 /** A laid-out table cell. All coordinates are page-absolute (px); `lines` and
@@ -178,4 +195,30 @@ export interface ResolvedPage {
 /** The paint-ready result the canvas painter consumes (M3). */
 export interface ResolvedLayout {
   pages: ResolvedPage[];
+}
+
+// ── Interaction (M4): caret, selection, hit-testing ────────────────
+
+/** A point in page-local coordinates (px), tagged with its page. */
+export interface PagePoint {
+  pageIndex: number;
+  x: number;
+  y: number;
+}
+
+/** Caret placement in page-local coordinates (px). */
+export interface CaretRect {
+  pageIndex: number;
+  x: number;
+  y: number;
+  height: number;
+}
+
+/** One highlighted rectangle of a selection, in page-local coordinates. */
+export interface SelectionRect {
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }

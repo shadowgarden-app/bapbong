@@ -219,6 +219,29 @@ describe('layoutBlocks', () => {
     expect(pages[1].tables?.[0]?.height).toBeCloseTo(32);
   });
 
+  it('carries segment positions and line from/to across wraps', () => {
+    // 24 chars × 10px > 200px content width; wraps before "eeee".
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc dddd eeee', font: font(), pos: 1 }],
+      pos: 1,
+      end: 25,
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [line0, line1] = pages[0].lines;
+    expect(line0.segments.map((s) => s.pos)).toEqual([1, 5, 6, 10, 11, 15, 16]); // words + spaces
+    expect(line0.from).toBe(1);
+    expect(line0.to).toBe(20); // after "dddd" (trailing space trimmed)
+    expect(line1.from).toBe(21);
+    expect(line1.to).toBe(25);
+  });
+
+  it('collapses an empty paragraph line to its content position', () => {
+    const block: FlowBlock = { type: 'paragraph', runs: [], pos: 7, end: 7 };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].lines[0]).toMatchObject({ from: 7, to: 7 });
+  });
+
   it('uses injected font metrics for the line box and baseline', () => {
     const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
     const { pages } = layoutBlocks([para('hi')], cfg);
@@ -297,6 +320,33 @@ describe('toFlowBlocks', () => {
     ]);
     const block = toFlowBlocks(doc)[0];
     expect(block.type === 'paragraph' && block.marker).toBe('1.');
+  });
+
+  it('threads absolute PM positions through paragraphs, images and cells', () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.text('ab'),
+        schema.node('image', { src: 'u', width: 10, height: 10 }),
+        schema.text('cd'),
+      ]),
+      schema.node('table', null, [
+        schema.node('table_row', null, [
+          schema.node('table_cell', null, [
+            schema.node('paragraph', null, [schema.text('x')]),
+          ]),
+        ]),
+      ]),
+    ]);
+    const [para, table] = toFlowBlocks(doc);
+    // doc → paragraph at 0, content starts at 1: "ab"@1, image@3, "cd"@4.
+    if (para.type !== 'paragraph') throw new Error('expected paragraph');
+    expect(para.pos).toBe(1);
+    expect(para.end).toBe(6);
+    expect(para.runs.map((r) => r.pos)).toEqual([1, 3, 4]);
+    // table at 7 → row at 8 → cell at 9 → inner paragraph at 10, content at 11.
+    if (table.type !== 'table') throw new Error('expected table');
+    const inner = table.rows[0].cells[0].content[0];
+    expect(inner.type === 'paragraph' && inner.pos).toBe(11);
   });
 
   it('flattens a table into rows and cells', () => {

@@ -25,9 +25,15 @@
   }
 
   <section [hidden]="!pageCount()">
-    <h2>Canvas <span class="dim">(layout-engine → painter-canvas · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
+    <h2>Canvas <span class="dim">(editable — click to place the caret, type, undo with ⌘Z · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
     <div class="canvas-wrap">
-      <canvas #docCanvas></canvas>
+      <canvas
+        #docCanvas
+        (mousedown)="onCanvasMouseDown($event)"
+        (mousemove)="onCanvasMouseMove($event)"
+        (mouseup)="onCanvasMouseUp()"
+        (mouseleave)="onCanvasMouseUp()"
+      ></canvas>
     </div>
   </section>
 

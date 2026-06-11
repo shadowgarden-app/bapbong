@@ -45,6 +45,14 @@ export default [
               onlyDependOnLibsWithTags: ['scope:pure'],
             },
             {
+              sourceTag: 'scope:selection',
+              onlyDependOnLibsWithTags: ['scope:pure'],
+            },
+            {
+              sourceTag: 'scope:input',
+              onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'],
+            },
+            {
               sourceTag: 'scope:io',
               onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'],
             },

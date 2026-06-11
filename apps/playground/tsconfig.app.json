@@ -24,6 +24,12 @@
     },
     {
       "path": "../../packages/painter-canvas/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/selection/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/input-bridge/tsconfig.lib.json"
     }
   ]
 }
