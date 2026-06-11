@@ -73,8 +73,13 @@ export const schema = new Schema({
     },
     table_row: {
       content: 'table_cell+',
+      attrs: {
+        header: { default: false }, // w:trPr/w:tblHeader — repeat on every page
+      },
+      // No getAttrs (same rationale as paragraph): the importer sets attrs
+      // directly; revisit when HTML paste lands.
       parseDOM: [{ tag: 'tr' }],
-      toDOM: () => ['tr', 0],
+      toDOM: (node) => (node.attrs['header'] ? ['tr', { 'data-header': 'true' }, 0] : ['tr', 0]),
     },
     table_cell: {
       content: 'block+',

@@ -256,6 +256,14 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     return cells;
   });
 
+  // w:trPr/w:tblHeader — OOXML on/off: present means true unless val says no.
+  const headerFlags = children(tbl, 'w:tr').map((tr) => {
+    const el = child(child(tr, 'w:trPr'), 'w:tblHeader');
+    if (!el) return false;
+    const val = attrOf(el, 'w:val');
+    return val !== 'false' && val !== '0';
+  });
+
   const colIndex = logicalRows.map((cells) => new Map(cells.map((c) => [c.startCol, c])));
 
   // Phase 2: drop continue cells; non-continue cells absorb the continues
@@ -277,7 +285,10 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         ),
       );
     }
-    return schema.nodes.table_row.create(null, emitted.length > 0 ? emitted : [emptyCell()]);
+    return schema.nodes.table_row.create(
+      headerFlags[r] ? { header: true } : null,
+      emitted.length > 0 ? emitted : [emptyCell()],
+    );
   });
 
   return schema.nodes.table.create(

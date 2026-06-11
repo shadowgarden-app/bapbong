@@ -95,6 +95,9 @@ export interface FlowTableCell {
 
 export interface FlowTableRow {
   cells: FlowTableCell[];
+  /** Repeat this row at the top of every page the table spans (w:tblHeader).
+   *  Only honored for contiguous header rows at the top of the table. */
+  header?: boolean;
 }
 
 /** A table flattened and ready for layout. */
@@ -181,6 +184,9 @@ export interface ResolvedTable {
   width: number;
   height: number;
   cells: ResolvedCell[];
+  /** Bottom edge (px from the table top) of the repeating header band, when
+   *  the table's leading rows are marked as header rows. */
+  headerBottom?: number;
 }
 
 export interface ResolvedPage {

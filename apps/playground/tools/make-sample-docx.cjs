@@ -149,7 +149,7 @@ function buildDocumentXml() {
     p(run('Bảng dưới đây có 36 hàng — dài hơn một trang, buộc layout engine phải ngắt trang theo từng hàng (M5).')),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
-      <w:tr>${td(p(run('Hàng', '<w:b/>')))}${td(p(run('Mô tả', '<w:b/>')))}</w:tr>
+      <w:tr><w:trPr><w:tblHeader/></w:trPr>${td(p(run('Hàng', '<w:b/>')))}${td(p(run('Mô tả (hàng tiêu đề lặp lại mỗi trang)', '<w:b/>')))}</w:tr>
       ${Array.from({ length: 36 }, (_, i) =>
         `<w:tr>${td(p(run(`Hàng ${i + 1}`)))}${td(p(run(`Nội dung ô bên phải của hàng ${i + 1} — một dòng mô tả đủ dài để chiếm trọn bề ngang cột và đôi khi xuống dòng thứ hai.`)))}</w:tr>`,
       ).join('\n')}

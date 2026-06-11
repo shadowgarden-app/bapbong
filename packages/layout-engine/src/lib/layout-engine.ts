@@ -135,7 +135,9 @@ function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
         content,
       });
     });
-    rows.push({ cells });
+    const row: FlowTableRow = { cells };
+    if (rowNode.attrs['header'] === true) row.header = true;
+    rows.push(row);
   });
   return { type: 'table', rows };
 }
@@ -549,7 +551,18 @@ function layoutTable(
     return cell;
   });
 
-  return { x: contentLeft, y: 0, width: tableWidth, height: rowY[nrows], cells };
+  const resolved: ResolvedTable = { x: contentLeft, y: 0, width: tableWidth, height: rowY[nrows], cells };
+
+  // Repeating header band: contiguous header rows from the top, provided no
+  // cell spans out of the band (a rowspan into the body would have to split).
+  let headerRows = 0;
+  while (headerRows < nrows && table.rows[headerRows].header) headerRows++;
+  if (headerRows > 0 && headerRows < nrows) {
+    const headerBottom = rowY[headerRows];
+    const spansOut = cells.some((c) => c.y < headerBottom && c.y + c.height > headerBottom);
+    if (!spansOut) resolved.headerBottom = headerBottom;
+  }
+  return resolved;
 }
 
 /** One laid-out top-level block awaiting vertical placement. */
@@ -561,6 +574,17 @@ function shiftCell(cell: ResolvedCell, dy: number): ResolvedCell {
   for (const line of cell.lines) line.y += dy;
   cell.tables?.forEach((t) => offsetTable(t, dy));
   return cell;
+}
+
+/** Deep copy of a resolved table (cells, lines, nested tables). */
+function cloneTable(t: ResolvedTable): ResolvedTable {
+  return { ...t, cells: t.cells.map(cloneCell) };
+}
+
+function cloneCell(cell: ResolvedCell): ResolvedCell {
+  const copy: ResolvedCell = { ...cell, lines: cell.lines.map((l) => ({ ...l })) };
+  if (cell.tables) copy.tables = cell.tables.map(cloneTable);
+  return copy;
 }
 
 /**
@@ -609,8 +633,9 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
     if (cell.y + cell.height <= cut) {
       topCells.push(cell);
     } else if (cell.y >= cut) {
-      // a row below the break: follows beneath the continuation row
-      restCells.push(shiftCell(cell, contHeight - splitBottom));
+      // a row below the break: follows beneath the continuation row.
+      // Copied so the caller can still fall back to placing the original whole.
+      restCells.push(shiftCell(cloneCell(cell), contHeight - splitBottom));
     } else {
       const c = straddlers.get(cell) as Cont;
       const topLines = cell.lines.filter((l) => l.y + l.height <= cut);
@@ -622,7 +647,8 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
 
       const delta = -c.firstY;
       const lines = c.remLines.map((l) => ({ ...l, y: l.y + delta }));
-      c.remTables.forEach((t) => offsetTable(t, delta));
+      const remTables = c.remTables.map(cloneTable);
+      remTables.forEach((t) => offsetTable(t, delta));
       const contCell: ResolvedCell = {
         x: cell.x,
         y: 0,
@@ -632,7 +658,7 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
         rowspan: cell.rowspan,
         lines,
       };
-      if (c.remTables.length > 0) contCell.tables = c.remTables;
+      if (remTables.length > 0) contCell.tables = remTables;
       restCells.push(contCell);
     }
   }
@@ -647,6 +673,25 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
       cells: restCells,
     },
   };
+}
+
+/** Ghost copies of the header-band cells for a continuation fragment. PM
+ *  positions are stripped so selection and hit-testing only ever target the
+ *  original header; returns null when the band is too complex to repeat. */
+function cloneHeaderCells(table: ResolvedTable, headerBottom: number): ResolvedCell[] | null {
+  const band = table.cells.filter((c) => c.y + c.height <= headerBottom);
+  if (band.some((c) => c.tables && c.tables.length > 0)) return null;
+  return band.map((cell) => ({
+    ...cell,
+    tables: undefined,
+    lines: cell.lines.map((l) => {
+      const line: LayoutLine = { ...l, segments: l.segments.map((s) => ({ ...s, pos: undefined })) };
+      delete line.from;
+      delete line.to;
+      if (line.images) line.images = line.images.map((im) => ({ ...im, pos: undefined }));
+      return line;
+    }),
+  }));
 }
 
 function buildCtx(config: LayoutConfig): Ctx {
@@ -690,7 +735,8 @@ function placeBlocks(items: Iterable<BlockItem>, config: LayoutConfig): Resolved
       }
     } else {
       // Tables flow across pages: split at row boundaries when possible, and
-      // mid-row when a single row is taller than a whole page.
+      // mid-row when a single row is taller than a whole page. Header rows
+      // (w:tblHeader) repeat at the top of every continuation fragment.
       let table = item.table; // laid out relative to y = 0
       for (;;) {
         const avail = bottom - y;
@@ -700,10 +746,15 @@ function placeBlocks(items: Iterable<BlockItem>, config: LayoutConfig): Resolved
           y += table.height;
           break;
         }
-        // Prefer the lowest row boundary that still fits.
+        // The header band repeats only while it leaves reasonable page room.
+        const hb =
+          table.headerBottom != null && table.headerBottom < (bottom - top) / 2
+            ? table.headerBottom
+            : 0;
+        // Prefer the lowest row boundary that still fits (never inside the header).
         let cut = 0;
         for (const cell of table.cells) {
-          if (cell.y > 0 && cell.y <= avail) cut = Math.max(cut, cell.y);
+          if (cell.y > hb && cell.y <= avail) cut = Math.max(cut, cell.y);
         }
         if (cut === 0) {
           if (pageHasContent()) {
@@ -712,23 +763,33 @@ function placeBlocks(items: Iterable<BlockItem>, config: LayoutConfig): Resolved
           }
           cut = avail; // first row alone exceeds a full page → split mid-row
         }
-        if (cut <= 0) {
-          // Degenerate page geometry — place whole rather than loop forever.
+        if (cut <= hb) {
+          // Degenerate (header taller than the page space) — place whole.
           offsetTable(table, y);
           tables.push(table);
           y += table.height;
           break;
         }
-        const { top, rest } = splitTableAt(table, cut);
+        const { top: topFrag, rest } = splitTableAt(table, cut);
         if (rest.height >= table.height) {
           // No progress (e.g. one line taller than the page) — place whole.
+          // splitTableAt copies whatever it moves, so `table` is intact.
           offsetTable(table, y);
           tables.push(table);
           y += table.height;
           break;
         }
-        offsetTable(top, y);
-        tables.push(top);
+        if (hb > 0) {
+          const ghosts = cloneHeaderCells(table, hb);
+          if (ghosts) {
+            for (const cell of rest.cells) shiftCell(cell, hb);
+            rest.cells.unshift(...ghosts);
+            rest.height += hb;
+            rest.headerBottom = hb; // continuations keep repeating it
+          }
+        }
+        offsetTable(topFrag, y);
+        tables.push(topFrag);
         finalizePage();
         table = rest;
       }

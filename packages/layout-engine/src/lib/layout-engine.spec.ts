@@ -237,6 +237,42 @@ describe('layoutBlocks', () => {
     expect(f2?.cells[0]).toMatchObject({ y: 20 });
   });
 
+  it('repeats header rows on every continuation fragment', () => {
+    // content height 60; header (16) + 4 body rows (64) = 80px total.
+    // Cells carry PM positions so the ghost-vs-original distinction is real.
+    const pcell = (text: string, pos: number): FlowTableCell => ({
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+      content: [{ type: 'paragraph', runs: [{ text, font: font(), pos }], pos, end: pos + text.length }],
+    });
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        { cells: [pcell('head', 1)], header: true },
+        { cells: [pcell('r1', 10)] },
+        { cells: [pcell('r2', 20)] },
+        { cells: [pcell('r3', 30)] },
+        { cells: [pcell('r4', 40)] },
+      ],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    // page 1: header + r1 + r2 (cut at 48 ≤ 60).
+    const f1 = pages[0].tables?.[0];
+    expect(f1?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['head', 'r1', 'r2']);
+    // page 2: GHOST header (positions stripped) + r3 + r4.
+    const f2 = pages[1].tables?.[0];
+    expect(f2?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['head', 'r3', 'r4']);
+    const ghost = f2?.cells[0].lines[0];
+    expect(ghost?.segments[0].pos).toBeUndefined(); // not caret-addressable
+    expect(ghost?.from).toBeUndefined();
+    expect(f2?.cells[0]).toMatchObject({ y: 20 });
+    expect(f2?.cells[1]).toMatchObject({ y: 36 }); // body resumes under the ghost
+    // the original header (page 1) keeps its positions
+    expect(f1?.cells[0].lines[0].segments[0].pos).toBeDefined();
+  });
+
   it('splits a row taller than the page mid-row and re-stacks the remainder', () => {
     // content height 60. Row 1: cell with 5 paragraphs (80px) > full page.
     const tallCell: FlowTableCell = {

@@ -259,6 +259,22 @@ describe('importDocx', () => {
     expect(table.child(2).child(0).textContent).toBe('R3');
   });
 
+  it('marks w:tblHeader rows as header rows', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:p><w:r><w:t>head</w:t></w:r></w:p></w:tc></w:tr>
+        <w:tr><w:trPr><w:tblHeader w:val="false"/></w:trPr><w:tc><w:p><w:r><w:t>off</w:t></w:r></w:p></w:tc></w:tr>
+        <w:tr><w:tc><w:p><w:r><w:t>body</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const table = doc.child(0);
+    expect(table.child(0).attrs.header).toBe(true);
+    expect(table.child(1).attrs.header).toBe(false); // explicit w:val="false"
+    expect(table.child(2).attrs.header).toBe(false);
+  });
+
   it('applies link marks from hyperlinks resolved via relationships', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>
       <w:p>
