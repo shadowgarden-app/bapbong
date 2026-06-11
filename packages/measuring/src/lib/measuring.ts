@@ -58,3 +58,24 @@ export function createApproxMetrics(): MeasureMetrics {
     return { ascent: em * 0.8, descent: em * 0.2 };
   };
 }
+
+/**
+ * Wait for the given font families to be usable before measuring — otherwise
+ * `measureText` runs against fallback fonts and every wrap/pagination
+ * coordinate is wrong once the real font arrives. Loads the four common
+ * variants per family. Resolves immediately where the CSS Font Loading API is
+ * unavailable (headless/tests) or for fonts the browser can't load.
+ */
+export async function ensureFontsLoaded(families: string[], sizePt = 12): Promise<void> {
+  const fonts = (globalThis as { document?: { fonts?: FontFaceSet } }).document?.fonts;
+  if (!fonts?.load) return;
+  const variants = ['', 'italic ', '700 ', 'italic 700 '];
+  const loads: Promise<unknown>[] = [];
+  for (const family of new Set(families)) {
+    for (const variant of variants) {
+      // load() rejects for unparsable specs; unknown fonts just resolve empty.
+      loads.push(fonts.load(`${variant}${sizePt}pt "${family}"`).catch(() => []));
+    }
+  }
+  await Promise.all(loads);
+}

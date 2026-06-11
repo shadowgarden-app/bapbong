@@ -3,7 +3,11 @@ import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from '@shadow-garden/bapbong-docx';
 import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
-import { createCanvasMeasurer, createCanvasMetrics } from '@shadow-garden/bapbong-measuring';
+import {
+  createCanvasMeasurer,
+  createCanvasMetrics,
+  ensureFontsLoaded,
+} from '@shadow-garden/bapbong-measuring';
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import {
   InputBridge,
@@ -62,7 +66,12 @@ export class App implements OnDestroy {
   private chromeFooter: ProseMirrorNode | undefined;
   private dragAnchor: number | null = null;
   // Incremental re-layout: unchanged paragraphs skip measuring on each keystroke.
-  private readonly layoutCache = createLayoutCache();
+  // Replaced wholesale when late-loading fonts invalidate every measurement.
+  private layoutCache = createLayoutCache();
+  private readonly onFontsLoaded = () => {
+    this.layoutCache = createLayoutCache();
+    if (this.bridge) this.refresh(this.bridge.state);
+  };
   // Caret blink state (solid on every interaction, toggling while idle).
   private lastCaret: CaretRect | null = null;
   private lastSelection: SelectionRect[] = [];
@@ -104,6 +113,8 @@ export class App implements OnDestroy {
       this.footerKeys.set(Object.keys(footers));
       this.chromeHeader = headers['default'];
       this.chromeFooter = footers['default'];
+      // Measure with the real fonts, not their fallbacks.
+      await ensureFontsLoaded(collectFontFamilies(doc, this.chromeHeader, this.chromeFooter));
       this.setupEditor(doc);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : String(err));
@@ -119,6 +130,8 @@ export class App implements OnDestroy {
     this.measureText ??= createCanvasMeasurer();
     this.measureMetrics ??= createCanvasMetrics();
     this.painter ??= new CanvasPainter(canvas, this.overlayHost()?.nativeElement);
+    // Fonts that finish loading later invalidate every measurement.
+    document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
 
     this.bridge?.destroy();
     this.bridge = new InputBridge({
@@ -254,6 +267,7 @@ export class App implements OnDestroy {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
     if (this.dragRaf != null) cancelAnimationFrame(this.dragRaf);
     if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
+    document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.bridge?.destroy();
   }
 
@@ -328,4 +342,19 @@ export class App implements OnDestroy {
     if (!host) return;
     host.replaceChildren(this.serializer.serializeFragment(doc.content, { document }));
   }
+}
+
+/** Every fontFamily mark in the given documents, plus the engine default. */
+function collectFontFamilies(...docs: (ProseMirrorNode | undefined)[]): string[] {
+  const families = new Set<string>(['Arial']);
+  for (const doc of docs) {
+    doc?.descendants((node) => {
+      for (const mark of node.marks) {
+        if (mark.type.name === 'fontFamily' && mark.attrs['family']) {
+          families.add(String(mark.attrs['family']));
+        }
+      }
+    });
+  }
+  return [...families];
 }

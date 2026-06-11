@@ -83,6 +83,11 @@ export const schema = new Schema({
       group: 'block',
       content: 'table_row+',
       isolating: true,
+      attrs: {
+        // w:tblCellMar overrides (px: {left,right,top,bottom}), or null for
+        // Word defaults. Importer-set (same rationale as paragraph attrs).
+        cellPadding: { default: null },
+      },
       parseDOM: [{ tag: 'table' }],
       toDOM: () => ['table', ['tbody', 0]],
     },

@@ -112,10 +112,19 @@ export interface FlowTableRow {
   header?: boolean;
 }
 
+/** Cell padding overrides (px) from w:tblCellMar; unset sides use defaults. */
+export interface CellPadding {
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
+}
+
 /** A table flattened and ready for layout. */
 export interface FlowTable {
   type: 'table';
   rows: FlowTableRow[];
+  cellPadding?: CellPadding;
 }
 
 export type FlowBlock = FlowParagraph | FlowTable;

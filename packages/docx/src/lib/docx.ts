@@ -326,6 +326,32 @@ function emptyCell(): PMNode {
   return schema.nodes.table_cell.create(null, [schema.nodes.paragraph.create()]);
 }
 
+/** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults.
+ *  type="nil" forces 0; only "dxa" widths are interpreted. */
+function parseCellMargins(
+  tbl: OoxmlNode,
+): { left?: number; right?: number; top?: number; bottom?: number } | null {
+  const mar = child(child(tbl, 'w:tblPr'), 'w:tblCellMar');
+  if (!mar) return null;
+  const side = (name: string): number | undefined => {
+    const el = child(mar, name);
+    if (!el) return undefined;
+    if (attrOf(el, 'w:type') === 'nil') return 0;
+    const w = attrOf(el, 'w:w');
+    return w === undefined ? undefined : twipsToPx(Number(w));
+  };
+  const out: { left?: number; right?: number; top?: number; bottom?: number } = {};
+  const left = side('w:left') ?? side('w:start');
+  const right = side('w:right') ?? side('w:end');
+  const top = side('w:top');
+  const bottom = side('w:bottom');
+  if (left !== undefined) out.left = left;
+  if (right !== undefined) out.right = right;
+  if (top !== undefined) out.top = top;
+  if (bottom !== undefined) out.bottom = bottom;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const grid = children(child(tbl, 'w:tblGrid'), 'w:gridCol').map((c) =>
     Number(attrOf(c, 'w:w') ?? '0'),
@@ -389,8 +415,9 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     );
   });
 
+  const cellPadding = parseCellMargins(tbl);
   return schema.nodes.table.create(
-    null,
+    cellPadding ? { cellPadding } : null,
     rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])],
   );
 }

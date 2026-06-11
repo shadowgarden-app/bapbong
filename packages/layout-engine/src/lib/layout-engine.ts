@@ -1,6 +1,7 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
 import type {
   Align,
+  CellPadding,
   FlowBlock,
   FlowInline,
   FlowParagraph,
@@ -30,9 +31,8 @@ const PT_TO_PX = 96 / 72;
 const LINE_HEIGHT_FACTOR = 1.2;
 const BASELINE_FACTOR = 0.8;
 const DEFAULT_TAB_WIDTH = 48; // 0.5in, Word's default tab interval
-// Cell padding (px). Word's default cell margins (w:tblCellMar): 108 twips
-// (= 7.2px) left/right, 0 top/bottom. Per-table w:tblCellMar overrides are a
-// later refinement.
+// Default cell padding (px) — Word's w:tblCellMar defaults: 108 twips
+// (= 7.2px) left/right, 0 top/bottom. Tables can override via cellPadding.
 const CELL_PAD_X = 7.2;
 const CELL_PAD_Y = 0;
 
@@ -169,7 +169,10 @@ function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
     if (rowNode.attrs['header'] === true) row.header = true;
     rows.push(row);
   });
-  return { type: 'table', rows };
+  const flow: FlowTable = { type: 'table', rows };
+  const cellPadding = node.attrs['cellPadding'] as CellPadding | null;
+  if (cellPadding) flow.cellPadding = cellPadding;
+  return flow;
 }
 
 /** Flatten a ProseMirror doc into FlowBlocks (paragraphs + tables). */
@@ -437,14 +440,44 @@ function layoutParagraph(
     firstLine = false;
   };
 
+  // Kerning across token boundaries: consecutive same-font text tokens (a word
+  // split across runs, e.g. by a mark change) are measured cumulatively, so
+  // the advance matches measuring the joined text. Resets on anything that
+  // breaks the glyph run: spaces, tabs, images, fields, font changes, wraps.
+  let clusterText = '';
+  let clusterWidth = 0;
+  let clusterFont: FontSpec | null = null;
+  const sameFont = (a: FontSpec, b: FontSpec) =>
+    a.family === b.family && a.sizePt === b.sizePt && a.bold === b.bold && a.italic === b.italic;
+  const resetCluster = () => {
+    clusterText = '';
+    clusterWidth = 0;
+    clusterFont = null;
+  };
+  const clusterable = (t: Token) =>
+    t.text != null && !t.isSpace && !t.isTab && !t.field && !t.image;
+
   for (const token of tokens) {
     // Skip leading spaces (but keep a leading tab — it indents the line).
     if (token.isSpace && !token.isTab && lineTokens.length === 0) continue;
     if (token.isTab) token.width = tabAdvance(lineStart() + lineWidth);
+    if (clusterable(token) && clusterFont && sameFont(clusterFont, token.font)) {
+      token.width = Math.max(0, measure(clusterText + token.text, token.font) - clusterWidth);
+    }
     const cursor = lineStart() + lineWidth;
     if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > paraRight) {
       flushLine(false);
+      resetCluster(); // the wrapped token starts a fresh glyph run
       if (token.isTab) token.width = tabAdvance(lineStart() + lineWidth);
+      else if (clusterable(token)) token.width = measure(token.text as string, token.font);
+    }
+    if (clusterable(token)) {
+      if (clusterFont && !sameFont(clusterFont, token.font)) resetCluster();
+      clusterText += token.text;
+      clusterWidth += token.width;
+      clusterFont = token.font;
+    } else {
+      resetCluster();
     }
     lineTokens.push(token);
     lineWidth += token.width;
@@ -553,6 +586,14 @@ function layoutTable(
     tables: ResolvedTable[];
     contentHeight: number;
   }
+  // Per-table cell margins (w:tblCellMar) override the Word defaults.
+  const pad = {
+    left: table.cellPadding?.left ?? CELL_PAD_X,
+    right: table.cellPadding?.right ?? CELL_PAD_X,
+    top: table.cellPadding?.top ?? CELL_PAD_Y,
+    bottom: table.cellPadding?.bottom ?? CELL_PAD_Y,
+  };
+
   const cellDrafts: CellDraft[] = [];
   for (let r = 0; r < nrows; r++) {
     let col = 0;
@@ -560,7 +601,7 @@ function layoutTable(
       let cellWidth = 0;
       for (let k = 0; k < cell.colspan && col + k < ncols; k++) cellWidth += colWidths[col + k];
       const cellLeft = colX[col];
-      const flow = layoutFlow(cell.content, cellLeft + CELL_PAD_X, cellLeft + cellWidth - CELL_PAD_X, ctx);
+      const flow = layoutFlow(cell.content, cellLeft + pad.left, cellLeft + cellWidth - pad.right, ctx);
       cellDrafts.push({
         startRow: r,
         startCol: col,
@@ -581,12 +622,12 @@ function layoutTable(
   const rowHeight = new Array<number>(nrows).fill(0);
   for (const c of cellDrafts) {
     if (c.rowspan === 1) {
-      rowHeight[c.startRow] = Math.max(rowHeight[c.startRow], c.contentHeight + 2 * CELL_PAD_Y);
+      rowHeight[c.startRow] = Math.max(rowHeight[c.startRow], c.contentHeight + pad.top + pad.bottom);
     }
   }
   for (const c of cellDrafts) {
     if (c.rowspan > 1) {
-      const need = c.contentHeight + 2 * CELL_PAD_Y;
+      const need = c.contentHeight + pad.top + pad.bottom;
       let span = 0;
       for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++) span += rowHeight[r];
       if (need > span) {
@@ -602,7 +643,7 @@ function layoutTable(
   const cells: ResolvedCell[] = cellDrafts.map((c) => {
     let height = 0;
     for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++) height += rowHeight[r];
-    const dy = rowY[c.startRow] + CELL_PAD_Y;
+    const dy = rowY[c.startRow] + pad.top;
     const lines = c.lines.map((ln) => ({ ...ln, y: ln.y + dy }));
     c.tables.forEach((t) => offsetTable(t, dy));
     const cell: ResolvedCell = {

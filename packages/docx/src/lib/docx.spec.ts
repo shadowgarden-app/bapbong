@@ -316,6 +316,27 @@ describe('importDocx', () => {
     expect(doc.child(1).textContent).toBe('11/06/2026');
   });
 
+  it('parses per-table cell margins (w:tblCellMar)', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblCellMar>
+          <w:left w:w="300" w:type="dxa"/>
+          <w:right w:w="150" w:type="dxa"/>
+          <w:top w:w="0" w:type="nil"/>
+        </w:tblCellMar></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>y</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    expect(doc.child(0).attrs.cellPadding).toEqual({ left: 20, right: 10, top: 0 });
+    expect(doc.child(1).attrs.cellPadding).toBeNull(); // no override → defaults
+  });
+
   it('marks w:tblHeader rows as header rows', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

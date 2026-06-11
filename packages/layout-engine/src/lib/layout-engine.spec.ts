@@ -213,6 +213,52 @@ describe('layoutBlocks', () => {
     expect(line?.width).toBeCloseTo(100 - 2 * 7.2);
   });
 
+  it('honors per-table cell margins (w:tblCellMar)', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cell('a', { colwidth: [100] })] }],
+      cellPadding: { left: 20, right: 4, top: 6 },
+    };
+    const { pages } = layoutBlocks([t], config());
+    const resolved = pages[0].tables?.[0];
+    const line = resolved?.cells[0].lines[0];
+    expect(line?.segments[0].x).toBeCloseTo(20 + 20); // custom left
+    expect(line?.width).toBeCloseTo(100 - 20 - 4); // custom left + right
+    expect(line?.y).toBeCloseTo(20 + 6); // custom top
+    expect(resolved?.cells[0].height).toBeCloseTo(16 + 6); // top + content (+ bottom default 0)
+  });
+
+  it('measures same-font adjacent tokens cumulatively (cross-run kerning)', () => {
+    // Kerning-aware fake: every "av" pair tightens the advance by 2px.
+    const kerned: MeasureText = (text) => {
+      const pairs = (text.match(/av/g) ?? []).length;
+      return text.length * 10 - pairs * 2;
+    };
+    const cfg = { ...config(), measureText: kerned };
+    // "a" + "v" split across two same-font runs (e.g. a mark boundary).
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        { text: 'a', font: font() },
+        { text: 'v', font: font() },
+      ],
+    };
+    const [line] = layoutBlocks([block], cfg).pages[0].lines;
+    expect(line.segments[0]).toMatchObject({ x: 20, width: 10 });
+    expect(line.segments[1]).toMatchObject({ x: 30, width: 8 }); // 18 − 10: pair kerned
+
+    // A font change breaks the glyph run — no cross-boundary kerning.
+    const mixed: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        { text: 'a', font: font() },
+        { text: 'v', font: font({ bold: true }) },
+      ],
+    };
+    const [mline] = layoutBlocks([mixed], cfg).pages[0].lines;
+    expect(mline.segments[1]).toMatchObject({ x: 30, width: 10 });
+  });
+
   it('spans columns via colspan', () => {
     const t = table([
       [cell('wide', { colspan: 2, colwidth: [80, 120] })],
