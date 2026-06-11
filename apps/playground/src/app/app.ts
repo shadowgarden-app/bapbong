@@ -70,6 +70,8 @@ export class App implements OnDestroy {
   private dragRaf: number | null = null;
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
+  // Scroll repaint throttle (page virtualization).
+  private scrollRaf: number | null = null;
 
   protected async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -162,10 +164,7 @@ export class App implements OnDestroy {
     }
 
     if (contentDirty) {
-      this.painter.paint(this.resolved, {
-        caret: this.caretVisible ? this.lastCaret : null,
-        selection: this.lastSelection,
-      });
+      this.repaintContent();
     } else {
       this.repaintOverlay(); // overlay-only: no text re-rasterization
     }
@@ -200,6 +199,35 @@ export class App implements OnDestroy {
     });
   }
 
+  /** Full content repaint, virtualized to the scroll viewport. */
+  private repaintContent(): void {
+    if (!this.painter || !this.resolved) return;
+    this.painter.paint(this.resolved, {
+      caret: this.caretVisible ? this.lastCaret : null,
+      selection: this.lastSelection,
+      viewport: this.currentViewport(),
+    });
+  }
+
+  /** The canvas-wrap's window onto the canvas, in canvas CSS px. */
+  private currentViewport(): { top: number; height: number } | undefined {
+    const canvas = this.canvasHost()?.nativeElement;
+    const wrap = canvas?.closest('.canvas-wrap');
+    if (!canvas || !wrap) return undefined;
+    const wrapRect = wrap.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    return { top: wrapRect.top - canvasRect.top, height: wrap.clientHeight };
+  }
+
+  /** Repaint newly visible pages while scrolling (rAF-throttled). */
+  protected onCanvasScroll(): void {
+    if (this.scrollRaf != null) return;
+    this.scrollRaf = requestAnimationFrame(() => {
+      this.scrollRaf = null;
+      this.repaintContent();
+    });
+  }
+
   private stopBlink(): void {
     if (this.blinkTimer != null) clearInterval(this.blinkTimer);
     this.blinkTimer = null;
@@ -219,6 +247,7 @@ export class App implements OnDestroy {
     this.stopBlink();
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
     if (this.dragRaf != null) cancelAnimationFrame(this.dragRaf);
+    if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
     this.bridge?.destroy();
   }
 

@@ -27,11 +27,21 @@ export interface PaintOptions {
   selection?: SelectionRect[];
   caretColor?: string;
   selectionColor?: string;
+  /** Visible region of the canvas in CSS px (e.g. the scroll container's
+   *  window onto it). Pages outside it paint only their background — call
+   *  paint() again on scroll. Omit to paint every page in full. */
+  viewport?: { top: number; height: number };
 }
 
 type Required_<T> = { [K in keyof T]-?: T[K] };
-type ResolvedOptions = Required_<Omit<PaintOptions, 'devicePixelRatio' | 'caret' | 'selection'>> &
-  Pick<PaintOptions, 'caret' | 'selection'>;
+type ResolvedOptions = Required_<
+  Omit<PaintOptions, 'devicePixelRatio' | 'caret' | 'selection' | 'viewport'>
+> &
+  Pick<PaintOptions, 'caret' | 'selection' | 'viewport'>;
+
+/** Extra band (layout px) painted above/below the viewport so slow scrolls
+ *  reveal content instead of blank page. */
+const VIEWPORT_MARGIN = 200;
 
 const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   zoom: 1,
@@ -113,9 +123,16 @@ export class CanvasPainter {
     ctx.clearRect(0, 0, width, height);
     ctx.textBaseline = 'alphabetic';
 
+    // Page virtualization: only pages intersecting the viewport get their
+    // content drawn (backgrounds always paint, so scrolling shows pages).
+    const vp = options.viewport;
+    const vTop = vp ? vp.top / o.zoom - VIEWPORT_MARGIN : -Infinity;
+    const vBottom = vp ? (vp.top + vp.height) / o.zoom + VIEWPORT_MARGIN : Infinity;
+
     let yOffset = 0;
     for (const page of layout.pages) {
-      this.paintPage(page, yOffset, o, this.overlayCtx == null);
+      const contentVisible = yOffset + page.height >= vTop && yOffset <= vBottom;
+      this.paintPage(page, yOffset, o, this.overlayCtx == null, contentVisible);
       yOffset += page.height + o.pageGap;
     }
     if (this.overlayCtx) this.renderOverlay();
@@ -187,6 +204,7 @@ export class CanvasPainter {
     yOffset: number,
     o: ResolvedOptions,
     inlineOverlay: boolean,
+    contentVisible: boolean,
   ): void {
     const ctx = this.ctx;
     ctx.fillStyle = o.pageBackground;
@@ -194,6 +212,7 @@ export class CanvasPainter {
     ctx.strokeStyle = o.pageBorder;
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
+    if (!contentVisible) return; // virtualized away — background only
 
     // Single-canvas mode: selection sits under the text.
     if (inlineOverlay) {

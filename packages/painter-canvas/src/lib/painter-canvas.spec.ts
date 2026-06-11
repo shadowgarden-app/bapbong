@@ -199,6 +199,20 @@ describe('CanvasPainter', () => {
     expect(widthSets).toBe(1);
   });
 
+  it('virtualizes pages outside the viewport (background only)', () => {
+    const ctx = new RecordingCtx();
+    const painter = new CanvasPainter(makeCanvas(ctx));
+    const layout: ResolvedLayout = { pages: [page([]), page([helloLine], 1)] };
+    // Page 1 spans y 310..610 (gap 10). Viewport 0..50 + 200 margin → hidden.
+    painter.paint(layout, { devicePixelRatio: 1, pageGap: 10, viewport: { top: 0, height: 50 } });
+    expect(ctx.of('fillText')).toHaveLength(0);
+    expect(ctx.of('fillRect')).toHaveLength(2); // both page backgrounds
+
+    // Scrolled down: viewport reaches page 1 → its text paints.
+    painter.paint(layout, { devicePixelRatio: 1, pageGap: 10, viewport: { top: 320, height: 50 } });
+    expect(ctx.of('fillText')).toHaveLength(1);
+  });
+
   it('maps canvas coords to page-local coords and back (zoom + gap aware)', () => {
     const ctx = new RecordingCtx();
     const painter = new CanvasPainter(makeCanvas(ctx));
