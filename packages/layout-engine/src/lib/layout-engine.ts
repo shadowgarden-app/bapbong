@@ -555,6 +555,100 @@ function layoutTable(
 /** One laid-out top-level block awaiting vertical placement. */
 type BlockItem = { drafts: LineDraft[] } | { table: ResolvedTable };
 
+/** Shift one cell (box + contents) vertically in place. */
+function shiftCell(cell: ResolvedCell, dy: number): ResolvedCell {
+  cell.y += dy;
+  for (const line of cell.lines) line.y += dy;
+  cell.tables?.forEach((t) => offsetTable(t, dy));
+  return cell;
+}
+
+/**
+ * Split a resolved table (in its own y = 0 space) at `cut` px.
+ *
+ * Cells entirely above stay in `top`; cells entirely below shift into `rest`.
+ * Cells straddling the cut (the row being broken, or a rowspan crossing a row
+ * boundary) are split: lines whose box fits above the cut stay, the remainder
+ * re-stacks from the top of a continuation row in `rest` (Word-like — a line
+ * straddling the boundary moves down whole). Rows after the split row follow
+ * beneath the continuation row.
+ */
+function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; rest: ResolvedTable } {
+  interface Cont {
+    cell: ResolvedCell;
+    remLines: LayoutLine[];
+    remTables: ResolvedTable[];
+    firstY: number;
+  }
+  const straddlers = new Map<ResolvedCell, Cont>();
+  let splitBottom = cut; // bottom of the broken row (cut itself if none breaks)
+  let contHeight = 0; // height of the continuation row in `rest`
+
+  for (const cell of table.cells) {
+    if (cell.y >= cut || cell.y + cell.height <= cut) continue;
+    splitBottom = Math.max(splitBottom, cell.y + cell.height);
+    const remLines = cell.lines.filter((l) => l.y + l.height > cut);
+    const remTables = (cell.tables ?? []).filter((t) => t.y + t.height > cut);
+    const firstY = Math.min(
+      remLines.length ? Math.min(...remLines.map((l) => l.y)) : Infinity,
+      remTables.length ? Math.min(...remTables.map((t) => t.y)) : Infinity,
+    );
+    const first = firstY === Infinity ? cut : firstY;
+    const extent =
+      Math.max(
+        remLines.length ? Math.max(...remLines.map((l) => l.y + l.height)) : first,
+        remTables.length ? Math.max(...remTables.map((t) => t.y + t.height)) : first,
+      ) - first;
+    contHeight = Math.max(contHeight, extent);
+    straddlers.set(cell, { cell, remLines, remTables, firstY: first });
+  }
+
+  const topCells: ResolvedCell[] = [];
+  const restCells: ResolvedCell[] = [];
+  for (const cell of table.cells) {
+    if (cell.y + cell.height <= cut) {
+      topCells.push(cell);
+    } else if (cell.y >= cut) {
+      // a row below the break: follows beneath the continuation row
+      restCells.push(shiftCell(cell, contHeight - splitBottom));
+    } else {
+      const c = straddlers.get(cell) as Cont;
+      const topLines = cell.lines.filter((l) => l.y + l.height <= cut);
+      const topTables = (cell.tables ?? []).filter((t) => t.y + t.height <= cut);
+      const topCell: ResolvedCell = { ...cell, height: cut - cell.y, lines: topLines };
+      if (topTables.length > 0) topCell.tables = topTables;
+      else delete topCell.tables;
+      topCells.push(topCell);
+
+      const delta = -c.firstY;
+      const lines = c.remLines.map((l) => ({ ...l, y: l.y + delta }));
+      c.remTables.forEach((t) => offsetTable(t, delta));
+      const contCell: ResolvedCell = {
+        x: cell.x,
+        y: 0,
+        width: cell.width,
+        height: contHeight,
+        colspan: cell.colspan,
+        rowspan: cell.rowspan,
+        lines,
+      };
+      if (c.remTables.length > 0) contCell.tables = c.remTables;
+      restCells.push(contCell);
+    }
+  }
+
+  return {
+    top: { x: table.x, y: 0, width: table.width, height: cut, cells: topCells },
+    rest: {
+      x: table.x,
+      y: 0,
+      width: table.width,
+      height: contHeight + (table.height - splitBottom),
+      cells: restCells,
+    },
+  };
+}
+
 function buildCtx(config: LayoutConfig): Ctx {
   return {
     base: { ...DEFAULT_FONT, ...config.defaultFont },
@@ -595,11 +689,49 @@ function placeBlocks(items: Iterable<BlockItem>, config: LayoutConfig): Resolved
         y += d.height;
       }
     } else {
-      const table = item.table;
-      if (y + table.height > bottom && pageHasContent()) finalizePage();
-      offsetTable(table, y); // table was laid out relative to y = 0
-      tables.push(table);
-      y += table.height;
+      // Tables flow across pages: split at row boundaries when possible, and
+      // mid-row when a single row is taller than a whole page.
+      let table = item.table; // laid out relative to y = 0
+      for (;;) {
+        const avail = bottom - y;
+        if (table.height <= avail) {
+          offsetTable(table, y);
+          tables.push(table);
+          y += table.height;
+          break;
+        }
+        // Prefer the lowest row boundary that still fits.
+        let cut = 0;
+        for (const cell of table.cells) {
+          if (cell.y > 0 && cell.y <= avail) cut = Math.max(cut, cell.y);
+        }
+        if (cut === 0) {
+          if (pageHasContent()) {
+            finalizePage(); // retry with a full fresh page
+            continue;
+          }
+          cut = avail; // first row alone exceeds a full page → split mid-row
+        }
+        if (cut <= 0) {
+          // Degenerate page geometry — place whole rather than loop forever.
+          offsetTable(table, y);
+          tables.push(table);
+          y += table.height;
+          break;
+        }
+        const { top, rest } = splitTableAt(table, cut);
+        if (rest.height >= table.height) {
+          // No progress (e.g. one line taller than the page) — place whole.
+          offsetTable(table, y);
+          tables.push(table);
+          y += table.height;
+          break;
+        }
+        offsetTable(top, y);
+        tables.push(top);
+        finalizePage();
+        table = rest;
+      }
     }
   }
 

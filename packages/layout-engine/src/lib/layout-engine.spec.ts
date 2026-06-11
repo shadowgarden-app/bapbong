@@ -205,18 +205,61 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[0]).toMatchObject({ x: 20, width: 200, colspan: 2 });
   });
 
-  it('flows a paragraph, then a table, then paginates a table that overflows', () => {
+  it('splits an overflowing table at the row boundary (Word-like)', () => {
     // page height 80 → content 20..60 (40px). One line (16) + table.
     const cfg = config({ height: 80 });
     const para: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
     const t = table([[cell('a')], [cell('b')]]); // 2 rows × 16 = 32px tall
     const { pages } = layoutBlocks([para, t], cfg);
-    // line at y=20 (16px) → next free y=36; table (32) would end at 68 > 60 → new page.
+    // line at y=20 → free 24px: row 'a' (16) fits, row 'b' flows to page 2.
     expect(pages).toHaveLength(2);
     expect(pages[0].lines[0].segments[0].text).toBe('hi');
-    expect(pages[0].tables ?? []).toHaveLength(0);
-    expect(pages[1].tables?.[0]).toMatchObject({ y: 20 });
-    expect(pages[1].tables?.[0]?.height).toBeCloseTo(32);
+    const f1 = pages[0].tables?.[0];
+    expect(f1?.cells).toHaveLength(1);
+    expect(f1?.cells[0].lines[0].segments[0].text).toBe('a');
+    expect(f1?.height).toBeCloseTo(16);
+    const f2 = pages[1].tables?.[0];
+    expect(f2).toMatchObject({ y: 20 });
+    expect(f2?.cells[0].lines[0]).toMatchObject({ y: 20 });
+    expect(f2?.cells[0].lines[0].segments[0].text).toBe('b');
+  });
+
+  it('splits a long table between rows across pages', () => {
+    // content height 60; 5 one-line rows (80px) → 3 rows + 2 rows.
+    const t = table([[cell('r1')], [cell('r2')], [cell('r3')], [cell('r4')], [cell('r5')]]);
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    const f1 = pages[0].tables?.[0];
+    expect(f1?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['r1', 'r2', 'r3']);
+    expect(f1?.height).toBeCloseTo(48);
+    const f2 = pages[1].tables?.[0];
+    expect(f2?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['r4', 'r5']);
+    expect(f2?.cells[0]).toMatchObject({ y: 20 });
+  });
+
+  it('splits a row taller than the page mid-row and re-stacks the remainder', () => {
+    // content height 60. Row 1: cell with 5 paragraphs (80px) > full page.
+    const tallCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+      content: Array.from({ length: 5 }, (_, i) => para(`l${i + 1}`)),
+    };
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [tallCell] }, { cells: [cell('after')] }],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    // page 1: the first 3 lines fit in the 60px band (cut at the line boundary).
+    const f1 = pages[0].tables?.[0];
+    expect(f1?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l1', 'l2', 'l3']);
+    // page 2: remaining lines re-stack from the page top; the next row follows.
+    const f2 = pages[1].tables?.[0];
+    expect(f2?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l4', 'l5']);
+    expect(f2?.cells[0].lines[0]).toMatchObject({ y: 20 });
+    expect(f2?.cells[1].lines[0].segments[0].text).toBe('after');
+    expect(f2?.cells[1].y).toBeCloseTo(52); // 20 + continuation row (32)
   });
 
   it('carries segment positions and line from/to across wraps', () => {
