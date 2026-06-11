@@ -65,10 +65,19 @@ h2 {
   display: flex;
   justify-content: safe center;
 }
+.canvas-stack {
+  position: relative; /* anchors the overlay canvas + hidden editor */
+  flex: none;
+}
 .canvas-wrap canvas {
   display: block;
-  flex: none;
   cursor: text;
+}
+.canvas-stack .overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* mouse goes to the document canvas underneath */
 }
 .hint {
   color: #6b6b70;

@@ -49,6 +49,7 @@ export class App implements OnDestroy {
 
   private readonly previewHost = viewChild<ElementRef<HTMLDivElement>>('preview');
   private readonly canvasHost = viewChild<ElementRef<HTMLCanvasElement>>('docCanvas');
+  private readonly overlayHost = viewChild<ElementRef<HTMLCanvasElement>>('overlayCanvas');
   private readonly serializer = DOMSerializer.fromSchema(schema);
 
   private painter: CanvasPainter | null = null;
@@ -110,7 +111,7 @@ export class App implements OnDestroy {
     if (!canvas) return;
     this.measureText ??= createCanvasMeasurer();
     this.measureMetrics ??= createCanvasMetrics();
-    this.painter ??= new CanvasPainter(canvas);
+    this.painter ??= new CanvasPainter(canvas, this.overlayHost()?.nativeElement);
 
     this.bridge?.destroy();
     this.bridge = new InputBridge({
@@ -133,6 +134,7 @@ export class App implements OnDestroy {
     if (!this.painter || !this.measureText || !this.measureMetrics) return;
     const docChanged = tr?.docChanged ?? true;
 
+    let contentDirty = false;
     if (docChanged || !this.resolved) {
       this.resolved = layout(
         state.doc,
@@ -141,6 +143,7 @@ export class App implements OnDestroy {
       );
       this.pageCount.set(this.resolved.pages.length);
       this.schedulePanelSync(state);
+      contentDirty = true;
     }
 
     const sel = state.selection;
@@ -157,7 +160,15 @@ export class App implements OnDestroy {
     } else {
       this.restartBlink();
     }
-    this.repaintOverlay();
+
+    if (contentDirty) {
+      this.painter.paint(this.resolved, {
+        caret: this.caretVisible ? this.lastCaret : null,
+        selection: this.lastSelection,
+      });
+    } else {
+      this.repaintOverlay(); // overlay-only: no text re-rasterization
+    }
 
     // Anchor the hidden editor (and its IME popup) at the painted caret.
     const caret = this.lastCaret;
@@ -180,10 +191,10 @@ export class App implements OnDestroy {
     }, PANEL_SYNC_MS);
   }
 
-  /** Repaint the current layout with the caret in its current blink phase. */
+  /** Redraw caret/selection in the current blink phase (overlay layer only). */
   private repaintOverlay(): void {
     if (!this.painter || !this.resolved) return;
-    this.painter.paint(this.resolved, {
+    this.painter.paintOverlay({
       caret: this.caretVisible ? this.lastCaret : null,
       selection: this.lastSelection,
     });

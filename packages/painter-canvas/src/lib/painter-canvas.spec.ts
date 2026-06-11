@@ -152,6 +152,53 @@ describe('CanvasPainter', () => {
     expect(ctx.calls.indexOf(caret)).toBeGreaterThan(textIdx);
   });
 
+  it('routes caret/selection to the overlay canvas when one is provided', () => {
+    const content = new RecordingCtx();
+    const overlay = new RecordingCtx();
+    const painter = new CanvasPainter(makeCanvas(content), makeCanvas(overlay));
+    painter.paint(
+      { pages: [page([helloLine])] },
+      { devicePixelRatio: 1, caret: { pageIndex: 0, x: 50, y: 20, height: 16 } },
+    );
+    // content canvas: text only — no caret rect, no selection fill.
+    expect(content.of('fillText')).toHaveLength(1);
+    expect(content.of('fillRect')).toHaveLength(1); // page background only
+    // overlay canvas: cleared + caret drawn, no text.
+    expect(overlay.of('fillText')).toHaveLength(0);
+    expect(overlay.of('fillRect')[0].args).toEqual([50, 20, 1.5, 16]);
+
+    // paintOverlay redraws ONLY the overlay (content untouched).
+    const contentCalls = content.calls.length;
+    painter.paintOverlay({
+      caret: null,
+      selection: [{ pageIndex: 0, x: 20, y: 20, width: 30, height: 16 }],
+    });
+    expect(content.calls.length).toBe(contentCalls);
+    const sel = overlay.of('fillRect').at(-1);
+    expect(sel?.args).toEqual([20, 20, 30, 16]);
+    expect(sel?.fillStyle.startsWith('rgba')).toBe(true);
+  });
+
+  it('skips the backing-store resize when dimensions are unchanged', () => {
+    const ctx = new RecordingCtx();
+    let widthSets = 0;
+    const canvas = makeCanvas(ctx) as unknown as { width: number };
+    let w = 0;
+    Object.defineProperty(canvas, 'width', {
+      get: () => w,
+      set: (v: number) => {
+        widthSets++;
+        w = v;
+      },
+    });
+    const painter = new CanvasPainter(canvas as unknown as HTMLCanvasElement);
+    const layout: ResolvedLayout = { pages: [page([helloLine])] };
+    painter.paint(layout, { devicePixelRatio: 1 });
+    expect(widthSets).toBe(1);
+    painter.paint(layout, { devicePixelRatio: 1 }); // same size → no reassignment
+    expect(widthSets).toBe(1);
+  });
+
   it('maps canvas coords to page-local coords and back (zoom + gap aware)', () => {
     const ctx = new RecordingCtx();
     const painter = new CanvasPainter(makeCanvas(ctx));

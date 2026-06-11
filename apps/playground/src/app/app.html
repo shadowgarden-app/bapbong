@@ -27,14 +27,17 @@
   <section [hidden]="!pageCount()">
     <h2>Canvas <span class="dim">(editable — click to place the caret, type, undo with ⌘Z · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
     <div class="canvas-wrap">
-      <canvas
-        #docCanvas
-        (mousedown)="onCanvasMouseDown($event)"
-        (mousemove)="onCanvasMouseMove($event)"
-        (mouseup)="onCanvasMouseUp()"
-        (mouseleave)="onCanvasMouseUp()"
-        (dblclick)="onCanvasDblClick($event)"
-      ></canvas>
+      <div class="canvas-stack">
+        <canvas
+          #docCanvas
+          (mousedown)="onCanvasMouseDown($event)"
+          (mousemove)="onCanvasMouseMove($event)"
+          (mouseup)="onCanvasMouseUp()"
+          (mouseleave)="onCanvasMouseUp()"
+          (dblclick)="onCanvasDblClick($event)"
+        ></canvas>
+        <canvas #overlayCanvas class="overlay"></canvas>
+      </div>
     </div>
   </section>
 

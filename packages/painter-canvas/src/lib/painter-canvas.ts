@@ -62,35 +62,51 @@ const defaultDpr = () =>
  */
 export class CanvasPainter {
   private readonly ctx: CanvasRenderingContext2D;
+  /** Optional second canvas stacked on top: caret + selection live here so
+   *  drag/blink redraws never re-rasterize the document text. */
+  private readonly overlayCtx: CanvasRenderingContext2D | null;
   private readonly images = new Map<string, HTMLImageElement>();
   private lastLayout: ResolvedLayout | null = null;
+  /** Last paint options, minus caret/selection (those live in lastOverlay). */
   private lastOptions: PaintOptions = {};
+  private lastOverlay: { caret: CaretRect | null; selection: SelectionRect[] } = {
+    caret: null,
+    selection: [],
+  };
+  private lastFrame: { o: ResolvedOptions; dpr: number; width: number; height: number } | null =
+    null;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly overlayCanvas?: HTMLCanvasElement,
+  ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('bapbong-painter-canvas: 2D canvas context unavailable');
     this.ctx = ctx;
+    this.overlayCtx = overlayCanvas?.getContext('2d') ?? null;
+    if (overlayCanvas && !this.overlayCtx) {
+      throw new Error('bapbong-painter-canvas: 2D overlay context unavailable');
+    }
   }
 
   paint(layout: ResolvedLayout, options: PaintOptions = {}): void {
     this.lastLayout = layout;
-    this.lastOptions = options;
-    const o: ResolvedOptions = { ...DEFAULTS, ...options };
+    const { caret, selection, ...rest } = options;
+    this.lastOptions = rest;
+    if (caret !== undefined || selection !== undefined) {
+      this.lastOverlay = { caret: caret ?? null, selection: selection ?? [] };
+    }
+    const o: ResolvedOptions = { ...DEFAULTS, ...rest };
     const dpr = options.devicePixelRatio ?? defaultDpr();
 
     const width = layout.pages.reduce((m, p) => Math.max(m, p.width), 0);
     const height =
       layout.pages.reduce((s, p) => s + p.height, 0) +
       Math.max(0, layout.pages.length - 1) * o.pageGap;
+    this.lastFrame = { o, dpr, width, height };
 
-    // Only resize when needed: assigning width/height — even the same value —
-    // clears and reallocates the backing store (expensive on a multi-page canvas).
-    const deviceW = Math.max(1, Math.round(width * o.zoom * dpr));
-    const deviceH = Math.max(1, Math.round(height * o.zoom * dpr));
-    if (this.canvas.width !== deviceW) this.canvas.width = deviceW;
-    if (this.canvas.height !== deviceH) this.canvas.height = deviceH;
-    this.canvas.style.width = `${Math.round(width * o.zoom)}px`;
-    this.canvas.style.height = `${Math.round(height * o.zoom)}px`;
+    this.sizeCanvas(this.canvas, width, height, o.zoom, dpr);
+    if (this.overlayCanvas) this.sizeCanvas(this.overlayCanvas, width, height, o.zoom, dpr);
 
     const ctx = this.ctx;
     ctx.setTransform(o.zoom * dpr, 0, 0, o.zoom * dpr, 0, 0);
@@ -99,12 +115,79 @@ export class CanvasPainter {
 
     let yOffset = 0;
     for (const page of layout.pages) {
-      this.paintPage(page, yOffset, o);
+      this.paintPage(page, yOffset, o, this.overlayCtx == null);
+      yOffset += page.height + o.pageGap;
+    }
+    if (this.overlayCtx) this.renderOverlay();
+  }
+
+  /** Redraw only the caret/selection layer — the cheap path for drag and
+   *  blink. Without an overlay canvas this falls back to a full repaint. */
+  paintOverlay(overlay: { caret?: CaretRect | null; selection?: SelectionRect[] } = {}): void {
+    this.lastOverlay = { caret: overlay.caret ?? null, selection: overlay.selection ?? [] };
+    if (!this.overlayCtx) {
+      if (this.lastLayout) {
+        this.paint(this.lastLayout, {
+          ...this.lastOptions,
+          caret: this.lastOverlay.caret,
+          selection: this.lastOverlay.selection,
+        });
+      }
+      return;
+    }
+    this.renderOverlay();
+  }
+
+  /** Only resize when needed: assigning width/height — even the same value —
+   *  clears and reallocates the backing store (expensive on a multi-page canvas). */
+  private sizeCanvas(c: HTMLCanvasElement, width: number, height: number, zoom: number, dpr: number): void {
+    const deviceW = Math.max(1, Math.round(width * zoom * dpr));
+    const deviceH = Math.max(1, Math.round(height * zoom * dpr));
+    if (c.width !== deviceW) c.width = deviceW;
+    if (c.height !== deviceH) c.height = deviceH;
+    c.style.width = `${Math.round(width * zoom)}px`;
+    c.style.height = `${Math.round(height * zoom)}px`;
+  }
+
+  /** Clear + redraw the overlay canvas from lastOverlay. */
+  private renderOverlay(): void {
+    const octx = this.overlayCtx;
+    const frame = this.lastFrame;
+    if (!octx || !frame || !this.lastLayout) return;
+    const { o, dpr, width, height } = frame;
+    octx.setTransform(o.zoom * dpr, 0, 0, o.zoom * dpr, 0, 0);
+    octx.clearRect(0, 0, width, height);
+    let yOffset = 0;
+    for (const page of this.lastLayout.pages) {
+      this.paintPageOverlay(octx, page.index, yOffset, o);
       yOffset += page.height + o.pageGap;
     }
   }
 
-  private paintPage(page: ResolvedPage, yOffset: number, o: ResolvedOptions): void {
+  /** Selection rects + caret for one page onto `ctx` (page-stacking applied). */
+  private paintPageOverlay(
+    ctx: CanvasRenderingContext2D,
+    pageIndex: number,
+    yOffset: number,
+    o: ResolvedOptions,
+  ): void {
+    ctx.fillStyle = o.selectionColor;
+    for (const r of this.lastOverlay.selection) {
+      if (r.pageIndex === pageIndex) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+    }
+    const caret = this.lastOverlay.caret;
+    if (caret && caret.pageIndex === pageIndex) {
+      ctx.fillStyle = o.caretColor;
+      ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
+    }
+  }
+
+  private paintPage(
+    page: ResolvedPage,
+    yOffset: number,
+    o: ResolvedOptions,
+    inlineOverlay: boolean,
+  ): void {
     const ctx = this.ctx;
     ctx.fillStyle = o.pageBackground;
     ctx.fillRect(0, yOffset, page.width, page.height);
@@ -112,20 +195,24 @@ export class CanvasPainter {
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
 
-    // Selection sits under the text.
-    ctx.fillStyle = o.selectionColor;
-    for (const r of o.selection ?? []) {
-      if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+    // Single-canvas mode: selection sits under the text.
+    if (inlineOverlay) {
+      ctx.fillStyle = o.selectionColor;
+      for (const r of this.lastOverlay.selection) {
+        if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+      }
     }
 
     for (const line of page.lines) this.paintLine(line, yOffset, o);
     for (const table of page.tables ?? []) this.paintTable(table, yOffset, o);
 
-    // Caret on top.
-    const caret = o.caret;
-    if (caret && caret.pageIndex === page.index) {
-      ctx.fillStyle = o.caretColor;
-      ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
+    // Single-canvas mode: caret on top.
+    if (inlineOverlay) {
+      const caret = this.lastOverlay.caret;
+      if (caret && caret.pageIndex === page.index) {
+        ctx.fillStyle = o.caretColor;
+        ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
+      }
     }
   }
 
