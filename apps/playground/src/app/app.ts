@@ -162,6 +162,14 @@ export class App {
     this.dragAnchor = null;
   }
 
+  protected onCanvasDblClick(ev: MouseEvent): void {
+    const pos = this.posAtEvent(ev);
+    if (pos == null || !this.bridge) return;
+    ev.preventDefault();
+    this.bridge.selectWordAt(pos);
+    this.bridge.focus();
+  }
+
   private posAtEvent(ev: MouseEvent): number | null {
     if (!this.painter || !this.resolved || !this.measureText) return null;
     const pt = this.painter.canvasToPage(ev.offsetX, ev.offsetY);

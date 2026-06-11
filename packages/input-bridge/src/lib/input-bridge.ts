@@ -21,6 +21,27 @@ export function moveCaretCommand(compute: (state: EditorState) => number | null)
   };
 }
 
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+/** The word range around `pos` (for double-click selection), or null when the
+ *  position isn't inside a textblock or doesn't touch a word character.
+ *  Unicode-aware: Vietnamese diacritics count as word characters. */
+export function wordRangeAt(doc: PMNode, pos: number): { from: number; to: number } | null {
+  if (pos < 0 || pos > doc.content.size) return null;
+  const $pos = doc.resolve(pos);
+  const parent = $pos.parent;
+  if (!parent.isTextblock) return null;
+  // Leaf nodes (images) become U+FFFC, which is not a word character.
+  const text = parent.textBetween(0, parent.content.size, undefined, '￼');
+  const offset = pos - $pos.start();
+  let from = offset;
+  let to = offset;
+  while (from > 0 && WORD_CHAR.test(text[from - 1])) from--;
+  while (to < text.length && WORD_CHAR.test(text[to])) to++;
+  if (from === to) return null;
+  return { from: $pos.start() + from, to: $pos.start() + to };
+}
+
 export interface InputBridgeOptions {
   /** The initial document (its schema drives the editor). */
   doc: PMNode;
@@ -99,6 +120,14 @@ export class InputBridge {
     const clamp = (p: number) => Math.max(0, Math.min(p, doc.content.size));
     const sel = TextSelection.between(doc.resolve(clamp(anchor)), doc.resolve(clamp(head)));
     this.view.dispatch(this.view.state.tr.setSelection(sel));
+  }
+
+  /** Select the word around `pos` (double-click); falls back to a collapsed
+   *  caret when there is no word at that position. */
+  selectWordAt(pos: number): void {
+    const range = wordRangeAt(this.view.state.doc, pos);
+    if (range) this.setSelection(range.from, range.to);
+    else this.setSelection(pos);
   }
 
   /** Move the hidden editor to the painted caret (CSS px, relative to the
