@@ -282,6 +282,40 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.align).toBe('justify');
   });
 
+  it('maps PAGE/NUMPAGES fields to page_field atoms, keeps other fields as text', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:t xml:space="preserve">Trang </w:t></w:r>
+        <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+        <w:r><w:instrText xml:space="preserve"> PAGE \\* MERGEFORMAT </w:instrText></w:r>
+        <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+        <w:r><w:rPr><w:b/></w:rPr><w:t>3</w:t></w:r>
+        <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        <w:r><w:t xml:space="preserve"> / </w:t></w:r>
+        <w:fldSimple w:instr=" NUMPAGES "><w:r><w:t>9</w:t></w:r></w:fldSimple>
+      </w:p>
+      <w:p>
+        <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+        <w:r><w:instrText> DATE </w:instrText></w:r>
+        <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+        <w:r><w:t>11/06/2026</w:t></w:r>
+        <w:r><w:fldChar w:fldCharType="end"/></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+
+    const p0 = doc.child(0);
+    expect(p0.child(0).text).toBe('Trang ');
+    expect(p0.child(1).type.name).toBe('page_field');
+    expect(p0.child(1).attrs.kind).toBe('page');
+    expect(markMap(p0.child(1).marks).strong).toBeDefined(); // result-run formatting kept
+    expect(p0.child(2).text).toBe(' / ');
+    expect(p0.child(3).type.name).toBe('page_field');
+    expect(p0.child(3).attrs.kind).toBe('pages');
+    // Unknown instruction (DATE) falls back to its cached result text.
+    expect(doc.child(1).textContent).toBe('11/06/2026');
+  });
+
   it('marks w:tblHeader rows as header rows', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

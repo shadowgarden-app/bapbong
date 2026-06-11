@@ -114,11 +114,10 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   });
 }
 
-/** Map one w:r into inline nodes (image or marked text), optionally hyperlinked. */
-function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string | null): PMNode[] {
+/** Effective marks for a run (docDefaults+paraStyle → run style → inline rPr). */
+function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href: string | null) {
   const rPr = child(run, 'w:rPr');
   const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
-  // Cascade: docDefaults+paraStyle → run style → inline rPr (later wins).
   const effective = [
     paraBase,
     ctx.styles.resolveStyle(rStyleId),
@@ -126,6 +125,12 @@ function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string 
   ].reduce(mergeRunProps, {} as RunProps);
   const marks = propsToMarks(effective);
   if (href) marks.push(schema.marks.link.create({ href }));
+  return marks;
+}
+
+/** Map one w:r into inline nodes (image or marked text), optionally hyperlinked. */
+function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string | null): PMNode[] {
+  const marks = runMarks(run, paraBase, ctx, href);
 
   const image = parseImage(run, ctx);
   if (image) return [href ? image.mark([schema.marks.link.create({ href })]) : image];
@@ -133,6 +138,30 @@ function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string 
   const text = runText(run);
   if (text.length === 0) return [];
   return [schema.text(text, marks)];
+}
+
+/** PAGE / NUMPAGES from a field instruction, or null for any other field. */
+function fieldKind(instr: string): 'page' | 'pages' | null {
+  if (/\bNUMPAGES\b/.test(instr)) return 'pages';
+  if (/\bPAGE\b/.test(instr)) return 'page';
+  return null;
+}
+
+/** A page_field node formatted like `formatRun` (the field's result run). */
+function pageFieldNode(
+  kind: 'page' | 'pages',
+  formatRun: OoxmlNode | undefined,
+  paraBase: RunProps,
+  ctx: Ctx,
+): PMNode {
+  return schema.nodes.page_field.create({ kind }).mark(runMarks(formatRun, paraBase, ctx, null));
+}
+
+/** State for a complex field (w:fldChar begin … instrText … separate … end). */
+interface FieldState {
+  instr: string;
+  resultRuns: OoxmlNode[];
+  phase: 'instr' | 'result';
 }
 
 function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
@@ -152,9 +181,44 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const indent = resolveIndent(pPrChain);
 
   const inline: PMNode[] = [];
+  let field: FieldState | null = null;
   for (const node of p.children) {
     if (node.name === 'w:r') {
+      const fldType = attrOf(child(node, 'w:fldChar'), 'w:fldCharType');
+      if (fldType === 'begin') {
+        field = { instr: '', resultRuns: [], phase: 'instr' };
+        continue;
+      }
+      if (field) {
+        if (fldType === 'separate') {
+          field.phase = 'result';
+        } else if (fldType === 'end') {
+          const kind = fieldKind(field.instr);
+          if (kind) {
+            inline.push(pageFieldNode(kind, field.resultRuns[0], paraBase, ctx));
+          } else {
+            // Unknown instruction: keep the cached result text.
+            for (const r of field.resultRuns) inline.push(...runToInline(r, paraBase, ctx, null));
+          }
+          field = null;
+        } else if (field.phase === 'instr') {
+          field.instr += children(node, 'w:instrText')
+            .map((t) => t.text)
+            .join('');
+        } else {
+          field.resultRuns.push(node);
+        }
+        continue;
+      }
       inline.push(...runToInline(node, paraBase, ctx, null));
+    } else if (node.name === 'w:fldSimple') {
+      const kind = fieldKind(attrOf(node, 'w:instr') ?? '');
+      const resultRuns = children(node, 'w:r');
+      if (kind) {
+        inline.push(pageFieldNode(kind, resultRuns[0], paraBase, ctx));
+      } else {
+        for (const r of resultRuns) inline.push(...runToInline(r, paraBase, ctx, null));
+      }
     } else if (node.name === 'w:hyperlink') {
       const rel = attrOf(node, 'r:id') ? ctx.rels.get(attrOf(node, 'r:id') as string) : undefined;
       const anchor = attrOf(node, 'w:anchor');

@@ -54,8 +54,18 @@ export interface InlineImage {
   pos?: number;
 }
 
-/** One piece of a paragraph's inline content. Distinguish with `'src' in x`. */
-export type FlowInline = InlineRun | InlineImage;
+/** A dynamic field whose text is substituted at paint time (page numbers).
+ *  Occupies one PM position, like an image atom. */
+export interface InlineField {
+  field: 'pageNumber' | 'pageCount';
+  font: FontSpec;
+  color?: string;
+  pos?: number;
+}
+
+/** One piece of a paragraph's inline content. Distinguish with
+ *  `'src' in x` (image) / `'field' in x` (field) / otherwise text run. */
+export type FlowInline = InlineRun | InlineImage | InlineField;
 
 /** Paragraph horizontal alignment (mirrors w:jc / CSS text-align). */
 export type Align = 'left' | 'center' | 'right' | 'justify';
@@ -136,6 +146,9 @@ export interface LayoutSegment {
   /** Measured width (px) — lets the painter draw text decorations without
    *  re-measuring at paint time. */
   width?: number;
+  /** Dynamic field: the painter substitutes the page number / page count for
+   *  `text` while painting. The segment occupies ONE PM position. */
+  field?: 'pageNumber' | 'pageCount';
   /** Absolute PM position of the segment's first character. Segments without
    *  a position (list markers) are decoration — not addressable by a caret. */
   pos?: number;

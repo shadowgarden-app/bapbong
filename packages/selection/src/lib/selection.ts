@@ -42,6 +42,11 @@ function lineItems(line: LayoutLine, measure: MeasureText): Item[] {
   const items: Item[] = [];
   for (const seg of line.segments) {
     if (seg.pos == null) continue;
+    if (seg.field) {
+      // Page-number fields are atoms: one PM position, midpoint rule.
+      items.push({ x: seg.x, width: seg.width ?? measure(seg.text, seg.font), pos: seg.pos, size: 1 });
+      continue;
+    }
     items.push({
       x: seg.x,
       width: measure(seg.text, seg.font),

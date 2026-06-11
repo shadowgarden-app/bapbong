@@ -216,6 +216,23 @@ describe('CanvasPainter', () => {
     expect(widthSets).toBe(1);
   });
 
+  it('substitutes live page numbers into chrome field segments', () => {
+    const ctx = new RecordingCtx();
+    const fieldLine = {
+      ...helloLine,
+      segments: [
+        { x: 20, text: '1', font: font(), field: 'pageNumber' as const, width: 10 },
+        { x: 35, text: '1', font: font(), field: 'pageCount' as const, width: 10 },
+      ],
+    };
+    new CanvasPainter(makeCanvas(ctx)).paint(
+      { pages: [page([]), page([], 1)], pageFooter: { lines: [fieldLine], tables: [], height: 16 } },
+      { devicePixelRatio: 1, pageGap: 10 },
+    );
+    const texts = ctx.of('fillText').map((c) => c.args[0]);
+    expect(texts).toEqual(['1', '2', '2', '2']); // page1: 1/2 — page2: 2/2
+  });
+
   it('stamps page chrome (header/footer) onto every page', () => {
     const ctx = new RecordingCtx();
     const headerLine = { ...helloLine, y: 5, segments: [{ x: 20, text: 'hdr', font: font() }] };

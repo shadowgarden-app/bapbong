@@ -499,6 +499,38 @@ describe('layout with page chrome (header/footer)', () => {
     expect(resolved.pages[0].lines[0]).toMatchObject({ y: 64 });
   });
 
+  it('lays out page-number fields sized by the page total', () => {
+    const fieldSchema = new Schema({
+      nodes: {
+        doc: { content: 'block+' },
+        paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+        text: { group: 'inline' },
+        page_field: { inline: true, group: 'inline', atom: true, attrs: { kind: {} } },
+      },
+      marks: {},
+    });
+    const footer = fieldSchema.node('doc', null, [
+      fieldSchema.node('paragraph', null, [
+        fieldSchema.text('Trang '),
+        fieldSchema.node('page_field', { kind: 'page' }),
+      ]),
+    ]);
+    // 12 body lines → 2 pages (content band shrinks for the footer).
+    const body = fieldSchema.node(
+      'doc',
+      null,
+      Array.from({ length: 30 }, (_, i) => fieldSchema.node('paragraph', null, [fieldSchema.text(`p${i}`)])),
+    );
+    const resolved = layout(body, { ...config({ height: 300 }) }, undefined, { footer });
+    const segs = resolved.pageFooter?.lines[0].segments ?? [];
+    const fieldSeg = segs.find((s) => s.field);
+    expect(fieldSeg?.field).toBe('pageNumber');
+    // 2 pages → second pass measures with '2' (1 digit × 10px).
+    expect(resolved.pages.length).toBeGreaterThan(1);
+    expect(fieldSeg?.width).toBe(10 * String(resolved.pages.length).length);
+    expect(fieldSeg?.pos).toBeUndefined(); // chrome stays non-addressable
+  });
+
   it('paginates against the shrunken body band', () => {
     // content band: top 64, bottom 300−48−16 = 236 → 172px ≈ 10 lines of 16.
     const cfg = { ...config({ height: 300 }) };

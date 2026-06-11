@@ -33,6 +33,12 @@ export interface PaintOptions {
   viewport?: { top: number; height: number };
 }
 
+/** Live numbering for the page being painted (PAGE / NUMPAGES fields). */
+interface PageInfo {
+  page: number;
+  pages: number;
+}
+
 type Required_<T> = { [K in keyof T]-?: T[K] };
 type ResolvedOptions = Required_<
   Omit<PaintOptions, 'devicePixelRatio' | 'caret' | 'selection' | 'viewport'>
@@ -132,13 +138,14 @@ export class CanvasPainter {
     let yOffset = 0;
     for (const page of layout.pages) {
       const contentVisible = yOffset + page.height >= vTop && yOffset <= vBottom;
-      this.paintPage(page, yOffset, o, this.overlayCtx == null, contentVisible);
+      const pageInfo = { page: page.index + 1, pages: layout.pages.length };
+      this.paintPage(page, yOffset, o, this.overlayCtx == null, contentVisible, pageInfo);
       if (contentVisible) {
         // Page chrome (header/footer) repeats on every page.
         for (const chrome of [layout.pageHeader, layout.pageFooter]) {
           if (!chrome) continue;
-          for (const line of chrome.lines) this.paintLine(line, yOffset, o);
-          for (const table of chrome.tables) this.paintTable(table, yOffset, o);
+          for (const line of chrome.lines) this.paintLine(line, yOffset, o, pageInfo);
+          for (const table of chrome.tables) this.paintTable(table, yOffset, o, pageInfo);
         }
       }
       yOffset += page.height + o.pageGap;
@@ -213,6 +220,7 @@ export class CanvasPainter {
     o: ResolvedOptions,
     inlineOverlay: boolean,
     contentVisible: boolean,
+    pageInfo?: PageInfo,
   ): void {
     const ctx = this.ctx;
     ctx.fillStyle = o.pageBackground;
@@ -230,8 +238,8 @@ export class CanvasPainter {
       }
     }
 
-    for (const line of page.lines) this.paintLine(line, yOffset, o);
-    for (const table of page.tables ?? []) this.paintTable(table, yOffset, o);
+    for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
+    for (const table of page.tables ?? []) this.paintTable(table, yOffset, o, pageInfo);
 
     // Single-canvas mode: caret on top.
     if (inlineOverlay) {
@@ -243,13 +251,23 @@ export class CanvasPainter {
     }
   }
 
-  private paintLine(line: LayoutLine, yOffset: number, o: ResolvedOptions): void {
+  private paintLine(
+    line: LayoutLine,
+    yOffset: number,
+    o: ResolvedOptions,
+    pageInfo?: PageInfo,
+  ): void {
     const ctx = this.ctx;
     const baselineY = yOffset + line.y + line.baseline;
     for (const seg of line.segments) {
       ctx.font = fontCss(seg.font);
       ctx.fillStyle = seg.color ?? o.textColor;
-      ctx.fillText(seg.text, seg.x, baselineY);
+      // Page-number fields render the live value for the page being painted.
+      const text =
+        seg.field && pageInfo
+          ? String(seg.field === 'pageNumber' ? pageInfo.page : pageInfo.pages)
+          : seg.text;
+      ctx.fillText(text, seg.x, baselineY);
       // Text decorations use the width measured at layout time — the painter
       // never measures.
       if ((seg.underline || seg.strike) && seg.width) {
@@ -268,7 +286,12 @@ export class CanvasPainter {
     }
   }
 
-  private paintTable(table: ResolvedTable, yOffset: number, o: ResolvedOptions): void {
+  private paintTable(
+    table: ResolvedTable,
+    yOffset: number,
+    o: ResolvedOptions,
+    pageInfo?: PageInfo,
+  ): void {
     const ctx = this.ctx;
     ctx.strokeStyle = o.tableBorder;
     ctx.lineWidth = 1;
@@ -276,8 +299,8 @@ export class CanvasPainter {
       ctx.strokeRect(cell.x + 0.5, yOffset + cell.y + 0.5, cell.width, cell.height);
     }
     for (const cell of table.cells) {
-      for (const line of cell.lines) this.paintLine(line, yOffset, o);
-      for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o);
+      for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
+      for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
     }
   }
 

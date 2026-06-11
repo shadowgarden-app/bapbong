@@ -8,6 +8,7 @@ import type {
   FlowTableCell,
   FlowTableRow,
   FontSpec,
+  InlineField,
   InlineImage,
   InlineRun,
   LayoutConfig,
@@ -43,6 +44,9 @@ interface Ctx {
   measure: MeasureText;
   metrics?: MeasureMetrics;
   tabWidth: number;
+  /** Width placeholder for page-number fields (digit count of the page
+   *  total once known; '1' on the first pass). */
+  fieldPlaceholder: string;
 }
 
 function findMark(marks: readonly Mark[], name: string): Mark | undefined {
@@ -74,6 +78,25 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   return run;
 }
 
+/** Resolve a page_field node into an InlineField (font/color from marks). */
+function resolveField(node: PMNode, base: FontSpec, pos: number): InlineField {
+  const marks = node.marks;
+  const font: FontSpec = { ...base };
+  if (findMark(marks, 'strong')) font.bold = true;
+  if (findMark(marks, 'em')) font.italic = true;
+  const size = findMark(marks, 'fontSize');
+  if (size) font.sizePt = Number(size.attrs['size']) || base.sizePt;
+  const family = findMark(marks, 'fontFamily');
+  if (family) font.family = String(family.attrs['family'] ?? base.family);
+  const color = findMark(marks, 'textColor');
+  return {
+    field: node.attrs['kind'] === 'pages' ? 'pageCount' : 'pageNumber',
+    font,
+    color: color ? String(color.attrs['color']) : undefined,
+    pos,
+  };
+}
+
 /** Resolve an image node into an InlineImage. Missing dimensions become 0
  *  (the image then takes no space until real sizing is available). */
 function resolveImage(node: PMNode, pos: number): InlineImage {
@@ -96,6 +119,8 @@ function paragraphToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowPar
   node.forEach((child, offset) => {
     if (child.isText) runs.push(resolveRun(child, base, contentStart + offset));
     else if (child.type.name === 'image') runs.push(resolveImage(child, contentStart + offset));
+    else if (child.type.name === 'page_field')
+      runs.push(resolveField(child, base, contentStart + offset));
   });
   const list = node.attrs['list'] as { marker?: string } | null;
   const align = node.attrs['align'] as Align | null | undefined;
@@ -163,6 +188,8 @@ interface Token {
   text?: string;
   /** Image payload (image token), or undefined for a text token. */
   image?: InlineImage;
+  /** Dynamic page-number field (atomic, like an image). */
+  field?: 'pageNumber' | 'pageCount';
   font: FontSpec;
   color?: string;
   link?: string;
@@ -188,6 +215,20 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         font: ctx.base,
         link: inline.link,
         width: inline.width,
+        isSpace: false,
+        pos: inline.pos,
+        size: 1,
+      },
+    ];
+  }
+  if ('field' in inline) {
+    return [
+      {
+        field: inline.field,
+        text: ctx.fieldPlaceholder,
+        font: inline.font,
+        color: inline.color,
+        width: ctx.measure(ctx.fieldPlaceholder, inline.font),
         isSpace: false,
         pos: inline.pos,
         size: 1,
@@ -340,7 +381,7 @@ function layoutParagraph(
           pos: t.pos,
         });
       } else {
-        segments.push({
+        const seg: LayoutSegment = {
           x,
           text: t.text ?? '',
           font: t.font,
@@ -350,7 +391,9 @@ function layoutParagraph(
           strike: t.strike,
           width: t.width,
           pos: t.pos,
-        });
+        };
+        if (t.field) seg.field = t.field;
+        segments.push(seg);
       }
       x += t.width + (t.isSpace && !t.isTab ? extraPerGap : 0);
     }
@@ -724,6 +767,7 @@ function buildCtx(config: LayoutConfig): Ctx {
     measure: config.measureText,
     metrics: config.measureMetrics,
     tabWidth: config.tabWidth ?? DEFAULT_TAB_WIDTH,
+    fieldPlaceholder: '1',
   };
 }
 
@@ -974,6 +1018,28 @@ export function layout(
     }
   });
   const resolved = placeBlocks(items, config, { top, bottom });
+
+  // Chrome with page-number fields: re-lay it out now that the page total is
+  // known, so the field slot is as wide as the widest number it will show.
+  const hasFields = (c?: ResolvedChrome) =>
+    c?.lines.some((l) => l.segments.some((s) => s.field)) ?? false;
+  if (hasFields(pageHeader) || hasFields(pageFooter)) {
+    const fieldCtx: Ctx = { ...ctx, fieldPlaceholder: String(resolved.pages.length) };
+    if (chrome?.header && hasFields(pageHeader)) {
+      pageHeader = layoutChrome(chrome.header, CHROME_DISTANCE, left, right, fieldCtx);
+    }
+    if (chrome?.footer && hasFields(pageFooter)) {
+      const flow = layoutChrome(chrome.footer, 0, left, right, fieldCtx);
+      const topY = page.height - CHROME_DISTANCE - flow.height;
+      pageFooter = {
+        lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
+        tables: flow.tables,
+        height: flow.height,
+      };
+      pageFooter.tables.forEach((t) => offsetTable(t, topY));
+    }
+  }
+
   if (pageHeader) resolved.pageHeader = pageHeader;
   if (pageFooter) resolved.pageFooter = pageFooter;
   return resolved;

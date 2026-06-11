@@ -62,6 +62,21 @@ export const schema = new Schema({
       },
     },
 
+    // PAGE / NUMPAGES fields: atoms whose text is computed per page at paint
+    // time. `kind` is 'page' (current page number) or 'pages' (total count).
+    page_field: {
+      inline: true,
+      group: 'inline',
+      atom: true,
+      attrs: { kind: {} },
+      parseDOM: [{ tag: 'span[data-page-field]' }],
+      toDOM: (node) => [
+        'span',
+        { 'data-page-field': String(node.attrs['kind']) },
+        node.attrs['kind'] === 'pages' ? '##' : '#',
+      ],
+    },
+
     // Tables: kept structural (table → row → cell → block+). Horizontal spans
     // map to colspan; vertical merges aren't collapsed yet (rowspan default 1).
     table: {

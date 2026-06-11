@@ -194,8 +194,21 @@ const HEADER_XML = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}">
   ${p(run('bapbong sample — tài liệu mẫu nhiều trang', '<w:i/><w:color w:val="6B6B70"/>'), jc('right'))}
 </w:hdr>`;
 
+// Footer "Trang X / Y": PAGE qua complex field (fldChar), NUMPAGES qua
+// fldSimple — phủ cả hai dạng field của Word.
+const GRAY = '<w:i/><w:color w:val="6B6B70"/>';
 const FOOTER_XML = `<?xml version="1.0"?><w:ftr xmlns:w="${W_NS}">
-  ${p(run('— bapbong playground —', '<w:i/><w:color w:val="6B6B70"/>'), jc('center'))}
+  <w:p><w:pPr>${jc('center')}</w:pPr>
+    ${run('Trang ', GRAY)}
+    <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+    <w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>
+    <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+    <w:r><w:rPr>${GRAY}</w:rPr><w:t>1</w:t></w:r>
+    <w:r><w:fldChar w:fldCharType="end"/></w:r>
+    ${run(' / ', GRAY)}
+    <w:fldSimple w:instr=" NUMPAGES "><w:r><w:rPr>${GRAY}</w:rPr><w:t>7</w:t></w:r></w:fldSimple>
+    ${run(' — bapbong playground', GRAY)}
+  </w:p>
 </w:ftr>`;
 
 const STYLES_XML = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
