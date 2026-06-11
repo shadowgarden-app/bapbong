@@ -145,6 +145,25 @@ function buildDocumentXml() {
       <w:tr>${td(p(run('Cột trái', '<w:b/>')))}${td(p(run('Cột phải', '<w:b/>')))}</w:tr>
       <w:tr>${td(p(run('Bảng nằm gần cuối tài liệu để kiểm tra ngắt-trang-nguyên-bảng khi không đủ chỗ.')))}${td(p(run('Ô bên phải.')))}</w:tr>
     </w:tbl>`,
+    heading('8. Bảng dài trải qua nhiều trang'),
+    p(run('Bảng dưới đây có 36 hàng — dài hơn một trang, buộc layout engine phải ngắt trang theo từng hàng (M5).')),
+    `<w:tbl>
+      <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
+      <w:tr>${td(p(run('Hàng', '<w:b/>')))}${td(p(run('Mô tả', '<w:b/>')))}</w:tr>
+      ${Array.from({ length: 36 }, (_, i) =>
+        `<w:tr>${td(p(run(`Hàng ${i + 1}`)))}${td(p(run(`Nội dung ô bên phải của hàng ${i + 1} — một dòng mô tả đủ dài để chiếm trọn bề ngang cột và đôi khi xuống dòng thứ hai.`)))}</w:tr>`,
+      ).join('\n')}
+    </w:tbl>`,
+    heading('9. Hàng cao hơn một trang'),
+    p(run('Hàng thứ nhất của bảng sau chứa 60 đoạn — cao hơn cả một trang, buộc phải tách giữa hàng.')),
+    `<w:tbl>
+      <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
+      <w:tr>
+        ${td(p(run('Nhãn của hàng siêu cao', '<w:b/>')))}
+        ${td(Array.from({ length: 60 }, (_, i) => p(run(`Dòng ${i + 1} trong ô siêu cao — nội dung lấp đầy để tổng chiều cao của hàng vượt quá một trang.`))).join('\n'))}
+      </w:tr>
+      <w:tr>${td(p(run('Hàng sau')))}${td(p(run('Hàng bình thường ngay sau hàng siêu cao.')))}</w:tr>
+    </w:tbl>`,
     p(run('— Hết tài liệu mẫu —', '<w:i/>'), jc('center')),
   ].join('\n');
 
