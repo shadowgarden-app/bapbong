@@ -10,6 +10,7 @@ import {
   moveCaretCommand,
   type Command,
   type EditorState,
+  type Transaction,
 } from '@shadow-garden/bapbong-input-bridge';
 import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
 import type {
@@ -29,6 +30,8 @@ const A4: PageConfig = {
 };
 
 const CARET_BLINK_MS = 530;
+/** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
+const PANEL_SYNC_MS = 250;
 
 @Component({
   selector: 'app-root',
@@ -61,6 +64,11 @@ export class App implements OnDestroy {
   private lastSelection: SelectionRect[] = [];
   private caretVisible = true;
   private blinkTimer: ReturnType<typeof setInterval> | null = null;
+  // Drag coalescing: at most one selection transaction per animation frame.
+  private pendingDragHead: number | null = null;
+  private dragRaf: number | null = null;
+  // Debounced side panels.
+  private panelTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -113,31 +121,43 @@ export class App implements OnDestroy {
         'Shift-ArrowUp': this.verticalCmd(-1, true),
         'Shift-ArrowDown': this.verticalCmd(1, true),
       },
-      onUpdate: (state) => this.refresh(state),
+      onUpdate: (state, tr) => this.refresh(state, tr),
     });
     // Same scroll container as the canvas, so IME anchoring scrolls along.
     canvas.parentElement?.appendChild(this.bridge.dom);
     this.refresh(this.bridge.state);
   }
 
-  /** Layout → paint (with caret/selection) → sync side panels. */
-  private refresh(state: EditorState): void {
+  /** Layout (only when the doc changed) → paint → schedule side panels. */
+  private refresh(state: EditorState, tr?: Transaction): void {
     if (!this.painter || !this.measureText || !this.measureMetrics) return;
-    this.resolved = layout(
-      state.doc,
-      { page: A4, measureText: this.measureText, measureMetrics: this.measureMetrics },
-      this.layoutCache,
-    );
+    const docChanged = tr?.docChanged ?? true;
+
+    if (docChanged || !this.resolved) {
+      this.resolved = layout(
+        state.doc,
+        { page: A4, measureText: this.measureText, measureMetrics: this.measureMetrics },
+        this.layoutCache,
+      );
+      this.pageCount.set(this.resolved.pages.length);
+      this.schedulePanelSync(state);
+    }
+
     const sel = state.selection;
     this.lastCaret = caretRect(this.resolved, sel.head, this.measureText);
     this.lastSelection = sel.empty
       ? []
       : selectionRects(this.resolved, sel.from, sel.to, this.measureText);
-    this.restartBlink(); // caret shows solid on every interaction
+
+    // While dragging the caret stays solid and the timer rests; otherwise every
+    // interaction restarts the blink phase.
+    if (this.dragAnchor != null) {
+      this.stopBlink();
+      this.caretVisible = true;
+    } else {
+      this.restartBlink();
+    }
     this.repaintOverlay();
-    this.pageCount.set(this.resolved.pages.length);
-    this.json.set(JSON.stringify(state.doc.toJSON(), null, 2));
-    this.renderPreview(state.doc);
 
     // Anchor the hidden editor (and its IME popup) at the painted caret.
     const caret = this.lastCaret;
@@ -150,6 +170,16 @@ export class App implements OnDestroy {
     }
   }
 
+  /** Debounced sync of the JSON / DOM-preview inspection panels. */
+  private schedulePanelSync(state: EditorState): void {
+    if (this.panelTimer != null) clearTimeout(this.panelTimer);
+    this.panelTimer = setTimeout(() => {
+      this.panelTimer = null;
+      this.json.set(JSON.stringify(state.doc.toJSON(), null, 2));
+      this.renderPreview(state.doc);
+    }, PANEL_SYNC_MS);
+  }
+
   /** Repaint the current layout with the caret in its current blink phase. */
   private repaintOverlay(): void {
     if (!this.painter || !this.resolved) return;
@@ -159,9 +189,14 @@ export class App implements OnDestroy {
     });
   }
 
+  private stopBlink(): void {
+    if (this.blinkTimer != null) clearInterval(this.blinkTimer);
+    this.blinkTimer = null;
+  }
+
   /** Show the caret solid now, then blink while idle. */
   private restartBlink(): void {
-    if (this.blinkTimer != null) clearInterval(this.blinkTimer);
+    this.stopBlink();
     this.caretVisible = true;
     this.blinkTimer = setInterval(() => {
       this.caretVisible = !this.caretVisible;
@@ -170,7 +205,9 @@ export class App implements OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.blinkTimer != null) clearInterval(this.blinkTimer);
+    this.stopBlink();
+    if (this.panelTimer != null) clearTimeout(this.panelTimer);
+    if (this.dragRaf != null) cancelAnimationFrame(this.dragRaf);
     this.bridge?.destroy();
   }
 
@@ -199,11 +236,29 @@ export class App implements OnDestroy {
     if (this.dragAnchor == null || !(ev.buttons & 1)) return;
     const pos = this.posAtEvent(ev);
     if (pos == null || !this.bridge) return;
-    this.bridge.setSelection(this.dragAnchor, pos);
+    // Coalesce to one selection transaction per frame — events can arrive
+    // faster than the display can show their effect.
+    this.pendingDragHead = pos;
+    this.dragRaf ??= requestAnimationFrame(() => {
+      this.dragRaf = null;
+      if (this.dragAnchor != null && this.pendingDragHead != null) {
+        this.bridge?.setSelection(this.dragAnchor, this.pendingDragHead);
+      }
+    });
   }
 
   protected onCanvasMouseUp(): void {
+    // Flush a pending drag update so the selection lands where the mouse did.
+    if (this.dragRaf != null) {
+      cancelAnimationFrame(this.dragRaf);
+      this.dragRaf = null;
+      if (this.dragAnchor != null && this.pendingDragHead != null) {
+        this.bridge?.setSelection(this.dragAnchor, this.pendingDragHead);
+      }
+    }
+    this.pendingDragHead = null;
     this.dragAnchor = null;
+    if (this.bridge) this.restartBlink(); // back to idle blinking
   }
 
   protected onCanvasDblClick(ev: MouseEvent): void {

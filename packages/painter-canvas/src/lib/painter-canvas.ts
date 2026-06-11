@@ -83,8 +83,12 @@ export class CanvasPainter {
       layout.pages.reduce((s, p) => s + p.height, 0) +
       Math.max(0, layout.pages.length - 1) * o.pageGap;
 
-    this.canvas.width = Math.max(1, Math.round(width * o.zoom * dpr));
-    this.canvas.height = Math.max(1, Math.round(height * o.zoom * dpr));
+    // Only resize when needed: assigning width/height — even the same value —
+    // clears and reallocates the backing store (expensive on a multi-page canvas).
+    const deviceW = Math.max(1, Math.round(width * o.zoom * dpr));
+    const deviceH = Math.max(1, Math.round(height * o.zoom * dpr));
+    if (this.canvas.width !== deviceW) this.canvas.width = deviceW;
+    if (this.canvas.height !== deviceH) this.canvas.height = deviceH;
     this.canvas.style.width = `${Math.round(width * o.zoom)}px`;
     this.canvas.style.height = `${Math.round(height * o.zoom)}px`;
 
