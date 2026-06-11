@@ -1,6 +1,8 @@
-// Generates apps/playground/public/sample.docx — a small document that
-// exercises the import + layout pipeline end to end: marks, alignment,
-// first-line indent, numbered list, table (incl. colspan), inline image.
+// Generates apps/playground/public/sample.docx — a multi-page document that
+// exercises the import + layout + paint pipeline end to end: marks (bold,
+// italic, color, size), alignment (center/right/justify), first-line and
+// hanging indent, multi-level numbered + bullet lists, tables (colwidth,
+// colspan, rowspan/vMerge), inline images, hyperlinks.
 //
 //   node apps/playground/tools/make-sample-docx.cjs
 const fs = require('node:fs');
@@ -14,72 +16,167 @@ const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDr
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
 
-// 1x1 red PNG; drawn at 64x64 via wp:extent (64px × 9525 EMU/px = 609600).
+// 1x1 PNGs; drawn at their wp:extent size (px × 9525 EMU).
 const PNG_RED =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const PNG_BLUE =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==';
 
-const LOREM =
-  'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor ' +
-  'incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud ' +
-  'exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure ' +
-  'dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.';
+const LOREM = [
+  'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.',
+  'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
+  'Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.',
+  'Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt, neque porro quisquam est qui dolorem ipsum.',
+  'Việt Nam đất nước ta ơi, mênh mông biển lúa đâu trời đẹp hơn. Cánh cò bay lả rập rờn, mây mờ che đỉnh Trường Sơn sớm chiều. Quê hương biết mấy thân yêu, bao nhiêu đời đã chịu nhiều thương đau.',
+  'Gõ tiếng Việt có dấu là bài kiểm tra quan trọng nhất của bapbong: chữ ư, ơ, ă, â, ê, ô cùng các thanh sắc huyền hỏi ngã nặng phải hiển thị đúng trên canvas ở mọi cỡ chữ và kiểu chữ.',
+];
 
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const run = (text, rpr = '') =>
+  `<w:r>${rpr ? `<w:rPr>${rpr}</w:rPr>` : ''}<w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
+const p = (content, ppr = '') => `<w:p>${ppr ? `<w:pPr>${ppr}</w:pPr>` : ''}${content}</w:p>`;
+const jc = (v) => `<w:jc w:val="${v}"/>`;
 const listP = (numId, ilvl, text) =>
-  `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+  p(run(text), `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>`);
+const td = (content, tcPr = '') => `<w:tc><w:tcPr>${tcPr}</w:tcPr>${content}</w:tc>`;
+const image = (relId, sizePx, alt) =>
+  `<w:r><w:drawing><wp:inline><wp:extent cx="${sizePx * 9525}" cy="${sizePx * 9525}"/><wp:docPr id="1" name="${alt}" descr="${alt}"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="${relId}"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
 
-const td = (text, extraTcPr = '') =>
-  `<w:tc><w:tcPr>${extraTcPr}</w:tcPr><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+const heading = (text) => p(run(text, '<w:b/><w:sz w:val="28"/>'), jc('left'));
 
-const DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+/** A chapter = heading + body paragraphs + one "special" showcase element. */
+function chapter(n, special) {
+  return [
+    heading(`${n}. ${special.title}`),
+    p(run(LOREM[(n * 2) % LOREM.length]), jc('both')),
+    special.xml,
+    p(run(LOREM[(n * 2 + 1) % LOREM.length]), jc('both')),
+  ].join('\n');
+}
+
+const SPECIALS = [
+  {
+    title: 'Chữ đậm, nghiêng, màu và cỡ chữ',
+    xml: p(
+      [
+        run('Đoạn này trộn '),
+        run('đậm', '<w:b/>'),
+        run(', '),
+        run('nghiêng', '<w:i/>'),
+        run(', '),
+        run('đậm nghiêng', '<w:b/><w:i/>'),
+        run(', '),
+        run('màu đỏ', '<w:color w:val="C0392B"/>'),
+        run(', '),
+        run('màu xanh', '<w:color w:val="1F6FEB"/>'),
+        run(', '),
+        run('chữ to 14pt', '<w:sz w:val="28"/>'),
+        run(' và '),
+        run('chữ nhỏ 8pt', '<w:sz w:val="16"/>'),
+        run(' trong cùng một dòng để kiểm tra đo chữ theo từng run.'),
+      ].join(''),
+      `<w:ind w:firstLine="720"/>`,
+    ),
+  },
+  {
+    title: 'Danh sách đa cấp',
+    xml: [
+      listP('1', 0, 'Hạng mục thứ nhất của danh sách đánh số'),
+      listP('1', 1, 'Mục con a — thụt lề cấp hai'),
+      listP('1', 1, 'Mục con b đủ dài để tự xuống dòng và kiểm tra hanging indent của marker khi nội dung tràn sang dòng tiếp theo'),
+      listP('1', 0, 'Hạng mục thứ hai quay về cấp một'),
+      listP('2', 0, 'Gạch đầu dòng thứ nhất'),
+      listP('2', 0, 'Gạch đầu dòng thứ hai'),
+    ].join('\n'),
+  },
+  {
+    title: 'Bảng: độ rộng cột, gộp ngang và dọc',
+    xml: `<w:tbl>
+      <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="3315"/><w:gridCol w:w="3315"/></w:tblGrid>
+      <w:tr>
+        ${td(p(run('Khu vực', '<w:b/>')))}
+        ${td(p(run('Quý 1', '<w:b/>')))}
+        ${td(p(run('Quý 2', '<w:b/>')))}
+      </w:tr>
+      <w:tr>
+        ${td(p(run('Miền Bắc — ô gộp dọc qua hai hàng')), '<w:vMerge w:val="restart"/>')}
+        ${td(p(run('120 đơn hàng')))}
+        ${td(p(run('158 đơn hàng, tăng trưởng tốt nhờ chiến dịch mới')))}
+      </w:tr>
+      <w:tr>
+        ${td('<w:p/>', '<w:vMerge/>')}
+        ${td(p(run('95')))}
+        ${td(p(run('102')))}
+      </w:tr>
+      <w:tr>
+        ${td(p(run('Tổng hợp cả nước — ô gộp ngang ba cột', '<w:i/>')), '<w:gridSpan w:val="3"/>')}
+      </w:tr>
+    </w:tbl>`,
+  },
+  {
+    title: 'Ảnh inline và canh lề',
+    xml: [
+      p(run('Ảnh nhỏ ') + image('rId7', 32, 'red square') + run(' nằm giữa chữ, còn ảnh to hơn ') + image('rId8', 72, 'blue square') + run(' đẩy chiều cao dòng lên theo.')),
+      p(run('Đoạn này canh giữa.'), jc('center')),
+      p(run('Đoạn này canh phải.'), jc('right')),
+    ].join('\n'),
+  },
+  {
+    title: 'Liên kết và thụt lề treo',
+    xml: [
+      p(`<w:hyperlink r:id="rId9">${run('Trang chủ ProseMirror')}</w:hyperlink>${run(' — hyperlink qua relationship, mark link giữ href trong model.')}`),
+      p(
+        run('Thụt lề treo: dòng đầu lùi ra ngoài, các dòng tiếp theo thẳng hàng với lề trái đã thụt — kiểu trình bày danh mục tài liệu tham khảo quen thuộc trong văn bản học thuật.'),
+        `<w:ind w:left="720" w:hanging="720"/>`,
+      ),
+    ].join('\n'),
+  },
+];
+
+function buildDocumentXml() {
+  const chapters = SPECIALS.map((s, i) => chapter(i + 1, s));
+  // Padding chương cuối để chắc chắn tràn sang trang 3.
+  const tail = [
+    heading('6. Phần đệm cho đủ độ dài'),
+    ...Array.from({ length: 20 }, (_, i) => p(run(LOREM[i % LOREM.length]), jc('both'))),
+    heading('7. Bảng thứ hai ở cuối tài liệu'),
+    `<w:tbl>
+      <w:tblGrid><w:gridCol w:w="4515"/><w:gridCol w:w="4515"/></w:tblGrid>
+      <w:tr>${td(p(run('Cột trái', '<w:b/>')))}${td(p(run('Cột phải', '<w:b/>')))}</w:tr>
+      <w:tr>${td(p(run('Bảng nằm gần cuối tài liệu để kiểm tra ngắt-trang-nguyên-bảng khi không đủ chỗ.')))}${td(p(run('Ô bên phải.')))}</w:tr>
+    </w:tbl>`,
+    p(run('— Hết tài liệu mẫu —', '<w:i/>'), jc('center')),
+  ].join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}">
   <w:body>
-    <w:p>
-      <w:pPr><w:jc w:val="center"/></w:pPr>
-      <w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>bapbong sample document</w:t></w:r>
-    </w:p>
-    <w:p>
-      <w:pPr><w:jc w:val="both"/></w:pPr>
-      <w:r><w:t>${LOREM}</w:t></w:r>
-    </w:p>
-    <w:p>
-      <w:pPr><w:ind w:firstLine="720"/></w:pPr>
-      <w:r><w:t xml:space="preserve">This paragraph has a first-line indent, plus </w:t></w:r>
-      <w:r><w:rPr><w:b/></w:rPr><w:t>bold</w:t></w:r>
-      <w:r><w:t xml:space="preserve">, </w:t></w:r>
-      <w:r><w:rPr><w:i/></w:rPr><w:t>italic</w:t></w:r>
-      <w:r><w:t xml:space="preserve"> and </w:t></w:r>
-      <w:r><w:rPr><w:color w:val="C0392B"/></w:rPr><w:t>colored</w:t></w:r>
-      <w:r><w:t xml:space="preserve"> runs.</w:t></w:r>
-    </w:p>
-    ${listP('1', 0, 'First numbered item')}
-    ${listP('1', 0, 'Second numbered item wraps onto a continuation line when it gets long enough to exceed the content width')}
-    ${listP('1', 0, 'Third numbered item')}
-    <w:tbl>
-      <w:tblGrid><w:gridCol w:w="4515"/><w:gridCol w:w="4515"/></w:tblGrid>
-      <w:tr>${td('Cell A1')}${td('Cell B1 with a bit more text so the row grows taller than its neighbour')}</w:tr>
-      <w:tr>${td('A merged cell spanning both columns', '<w:gridSpan w:val="2"/>')}</w:tr>
-    </w:tbl>
-    <w:p>
-      <w:r><w:t xml:space="preserve">Inline image: </w:t></w:r>
-      <w:r><w:drawing><wp:inline>
-        <wp:extent cx="609600" cy="609600"/>
-        <wp:docPr id="1" name="Picture 1" descr="red square"/>
-        <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
-      </wp:inline></w:drawing></w:r>
-      <w:r><w:t xml:space="preserve"> sits on the baseline.</w:t></w:r>
-    </w:p>
+    ${p(run('bapbong sample document', '<w:b/><w:sz w:val="36"/>'), jc('center'))}
+    ${p(run('Tài liệu mẫu nhiều trang: đậm/nghiêng/màu, danh sách đa cấp, bảng gộp ô, ảnh inline, hyperlink, canh lề và thụt lề.', '<w:i/>'), jc('center'))}
+    ${chapters.join('\n')}
+    ${tail}
     <w:sectPr/>
   </w:body>
 </w:document>`;
+}
 
 const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
   <w:abstractNum w:abstractNumId="0">
     <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2."/><w:start w:val="1"/></w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="1">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl>
   </w:abstractNum>
   <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>
 </w:numbering>`;
 
-const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
+  <Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/>
+  <Relationship Id="rId8" Type="${R_NS}/image" Target="media/image2.png"/>
+  <Relationship Id="rId9" Type="${R_NS}/hyperlink" Target="https://prosemirror.net/" TargetMode="External"/>
+</Relationships>`;
 
 async function main() {
   const zip = new JSZip();
@@ -91,10 +188,11 @@ async function main() {
     '_rels/.rels',
     `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
   );
-  zip.file('word/document.xml', DOCUMENT_XML);
+  zip.file('word/document.xml', buildDocumentXml());
   zip.file('word/numbering.xml', NUMBERING_XML);
   zip.file('word/_rels/document.xml.rels', RELS_XML);
   zip.file('word/media/image1.png', PNG_RED, { base64: true });
+  zip.file('word/media/image2.png', PNG_BLUE, { base64: true });
 
   const bytes = await zip.generateAsync({ type: 'nodebuffer' });
   const out = path.join(__dirname, '..', 'public', 'sample.docx');
