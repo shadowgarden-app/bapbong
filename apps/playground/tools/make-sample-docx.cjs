@@ -133,6 +133,10 @@ const SPECIALS = [
         run('Thụt lề treo: dòng đầu lùi ra ngoài, các dòng tiếp theo thẳng hàng với lề trái đã thụt — kiểu trình bày danh mục tài liệu tham khảo quen thuộc trong văn bản học thuật.'),
         `<w:ind w:left="720" w:hanging="720"/>`,
       ),
+      p(
+        run('Đoạn này dùng style "Quote": thụt lề hai bên và chữ nghiêng đến từ STYLE (cascade pPr qua w:basedOn), không khai inline — đúng cách văn bản công sở dùng Heading/Quote/ListParagraph.'),
+        `<w:pStyle w:val="Quote"/>`,
+      ),
     ].join('\n'),
   },
 ];
@@ -194,6 +198,11 @@ const FOOTER_XML = `<?xml version="1.0"?><w:ftr xmlns:w="${W_NS}">
   ${p(run('— bapbong playground —', '<w:i/><w:color w:val="6B6B70"/>'), jc('center'))}
 </w:ftr>`;
 
+const STYLES_XML = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+  <w:style w:styleId="Indented"><w:pPr><w:ind w:left="720" w:right="720"/></w:pPr></w:style>
+  <w:style w:styleId="Quote"><w:basedOn w:val="Indented"/><w:rPr><w:i/><w:color w:val="555555"/></w:rPr></w:style>
+</w:styles>`;
+
 const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
   <w:abstractNum w:abstractNumId="0">
     <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
@@ -225,6 +234,7 @@ async function main() {
     `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
   );
   zip.file('word/document.xml', buildDocumentXml());
+  zip.file('word/styles.xml', STYLES_XML);
   zip.file('word/numbering.xml', NUMBERING_XML);
   zip.file('word/_rels/document.xml.rels', RELS_XML);
   zip.file('word/header1.xml', HEADER_XML);

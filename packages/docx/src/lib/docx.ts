@@ -140,9 +140,16 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const pStyleId = attrOf(child(pPr, 'w:pStyle'), 'w:val');
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(ctx.styles.docDefaults, ctx.styles.resolveStyle(pStyleId));
-  const list = parseList(pPr, ctx.numbering);
-  const align = parseAlign(pPr);
-  const indent = parseIndent(pPr);
+  // Paragraph-property cascade, base-most first; later layers win:
+  // docDefaults pPrDefault → style chain (w:basedOn ancestors → style) → inline.
+  const pPrChain: (OoxmlNode | undefined)[] = [
+    ctx.styles.docDefaultsPPr,
+    ...ctx.styles.resolveStylePPr(pStyleId),
+    pPr,
+  ];
+  const list = parseList(lastWith(pPrChain, 'w:numPr'), ctx.numbering);
+  const align = resolveAlign(pPrChain);
+  const indent = resolveIndent(pPrChain);
 
   const inline: PMNode[] = [];
   for (const node of p.children) {
@@ -164,6 +171,56 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   return schema.nodes.paragraph.create(attrs, inline);
 }
 
+/** The last (most-derived) pPr layer that carries `childName`, if any. */
+function lastWith(chain: (OoxmlNode | undefined)[], childName: string): OoxmlNode | undefined {
+  for (let i = chain.length - 1; i >= 0; i--) {
+    if (child(chain[i], childName)) return chain[i];
+  }
+  return undefined;
+}
+
+/** Resolve alignment through the cascade: the last layer with a w:jc wins. */
+function resolveAlign(chain: (OoxmlNode | undefined)[]): Align | null {
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const align = parseAlign(chain[i]);
+    if (align) return align;
+  }
+  return null;
+}
+
+/** Resolve indentation through the cascade. w:ind merges per attribute (a
+ *  style's left can combine with an inline firstLine); when both hanging and
+ *  firstLine survive the merge, hanging wins. */
+function resolveIndent(chain: (OoxmlNode | undefined)[]): Indent | null {
+  let left: number | undefined;
+  let right: number | undefined;
+  let firstLine: number | undefined;
+  let hanging: number | undefined;
+  for (const pPr of chain) {
+    const ind = child(pPr, 'w:ind');
+    if (!ind) continue;
+    const px = (attr: string): number | undefined => {
+      const v = attrOf(ind, attr);
+      return v === undefined ? undefined : twipsToPx(Number(v));
+    };
+    left = px('w:left') ?? px('w:start') ?? left;
+    right = px('w:right') ?? px('w:end') ?? right;
+    const fl = px('w:firstLine');
+    const hg = px('w:hanging');
+    // A layer that sets either first-line property replaces the pair.
+    if (fl !== undefined || hg !== undefined) {
+      firstLine = fl;
+      hanging = hg;
+    }
+  }
+  const out: Indent = {};
+  if (left !== undefined) out.left = left;
+  if (right !== undefined) out.right = right;
+  if (hanging !== undefined) out.hanging = hanging;
+  else if (firstLine !== undefined) out.firstLine = firstLine;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /** Map w:jc to an alignment, or null when absent/unrecognized. */
 function parseAlign(pPr: OoxmlNode | undefined): Align | null {
   switch (attrOf(child(pPr, 'w:jc'), 'w:val')) {
@@ -181,29 +238,6 @@ function parseAlign(pPr: OoxmlNode | undefined): Align | null {
     default:
       return null;
   }
-}
-
-/** Map w:ind (twips) to an Indent in px, or null when absent/empty.
- *  w:start/w:end are the OOXML-strict aliases for w:left/w:right. */
-function parseIndent(pPr: OoxmlNode | undefined): Indent | null {
-  const ind = child(pPr, 'w:ind');
-  if (!ind) return null;
-  const px = (attr: string): number | undefined => {
-    const v = attrOf(ind, attr);
-    return v === undefined ? undefined : twipsToPx(Number(v));
-  };
-  const left = px('w:left') ?? px('w:start');
-  const right = px('w:right') ?? px('w:end');
-  const hanging = px('w:hanging');
-  const firstLine = px('w:firstLine');
-
-  const out: Indent = {};
-  if (left !== undefined) out.left = left;
-  if (right !== undefined) out.right = right;
-  // hanging and firstLine are mutually exclusive; hanging wins.
-  if (hanging !== undefined) out.hanging = hanging;
-  else if (firstLine !== undefined) out.firstLine = firstLine;
-  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** Read a paragraph's list membership (w:numPr) and advance the counter. */

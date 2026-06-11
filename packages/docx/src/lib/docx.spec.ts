@@ -259,6 +259,29 @@ describe('importDocx', () => {
     expect(table.child(2).child(0).textContent).toBe('R3');
   });
 
+  it('cascades w:jc and w:ind from paragraph styles (pPr)', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:docDefaults><w:pPrDefault><w:pPr><w:jc w:val="both"/></w:pPr></w:pPrDefault></w:docDefaults>
+      <w:style w:styleId="Base"><w:pPr><w:ind w:left="720"/></w:pPr></w:style>
+      <w:style w:styleId="Quote"><w:basedOn w:val="Base"/><w:pPr><w:jc w:val="center"/><w:ind w:firstLine="360"/></w:pPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>styled</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Quote"/><w:jc w:val="right"/><w:ind w:hanging="240"/></w:pPr><w:r><w:t>inline wins</w:t></w:r></w:p>
+      <w:p><w:r><w:t>defaults only</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+
+    // p0: style chain — Base gives ind.left (720tw=48px), Quote adds center + firstLine (360tw=24px).
+    expect(doc.child(0).attrs.align).toBe('center');
+    expect(doc.child(0).attrs.indent).toEqual({ left: 48, firstLine: 24 });
+    // p1: inline overrides — jc right; hanging replaces the style's firstLine.
+    expect(doc.child(1).attrs.align).toBe('right');
+    expect(doc.child(1).attrs.indent).toEqual({ left: 48, hanging: 16 });
+    // p2: docDefaults pPrDefault applies when nothing else does.
+    expect(doc.child(2).attrs.align).toBe('justify');
+  });
+
   it('marks w:tblHeader rows as header rows', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>
