@@ -216,6 +216,38 @@ describe('CanvasPainter', () => {
     expect(widthSets).toBe(1);
   });
 
+  it('paints page floats behind the text once loaded', async () => {
+    class FakeImage {
+      onload: (() => void) | null = null;
+      complete = false;
+      naturalWidth = 0;
+      set src(_v: string) {
+        queueMicrotask(() => {
+          this.complete = true;
+          this.naturalWidth = 80;
+          this.onload?.();
+        });
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+    try {
+      const ctx = new RecordingCtx();
+      new CanvasPainter(makeCanvas(ctx)).paint(
+        { pages: [{ ...page([helloLine]), floats: [{ x: 140, y: 20, width: 80, height: 40, src: 'f' }] }] },
+        { devicePixelRatio: 1 },
+      );
+      await new Promise((r) => setTimeout(r, 0));
+      const draw = ctx.of('drawImage')[0];
+      expect(draw.args.slice(1)).toEqual([140, 20, 80, 40]);
+      // behind the text: drawImage precedes the repaint's fillText
+      const lastDraw = ctx.calls.lastIndexOf(ctx.of('drawImage')[0]);
+      const lastText = ctx.calls.lastIndexOf(ctx.of('fillText').at(-1) as never);
+      expect(lastDraw).toBeLessThan(lastText);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('substitutes live page numbers into chrome field segments', () => {
     const ctx = new RecordingCtx();
     const fieldLine = {

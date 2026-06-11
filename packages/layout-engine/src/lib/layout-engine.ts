@@ -3,6 +3,7 @@ import type {
   Align,
   CellPadding,
   FlowBlock,
+  FlowFloat,
   FlowInline,
   FlowParagraph,
   FlowTable,
@@ -21,6 +22,7 @@ import type {
   ParagraphIndent,
   ResolvedCell,
   ResolvedChrome,
+  ResolvedFloat,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
@@ -112,20 +114,39 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
 }
 
 /** Flatten one paragraph node into a FlowParagraph (text + inline images).
- *  `nodePos` is the absolute PM position of the paragraph node itself. */
-function paragraphToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowParagraph {
+ *  `nodePos` is the absolute PM position of the paragraph node itself. With
+ *  `allowFloats`, anchored images become FlowFloats instead of inline content;
+ *  contexts without float support (table cells, chrome) degrade them inline. */
+function paragraphToFlow(
+  node: PMNode,
+  base: FontSpec,
+  nodePos: number,
+  allowFloats = false,
+): FlowParagraph {
   const contentStart = nodePos + 1;
   const runs: FlowInline[] = [];
+  const floats: FlowFloat[] = [];
   node.forEach((child, offset) => {
     if (child.isText) runs.push(resolveRun(child, base, contentStart + offset));
-    else if (child.type.name === 'image') runs.push(resolveImage(child, contentStart + offset));
-    else if (child.type.name === 'page_field')
+    else if (child.type.name === 'image') {
+      const float = child.attrs['float'] as Omit<FlowFloat, 'src' | 'width' | 'height'> | null;
+      if (float && allowFloats) {
+        floats.push({
+          ...float,
+          src: String(child.attrs['src'] ?? ''),
+          width: Number(child.attrs['width']) || 0,
+          height: Number(child.attrs['height']) || 0,
+        });
+      } else {
+        runs.push(resolveImage(child, contentStart + offset));
+      }
+    } else if (child.type.name === 'page_field')
       runs.push(resolveField(child, base, contentStart + offset));
   });
   const list = node.attrs['list'] as { marker?: string } | null;
   const align = node.attrs['align'] as Align | null | undefined;
   const indent = node.attrs['indent'] as ParagraphIndent | null | undefined;
-  return {
+  const flow: FlowParagraph = {
     type: 'paragraph',
     runs,
     marker: list?.marker || undefined,
@@ -134,12 +155,28 @@ function paragraphToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowPar
     pos: contentStart,
     end: contentStart + node.content.size,
   };
+  if (floats.length > 0) flow.floats = floats;
+  return flow;
+}
+
+/** Whether the paragraph node anchors any floating image. */
+function nodeHasFloats(node: PMNode): boolean {
+  let found = false;
+  node.forEach((child) => {
+    if (child.type.name === 'image' && child.attrs['float']) found = true;
+  });
+  return found;
 }
 
 /** Flatten a block-level node (paragraph or table) into a FlowBlock, or null
  *  for node types we don't model yet. `nodePos` is its absolute PM position. */
-function nodeToBlock(node: PMNode, base: FontSpec, nodePos: number): FlowBlock | null {
-  if (node.type.name === 'paragraph') return paragraphToFlow(node, base, nodePos);
+function nodeToBlock(
+  node: PMNode,
+  base: FontSpec,
+  nodePos: number,
+  allowFloats = false,
+): FlowBlock | null {
+  if (node.type.name === 'paragraph') return paragraphToFlow(node, base, nodePos, allowFloats);
   if (node.type.name === 'table') return tableToFlow(node, base, nodePos);
   return null;
 }
@@ -176,11 +213,15 @@ function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
 }
 
 /** Flatten a ProseMirror doc into FlowBlocks (paragraphs + tables). */
-export function toFlowBlocks(doc: PMNode, defaultFont: Partial<FontSpec> = {}): FlowBlock[] {
+export function toFlowBlocks(
+  doc: PMNode,
+  defaultFont: Partial<FontSpec> = {},
+  allowFloats = true,
+): FlowBlock[] {
   const base: FontSpec = { ...DEFAULT_FONT, ...defaultFont };
   const blocks: FlowBlock[] = [];
   doc.forEach((node, offset) => {
-    const block = nodeToBlock(node, base, offset);
+    const block = nodeToBlock(node, base, offset, allowFloats);
     if (block) blocks.push(block);
   });
   return blocks;
@@ -291,45 +332,57 @@ function draftToLine(d: LineDraft, y: number): LayoutLine {
   return line;
 }
 
-/** Wrap one paragraph into line drafts within [contentLeft, contentRight].
- *  Pure: no pagination, no vertical positioning. */
-function layoutParagraph(
+/** The content bounds for the line about to be assembled. Queried once per
+ *  line, so callers can flow text around floating images (the band narrows
+ *  while a float's rectangle is in the way). */
+type BandFn = (estHeight: number) => { left: number; right: number };
+
+/** Wrap one paragraph, emitting one LineDraft per line. The band may differ
+ *  per line; indents, the list marker and tab stops apply within each band. */
+function wrapParagraph(
   block: FlowParagraph,
-  contentLeft: number,
-  contentRight: number,
   ctx: Ctx,
-): LineDraft[] {
+  bandFn: BandFn,
+  emit: (d: LineDraft) => void,
+): void {
   const { base, measure, metrics, tabWidth } = ctx;
   const indent = block.indent;
-  const paraLeft = contentLeft + (indent?.left ?? 0);
-  const paraRight = contentRight - (indent?.right ?? 0);
+  const indentLeft = indent?.left ?? 0;
+  const indentRight = indent?.right ?? 0;
   // hanging outdents the first line; firstLine indents it. Mutually exclusive.
   const firstLineDelta = indent?.hanging != null ? -indent.hanging : indent?.firstLine ?? 0;
   const align: Align = block.align ?? 'left';
 
   const tokens = block.runs.flatMap((inline) => tokenizeInline(inline, ctx));
 
+  // Baseline metrics for the default font seed every line (so empty lines have
+  // a sensible height too).
+  const baseMetrics = metrics ? metrics(base) : null;
+  const nominalH = baseMetrics
+    ? baseMetrics.ascent + baseMetrics.descent
+    : sizePx(base) * LINE_HEIGHT_FACTOR;
+
+  // Bounds for the line currently being assembled.
+  let band = bandFn(nominalH);
+  let lineLeft = band.left + indentLeft;
+  let lineRight = band.right - indentRight;
+
   // List marker hangs at the first line's start; text follows after it, and
   // wrapped lines align under that text (hanging indent).
   let marker: LayoutSegment | null = null;
-  let markerWidth = 0;
+  let markerTextX = 0;
   if (block.marker) {
     marker = {
-      x: paraLeft + firstLineDelta,
+      x: lineLeft + firstLineDelta,
       text: block.marker,
       font: base,
       width: measure(block.marker, base),
     };
-    markerWidth = measure(`${block.marker} `, base);
+    markerTextX = marker.x + measure(`${block.marker} `, base);
   }
-  const firstLineStart = marker ? marker.x + markerWidth : paraLeft + firstLineDelta;
-  const contStart = marker ? marker.x + markerWidth : paraLeft;
+  const firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
+  let contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
 
-  // Baseline metrics for the default font seed every line (so empty lines have
-  // a sensible height too).
-  const baseMetrics = metrics ? metrics(base) : null;
-
-  const drafts: LineDraft[] = [];
   let lineTokens: Token[] = [];
   let lineWidth = 0; // running width of the current line's tokens
   let firstLine = true;
@@ -341,15 +394,15 @@ function layoutParagraph(
 
   const lineStart = () => (firstLine ? firstLineStart : contStart);
 
-  /** Distance from `x` to the next tab stop (stops every tabWidth from paraLeft). */
+  /** Distance from `x` to the next tab stop (every tabWidth from the band left). */
   const tabAdvance = (x: number) => {
-    const k = Math.floor((x - paraLeft) / tabWidth) + 1;
-    return paraLeft + k * tabWidth - x;
+    const k = Math.floor((x - lineLeft) / tabWidth) + 1;
+    return lineLeft + k * tabWidth - x;
   };
 
   const flushLine = (isLast: boolean) => {
     const startX = lineStart();
-    const avail = paraRight - startX;
+    const avail = lineRight - startX;
 
     // Trailing whitespace doesn't count toward alignment, nor is it painted.
     let end = lineTokens.length;
@@ -428,7 +481,7 @@ function layoutParagraph(
       baseline = height * BASELINE_FACTOR;
     }
     const painted = firstLine && marker ? [marker, ...segments] : segments;
-    drafts.push({ x: startX, width: paraRight - startX, height, baseline, segments: painted, images, from, to });
+    emit({ x: startX, width: lineRight - startX, height, baseline, segments: painted, images, from, to });
     prevTo = to;
 
     lineTokens = [];
@@ -438,6 +491,12 @@ function layoutParagraph(
     maxAscent = baseMetrics?.ascent ?? 0;
     maxDescent = baseMetrics?.descent ?? 0;
     firstLine = false;
+
+    // The next line may sit beside (or past) a float — fetch its band.
+    band = bandFn(nominalH);
+    lineLeft = band.left + indentLeft;
+    lineRight = band.right - indentRight;
+    contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
   };
 
   // Kerning across token boundaries: consecutive same-font text tokens (a word
@@ -465,7 +524,7 @@ function layoutParagraph(
       token.width = Math.max(0, measure(clusterText + token.text, token.font) - clusterWidth);
     }
     const cursor = lineStart() + lineWidth;
-    if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > paraRight) {
+    if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > lineRight) {
       flushLine(false);
       resetCluster(); // the wrapped token starts a fresh glyph run
       if (token.isTab) token.width = tabAdvance(lineStart() + lineWidth);
@@ -494,6 +553,20 @@ function layoutParagraph(
     }
   }
   flushLine(true); // emit the paragraph's last (or only/empty) line
+}
+
+/** Wrap one paragraph into line drafts within [contentLeft, contentRight].
+ *  Pure: no pagination, no vertical positioning. */
+function layoutParagraph(
+  block: FlowParagraph,
+  contentLeft: number,
+  contentRight: number,
+  ctx: Ctx,
+): LineDraft[] {
+  const drafts: LineDraft[] = [];
+  wrapParagraph(block, ctx, () => ({ left: contentLeft, right: contentRight }), (d) =>
+    drafts.push(d),
+  );
   return drafts;
 }
 
@@ -674,7 +747,25 @@ function layoutTable(
 }
 
 /** One laid-out top-level block awaiting vertical placement. */
-type BlockItem = { drafts: LineDraft[] } | { table: ResolvedTable };
+type ParaItem = {
+  /** Flattened paragraph (lazy — cache hits skip flattening until needed). */
+  getFlow: () => FlowParagraph;
+  /** Pre-wrapped constant-band lines; null when the paragraph anchors floats
+   *  (those must wrap at placement time, when their y is known). */
+  drafts: LineDraft[] | null;
+};
+type BlockItem = { para: ParaItem } | { table: ResolvedTable };
+
+/** A rectangle text must flow around (a float's box plus its text gaps). */
+interface Exclusion {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** Narrowest band we'll still flow text into beside a float. */
+const MIN_BAND = 24;
 
 /** Shift one cell (box + contents) vertically in place. */
 function shiftCell(cell: ResolvedCell, dy: number): ResolvedCell {
@@ -817,35 +908,130 @@ function buildCtx(config: LayoutConfig): Ctx {
 function placeBlocks(
   items: Iterable<BlockItem>,
   config: LayoutConfig,
+  ctx: Ctx,
   band?: { top: number; bottom: number },
 ): ResolvedLayout {
   const { page } = config;
   const top = band?.top ?? page.margin.top;
   const bottom = band?.bottom ?? page.height - page.margin.bottom;
+  const contentLeft = page.margin.left;
+  const contentRight = page.width - page.margin.right;
 
   const pages: ResolvedPage[] = [];
   let lines: LayoutLine[] = [];
   let tables: ResolvedTable[] = [];
+  let pageFloats: ResolvedFloat[] = [];
+  let exclusions: Exclusion[] = []; // floats die at their page's end
   let y = top;
 
   const finalizePage = () => {
     const resolved: ResolvedPage = { index: pages.length, width: page.width, height: page.height, lines };
     if (tables.length > 0) resolved.tables = tables;
+    if (pageFloats.length > 0) resolved.floats = pageFloats;
     pages.push(resolved);
     lines = [];
     tables = [];
+    pageFloats = [];
+    exclusions = [];
     y = top;
   };
 
   /** Whether the current page already holds content (so a break is meaningful). */
-  const pageHasContent = () => lines.length > 0 || tables.length > 0;
+  const pageHasContent = () => lines.length > 0 || tables.length > 0 || pageFloats.length > 0;
+
+  /** Pin a paragraph's floats relative to its start; register text exclusions. */
+  const registerFloats = (flow: FlowParagraph, yPara: number) => {
+    for (const f of flow.floats ?? []) {
+      const baseL = f.hRel === 'page' ? 0 : contentLeft;
+      const baseR = f.hRel === 'page' ? page.width : contentRight;
+      const fx =
+        f.hAlign === 'right'
+          ? baseR - f.width
+          : f.hAlign === 'center'
+            ? (baseL + baseR - f.width) / 2
+            : f.hAlign === 'left'
+              ? baseL
+              : baseL + (f.hOffset ?? 0);
+      const fy =
+        f.vRel === 'page'
+          ? (f.vOffset ?? 0)
+          : f.vRel === 'margin'
+            ? top + (f.vOffset ?? 0)
+            : yPara + (f.vOffset ?? 0);
+      pageFloats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src });
+      if (f.wrap === 'square') {
+        exclusions.push({
+          left: fx - (f.distL ?? 0),
+          right: fx + f.width + (f.distR ?? 0),
+          top: fy - (f.distT ?? 0),
+          bottom: fy + f.height + (f.distB ?? 0),
+        });
+      } else if (f.wrap === 'topAndBottom') {
+        exclusions.push({
+          left: -Infinity,
+          right: Infinity,
+          top: fy - (f.distT ?? 0),
+          bottom: fy + f.height + (f.distB ?? 0),
+        });
+      } // 'none' paints only
+    }
+  };
+
+  /** Widest text band at [yy, yy+h) after carving out the exclusions; null
+   *  when nothing usable remains (the caller skips below the blocker). */
+  const bandAt = (yy: number, h: number): { left: number; right: number } | null => {
+    let L = contentLeft;
+    let R = contentRight;
+    for (const ex of exclusions) {
+      if (ex.bottom <= yy || ex.top >= yy + h) continue;
+      const leftGap = Math.min(R, ex.left) - L;
+      const rightGap = R - Math.max(L, ex.right);
+      if (rightGap >= leftGap) L = Math.max(L, ex.right);
+      else R = Math.min(R, ex.left);
+    }
+    return R - L >= MIN_BAND ? { left: L, right: R } : null;
+  };
+
+  /** Wrap + place a paragraph line by line, flowing around active floats. */
+  const placeParaBanded = (flow: FlowParagraph) => {
+    registerFloats(flow, y);
+    wrapParagraph(
+      flow,
+      ctx,
+      (estH) => {
+        for (;;) {
+          if (y + estH > bottom && pageHasContent()) {
+            finalizePage(); // fresh page: exclusions are gone
+            continue;
+          }
+          const b = bandAt(y, estH);
+          if (b) return b;
+          const blockers = exclusions.filter((ex) => ex.top < y + estH && ex.bottom > y);
+          if (blockers.length === 0) return { left: contentLeft, right: contentRight };
+          y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
+        }
+      },
+      (draft) => {
+        if (y + draft.height > bottom && pageHasContent()) finalizePage();
+        lines.push(draftToLine(draft, y));
+        y += draft.height;
+      },
+    );
+  };
 
   for (const item of items) {
-    if ('drafts' in item) {
-      for (const d of item.drafts) {
-        if (y + d.height > bottom && pageHasContent()) finalizePage();
-        lines.push(draftToLine(d, y));
-        y += d.height;
+    if ('para' in item) {
+      const drafts = item.para.drafts;
+      const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
+      const floatsAhead = exclusions.some((ex) => ex.bottom > y && ex.top < y + draftsHeight);
+      if (drafts && !floatsAhead) {
+        for (const d of drafts) {
+          if (y + d.height > bottom && pageHasContent()) finalizePage();
+          lines.push(draftToLine(d, y));
+          y += d.height;
+        }
+      } else {
+        placeParaBanded(item.para.getFlow());
       }
     } else {
       // Tables flow across pages: split at row boundaries when possible, and
@@ -944,10 +1130,15 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
   const right = config.page.width - config.page.margin.right;
   const items: BlockItem[] = blocks.map((block) =>
     block.type === 'paragraph'
-      ? { drafts: layoutParagraph(block, left, right, ctx) }
+      ? {
+          para: {
+            getFlow: () => block,
+            drafts: block.floats?.length ? null : layoutParagraph(block, left, right, ctx),
+          },
+        }
       : { table: layoutTable(block, left, right, ctx) },
   );
-  return placeBlocks(items, config);
+  return placeBlocks(items, config, ctx);
 }
 
 // ── Incremental re-layout (M4+) ─────────────────────────────────────
@@ -1017,7 +1208,8 @@ function layoutChrome(
   right: number,
   ctx: Ctx,
 ): ResolvedChrome {
-  const flow = layoutFlow(toFlowBlocks(doc, ctx.base), left, right, ctx);
+  // Chrome can't host floats — anchored images degrade to inline there.
+  const flow = layoutFlow(toFlowBlocks(doc, ctx.base, false), left, right, ctx);
   const lines = flow.lines.map((l) => ({ ...l, y: l.y + topY }));
   flow.tables.forEach((t) => offsetTable(t, topY));
   stripPositions(lines, flow.tables);
@@ -1063,6 +1255,13 @@ export function layout(
   const items: BlockItem[] = [];
   doc.forEach((node, offset) => {
     if (node.type.name === 'paragraph') {
+      const getFlow = () => paragraphToFlow(node, ctx.base, offset, true);
+      // Float-anchoring paragraphs always wrap at placement time (their band
+      // depends on where they land) — never cached.
+      if (nodeHasFloats(node)) {
+        items.push({ para: { getFlow, drafts: null } });
+        return;
+      }
       const contentStart = offset + 1;
       const hit = cache?.paragraphs.get(node);
       if (hit && hit.left === left && hit.right === right) {
@@ -1070,17 +1269,18 @@ export function layout(
           hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
           hit.basePos = contentStart;
         }
-        items.push({ drafts: hit.drafts });
+        items.push({ para: { getFlow, drafts: hit.drafts } });
         return;
       }
-      const drafts = layoutParagraph(paragraphToFlow(node, ctx.base, offset), left, right, ctx);
+      const flow = paragraphToFlow(node, ctx.base, offset, true);
+      const drafts = layoutParagraph(flow, left, right, ctx);
       cache?.paragraphs.set(node, { left, right, basePos: contentStart, drafts });
-      items.push({ drafts });
+      items.push({ para: { getFlow: () => flow, drafts } });
     } else if (node.type.name === 'table') {
       items.push({ table: layoutTable(tableToFlow(node, ctx.base, offset), left, right, ctx) });
     }
   });
-  const resolved = placeBlocks(items, config, { top, bottom });
+  const resolved = placeBlocks(items, config, ctx, { top, bottom });
 
   // Chrome with page-number fields: re-lay it out now that the page total is
   // known, so the field slot is as wide as the widest number it will show.

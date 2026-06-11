@@ -559,6 +559,78 @@ describe('toFlowBlocks', () => {
   });
 });
 
+describe('floating images', () => {
+  const words = (n: number, len = 9) => Array.from({ length: n }, () => 'a'.repeat(len)).join(' ');
+
+  it('narrows lines beside a right-aligned square float, resumes below it', () => {
+    // content [20,220]; float 80×40 at right → rect x 140..220, y 20..60.
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: words(8), font: font() }],
+      floats: [{ src: 'f', width: 80, height: 40, wrap: 'square', hAlign: 'right' }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    const lines = pages[0].lines;
+    // Lines overlapping the float band [20,60) get the 120px band; the rest 200px.
+    const narrowed = lines.filter((l) => l.y < 60);
+    const full = lines.filter((l) => l.y >= 60);
+    expect(narrowed.length).toBeGreaterThan(0);
+    expect(full.length).toBeGreaterThan(0);
+    for (const l of narrowed) expect(l.width).toBeCloseTo(120); // 140 − 20
+    for (const l of full) expect(l.width).toBeCloseTo(200);
+    // The float itself lands on the page for the painter.
+    expect(pages[0].floats?.[0]).toMatchObject({ x: 140, y: 20, width: 80, height: 40 });
+  });
+
+  it('honors text-to-image gaps (distL)', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: words(6), font: font() }],
+      floats: [{ src: 'f', width: 80, height: 40, wrap: 'square', hAlign: 'right', distL: 10 }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].lines[0].width).toBeCloseTo(110); // band ends 10px before the image
+  });
+
+  it('topAndBottom floats push the text below them', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hello', font: font() }],
+      floats: [{ src: 'f', width: 50, height: 30, wrap: 'topAndBottom' }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].floats?.[0]).toMatchObject({ y: 20 });
+    expect(pages[0].lines[0].y).toBeCloseTo(50); // below the float band
+  });
+
+  it('affects following paragraphs while the float is still in the way', () => {
+    // Para 1: one line + a tall right float (height 100 → y 20..120).
+    const p1: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'short', font: font() }],
+      floats: [{ src: 'f', width: 80, height: 100, wrap: 'square', hAlign: 'right' }],
+    };
+    // Para 2: no floats of its own — would normally take the drafts fast path.
+    const p2: FlowBlock = { type: 'paragraph', runs: [{ text: words(8), font: font() }] };
+    const { pages } = layoutBlocks([p1, p2], config());
+    const p2Lines = pages[0].lines.slice(1);
+    const narrowed = p2Lines.filter((l) => l.y < 120);
+    expect(narrowed.length).toBeGreaterThan(0);
+    for (const l of narrowed) expect(l.width).toBeCloseTo(120);
+  });
+
+  it("'none' wrap paints the float without touching the text", () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: words(4), font: font() }],
+      floats: [{ src: 'f', width: 80, height: 40, wrap: 'none', hAlign: 'right' }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].floats).toHaveLength(1);
+    for (const l of pages[0].lines) expect(l.width).toBeCloseTo(200); // untouched
+  });
+});
+
 describe('layout with page chrome (header/footer)', () => {
   const schema = new Schema({
     nodes: {

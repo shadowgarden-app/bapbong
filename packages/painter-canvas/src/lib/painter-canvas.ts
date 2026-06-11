@@ -230,6 +230,14 @@ export class CanvasPainter {
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
     if (!contentVisible) return; // virtualized away — background only
 
+    // Floating images sit behind the text (text already flows around them).
+    for (const f of page.floats ?? []) {
+      const el = this.requestImage(f.src);
+      if (el?.complete && el.naturalWidth > 0) {
+        ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
+      }
+    }
+
     // Single-canvas mode: selection sits under the text.
     if (inlineOverlay) {
       ctx.fillStyle = o.selectionColor;

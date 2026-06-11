@@ -67,6 +67,28 @@ export interface InlineField {
  *  `'src' in x` (image) / `'field' in x` (field) / otherwise text run. */
 export type FlowInline = InlineRun | InlineImage | InlineField;
 
+/** A floating image (wp:anchor) anchored to a paragraph. Text flows around
+ *  its rectangle ('square'), skips below it ('topAndBottom'), or ignores it
+ *  ('none' — painted only). All values are CSS px. */
+export interface FlowFloat {
+  src: string;
+  width: number;
+  height: number;
+  wrap: 'square' | 'topAndBottom' | 'none';
+  /** Horizontal: alignment within hRel, or an offset from its left edge. */
+  hAlign?: 'left' | 'right' | 'center';
+  hOffset?: number;
+  hRel?: 'margin' | 'page';
+  /** Vertical: offset from the anchor paragraph top / margin / page top. */
+  vOffset?: number;
+  vRel?: 'paragraph' | 'margin' | 'page';
+  /** Text-to-image gaps. */
+  distL?: number;
+  distR?: number;
+  distT?: number;
+  distB?: number;
+}
+
 /** Paragraph horizontal alignment (mirrors w:jc / CSS text-align). */
 export type Align = 'left' | 'center' | 'right' | 'justify';
 
@@ -94,6 +116,8 @@ export interface FlowParagraph {
   pos?: number;
   /** Absolute PM position after the paragraph's last character. */
   end?: number;
+  /** Floating images anchored to this paragraph. */
+  floats?: FlowFloat[];
 }
 
 /** A table cell, holding nested flow content (paragraphs / tables). */
@@ -218,6 +242,15 @@ export interface ResolvedTable {
   headerBottom?: number;
 }
 
+/** A floating image placed on a page (page-local coordinates, px). */
+export interface ResolvedFloat {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  src: string;
+}
+
 export interface ResolvedPage {
   index: number;
   width: number;
@@ -225,6 +258,8 @@ export interface ResolvedPage {
   lines: LayoutLine[];
   /** Tables on this page, positioned in page coordinates. */
   tables?: ResolvedTable[];
+  /** Floating images on this page (painted behind the text). */
+  floats?: ResolvedFloat[];
 }
 
 /** Repeating page furniture (a header or footer band). Coordinates are

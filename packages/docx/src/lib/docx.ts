@@ -92,7 +92,51 @@ function runText(run: OoxmlNode): string {
     .join('');
 }
 
-/** Extract an inline image from a run's w:drawing, if any. */
+/** EMU → px where 0 is meaningful (offsets/gaps), unlike emuToPx. */
+function emuToPxZero(emu: string | undefined): number | undefined {
+  if (emu === undefined) return undefined;
+  const n = Number(emu);
+  return Number.isNaN(n) ? undefined : Math.round(n / 9525);
+}
+
+/** Floating-image placement from a wp:anchor, or null for wp:inline. */
+function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
+  const anchor = child(drawing, 'wp:anchor');
+  if (!anchor) return null;
+
+  const wrap = child(anchor, 'wp:wrapTopAndBottom')
+    ? 'topAndBottom'
+    : child(anchor, 'wp:wrapSquare') || child(anchor, 'wp:wrapTight') || child(anchor, 'wp:wrapThrough')
+      ? 'square'
+      : 'none'; // wrapNone / absent: paints without affecting text
+
+  const float: Record<string, unknown> = { wrap };
+
+  const posH = child(anchor, 'wp:positionH');
+  if (posH) {
+    const align = child(posH, 'wp:align')?.text.trim();
+    if (align === 'left' || align === 'right' || align === 'center') float['hAlign'] = align;
+    const off = emuToPxZero(child(posH, 'wp:posOffset')?.text);
+    if (off !== undefined && float['hAlign'] === undefined) float['hOffset'] = off;
+    const rel = attrOf(posH, 'relativeFrom');
+    float['hRel'] = rel === 'page' ? 'page' : 'margin'; // column/margin/… ≈ margin
+  }
+  const posV = child(anchor, 'wp:positionV');
+  if (posV) {
+    const off = emuToPxZero(child(posV, 'wp:posOffset')?.text);
+    if (off !== undefined) float['vOffset'] = off;
+    const rel = attrOf(posV, 'relativeFrom');
+    float['vRel'] = rel === 'page' ? 'page' : rel === 'margin' ? 'margin' : 'paragraph';
+  }
+  // Text-to-image gaps (EMU attrs on the anchor itself).
+  for (const side of ['distL', 'distR', 'distT', 'distB'] as const) {
+    const v = emuToPxZero(attrOf(anchor, side));
+    if (v !== undefined) float[side] = v;
+  }
+  return float;
+}
+
+/** Extract an image (inline or floating) from a run's w:drawing, if any. */
 function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const drawing = child(run, 'w:drawing');
   if (!drawing) return null;
@@ -106,11 +150,13 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
 
   const extent = findDescendant(drawing, 'wp:extent');
   const docPr = findDescendant(drawing, 'wp:docPr');
+  const float = parseAnchorFloat(drawing);
   return schema.nodes.image.create({
     src,
     width: emuToPx(attrOf(extent, 'cx')),
     height: emuToPx(attrOf(extent, 'cy')),
     alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
+    float,
   });
 }
 

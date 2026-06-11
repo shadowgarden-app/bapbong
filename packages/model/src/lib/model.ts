@@ -52,6 +52,10 @@ export const schema = new Schema({
         alt: { default: '' },
         width: { default: null },
         height: { default: null },
+        // wp:anchor (floating image): { wrap: 'square'|'topAndBottom'|'none',
+        // hAlign?, hOffset?, hRel?, vOffset?, vRel?, distL?, distR?, distT?,
+        // distB? } in px, or null for inline images. Importer-set.
+        float: { default: null },
       },
       toDOM(node) {
         const a = node.attrs;

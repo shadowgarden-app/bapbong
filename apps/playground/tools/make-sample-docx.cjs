@@ -139,21 +139,51 @@ const SPECIALS = [
       ),
     ].join('\n'),
   },
+  {
+    title: 'Ảnh floating — chữ chảy quanh ảnh',
+    xml: [
+      p(
+        `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300">
+          <wp:positionH relativeFrom="margin"><wp:align>right</wp:align></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>
+          <wp:extent cx="1333500" cy="1333500"/>
+          <wp:docPr id="2" name="Float 1" descr="blue float"/>
+          <wp:wrapSquare wrapText="bothSides"/>
+          <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId8"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+        </wp:anchor></w:drawing></w:r>` +
+          run('Ảnh xanh 140px neo bên phải với wrapSquare: dòng nào nằm ngang ảnh sẽ thu hẹp lại, chữ chảy dọc theo mép trái của ảnh. ') +
+          run(LOREM[0]) +
+          run(' ' + LOREM[4]),
+      ),
+      p(run('Đoạn kế tiếp không có ảnh nhưng vẫn né rect của ảnh nếu ảnh còn thò xuống — exclusion sống theo trang, không theo đoạn. ' + LOREM[5])),
+      p(
+        `<w:r><w:drawing><wp:anchor distT="57150" distB="57150">
+          <wp:positionH relativeFrom="margin"><wp:align>center</wp:align></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>190500</wp:posOffset></wp:positionV>
+          <wp:extent cx="952500" cy="476250"/>
+          <wp:docPr id="3" name="Float 2" descr="red band"/>
+          <wp:wrapTopAndBottom/>
+          <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+        </wp:anchor></w:drawing></w:r>` +
+          run('Còn ảnh đỏ dưới đây dùng wrapTopAndBottom: không dòng nào đứng cạnh ảnh — văn bản nhảy hẳn xuống dưới. ' + LOREM[1]),
+      ),
+    ].join('\n'),
+  },
 ];
 
 function buildDocumentXml() {
   const chapters = SPECIALS.map((s, i) => chapter(i + 1, s));
   // Padding chương cuối để chắc chắn tràn sang trang 3.
   const tail = [
-    heading('6. Phần đệm cho đủ độ dài'),
+    heading('7. Phần đệm cho đủ độ dài'),
     ...Array.from({ length: 20 }, (_, i) => p(run(LOREM[i % LOREM.length]), jc('both'))),
-    heading('7. Bảng thứ hai ở cuối tài liệu'),
+    heading('8. Bảng thứ hai ở cuối tài liệu'),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="4515"/><w:gridCol w:w="4515"/></w:tblGrid>
       <w:tr>${td(p(run('Cột trái', '<w:b/>')))}${td(p(run('Cột phải', '<w:b/>')))}</w:tr>
       <w:tr>${td(p(run('Bảng nằm gần cuối tài liệu để kiểm tra ngắt-trang-nguyên-bảng khi không đủ chỗ.')))}${td(p(run('Ô bên phải.')))}</w:tr>
     </w:tbl>`,
-    heading('8. Bảng dài trải qua nhiều trang'),
+    heading('9. Bảng dài trải qua nhiều trang'),
     p(run('Bảng dưới đây có 36 hàng — dài hơn một trang, buộc layout engine phải ngắt trang theo từng hàng (M5).')),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
@@ -162,7 +192,7 @@ function buildDocumentXml() {
         `<w:tr>${td(p(run(`Hàng ${i + 1}`)))}${td(p(run(`Nội dung ô bên phải của hàng ${i + 1} — một dòng mô tả đủ dài để chiếm trọn bề ngang cột và đôi khi xuống dòng thứ hai.`)))}</w:tr>`,
       ).join('\n')}
     </w:tbl>`,
-    heading('9. Hàng cao hơn một trang'),
+    heading('10. Hàng cao hơn một trang'),
     p(run('Hàng thứ nhất của bảng sau chứa 60 đoạn — cao hơn cả một trang, buộc phải tách giữa hàng.')),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>

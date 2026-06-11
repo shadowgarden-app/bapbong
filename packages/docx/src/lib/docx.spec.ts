@@ -316,6 +316,36 @@ describe('importDocx', () => {
     expect(doc.child(1).textContent).toBe('11/06/2026');
   });
 
+  it('imports wp:anchor drawings as floating images', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
+      <w:p><w:r><w:drawing><wp:anchor distL="114300" distR="114300" distT="0" distB="0">
+        <wp:positionH relativeFrom="margin"><wp:align>right</wp:align></wp:positionH>
+        <wp:positionV relativeFrom="paragraph"><wp:posOffset>190500</wp:posOffset></wp:positionV>
+        <wp:extent cx="952500" cy="476250"/>
+        <wp:wrapSquare wrapText="bothSides"/>
+        <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+      </wp:anchor></w:drawing></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image1.png': PNG_1x1 }),
+    );
+    const img = doc.child(0).child(0);
+    expect(img.type.name).toBe('image');
+    expect(img.attrs.width).toBe(100);
+    expect(img.attrs.float).toEqual({
+      wrap: 'square',
+      hAlign: 'right',
+      hRel: 'margin',
+      vOffset: 20, // 190500 EMU
+      vRel: 'paragraph',
+      distL: 12,
+      distR: 12,
+      distT: 0,
+      distB: 0,
+    });
+  });
+
   it('parses per-table cell margins (w:tblCellMar)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>
