@@ -94,7 +94,12 @@ export class InputBridge {
       position: 'absolute',
       top: '0',
       left: '0',
-      width: '1px',
+      // MUST be wide: a 1px host makes the hidden document wrap one character
+      // per line (tens of thousands of line boxes), and every DOM-selection
+      // placement then re-runs that layout — ~500ms PER CLICK on multi-page
+      // documents. At a page-ish width the same layout is ~10ms and stays
+      // warm. The host is invisible either way (opacity 0, clipped height).
+      width: '800px',
       height: '1em',
       overflow: 'hidden',
       opacity: '0',
