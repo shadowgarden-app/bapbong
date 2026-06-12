@@ -77,9 +77,9 @@ export class App implements OnDestroy {
   private lastSelection: SelectionRect[] = [];
   private caretVisible = true;
   private blinkTimer: ReturnType<typeof setInterval> | null = null;
-  // Drag coalescing: at most one selection transaction per animation frame.
-  private pendingDragHead: number | null = null;
-  private dragRaf: number | null = null;
+  // While dragging, the visual selection leads (painted straight from
+  // hit-testing, same frame); the PM model commits once on pointerup.
+  private dragHead: number | null = null;
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
   // Scroll repaint throttle (page virtualization).
@@ -265,7 +265,6 @@ export class App implements OnDestroy {
   ngOnDestroy(): void {
     this.stopBlink();
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
-    if (this.dragRaf != null) cancelAnimationFrame(this.dragRaf);
     if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.bridge?.destroy();
@@ -283,41 +282,50 @@ export class App implements OnDestroy {
     }, extend);
   }
 
-  protected onCanvasMouseDown(ev: MouseEvent): void {
+  protected onCanvasPointerDown(ev: PointerEvent): void {
     const pos = this.posAtEvent(ev);
     if (pos == null || !this.bridge) return;
     ev.preventDefault(); // keep focus on the hidden editor
     this.dragAnchor = pos;
-    this.bridge.setSelection(pos);
+    this.dragHead = pos;
+    // Keep receiving moves when the pointer leaves the canvas mid-drag.
+    (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
+    this.bridge.setSelection(pos); // caret placement (cheap, anchors the IME)
     this.bridge.focus();
   }
 
-  protected onCanvasMouseMove(ev: MouseEvent): void {
+  protected onCanvasPointerMove(ev: PointerEvent): void {
     if (this.dragAnchor == null || !(ev.buttons & 1)) return;
-    const pos = this.posAtEvent(ev);
-    if (pos == null || !this.bridge) return;
-    // Coalesce to one selection transaction per frame — events can arrive
-    // faster than the display can show their effect.
-    this.pendingDragHead = pos;
-    this.dragRaf ??= requestAnimationFrame(() => {
-      this.dragRaf = null;
-      if (this.dragAnchor != null && this.pendingDragHead != null) {
-        this.bridge?.setSelection(this.dragAnchor, this.pendingDragHead);
-      }
-    });
+    // Freshest coalesced point; the overlay paints SYNCHRONOUSLY in this very
+    // frame — no rAF deferral, no PM transaction (the model follows on
+    // pointerup, Google Docs-style).
+    const coalesced = ev.getCoalescedEvents?.() ?? [];
+    const last = coalesced.length > 0 ? coalesced[coalesced.length - 1] : ev;
+    const pos = this.posAtEvent(last);
+    if (pos == null || pos === this.dragHead) return;
+    this.dragHead = pos;
+    this.paintDragSelection();
   }
 
-  protected onCanvasMouseUp(): void {
-    // Flush a pending drag update so the selection lands where the mouse did.
-    if (this.dragRaf != null) {
-      cancelAnimationFrame(this.dragRaf);
-      this.dragRaf = null;
-      if (this.dragAnchor != null && this.pendingDragHead != null) {
-        this.bridge?.setSelection(this.dragAnchor, this.pendingDragHead);
-      }
+  /** Overlay-only repaint of the in-progress drag selection. */
+  private paintDragSelection(): void {
+    if (!this.painter || !this.resolved || !this.measureText) return;
+    if (this.dragAnchor == null || this.dragHead == null) return;
+    const from = Math.min(this.dragAnchor, this.dragHead);
+    const to = Math.max(this.dragAnchor, this.dragHead);
+    this.lastCaret = caretRect(this.resolved, this.dragHead, this.measureText);
+    this.lastSelection = from === to ? [] : selectionRects(this.resolved, from, to, this.measureText);
+    this.caretVisible = true;
+    this.painter.paintOverlay({ caret: this.lastCaret, selection: this.lastSelection });
+  }
+
+  protected onCanvasPointerUp(): void {
+    // Commit the dragged selection to the model exactly once.
+    if (this.dragAnchor != null && this.dragHead != null && this.dragHead !== this.dragAnchor) {
+      this.bridge?.setSelection(this.dragAnchor, this.dragHead);
     }
-    this.pendingDragHead = null;
     this.dragAnchor = null;
+    this.dragHead = null;
     if (this.bridge) this.restartBlink(); // back to idle blinking
   }
 

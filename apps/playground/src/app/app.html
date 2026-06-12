@@ -30,10 +30,10 @@
       <div class="canvas-stack">
         <canvas
           #docCanvas
-          (mousedown)="onCanvasMouseDown($event)"
-          (mousemove)="onCanvasMouseMove($event)"
-          (mouseup)="onCanvasMouseUp()"
-          (mouseleave)="onCanvasMouseUp()"
+          (pointerdown)="onCanvasPointerDown($event)"
+          (pointermove)="onCanvasPointerMove($event)"
+          (pointerup)="onCanvasPointerUp()"
+          (pointercancel)="onCanvasPointerUp()"
           (dblclick)="onCanvasDblClick($event)"
         ></canvas>
         <canvas #overlayCanvas class="overlay"></canvas>
