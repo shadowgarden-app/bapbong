@@ -4,12 +4,17 @@ interface LevelDef {
   numFmt: string;
   lvlText: string;
   start: number;
+  /** The level's w:pPr — carries the per-level indent (w:ind) that gives
+   *  nested lists their staircase. */
+  pPr?: OoxmlNode;
 }
 
 /** Stateful numbering counter built from `word/numbering.xml`. Call `next`
  *  once per list paragraph, in document order, to get its marker string. */
 export interface NumberingResolver {
   next(numId: string, level: number): string;
+  /** The lvl's paragraph properties (indent layer in the pPr cascade). */
+  levelPPr(numId: string, level: number): OoxmlNode | undefined;
 }
 
 function toLetters(n: number): string {
@@ -70,6 +75,7 @@ export function buildNumbering(numberingRoot: OoxmlNode | undefined): NumberingR
         numFmt: attrOf(child(lvl, 'w:numFmt'), 'w:val') ?? 'decimal',
         lvlText: attrOf(child(lvl, 'w:lvlText'), 'w:val') ?? '',
         start: Number(attrOf(child(lvl, 'w:start'), 'w:val') ?? '1') || 1,
+        pPr: child(lvl, 'w:pPr'),
       });
     }
     abstract.set(id, levels);
@@ -108,5 +114,10 @@ export function buildNumbering(numberingRoot: OoxmlNode | undefined): NumberingR
     });
   }
 
-  return { next };
+  function levelPPr(numId: string, level: number): OoxmlNode | undefined {
+    const absId = numToAbstract.get(numId);
+    return absId === undefined ? undefined : abstract.get(absId)?.get(level)?.pPr;
+  }
+
+  return { next, levelPPr };
 }

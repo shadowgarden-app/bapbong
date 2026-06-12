@@ -259,6 +259,28 @@ describe('importDocx', () => {
     expect(table.child(2).child(0).textContent).toBe('R3');
   });
 
+  it('indents list items per numbering level (w:lvl/w:pPr/w:ind)', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:pPr><w:ind w:left="1440" w:hanging="360"/></w:pPr><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2."/><w:start w:val="1"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'top')}
+      ${listP('1', 1, 'nested')}
+      <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:ind w:left="2160"/></w:pPr><w:r><w:t>override</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
+
+    // The lvl pPr indents flow through the cascade: 720tw=48px, 1440tw=96px.
+    expect(doc.child(0).attrs.indent).toEqual({ left: 48, hanging: 24 });
+    expect(doc.child(1).attrs.indent).toEqual({ left: 96, hanging: 24 });
+    // Inline w:ind overrides the numbering layer per attribute.
+    expect(doc.child(2).attrs.indent).toEqual({ left: 144, hanging: 24 });
+  });
+
   it('cascades w:jc and w:ind from paragraph styles (pPr)', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:docDefaults><w:pPrDefault><w:pPr><w:jc w:val="both"/></w:pPr></w:pPrDefault></w:docDefaults>

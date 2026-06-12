@@ -219,13 +219,18 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(ctx.styles.docDefaults, ctx.styles.resolveStyle(pStyleId));
   // Paragraph-property cascade, base-most first; later layers win:
-  // docDefaults pPrDefault → style chain (w:basedOn ancestors → style) → inline.
+  // docDefaults pPrDefault → style chain (w:basedOn ancestors → style)
+  // → numbering lvl pPr (the per-level list indent) → inline.
   const pPrChain: (OoxmlNode | undefined)[] = [
     ctx.styles.docDefaultsPPr,
     ...ctx.styles.resolveStylePPr(pStyleId),
     pPr,
   ];
   const list = parseList(lastWith(pPrChain, 'w:numPr'), ctx.numbering);
+  if (list) {
+    const lvlPPr = ctx.numbering.levelPPr(list.numId, list.level);
+    if (lvlPPr) pPrChain.splice(pPrChain.length - 1, 0, lvlPPr);
+  }
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
   const tabs = resolveTabs(pPrChain);

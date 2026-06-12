@@ -285,11 +285,11 @@ const STYLES_XML = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
 
 const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
   <w:abstractNum w:abstractNumId="0">
-    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
-    <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2."/><w:start w:val="1"/></w:lvl>
+    <w:lvl w:ilvl="0"><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:pPr><w:ind w:left="1440" w:hanging="360"/></w:pPr><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2."/><w:start w:val="1"/></w:lvl>
   </w:abstractNum>
   <w:abstractNum w:abstractNumId="1">
-    <w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl>
+    <w:lvl w:ilvl="0"><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl>
   </w:abstractNum>
   <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
   <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>
