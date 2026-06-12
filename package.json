@@ -71,6 +71,7 @@
     "prosemirror-keymap": "^1.2.3",
     "prosemirror-model": "^1.25.7",
     "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.10.0",
     "prosemirror-view": "^1.41.3",
     "rxjs": "~7.8.0"
   }

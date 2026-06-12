@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { Mark } from 'prosemirror-model';
+import { createNumberingCounter, type NumberingDefs } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -154,10 +155,16 @@ describe('importDocx', () => {
 
     const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
 
+    // Markers are no longer frozen at import — they're recounted from the
+    // defs riding the doc (this is what lets edits renumber live).
+    const counter = createNumberingCounter(doc.attrs.numbering as NumberingDefs);
     const markers: (string | null)[] = [];
-    doc.forEach((node) => markers.push((node.attrs.list as { marker: string } | null)?.marker ?? null));
+    doc.forEach((node) => {
+      const list = node.attrs.list as { numId: string; level: number } | null;
+      markers.push(list ? counter.next(list.numId, list.level) : null);
+    });
     expect(markers).toEqual(['1.', '2.', '2.a', '2.b', '3.', null]);
-    expect(doc.child(0).attrs.list).toMatchObject({ numId: '1', level: 0 });
+    expect(doc.child(0).attrs.list).toEqual({ numId: '1', level: 0 });
     expect(doc.child(5).attrs.list).toBeNull();
   });
 
@@ -175,7 +182,11 @@ describe('importDocx', () => {
     </w:body></w:document>`;
 
     const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
-    const marker = (i: number) => (doc.child(i).attrs.list as { marker: string }).marker;
+    const counter = createNumberingCounter(doc.attrs.numbering as NumberingDefs);
+    const marker = (i: number) => {
+      const list = doc.child(i).attrs.list as { numId: string; level: number };
+      return counter.next(list.numId, list.level);
+    };
     expect(marker(0)).toBe('•');
     expect(marker(1)).toBe('I)');
     expect(marker(2)).toBe('II)');

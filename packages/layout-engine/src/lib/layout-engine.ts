@@ -1,4 +1,9 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
+import {
+  createNumberingCounter,
+  type NumberingCounter,
+  type NumberingDefs,
+} from '@shadow-garden/bapbong-model';
 import type {
   Align,
   CellPadding,
@@ -124,6 +129,7 @@ function paragraphToFlow(
   base: FontSpec,
   nodePos: number,
   allowFloats = false,
+  marker?: string,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   const runs: FlowInline[] = [];
@@ -151,7 +157,7 @@ function paragraphToFlow(
   const flow: FlowParagraph = {
     type: 'paragraph',
     runs,
-    marker: list?.marker || undefined,
+    marker: marker ?? (list?.marker || undefined),
     align: align ?? undefined,
     indent: indent ?? undefined,
     pos: contentStart,
@@ -172,6 +178,14 @@ function nodeHasFloats(node: PMNode): boolean {
   return found;
 }
 
+/** The live marker for a list paragraph: counted from the doc's numbering
+ *  defs, falling back to a legacy pre-resolved marker on the attr. */
+function markerFor(node: PMNode, counter: NumberingCounter | undefined): string | undefined {
+  const list = node.attrs['list'] as { numId: string; level: number; marker?: string } | null;
+  if (!list) return undefined;
+  return (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
+}
+
 /** Flatten a block-level node (paragraph or table) into a FlowBlock, or null
  *  for node types we don't model yet. `nodePos` is its absolute PM position. */
 function nodeToBlock(
@@ -179,14 +193,21 @@ function nodeToBlock(
   base: FontSpec,
   nodePos: number,
   allowFloats = false,
+  counter?: NumberingCounter,
 ): FlowBlock | null {
-  if (node.type.name === 'paragraph') return paragraphToFlow(node, base, nodePos, allowFloats);
-  if (node.type.name === 'table') return tableToFlow(node, base, nodePos);
+  if (node.type.name === 'paragraph')
+    return paragraphToFlow(node, base, nodePos, allowFloats, markerFor(node, counter));
+  if (node.type.name === 'table') return tableToFlow(node, base, nodePos, counter);
   return null;
 }
 
 /** Flatten a table node (table → table_row → table_cell → block+). */
-function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
+function tableToFlow(
+  node: PMNode,
+  base: FontSpec,
+  nodePos: number,
+  counter?: NumberingCounter,
+): FlowTable {
   const rows: FlowTableRow[] = [];
   node.forEach((rowNode, rowOffset) => {
     const rowPos = nodePos + 1 + rowOffset;
@@ -195,7 +216,7 @@ function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
       const cellPos = rowPos + 1 + cellOffset;
       const content: FlowBlock[] = [];
       cellNode.forEach((child, childOffset) => {
-        const block = nodeToBlock(child, base, cellPos + 1 + childOffset);
+        const block = nodeToBlock(child, base, cellPos + 1 + childOffset, false, counter);
         if (block) content.push(block);
       });
       const a = cellNode.attrs;
@@ -225,9 +246,10 @@ export function toFlowBlocks(
   allowFloats = true,
 ): FlowBlock[] {
   const base: FontSpec = { ...DEFAULT_FONT, ...defaultFont };
+  const counter = createNumberingCounter(doc.attrs['numbering'] as NumberingDefs | null);
   const blocks: FlowBlock[] = [];
   doc.forEach((node, offset) => {
-    const block = nodeToBlock(node, base, offset, allowFloats);
+    const block = nodeToBlock(node, base, offset, allowFloats, counter);
     if (block) blocks.push(block);
   });
   return blocks;
@@ -1244,6 +1266,8 @@ interface ParagraphCacheEntry {
   right: number;
   /** Content-start position the cached drafts were computed at. */
   basePos: number;
+  /** List marker the drafts were computed with — renumbering invalidates. */
+  marker?: string;
   drafts: LineDraft[];
 }
 
@@ -1336,10 +1360,15 @@ export function layout(
     bottom = Math.min(bottom, topY);
   }
 
+  // Markers are recounted on every layout, so list edits renumber live. The
+  // counter advances for every list paragraph — including cache hits.
+  const counter = createNumberingCounter(doc.attrs['numbering'] as NumberingDefs | null);
+
   const items: BlockItem[] = [];
   doc.forEach((node, offset) => {
     if (node.type.name === 'paragraph') {
-      const getFlow = () => paragraphToFlow(node, ctx.base, offset, true);
+      const marker = markerFor(node, counter);
+      const getFlow = () => paragraphToFlow(node, ctx.base, offset, true, marker);
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land) — never cached.
       if (nodeHasFloats(node)) {
@@ -1348,7 +1377,7 @@ export function layout(
       }
       const contentStart = offset + 1;
       const hit = cache?.paragraphs.get(node);
-      if (hit && hit.left === left && hit.right === right) {
+      if (hit && hit.left === left && hit.right === right && hit.marker === marker) {
         if (hit.basePos !== contentStart) {
           hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
           hit.basePos = contentStart;
@@ -1356,12 +1385,14 @@ export function layout(
         items.push({ para: { getFlow, drafts: hit.drafts } });
         return;
       }
-      const flow = paragraphToFlow(node, ctx.base, offset, true);
+      const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
       const drafts = layoutParagraph(flow, left, right, ctx);
-      cache?.paragraphs.set(node, { left, right, basePos: contentStart, drafts });
+      cache?.paragraphs.set(node, { left, right, basePos: contentStart, marker, drafts });
       items.push({ para: { getFlow: () => flow, drafts } });
     } else if (node.type.name === 'table') {
-      items.push({ table: layoutTable(tableToFlow(node, ctx.base, offset), left, right, ctx) });
+      items.push({
+        table: layoutTable(tableToFlow(node, ctx.base, offset, counter), left, right, ctx),
+      });
     }
   });
   const resolved = placeBlocks(items, config, ctx, { top, bottom });

@@ -1,7 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { undo } from 'prosemirror-history';
-import { createEditingState, moveCaretCommand, wordRangeAt } from './input-bridge.js';
+import { createEditingState, moveCaretCommand, splitListItem, wordRangeAt } from './input-bridge.js';
 
 // EditorView needs a real DOM, so the headless tests cover the state side:
 // plugins, typing transactions and history. The view itself is exercised in
@@ -56,6 +56,43 @@ describe('moveCaretCommand', () => {
 
     // compute → null leaves the key to the next handler
     expect(moveCaretCommand(() => null)(state, () => undefined)).toBe(false);
+  });
+});
+
+describe('splitListItem', () => {
+  const listSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const listAttrs = { list: { numId: '1', level: 0 } };
+
+  it('splits keeping the list attrs (the new item stays in the list)', () => {
+    const d = listSchema.node('doc', null, [
+      listSchema.node('paragraph', listAttrs, [listSchema.text('item')]),
+    ]);
+    let state = createEditingState(d);
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 5))); // end of "item"
+    const handled = splitListItem(state, (tr) => (state = state.apply(tr)));
+    expect(handled).toBe(true);
+    expect(state.doc.childCount).toBe(2);
+    expect(state.doc.child(1).attrs['list']).toEqual(listAttrs.list);
+  });
+
+  it('exits the list on an empty item, and defers outside lists', () => {
+    const d = listSchema.node('doc', null, [listSchema.node('paragraph', listAttrs)]);
+    let state = createEditingState(d);
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1)));
+    expect(splitListItem(state, (tr) => (state = state.apply(tr)))).toBe(true);
+    expect(state.doc.child(0).attrs['list']).toBeNull(); // left the list
+
+    const plain = createEditingState(
+      listSchema.node('doc', null, [listSchema.node('paragraph', null, [listSchema.text('x')])]),
+    );
+    expect(splitListItem(plain, () => undefined)).toBe(false); // base keymap's turn
   });
 });
 

@@ -3,6 +3,7 @@ import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import type { Node as PMNode } from 'prosemirror-model';
 import { EditorState, TextSelection, type Command, type Transaction } from 'prosemirror-state';
+import { canSplit } from 'prosemirror-transform';
 import { EditorView } from 'prosemirror-view';
 
 // Re-exported so hosts type against ONE prosemirror-state identity (mixing
@@ -28,6 +29,32 @@ export function moveCaretCommand(
     return true;
   };
 }
+
+/** Enter inside a list item: split the paragraph KEEPING its list attrs (the
+ *  layout engine recounts markers, so the new item numbers itself and
+ *  everything below renumbers). Enter on an EMPTY item exits the list, like
+ *  Word. Returns false outside lists so the base keymap takes over. */
+export const splitListItem: Command = (state, dispatch) => {
+  const { $from, $to } = state.selection;
+  const parent = $from.parent;
+  if (!parent.isTextblock || !parent.attrs['list']) return false;
+  if ($from.parent !== $to.parent) return false; // cross-block selection → default handling
+
+  if (parent.content.size === 0) {
+    // Empty item: leave the list instead of adding another empty marker.
+    dispatch?.(
+      state.tr.setNodeMarkup($from.before(), null, { ...parent.attrs, list: null }),
+    );
+    return true;
+  }
+
+  const tr = state.tr.deleteSelection();
+  const pos = tr.selection.from;
+  if (!canSplit(tr.doc, pos)) return false;
+  tr.split(pos, 1, [{ type: parent.type, attrs: parent.attrs }]);
+  dispatch?.(tr);
+  return true;
+};
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 

@@ -12,6 +12,7 @@ import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import {
   InputBridge,
   moveCaretCommand,
+  splitListItem,
   type Command,
   type EditorState,
   type Transaction,
@@ -137,6 +138,7 @@ export class App implements OnDestroy {
     this.bridge = new InputBridge({
       doc,
       keys: {
+        Enter: splitListItem, // continue lists; falls through outside them
         ArrowUp: this.verticalCmd(-1),
         ArrowDown: this.verticalCmd(1),
         'Shift-ArrowUp': this.verticalCmd(-1, true),

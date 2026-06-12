@@ -769,6 +769,37 @@ describe('layout with page chrome (header/footer)', () => {
   });
 });
 
+describe('live list numbering', () => {
+  const numbering = {
+    '1': { key: 'a0', levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } } },
+  };
+  const listSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+', attrs: { numbering: { default: null } } },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const li = (text: string) =>
+    listSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [listSchema.text(text)]);
+  const markersOf = (resolved: ReturnType<typeof layout>) =>
+    resolved.pages[0].lines.map((l) => l.segments[0]?.text);
+
+  it('counts markers at layout time and renumbers cached paragraphs', () => {
+    const a = li('one');
+    const b = li('two');
+    const doc1 = listSchema.node('doc', { numbering }, [a, b]);
+    const cache = createLayoutCache();
+    expect(markersOf(layout(doc1, config(), cache))).toEqual(['1.', '2.']);
+
+    // Insert a new first item; a and b keep node identity (cache hits) but
+    // their markers shift — the cache must not serve the stale '1.'/'2.'.
+    const doc2 = listSchema.node('doc', { numbering }, [li('zero'), a, b]);
+    expect(markersOf(layout(doc2, config(), cache))).toEqual(['1.', '2.', '3.']);
+  });
+});
+
 describe('layout with LayoutCache', () => {
   const schema = new Schema({
     nodes: {

@@ -1,6 +1,12 @@
 import JSZip from 'jszip';
 import { Node as PMNode, Mark } from 'prosemirror-model';
-import { schema, type Align, type Indent, type ListInfo } from '@shadow-garden/bapbong-model';
+import {
+  schema,
+  type Align,
+  type Indent,
+  type ListInfo,
+  type NumberingDefs,
+} from '@shadow-garden/bapbong-model';
 import {
   attrOf,
   child,
@@ -226,7 +232,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     ...ctx.styles.resolveStylePPr(pStyleId),
     pPr,
   ];
-  const list = parseList(lastWith(pPrChain, 'w:numPr'), ctx.numbering);
+  const list = parseList(lastWith(pPrChain, 'w:numPr'));
   if (list) {
     const lvlPPr = ctx.numbering.levelPPr(list.numId, list.level);
     if (lvlPPr) pPrChain.splice(pPrChain.length - 1, 0, lvlPPr);
@@ -393,14 +399,15 @@ function parseAlign(pPr: OoxmlNode | undefined): Align | null {
   }
 }
 
-/** Read a paragraph's list membership (w:numPr) and advance the counter. */
-function parseList(pPr: OoxmlNode | undefined, numbering: NumberingResolver): ListInfo | null {
+/** Read a paragraph's list membership (w:numPr). The marker string is NOT
+ *  resolved here — the layout engine recounts markers from the doc's
+ *  numbering defs every pass, so edits renumber live. */
+function parseList(pPr: OoxmlNode | undefined): ListInfo | null {
   const numPr = child(pPr, 'w:numPr');
   const numId = attrOf(child(numPr, 'w:numId'), 'w:val');
   if (numId === undefined || numId === '0') return null; // 0 cancels numbering
   const ilvl = Number(attrOf(child(numPr, 'w:ilvl'), 'w:val') ?? '0');
-  const level = Number.isNaN(ilvl) ? 0 : ilvl;
-  return { numId, level, marker: numbering.next(numId, level) };
+  return { numId, level: Number.isNaN(ilvl) ? 0 : ilvl };
 }
 
 interface LogicalCell {
@@ -559,9 +566,13 @@ async function readPartRels(zip: JSZip, partPath: string): Promise<OoxmlNode | u
   return xml ? parseXml(xml) : undefined;
 }
 
-function storyDoc(blocks: PMNode[]): PMNode {
-  // doc content is `block+` — guarantee at least one paragraph.
-  return schema.nodes.doc.create(null, blocks.length > 0 ? blocks : [schema.nodes.paragraph.create()]);
+function storyDoc(blocks: PMNode[], numbering: NumberingDefs | null): PMNode {
+  // doc content is `block+` — guarantee at least one paragraph. The numbering
+  // defs ride the doc so markers can be recounted live at layout time.
+  return schema.nodes.doc.create(
+    numbering ? { numbering } : null,
+    blocks.length > 0 ? blocks : [schema.nodes.paragraph.create()],
+  );
 }
 
 async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
@@ -613,7 +624,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
-  const doc = storyDoc(body ? parseBlocks(body, ctx) : []);
+  const doc = storyDoc(body ? parseBlocks(body, ctx) : [], ctx.numbering.defs);
 
   // Headers/footers referenced by the section properties.
   const headers: Record<string, PMNode> = {};
@@ -631,7 +642,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
         if (!xml) continue;
         const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
         const el = child(parseXml(xml), root);
-        store[type] = storyDoc(el ? parseBlocks(el, partCtx) : []);
+        store[type] = storyDoc(el ? parseBlocks(el, partCtx) : [], ctx.numbering.defs);
       }
     };
     await collect('w:headerReference', headers, 'w:hdr');

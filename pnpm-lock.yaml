@@ -47,6 +47,9 @@ importers:
       prosemirror-state:
         specifier: ^1.4.4
         version: 1.4.4
+      prosemirror-transform:
+        specifier: ^1.10.0
+        version: 1.12.0
       prosemirror-view:
         specifier: ^1.41.3
         version: 1.41.9
@@ -202,6 +205,9 @@ importers:
       prosemirror-state:
         specifier: ^1.4.4
         version: 1.4.4
+      prosemirror-transform:
+        specifier: ^1.10.0
+        version: 1.12.0
       prosemirror-view:
         specifier: ^1.41.3
         version: 1.41.9
@@ -211,6 +217,9 @@ importers:
       '@shadow-garden/bapbong-contracts':
         specifier: workspace:^
         version: link:../contracts
+      '@shadow-garden/bapbong-model':
+        specifier: workspace:^
+        version: link:../model
       prosemirror-model:
         specifier: ^1.25.7
         version: 1.25.8

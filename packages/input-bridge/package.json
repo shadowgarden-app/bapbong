@@ -25,16 +25,23 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:input"],
+    "tags": [
+      "scope:input"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/input-bridge/dist",
           "main": "packages/input-bridge/src/index.ts",
           "tsConfig": "packages/input-bridge/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/input-bridge/src"
         }
       }
@@ -46,6 +53,7 @@
     "prosemirror-keymap": "^1.2.3",
     "prosemirror-model": "^1.25.7",
     "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.10.0",
     "prosemirror-view": "^1.41.3"
   }
 }

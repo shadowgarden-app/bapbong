@@ -11,7 +11,14 @@ import { Schema } from 'prosemirror-model';
  */
 export const schema = new Schema({
   nodes: {
-    doc: { content: 'block+' },
+    doc: {
+      content: 'block+',
+      attrs: {
+        // NumberingDefs (numbering.ts) — list markers are recomputed from
+        // these at layout time, so edits renumber live. Importer-set.
+        numbering: { default: null },
+      },
+    },
 
     paragraph: {
       group: 'block',
@@ -232,11 +239,12 @@ function paragraphStyle(attrs: ParagraphAttrs): string {
   return parts.join('; ');
 }
 
-/** Value of a list paragraph's `list` attribute. `marker` is the resolved
- *  number/bullet string (e.g. "1.", "2.a", "•"); the numbering engine owns
- *  recomputation when the document is edited. */
+/** Value of a list paragraph's `list` attribute. The marker string ("1.",
+ *  "2.a", "•") is NOT stored — it's recomputed at layout time from the doc's
+ *  numbering defs, so edits renumber live. `marker` remains only for legacy
+ *  callers that pass pre-resolved markers straight to the layout engine. */
 export interface ListInfo {
   numId: string;
   level: number;
-  marker: string;
+  marker?: string;
 }
