@@ -147,6 +147,17 @@ export interface FlowTableRow {
   header?: boolean;
 }
 
+/** Which table borders are visible (w:tblBorders). OOXML tables have NO
+ *  borders unless declared — absence of this object means draw nothing. */
+export interface TableBorders {
+  top?: boolean;
+  bottom?: boolean;
+  left?: boolean;
+  right?: boolean;
+  insideH?: boolean;
+  insideV?: boolean;
+}
+
 /** Cell padding overrides (px) from w:tblCellMar; unset sides use defaults. */
 export interface CellPadding {
   left?: number;
@@ -160,6 +171,7 @@ export interface FlowTable {
   type: 'table';
   rows: FlowTableRow[];
   cellPadding?: CellPadding;
+  borders?: TableBorders;
 }
 
 export type FlowBlock = FlowParagraph | FlowTable;
@@ -251,6 +263,8 @@ export interface ResolvedTable {
   /** Bottom edge (px from the table top) of the repeating header band, when
    *  the table's leading rows are marked as header rows. */
   headerBottom?: number;
+  /** Visible borders; absent → the table paints borderless (OOXML default). */
+  borders?: TableBorders;
 }
 
 /** A floating image placed on a page (page-local coordinates, px). */

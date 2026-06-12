@@ -104,9 +104,13 @@ h2 {
 }
 .preview td,
 .preview th {
-  border: 1px solid #c8c8d0;
   padding: 4px 8px;
   vertical-align: top;
+}
+/* OOXML tables are borderless unless w:tblBorders says otherwise. */
+.preview table[data-borders] td,
+.preview table[data-borders] th {
+  border: 1px solid #c8c8d0;
 }
 .preview img {
   max-width: 100%;

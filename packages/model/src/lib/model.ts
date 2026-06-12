@@ -94,9 +94,12 @@ export const schema = new Schema({
         // w:tblCellMar overrides (px: {left,right,top,bottom}), or null for
         // Word defaults. Importer-set (same rationale as paragraph attrs).
         cellPadding: { default: null },
+        // w:tblBorders visibility { top, bottom, left, right, insideH,
+        // insideV }, or null — OOXML tables are borderless unless declared.
+        borders: { default: null },
       },
       parseDOM: [{ tag: 'table' }],
-      toDOM: () => ['table', ['tbody', 0]],
+      toDOM: (node) => ['table', node.attrs['borders'] ? { 'data-borders': '1' } : {}, ['tbody', 0]],
     },
     table_row: {
       content: 'table_cell+',

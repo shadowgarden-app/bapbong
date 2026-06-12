@@ -44,6 +44,9 @@ const image = (relId, sizePx, alt) =>
 
 const heading = (text) => p(run(text, '<w:b/><w:sz w:val="28"/>'), jc('left'));
 
+// Lưới viền đầy đủ — OOXML mặc định KHÔNG có viền; bảng nào muốn lưới phải khai.
+const TBL_BORDERS = `<w:tblPr><w:tblBorders><w:top w:val="single"/><w:bottom w:val="single"/><w:left w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr>`;
+
 /** A chapter = heading + body paragraphs + one "special" showcase element. */
 function chapter(n, special) {
   return [
@@ -96,6 +99,7 @@ const SPECIALS = [
   {
     title: 'Bảng: độ rộng cột, gộp ngang và dọc',
     xml: `<w:tbl>
+      ${TBL_BORDERS}
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="3315"/><w:gridCol w:w="3315"/></w:tblGrid>
       <w:tr>
         ${td(p(run('Khu vực', '<w:b/>')))}
@@ -227,6 +231,7 @@ function buildDocumentXml() {
     heading('11. Hàng cao hơn một trang'),
     p(run('Hàng thứ nhất của bảng sau chứa 60 đoạn — cao hơn cả một trang, buộc phải tách giữa hàng.')),
     `<w:tbl>
+      ${TBL_BORDERS}
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
       <w:tr>
         ${td(p(run('Nhãn của hàng siêu cao', '<w:b/>')))}

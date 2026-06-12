@@ -381,6 +381,20 @@ describe('layoutBlocks', () => {
     expect(pages[1].tables?.[0]?.cells[0].lines).toHaveLength(3); // intact row
   });
 
+  it('carries border visibility onto split fragments', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [[cell('r1')], [cell('r2')], [cell('r3')], [cell('r4')], [cell('r5')]].map(
+        (cells) => ({ cells }),
+      ),
+      borders: { top: true, insideH: true },
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    expect(pages[0].tables?.[0]?.borders).toEqual({ top: true, insideH: true });
+    expect(pages[1].tables?.[0]?.borders).toEqual({ top: true, insideH: true });
+  });
+
   it('splits a row taller than the page mid-row and re-stacks the remainder', () => {
     // content height 60. Row 1: cell with 5 paragraphs (80px) > full page.
     const tallCell: FlowTableCell = {

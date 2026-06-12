@@ -365,6 +365,42 @@ describe('importDocx', () => {
     });
   });
 
+  it('parses table border visibility (direct w:tblBorders and via table style)', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:styleId="TableGrid"><w:tblPr><w:tblBorders>
+        <w:top w:val="single"/><w:bottom w:val="single"/><w:left w:val="single"/>
+        <w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/>
+      </w:tblBorders></w:tblPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblBorders><w:top w:val="single"/><w:insideH w:val="nil"/></w:tblBorders></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>direct</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="TableGrid"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>styled</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>bare</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.borders).toEqual({ top: true, insideH: false });
+    expect(doc.child(1).attrs.borders).toEqual({
+      top: true,
+      bottom: true,
+      left: true,
+      right: true,
+      insideH: true,
+      insideV: true,
+    });
+    expect(doc.child(2).attrs.borders).toBeNull(); // borderless by default
+  });
+
   it('parses per-table cell margins (w:tblCellMar)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

@@ -436,6 +436,27 @@ function parseCellMargins(
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** Border visibility from a w:tblBorders node (direct tblPr or table style).
+ *  OOXML tables are borderless unless declared; val none/nil hides a side. */
+function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): Record<string, boolean> | null {
+  const tblPr = child(tbl, 'w:tblPr');
+  const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
+  const bordersEl = child(tblPr, 'w:tblBorders') ?? ctx.styles.resolveTableBorders(styleId);
+  if (!bordersEl) return null;
+  const sides = ['top', 'bottom', 'left', 'right', 'insideH', 'insideV'] as const;
+  const out: Record<string, boolean> = {};
+  let any = false;
+  for (const side of sides) {
+    const el = child(bordersEl, `w:${side}`);
+    if (!el) continue;
+    const val = attrOf(el, 'w:val');
+    const visible = val !== undefined && val !== 'none' && val !== 'nil';
+    out[side] = visible;
+    if (visible) any = true;
+  }
+  return any ? out : null;
+}
+
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const grid = children(child(tbl, 'w:tblGrid'), 'w:gridCol').map((c) =>
     Number(attrOf(c, 'w:w') ?? '0'),
@@ -500,8 +521,12 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   });
 
   const cellPadding = parseCellMargins(tbl);
+  const borders = parseTableBorders(tbl, ctx);
+  const attrs: Record<string, unknown> = {};
+  if (cellPadding) attrs['cellPadding'] = cellPadding;
+  if (borders) attrs['borders'] = borders;
   return schema.nodes.table.create(
-    cellPadding ? { cellPadding } : null,
+    Object.keys(attrs).length > 0 ? attrs : null,
     rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])],
   );
 }

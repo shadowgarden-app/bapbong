@@ -24,6 +24,10 @@ class RecordingCtx {
   strokeRect(...args: unknown[]) { this.record('strokeRect', args); }
   fillText(...args: unknown[]) { this.record('fillText', args); }
   drawImage(...args: unknown[]) { this.record('drawImage', args); }
+  beginPath(...args: unknown[]) { this.record('beginPath', args); }
+  moveTo(...args: unknown[]) { this.record('moveTo', args); }
+  lineTo(...args: unknown[]) { this.record('lineTo', args); }
+  stroke(...args: unknown[]) { this.record('stroke', args); }
 
   of(method: string): Call[] {
     return this.calls.filter((c) => c.method === method);
@@ -123,7 +127,31 @@ describe('CanvasPainter', () => {
     expect(strike.args[1] as number).toBeLessThan(32);
   });
 
-  it('strokes table cell borders and paints cell content', () => {
+  it('draws declared table borders and paints cell content', () => {
+    const ctx = new RecordingCtx();
+    const p = {
+      ...page([]),
+      tables: [
+        {
+          x: 20,
+          y: 20,
+          width: 100,
+          height: 16,
+          borders: { top: true, bottom: true, left: true, right: true, insideH: true, insideV: true },
+          cells: [
+            { x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, lines: [helloLine] },
+          ],
+        },
+      ],
+    };
+    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    // single cell, all edges outer → 4 edges drawn in one path
+    expect(ctx.of('lineTo')).toHaveLength(4);
+    expect(ctx.of('stroke').length).toBeGreaterThan(0);
+    expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]);
+  });
+
+  it('paints tables WITHOUT borders when none are declared (OOXML default)', () => {
     const ctx = new RecordingCtx();
     const p = {
       ...page([]),
@@ -140,10 +168,9 @@ describe('CanvasPainter', () => {
       ],
     };
     new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
-    const border = ctx.of('strokeRect')[1]; // [0] is the page border
-    expect(border.args).toEqual([20.5, 20.5, 100, 16]);
-    expect(border.strokeStyle).toBe('#b0b0b0');
-    expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]);
+    expect(ctx.of('lineTo')).toHaveLength(0); // no borders
+    expect(ctx.of('strokeRect')).toHaveLength(1); // only the page border
+    expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]); // content intact
   });
 
   it('draws selection under the text and the caret on top, page-offset', () => {

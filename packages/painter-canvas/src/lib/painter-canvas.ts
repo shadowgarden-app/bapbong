@@ -301,10 +301,33 @@ export class CanvasPainter {
     pageInfo?: PageInfo,
   ): void {
     const ctx = this.ctx;
-    ctx.strokeStyle = o.tableBorder;
-    ctx.lineWidth = 1;
-    for (const cell of table.cells) {
-      ctx.strokeRect(cell.x + 0.5, yOffset + cell.y + 0.5, cell.width, cell.height);
+    // OOXML tables are borderless unless w:tblBorders (or a table style) says
+    // otherwise. Outer edges use top/bottom/left/right; shared edges insideH/V.
+    const b = table.borders;
+    if (b) {
+      ctx.strokeStyle = o.tableBorder;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const edge = (x1: number, y1: number, x2: number, y2: number) => {
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+      };
+      const eps = 0.5;
+      for (const cell of table.cells) {
+        const x0 = cell.x + 0.5;
+        const x1 = cell.x + cell.width + 0.5;
+        const y0 = yOffset + cell.y + 0.5;
+        const y1 = yOffset + cell.y + cell.height + 0.5;
+        const topOuter = Math.abs(cell.y - table.y) < eps;
+        const bottomOuter = Math.abs(cell.y + cell.height - (table.y + table.height)) < eps;
+        const leftOuter = Math.abs(cell.x - table.x) < eps;
+        const rightOuter = Math.abs(cell.x + cell.width - (table.x + table.width)) < eps;
+        if (topOuter ? b.top : b.insideH) edge(x0, y0, x1, y0);
+        if (bottomOuter ? b.bottom : b.insideH) edge(x0, y1, x1, y1);
+        if (leftOuter ? b.left : b.insideV) edge(x0, y0, x0, y1);
+        if (rightOuter ? b.right : b.insideV) edge(x1, y0, x1, y1);
+      }
+      ctx.stroke();
     }
     for (const cell of table.cells) {
       for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);

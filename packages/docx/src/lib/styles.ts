@@ -13,6 +13,8 @@ interface StyleDef {
   basedOn?: string;
   rPr: RunProps;
   pPr?: OoxmlNode;
+  /** w:tblPr/w:tblBorders of a table style, if any. */
+  tblBorders?: OoxmlNode;
 }
 
 /** Resolved view of `word/styles.xml`: document defaults plus named styles,
@@ -27,6 +29,8 @@ export interface StyleRegistry {
   /** The styleId's w:pPr nodes, base-most first (basedOn ancestors → style).
    *  Callers append the inline pPr and resolve "later wins" per property. */
   resolveStylePPr(styleId: string | undefined): OoxmlNode[];
+  /** The most-derived w:tblBorders a table style (chain) contributes, if any. */
+  resolveTableBorders(styleId: string | undefined): OoxmlNode | undefined;
 }
 
 const EMPTY: RunProps = {};
@@ -49,6 +53,7 @@ export function buildStyleRegistry(
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
       rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme),
       pPr: child(style, 'w:pPr'),
+      tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
     });
   }
 
@@ -70,10 +75,19 @@ export function buildStyleRegistry(
     return def.pPr ? [...base, def.pPr] : base;
   }
 
+  function resolveTblBorders(styleId: string | undefined, seen: Set<string>): OoxmlNode | undefined {
+    if (!styleId || seen.has(styleId)) return undefined;
+    const def = defs.get(styleId);
+    if (!def) return undefined;
+    seen.add(styleId);
+    return def.tblBorders ?? resolveTblBorders(def.basedOn, seen);
+  }
+
   return {
     docDefaults,
     docDefaultsPPr,
     resolveStyle: (styleId) => resolve(styleId, new Set<string>()),
     resolveStylePPr: (styleId) => resolvePPr(styleId, new Set<string>()),
+    resolveTableBorders: (styleId) => resolveTblBorders(styleId, new Set<string>()),
   };
 }

@@ -26,6 +26,7 @@ import type {
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
+  TableBorders,
   TabStop,
 } from '@shadow-garden/bapbong-contracts';
 
@@ -212,6 +213,8 @@ function tableToFlow(node: PMNode, base: FontSpec, nodePos: number): FlowTable {
   const flow: FlowTable = { type: 'table', rows };
   const cellPadding = node.attrs['cellPadding'] as CellPadding | null;
   if (cellPadding) flow.cellPadding = cellPadding;
+  const borders = node.attrs['borders'] as TableBorders | null;
+  if (borders) flow.borders = borders;
   return flow;
 }
 
@@ -810,6 +813,7 @@ function layoutTable(
   });
 
   const resolved: ResolvedTable = { x: contentLeft, y: 0, width: tableWidth, height: rowY[nrows], cells };
+  if (table.borders) resolved.borders = table.borders;
 
   // Repeating header band: contiguous header rows from the top, provided no
   // cell spans out of the band (a rowspan into the body would have to split).
@@ -939,16 +943,19 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
     }
   }
 
-  return {
-    top: { x: table.x, y: 0, width: table.width, height: cut, cells: topCells },
-    rest: {
-      x: table.x,
-      y: 0,
-      width: table.width,
-      height: contHeight + (table.height - splitBottom),
-      cells: restCells,
-    },
+  const top: ResolvedTable = { x: table.x, y: 0, width: table.width, height: cut, cells: topCells };
+  const rest: ResolvedTable = {
+    x: table.x,
+    y: 0,
+    width: table.width,
+    height: contHeight + (table.height - splitBottom),
+    cells: restCells,
   };
+  if (table.borders) {
+    top.borders = table.borders;
+    rest.borders = table.borders;
+  }
+  return { top, rest };
 }
 
 /** Ghost copies of the header-band cells for a continuation fragment. PM
