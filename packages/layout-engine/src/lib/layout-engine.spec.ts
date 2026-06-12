@@ -437,6 +437,53 @@ describe('layoutBlocks', () => {
     expect(line.baseline).toBe(12); // baseline sits at the ascent
   });
 
+  it('jumps to custom left tab stops and fills dot leaders', () => {
+    // content left = 20; stop at +100 with a dot leader (TOC style).
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'Ch1\t9', font: font(), pos: 1 }],
+      tabs: [{ pos: 100, val: 'left', leader: 'dot' }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    const segs = pages[0].lines[0].segments;
+    expect(segs[0]).toMatchObject({ text: 'Ch1', x: 20 });
+    // tab spans 50..120 (70px) → leader of 6 dots (70/10 − 1), pos stripped.
+    expect(segs[1].text).toBe('......');
+    expect(segs[1].pos).toBeUndefined();
+    expect(segs[2]).toMatchObject({ text: '9', x: 120 }); // lands at the stop
+  });
+
+  it('right-aligns and decimal-aligns tab groups at their stops', () => {
+    const right: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a\tend', font: font() }],
+      tabs: [{ pos: 150, val: 'right' }],
+    };
+    const r = layoutBlocks([right], config()).pages[0].lines[0].segments;
+    // group "end" (30px) ENDS at 20+150 → starts at 140.
+    expect(r.at(-1)).toMatchObject({ text: 'end', x: 140 });
+
+    const decimal: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x\t123.45', font: font() }],
+      tabs: [{ pos: 100, val: 'decimal' }],
+    };
+    const d = layoutBlocks([decimal], config()).pages[0].lines[0].segments;
+    // separator sits at the stop: "123" (30px) before 20+100 → group at 90.
+    expect(d.at(-1)).toMatchObject({ text: '123.45', x: 90 });
+  });
+
+  it('falls back to the default grid past the last custom stop', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaaaaaaaaaa\tb', font: font() }], // 12 chars → x=140 > stop 100
+      tabs: [{ pos: 100, val: 'left' }],
+    };
+    const { pages } = layoutBlocks([block], { ...config(), tabWidth: 50 });
+    // past the stop → default grid: next multiple of 50 from 20 → 170.
+    expect(pages[0].lines[0].segments.at(-1)).toMatchObject({ text: 'b', x: 170 });
+  });
+
   it('advances a tab to the next tab stop', () => {
     const block: FlowBlock = { type: 'paragraph', runs: [{ text: 'a\tb', font: font() }] };
     const { pages } = layoutBlocks([block], { ...config(), tabWidth: 50 });

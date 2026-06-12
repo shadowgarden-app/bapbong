@@ -316,6 +316,25 @@ describe('importDocx', () => {
     expect(doc.child(1).textContent).toBe('11/06/2026');
   });
 
+  it('parses w:tab run elements and w:tabs stop definitions', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:styleId="TOC"><w:pPr><w:tabs>
+        <w:tab w:val="right" w:pos="9000" w:leader="dot"/>
+        <w:tab w:val="bar" w:pos="450"/>
+        <w:tab w:val="clear" w:pos="900"/>
+      </w:tabs></w:pPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="TOC"/></w:pPr>
+        <w:r><w:t>Chương 1</w:t><w:tab/><w:t>5</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const p = doc.child(0);
+    expect(p.textContent).toBe('Chương 1\t5'); // <w:tab/> → \t, in order
+    expect(p.attrs.tabs).toEqual([{ pos: 600, val: 'right', leader: 'dot' }]); // bar/clear dropped
+  });
+
   it('imports wp:anchor drawings as floating images', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
       <w:p><w:r><w:drawing><wp:anchor distL="114300" distR="114300" distT="0" distB="0">

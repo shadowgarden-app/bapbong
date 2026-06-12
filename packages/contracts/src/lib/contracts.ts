@@ -92,6 +92,15 @@ export interface FlowFloat {
 /** Paragraph horizontal alignment (mirrors w:jc / CSS text-align). */
 export type Align = 'left' | 'center' | 'right' | 'justify';
 
+/** A custom tab stop (w:tabs/w:tab). `pos` is px from the paragraph's content
+ *  left edge. `val` says how the following text aligns at the stop; `leader`
+ *  fills the jumped-over gap (TOC dots etc.). */
+export interface TabStop {
+  pos: number;
+  val: 'left' | 'right' | 'center' | 'decimal';
+  leader?: 'dot' | 'hyphen' | 'underscore' | 'middleDot';
+}
+
 /** Paragraph indentation in CSS px (mirrors w:ind). `firstLine` and `hanging`
  *  are mutually exclusive; if both are present, `hanging` takes precedence. */
 export interface ParagraphIndent {
@@ -118,6 +127,8 @@ export interface FlowParagraph {
   end?: number;
   /** Floating images anchored to this paragraph. */
   floats?: FlowFloat[];
+  /** Custom tab stops; tabs past the last stop use the default grid. */
+  tabs?: TabStop[];
 }
 
 /** A table cell, holding nested flow content (paragraphs / tables). */

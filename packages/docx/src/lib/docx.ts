@@ -85,11 +85,14 @@ function propsToMarks(p: RunProps): Mark[] {
   return marks;
 }
 
-/** Concatenate a run's `w:t` text segments. */
+/** A run's text content in order: w:t segments plus w:tab elements (→ \t). */
 function runText(run: OoxmlNode): string {
-  return children(run, 'w:t')
-    .map((t) => t.text)
-    .join('');
+  let out = '';
+  for (const node of run.children) {
+    if (node.name === 'w:t') out += node.text;
+    else if (node.name === 'w:tab') out += '\t';
+  }
+  return out;
 }
 
 /** EMU → px where 0 is meaningful (offsets/gaps), unlike emuToPx. */
@@ -225,6 +228,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const list = parseList(lastWith(pPrChain, 'w:numPr'), ctx.numbering);
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
+  const tabs = resolveTabs(pPrChain);
 
   const inline: PMNode[] = [];
   let field: FieldState | null = null;
@@ -274,11 +278,45 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       }
     }
   }
-  const attrs: { list?: ListInfo; align?: Align; indent?: Indent } = {};
+  const attrs: {
+    list?: ListInfo;
+    align?: Align;
+    indent?: Indent;
+    tabs?: { pos: number; val: string; leader?: string }[];
+  } = {};
   if (list) attrs.list = list;
   if (align) attrs.align = align;
   if (indent) attrs.indent = indent;
+  if (tabs) attrs.tabs = tabs;
   return schema.nodes.paragraph.create(attrs, inline);
+}
+
+/** Custom tab stops from the cascade: the most-derived w:tabs list wins
+ *  (per-layer merging with w:val="clear" is a later refinement). 'clear' and
+ *  unsupported 'bar' stops are dropped; 'num' behaves like 'left'. */
+function resolveTabs(
+  chain: (OoxmlNode | undefined)[],
+): { pos: number; val: string; leader?: string }[] | null {
+  const layer = lastWith(chain, 'w:tabs');
+  if (!layer) return null;
+  const stops: { pos: number; val: string; leader?: string }[] = [];
+  for (const tab of children(child(layer, 'w:tabs'), 'w:tab')) {
+    const val = attrOf(tab, 'w:val') ?? 'left';
+    if (val === 'clear' || val === 'bar') continue;
+    const pos = attrOf(tab, 'w:pos');
+    if (pos === undefined) continue;
+    const stop: { pos: number; val: string; leader?: string } = {
+      pos: twipsToPx(Number(pos)),
+      val: val === 'right' || val === 'center' || val === 'decimal' ? val : 'left',
+    };
+    const leader = attrOf(tab, 'w:leader');
+    if (leader && leader !== 'none') {
+      stop.leader =
+        leader === 'hyphen' ? 'hyphen' : leader === 'underscore' ? 'underscore' : leader === 'middleDot' ? 'middleDot' : 'dot';
+    }
+    stops.push(stop);
+  }
+  return stops.length > 0 ? stops.sort((a, b) => a.pos - b.pos) : null;
 }
 
 /** The last (most-derived) pPr layer that carries `childName`, if any. */

@@ -28,6 +28,9 @@ export const schema = new Schema({
         list: { default: null },
         align: { default: null },
         indent: { default: null },
+        // w:tabs — [{ pos, val: 'left'|'right'|'center'|'decimal', leader? }]
+        // in px from the paragraph's content left edge, or null. Importer-set.
+        tabs: { default: null },
       },
       // No getAttrs: nothing in the pipeline parses paragraphs from the DOM
       // yet (the importer builds nodes directly). align/indent still round-trip

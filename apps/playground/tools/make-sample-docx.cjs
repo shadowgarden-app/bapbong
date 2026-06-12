@@ -169,21 +169,53 @@ const SPECIALS = [
       ),
     ].join('\n'),
   },
+  {
+    title: 'Tab stops tùy biến (w:tabs)',
+    xml: [
+      // Mục lục: right-tab + dot leader sát lề phải.
+      ...[
+        ['Chương 1 — Mở đầu', '3'],
+        ['Chương 2 — Kiến trúc canvas', '12'],
+        ['Chương 3 — Ngắt trang bảng', '27'],
+      ].map(([title, page]) =>
+        p(
+          `${run(title)}<w:r><w:tab/></w:r>${run(page)}`,
+          `<w:tabs><w:tab w:val="right" w:pos="9000" w:leader="dot"/></w:tabs>`,
+        ),
+      ),
+      // Chữ ký hai bên: center-tab giữa trang + right-tab sát lề.
+      p(
+        `${run('NGƯỜI LẬP', '<w:b/>')}<w:r><w:tab/></w:r>${run('KẾ TOÁN', '<w:b/>')}<w:r><w:tab/></w:r>${run('GIÁM ĐỐC', '<w:b/>')}`,
+        `<w:tabs><w:tab w:val="center" w:pos="4560"/><w:tab w:val="right" w:pos="9000"/></w:tabs>`,
+      ),
+      // Decimal tab: số tiền thẳng hàng dấu thập phân.
+      ...[
+        ['Phí khởi tạo', '1.250'],
+        ['Thuê bao tháng', '99'],
+        ['Phụ phí vùng xa', '12.345'],
+      ].map(([label, amount]) =>
+        p(
+          `${run(label)}<w:r><w:tab/></w:r>${run(amount + ' đ')}`,
+          `<w:tabs><w:tab w:val="decimal" w:pos="6000"/></w:tabs>`,
+        ),
+      ),
+    ].join('\n'),
+  },
 ];
 
 function buildDocumentXml() {
   const chapters = SPECIALS.map((s, i) => chapter(i + 1, s));
   // Padding chương cuối để chắc chắn tràn sang trang 3.
   const tail = [
-    heading('7. Phần đệm cho đủ độ dài'),
+    heading('8. Phần đệm cho đủ độ dài'),
     ...Array.from({ length: 20 }, (_, i) => p(run(LOREM[i % LOREM.length]), jc('both'))),
-    heading('8. Bảng thứ hai ở cuối tài liệu'),
+    heading('9. Bảng thứ hai ở cuối tài liệu'),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="4515"/><w:gridCol w:w="4515"/></w:tblGrid>
       <w:tr>${td(p(run('Cột trái', '<w:b/>')))}${td(p(run('Cột phải', '<w:b/>')))}</w:tr>
       <w:tr>${td(p(run('Bảng nằm gần cuối tài liệu để kiểm tra ngắt-trang-nguyên-bảng khi không đủ chỗ.')))}${td(p(run('Ô bên phải.')))}</w:tr>
     </w:tbl>`,
-    heading('9. Bảng dài trải qua nhiều trang'),
+    heading('10. Bảng dài trải qua nhiều trang'),
     p(run('Bảng dưới đây có 36 hàng — dài hơn một trang, buộc layout engine phải ngắt trang theo từng hàng (M5).')),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
@@ -192,7 +224,7 @@ function buildDocumentXml() {
         `<w:tr>${td(p(run(`Hàng ${i + 1}`)))}${td(p(run(`Nội dung ô bên phải của hàng ${i + 1} — một dòng mô tả đủ dài để chiếm trọn bề ngang cột và đôi khi xuống dòng thứ hai.`)))}</w:tr>`,
       ).join('\n')}
     </w:tbl>`,
-    heading('10. Hàng cao hơn một trang'),
+    heading('11. Hàng cao hơn một trang'),
     p(run('Hàng thứ nhất của bảng sau chứa 60 đoạn — cao hơn cả một trang, buộc phải tách giữa hàng.')),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>

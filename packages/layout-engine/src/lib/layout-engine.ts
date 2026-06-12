@@ -26,6 +26,7 @@ import type {
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
+  TabStop,
 } from '@shadow-garden/bapbong-contracts';
 
 const DEFAULT_FONT: FontSpec = { family: 'Arial', sizePt: 11, bold: false, italic: false };
@@ -156,6 +157,8 @@ function paragraphToFlow(
     end: contentStart + node.content.size,
   };
   if (floats.length > 0) flow.floats = floats;
+  const tabs = node.attrs['tabs'] as TabStop[] | null;
+  if (tabs) flow.tabs = tabs;
   return flow;
 }
 
@@ -243,6 +246,9 @@ interface Token {
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
   isTab?: boolean;
+  /** Original PM position of a tab token (pos is stripped when it becomes a
+   *  leader decoration, and must be restorable on a re-resolve after a wrap). */
+  origPos?: number;
   /** Absolute PM position of the token's first character / atom. */
   pos?: number;
   /** Size in PM positions (text length, or 1 for an image atom). */
@@ -400,6 +406,76 @@ function wrapParagraph(
     return lineLeft + k * tabWidth - x;
   };
 
+  // ── Custom tab stops (w:tabs) ─────────────────────────────────────
+  const tabStops = block.tabs ? [...block.tabs].sort((a, b) => a.pos - b.pos) : [];
+  const LEADER_CHARS = { dot: '.', hyphen: '-', underscore: '_', middleDot: '·' } as const;
+  const MIN_TAB = 2;
+
+  /** The "tab group": tokens after `ti` up to the next tab, whose total width
+   *  decides where right/center/decimal-aligned text starts. `decimalPrefix`
+   *  is the width before the first '.' or ',' in the group. */
+  const tabGroup = (ti: number) => {
+    let width = 0;
+    let decimalPrefix: number | null = null;
+    for (let j = ti + 1; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (t.isTab) break;
+      if (decimalPrefix === null && t.text != null && !t.field) {
+        const m = /[.,]/.exec(t.text);
+        if (m) decimalPrefix = width + measure(t.text.slice(0, m.index), t.font);
+      }
+      width += t.width;
+    }
+    return { width, decimalPrefix };
+  };
+
+  /** Resolve a tab token at `x`: jump to the next custom stop (aligning the
+   *  following group for right/center/decimal, synthesizing the leader fill),
+   *  or fall back to the default grid past the last stop. */
+  const resolveTab = (token: Token, x: number, ti: number) => {
+    // Re-resolves (after a wrap) must start from a pristine tab token.
+    token.origPos ??= token.pos;
+    token.pos = token.origPos;
+    token.text = '\t';
+
+    const stop = tabStops.find((s) => lineLeft + s.pos > x + 0.5);
+    if (!stop) {
+      token.width = tabAdvance(x);
+      return;
+    }
+    // A stop past the line end clamps to it (Word: TOC stops at the margin).
+    const stopX = Math.min(lineLeft + stop.pos, lineRight);
+    if (stopX <= x + 0.5) {
+      token.width = tabAdvance(x);
+      return;
+    }
+    let w = stopX - x;
+    if (stop.val !== 'left') {
+      const g = tabGroup(ti);
+      const hang =
+        stop.val === 'right'
+          ? g.width
+          : stop.val === 'center'
+            ? g.width / 2
+            : (g.decimalPrefix ?? g.width); // decimal: align the separator
+      w = stopX - x - hang;
+      if (w < MIN_TAB) {
+        token.width = tabAdvance(x); // group doesn't fit before the stop
+        return;
+      }
+    }
+    token.width = w;
+    if (stop.leader) {
+      const ch = LEADER_CHARS[stop.leader] ?? '.';
+      const chW = measure(ch, token.font);
+      const n = chW > 0 ? Math.floor(w / chW) : 0;
+      if (n > 1) {
+        token.text = ch.repeat(n - 1); // a breath of space before the target
+        token.pos = undefined; // decoration — not caret-addressable
+      }
+    }
+  };
+
   const flushLine = (isLast: boolean) => {
     const startX = lineStart();
     const avail = lineRight - startX;
@@ -516,10 +592,11 @@ function wrapParagraph(
   const clusterable = (t: Token) =>
     t.text != null && !t.isSpace && !t.isTab && !t.field && !t.image;
 
-  for (const token of tokens) {
+  for (let ti = 0; ti < tokens.length; ti++) {
+    const token = tokens[ti];
     // Skip leading spaces (but keep a leading tab — it indents the line).
     if (token.isSpace && !token.isTab && lineTokens.length === 0) continue;
-    if (token.isTab) token.width = tabAdvance(lineStart() + lineWidth);
+    if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
     if (clusterable(token) && clusterFont && sameFont(clusterFont, token.font)) {
       token.width = Math.max(0, measure(clusterText + token.text, token.font) - clusterWidth);
     }
@@ -527,7 +604,7 @@ function wrapParagraph(
     if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > lineRight) {
       flushLine(false);
       resetCluster(); // the wrapped token starts a fresh glyph run
-      if (token.isTab) token.width = tabAdvance(lineStart() + lineWidth);
+      if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
       else if (clusterable(token)) token.width = measure(token.text as string, token.font);
     }
     if (clusterable(token)) {
