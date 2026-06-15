@@ -50,12 +50,24 @@ export interface DocxImport {
   page: PageConfig;
 }
 
+/** Footnote/endnote bodies + a counter that numbers references in document
+ *  order. Notes render appended at the document end (endnote-style); true
+ *  page-bottom footnote layout is deferred. */
+interface NotesRegistry {
+  bodies: { footnote: Map<string, OoxmlNode>; endnote: Map<string, OoxmlNode> };
+  refs: { kind: 'footnote' | 'endnote'; id: string; num: number }[];
+  counter: { footnote: number; endnote: number };
+  /** Assign (and remember) the display number for a reference. */
+  ref(kind: 'footnote' | 'endnote', id: string): number;
+}
+
 interface Ctx {
   styles: StyleRegistry;
   numbering: NumberingResolver;
   rels: Map<string, Relationship>;
   media: Map<string, string>; // zip path → data URL
   resolveTheme: ThemeResolver;
+  notes: NotesRegistry;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -155,6 +167,17 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     if (node.name === 'w:t') buf += node.text;
     else if (node.name === 'w:tab') buf += '\t';
     else if (node.name === 'w:sym') buf += symbolChar(attrOf(node, 'w:char'));
+    else if (node.name === 'w:footnoteReference' || node.name === 'w:endnoteReference') {
+      const kind = node.name === 'w:footnoteReference' ? 'footnote' : 'endnote';
+      const id = attrOf(node, 'w:id');
+      if (id && ctx.notes.bodies[kind].has(id)) {
+        flush();
+        const num = ctx.notes.ref(kind, id);
+        out.push(
+          schema.text(String(num), [...marks, schema.marks.vertAlign.create({ value: 'super' })]),
+        );
+      }
+    }
     else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
       flush();
       out.push(schema.nodes.hard_break.create());
@@ -686,6 +709,64 @@ async function readPartRels(zip: JSZip, partPath: string): Promise<OoxmlNode | u
   return xml ? parseXml(xml) : undefined;
 }
 
+/** Load footnotes.xml / endnotes.xml into a numbering registry. Separator
+ *  notes (negative ids / w:type separator) are skipped. */
+async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
+  const bodies = { footnote: new Map<string, OoxmlNode>(), endnote: new Map<string, OoxmlNode>() };
+  const load = async (path: string, root: string, tag: string, into: Map<string, OoxmlNode>) => {
+    const xml = await readPart(zip, path);
+    if (!xml) return;
+    for (const note of children(child(parseXml(xml), root), tag)) {
+      const id = attrOf(note, 'w:id');
+      const type = attrOf(note, 'w:type');
+      if (id === undefined || Number(id) < 1 || (type && type !== 'normal')) continue;
+      into.set(id, note);
+    }
+  };
+  await load('word/footnotes.xml', 'w:footnotes', 'w:footnote', bodies.footnote);
+  await load('word/endnotes.xml', 'w:endnotes', 'w:endnote', bodies.endnote);
+  const reg: NotesRegistry = {
+    bodies,
+    refs: [],
+    counter: { footnote: 0, endnote: 0 },
+    ref(kind, id) {
+      const num = ++reg.counter[kind];
+      reg.refs.push({ kind, id, num });
+      return num;
+    },
+  };
+  return reg;
+}
+
+/** Render referenced notes as an appended section (a heading + one paragraph
+ *  per note prefixed with its superscript number). Page-bottom footnote layout
+ *  is a later milestone. */
+function buildNotesSection(ctx: Ctx): PMNode[] {
+  const { refs, bodies } = ctx.notes;
+  if (refs.length === 0) return [];
+  const out: PMNode[] = [
+    schema.nodes.paragraph.create({ spacing: { before: 12 } }, [
+      schema.text('Chú thích', [schema.marks.strong.create()]),
+    ]),
+  ];
+  for (const { kind, id, num } of refs) {
+    const note = bodies[kind].get(id);
+    if (!note) continue;
+    const blocks = parseBlocks(note, ctx);
+    const marker = schema.text(`${num}. `, [schema.marks.vertAlign.create({ value: 'super' })]);
+    const first = blocks[0];
+    if (first && first.type.name === 'paragraph') {
+      const kids: PMNode[] = [marker];
+      first.forEach((k) => kids.push(k));
+      blocks[0] = schema.nodes.paragraph.create(first.attrs, kids);
+    } else {
+      out.push(schema.nodes.paragraph.create(null, [marker]));
+    }
+    out.push(...blocks);
+  }
+  return out;
+}
+
 function storyDoc(blocks: PMNode[], numbering: NumberingDefs | null): PMNode {
   // doc content is `block+` — guarantee at least one paragraph. The numbering
   // defs ride the doc so markers can be recounted live at layout time.
@@ -732,19 +813,22 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const styles = buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined, resolveTheme);
   const numberingRoot = numberingXml ? parseXml(numberingXml) : undefined;
   const media = await extractMedia(zip);
+  const notes = await buildNotesRegistry(zip);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     styles,
     numbering: buildNumbering(numberingRoot),
     rels,
     media,
     resolveTheme,
+    notes,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
   const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
-  const doc = storyDoc(body ? parseBlocks(body, ctx) : [], ctx.numbering.defs);
+  const bodyBlocks = body ? parseBlocks(body, ctx) : [];
+  const doc = storyDoc([...bodyBlocks, ...buildNotesSection(ctx)], ctx.numbering.defs);
 
   // Headers/footers referenced by the section properties.
   const headers: Record<string, PMNode> = {};

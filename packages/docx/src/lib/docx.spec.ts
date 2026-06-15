@@ -518,6 +518,34 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.borders).toBeNull(); // borderless by default
   });
 
+  it('numbers footnote references and appends the notes section', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>First</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r></w:p>
+      <w:p><w:r><w:t>Second</w:t></w:r><w:r><w:footnoteReference w:id="3"/></w:r></w:p>
+    </w:body></w:document>`;
+    const footnotesXml = `<?xml version="1.0"?><w:footnotes xmlns:w="${W_NS}">
+      <w:footnote w:id="0" w:type="separator"><w:p/></w:footnote>
+      <w:footnote w:id="2"><w:p><w:r><w:t>Note alpha</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="3"><w:p><w:r><w:t>Note beta</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
+        'word/footnotes.xml': footnotesXml,
+      }),
+    );
+    // references render as superscript 1, 2 in document order
+    const p0 = doc.child(0);
+    const ref = p0.child(p0.childCount - 1);
+    expect(ref.text).toBe('1');
+    expect(markMap(ref.marks).vertAlign.value).toBe('super');
+    // appended notes section: heading + the two notes, separator skipped
+    const tail: string[] = [];
+    doc.forEach((n) => tail.push(n.textContent));
+    expect(tail).toContain('Chú thích');
+    expect(tail.join('\n')).toMatch(/1\. Note alpha/);
+    expect(tail.join('\n')).toMatch(/2\. Note beta/);
+  });
+
   it('accepts tracked changes: keeps w:ins text, drops w:del', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>
