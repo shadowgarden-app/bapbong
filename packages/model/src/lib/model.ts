@@ -118,6 +118,8 @@ export const schema = new Schema({
         // w:tblBorders visibility { top, bottom, left, right, insideH,
         // insideV }, or null — OOXML tables are borderless unless declared.
         borders: { default: null },
+        // w:tblPr/w:jc — 'center' | 'right' table alignment, or null (left).
+        align: { default: null },
       },
       parseDOM: [{ tag: 'table' }],
       toDOM: (node) => ['table', node.attrs['borders'] ? { 'data-borders': '1' } : {}, ['tbody', 0]],
@@ -126,6 +128,8 @@ export const schema = new Schema({
       content: 'table_cell+',
       attrs: {
         header: { default: false }, // w:trPr/w:tblHeader — repeat on every page
+        // w:trHeight — { value: px, exact: boolean } or null (auto).
+        height: { default: null },
       },
       // No getAttrs (same rationale as paragraph): the importer sets attrs
       // directly; revisit when HTML paste lands.
@@ -140,6 +144,7 @@ export const schema = new Schema({
         rowspan: { default: 1 },
         colwidth: { default: null }, // px widths of the spanned columns, or null
         background: { default: null }, // w:shd w:fill — cell fill "#RRGGBB"
+        vAlign: { default: null }, // w:vAlign — 'center' | 'bottom' (top default)
       },
       parseDOM: [{ tag: 'td' }, { tag: 'th' }],
       toDOM(node) {

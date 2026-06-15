@@ -243,6 +243,25 @@ describe('layoutBlocks', () => {
     expect(line?.width).toBeCloseTo(100 - 2 * 7.2);
   });
 
+  it('aligns the table, honors trHeight and cell vAlign', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      align: 'center',
+      rows: [
+        {
+          height: { value: 50, exact: false }, // floor → row grows to 50
+          cells: [{ ...cell('x', { colwidth: [100] }), vAlign: 'center' }],
+        },
+      ],
+    };
+    const resolved = layoutBlocks([t], config()).pages[0].tables?.[0];
+    // content [20,220] (200px), table 100px wide, centered → x = 20 + 50.
+    expect(resolved?.x).toBeCloseTo(70);
+    expect(resolved?.cells[0]).toMatchObject({ x: 70, y: 20, height: 50 });
+    // vAlign center: line centered in the 50px row (content 16); +20 page top.
+    expect(resolved?.cells[0].lines[0].y).toBeCloseTo(37);
+  });
+
   it('honors per-table cell margins (w:tblCellMar)', () => {
     const t: FlowBlock = {
       type: 'table',

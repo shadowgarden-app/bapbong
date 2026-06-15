@@ -236,16 +236,21 @@ function tableToFlow(
         rowspan: Number(a['rowspan']) || 1,
         colwidth: (a['colwidth'] as number[] | null) ?? null,
         background: (a['background'] as string | null) ?? undefined,
+        vAlign: (a['vAlign'] as 'center' | 'bottom' | null) ?? undefined,
         content,
       });
     });
     const row: FlowTableRow = { cells };
     if (rowNode.attrs['header'] === true) row.header = true;
+    const height = rowNode.attrs['height'] as { value: number; exact: boolean } | null;
+    if (height) row.height = height;
     rows.push(row);
   });
   const flow: FlowTable = { type: 'table', rows };
   const cellPadding = node.attrs['cellPadding'] as CellPadding | null;
   if (cellPadding) flow.cellPadding = cellPadding;
+  const align = node.attrs['align'] as 'center' | 'right' | null;
+  if (align) flow.align = align;
   const borders = node.attrs['borders'] as TableBorders | null;
   if (borders) flow.borders = borders;
   return flow;
@@ -789,9 +794,16 @@ function layoutTable(
     const share = Math.max(0, (avail - known) / unknown);
     for (let i = 0; i < ncols; i++) if (colWidths[i] === 0) colWidths[i] = share;
   }
-  const colX = new Array<number>(ncols + 1).fill(contentLeft);
+  const tableWidth = colWidths.reduce((s, w) => s + w, 0);
+  // Table alignment (w:jc) shifts the whole grid within the content area.
+  const xShift =
+    table.align === 'center'
+      ? Math.max(0, (avail - tableWidth) / 2)
+      : table.align === 'right'
+        ? Math.max(0, avail - tableWidth)
+        : 0;
+  const colX = new Array<number>(ncols + 1).fill(contentLeft + xShift);
   for (let i = 0; i < ncols; i++) colX[i + 1] = colX[i] + colWidths[i];
-  const tableWidth = colX[ncols] - contentLeft;
 
   // Lay out each cell's content; remember where it sits in the grid.
   interface CellDraft {
@@ -805,6 +817,7 @@ function layoutTable(
     tables: ResolvedTable[];
     contentHeight: number;
     background?: string;
+    vAlign?: 'center' | 'bottom';
   }
   // Per-table cell margins (w:tblCellMar) override the Word defaults.
   const pad = {
@@ -833,6 +846,7 @@ function layoutTable(
         tables: flow.tables,
         contentHeight: flow.height,
         background: cell.background,
+        vAlign: cell.vAlign,
       });
       col += cell.colspan;
     }
@@ -857,6 +871,11 @@ function layoutTable(
       }
     }
   }
+  // w:trHeight: 'exact' forces the row height, otherwise it's a floor.
+  for (let r = 0; r < nrows; r++) {
+    const h = table.rows[r]?.height;
+    if (h) rowHeight[r] = h.exact ? h.value : Math.max(rowHeight[r], h.value);
+  }
   const rowY = new Array<number>(nrows + 1).fill(0);
   for (let r = 0; r < nrows; r++) rowY[r + 1] = rowY[r] + rowHeight[r];
 
@@ -864,7 +883,10 @@ function layoutTable(
   const cells: ResolvedCell[] = cellDrafts.map((c) => {
     let height = 0;
     for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++) height += rowHeight[r];
-    const dy = rowY[c.startRow] + pad.top;
+    // w:vAlign: distribute the slack above/centered for non-top cells.
+    const slack = Math.max(0, height - pad.top - pad.bottom - c.contentHeight);
+    const vOffset = c.vAlign === 'bottom' ? slack : c.vAlign === 'center' ? slack / 2 : 0;
+    const dy = rowY[c.startRow] + pad.top + vOffset;
     const lines = c.lines.map((ln) => ({ ...ln, y: ln.y + dy }));
     c.tables.forEach((t) => offsetTable(t, dy));
     const cell: ResolvedCell = {
@@ -881,7 +903,7 @@ function layoutTable(
     return cell;
   });
 
-  const resolved: ResolvedTable = { x: contentLeft, y: 0, width: tableWidth, height: rowY[nrows], cells };
+  const resolved: ResolvedTable = { x: contentLeft + xShift, y: 0, width: tableWidth, height: rowY[nrows], cells };
   if (table.borders) resolved.borders = table.borders;
 
   // Repeating header band: contiguous header rows from the top, provided no

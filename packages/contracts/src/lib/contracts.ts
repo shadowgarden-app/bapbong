@@ -164,6 +164,8 @@ export interface FlowTableCell {
   colwidth: number[] | null;
   /** Cell fill color (w:shd), e.g. "#D9E2F3". */
   background?: string;
+  /** Vertical alignment of content within the cell (w:vAlign); top default. */
+  vAlign?: 'center' | 'bottom';
   content: FlowBlock[];
 }
 
@@ -172,6 +174,8 @@ export interface FlowTableRow {
   /** Repeat this row at the top of every page the table spans (w:tblHeader).
    *  Only honored for contiguous header rows at the top of the table. */
   header?: boolean;
+  /** Explicit row height (w:trHeight): a floor, or `exact` to force it. */
+  height?: { value: number; exact: boolean };
 }
 
 /** Which table borders are visible (w:tblBorders). OOXML tables have NO
@@ -199,6 +203,8 @@ export interface FlowTable {
   rows: FlowTableRow[];
   cellPadding?: CellPadding;
   borders?: TableBorders;
+  /** Table alignment within the content area (w:jc); left default. */
+  align?: 'center' | 'right';
 }
 
 export type FlowBlock = FlowParagraph | FlowTable;

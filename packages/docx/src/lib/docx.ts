@@ -474,6 +474,7 @@ interface LogicalCell {
   vMerge: 'restart' | 'continue' | null;
   colwidth: number[] | null;
   background: string | null;
+  vAlign: string | null;
   content: PMNode[];
 }
 
@@ -549,20 +550,26 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
           : 'continue'; // omitted w:val defaults to continue
       const widths = grid.length ? grid.slice(col, col + colspan).map(twipsToPx) : [];
       const background = normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
+      const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
+      const vAlign = vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
       const content = parseBlocks(tc, ctx);
       if (content.length === 0) content.push(schema.nodes.paragraph.create());
-      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, content });
+      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, vAlign, content });
       col += colspan;
     }
     return cells;
   });
 
-  // w:trPr/w:tblHeader — OOXML on/off: present means true unless val says no.
-  const headerFlags = children(tbl, 'w:tr').map((tr) => {
-    const el = child(child(tr, 'w:trPr'), 'w:tblHeader');
-    if (!el) return false;
-    const val = attrOf(el, 'w:val');
-    return val !== 'false' && val !== '0';
+  // Per-row trPr: w:tblHeader (on/off) + w:trHeight (px floor / exact).
+  const rowProps = children(tbl, 'w:tr').map((tr) => {
+    const trPr = child(tr, 'w:trPr');
+    const hdr = child(trPr, 'w:tblHeader');
+    const header = hdr ? attrOf(hdr, 'w:val') !== 'false' && attrOf(hdr, 'w:val') !== '0' : false;
+    const trH = child(trPr, 'w:trHeight');
+    const hv = attrOf(trH, 'w:val');
+    const height =
+      hv !== undefined ? { value: twipsToPx(Number(hv)), exact: attrOf(trH, 'w:hRule') === 'exact' } : null;
+    return { header, height };
   });
 
   const colIndex = logicalRows.map((cells) => new Map(cells.map((c) => [c.startCol, c])));
@@ -581,22 +588,34 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       }
       emitted.push(
         schema.nodes.table_cell.create(
-          { colspan: cell.colspan, rowspan, colwidth: cell.colwidth, background: cell.background },
+          {
+            colspan: cell.colspan,
+            rowspan,
+            colwidth: cell.colwidth,
+            background: cell.background,
+            vAlign: cell.vAlign,
+          },
           cell.content,
         ),
       );
     }
+    const rp = rowProps[r];
+    const rowAttrs: Record<string, unknown> = {};
+    if (rp.header) rowAttrs['header'] = true;
+    if (rp.height) rowAttrs['height'] = rp.height;
     return schema.nodes.table_row.create(
-      headerFlags[r] ? { header: true } : null,
+      Object.keys(rowAttrs).length > 0 ? rowAttrs : null,
       emitted.length > 0 ? emitted : [emptyCell()],
     );
   });
 
   const cellPadding = parseCellMargins(tbl);
   const borders = parseTableBorders(tbl, ctx);
+  const jc = attrOf(child(child(tbl, 'w:tblPr'), 'w:jc'), 'w:val');
   const attrs: Record<string, unknown> = {};
   if (cellPadding) attrs['cellPadding'] = cellPadding;
   if (borders) attrs['borders'] = borders;
+  if (jc === 'center' || jc === 'right' || jc === 'end') attrs['align'] = jc === 'end' ? 'right' : jc;
   return schema.nodes.table.create(
     Object.keys(attrs).length > 0 ? attrs : null,
     rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])],

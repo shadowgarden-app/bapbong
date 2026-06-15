@@ -518,6 +518,23 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.borders).toBeNull(); // borderless by default
   });
 
+  it('parses table alignment, row height and cell vAlign', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:jc w:val="center"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:trPr><w:trHeight w:val="600" w:hRule="atLeast"/></w:trPr>
+          <w:tc><w:tcPr><w:vAlign w:val="center"/></w:tcPr><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const table = doc.child(0);
+    expect(table.attrs.align).toBe('center');
+    expect(table.child(0).attrs.height).toEqual({ value: 40, exact: false }); // 600tw → 40px
+    expect(table.child(0).child(0).attrs.vAlign).toBe('center');
+  });
+
   it('parses per-table cell margins (w:tblCellMar)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>
