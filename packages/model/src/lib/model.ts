@@ -198,6 +198,15 @@ export const schema = new Schema({
         return ['span', { style: `font-size: ${mark.attrs['size'] as number}pt` }, 0];
       },
     },
+    // w:vertAlign — superscript / subscript
+    vertAlign: {
+      attrs: { value: {} }, // 'super' | 'sub'
+      parseDOM: [
+        { tag: 'sup', getAttrs: () => ({ value: 'super' }) },
+        { tag: 'sub', getAttrs: () => ({ value: 'sub' }) },
+      ],
+      toDOM: (mark) => [mark.attrs['value'] === 'sub' ? 'sub' : 'sup', 0],
+    },
     // w:highlight / w:shd w:fill — run background color ("#RRGGBB")
     highlight: {
       attrs: { color: {} },

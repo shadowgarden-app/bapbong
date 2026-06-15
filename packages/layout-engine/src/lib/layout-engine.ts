@@ -41,6 +41,7 @@ const PT_TO_PX = 96 / 72;
 const LINE_HEIGHT_FACTOR = 1.2;
 const BASELINE_FACTOR = 0.8;
 const DEFAULT_TAB_WIDTH = 48; // 0.5in, Word's default tab interval
+const SUPERSUB_SCALE = 0.66; // super/subscript font size relative to the run
 // Default cell padding (px) — Word's w:tblCellMar defaults: 108 twips
 // (= 7.2px) left/right, 0 top/bottom. Tables can override via cellPadding.
 const CELL_PAD_X = 7.2;
@@ -87,6 +88,9 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   if (findMark(marks, 'strike')) run.strike = true;
   const highlight = findMark(marks, 'highlight');
   if (highlight) run.background = String(highlight.attrs['color']);
+  const va = findMark(marks, 'vertAlign');
+  // The font is reduced in tokenizeInline (one place, both entry paths).
+  if (va) run.vertAlign = va.attrs['value'] === 'sub' ? 'sub' : 'super';
   return run;
 }
 
@@ -276,6 +280,7 @@ interface Token {
   underline?: boolean;
   strike?: boolean;
   background?: string;
+  vertAlign?: 'super' | 'sub';
   width: number;
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
@@ -324,6 +329,10 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
       },
     ];
   }
+  // Super/subscript render at a reduced size — apply once, here.
+  const font = inline.vertAlign
+    ? { ...inline.font, sizePt: inline.font.sizePt * SUPERSUB_SCALE }
+    : inline.font;
   let offset = 0;
   return inline.text
     .split(/(\t| +)/)
@@ -335,13 +344,14 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
       offset += part.length;
       return {
         text: part,
-        font: inline.font,
+        font,
         color: inline.color,
         link: inline.link,
         underline: inline.underline,
         strike: inline.strike,
         background: inline.background,
-        width: isTab ? 0 : ctx.measure(part, inline.font),
+        vertAlign: inline.vertAlign,
+        width: isTab ? 0 : ctx.measure(part, font),
         isSpace,
         isTab,
         pos,
@@ -562,6 +572,7 @@ function wrapParagraph(
           underline: t.underline,
           strike: t.strike,
           background: t.background,
+          vertAlign: t.vertAlign,
           width: t.width,
           pos: t.pos,
         };

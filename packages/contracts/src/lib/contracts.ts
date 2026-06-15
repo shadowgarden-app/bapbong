@@ -42,6 +42,8 @@ export interface InlineRun {
   strike?: boolean;
   /** Highlight / shading background color, e.g. "#FFFF00". */
   background?: string;
+  /** Superscript / subscript (font already reduced; painter shifts baseline). */
+  vertAlign?: 'super' | 'sub';
   /** Absolute ProseMirror position of the run's first character. */
   pos?: number;
 }
@@ -226,6 +228,9 @@ export interface LayoutSegment {
   strike?: boolean;
   /** Highlight / shading background painted behind the text. */
   background?: string;
+  /** Superscript / subscript: the painter shifts the baseline (font is
+   *  already the reduced size). */
+  vertAlign?: 'super' | 'sub';
   /** Measured width (px) — lets the painter draw text decorations without
    *  re-measuring at paint time. */
   width?: number;

@@ -282,7 +282,11 @@ export class CanvasPainter {
         seg.field && pageInfo
           ? String(seg.field === 'pageNumber' ? pageInfo.page : pageInfo.pages)
           : seg.text;
-      ctx.fillText(text, seg.x, baselineY);
+      // Super/subscript shift the (already-reduced) glyphs off the baseline.
+      const em = seg.font.sizePt * (96 / 72);
+      const segY =
+        seg.vertAlign === 'super' ? baselineY - em * 0.5 : seg.vertAlign === 'sub' ? baselineY + em * 0.2 : baselineY;
+      ctx.fillText(text, seg.x, segY);
       // Text decorations use the width measured at layout time — the painter
       // never measures.
       if ((seg.underline || seg.strike) && seg.width) {

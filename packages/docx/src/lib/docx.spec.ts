@@ -292,6 +292,22 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.indent).toEqual({ left: 144, hanging: 24 });
   });
 
+  it('parses w:vertAlign as super/subscript marks', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:t>E=mc</w:t></w:r>
+        <w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>2</w:t></w:r>
+        <w:r><w:t>, H</w:t></w:r>
+        <w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>2</w:t></w:r>
+        <w:r><w:t>O</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(markMap(p.child(1).marks).vertAlign.value).toBe('super');
+    expect(markMap(p.child(3).marks).vertAlign.value).toBe('sub');
+  });
+
   it('parses highlight/shading on runs and w:shd cell fills', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

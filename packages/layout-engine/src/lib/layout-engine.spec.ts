@@ -195,6 +195,20 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[2]).toMatchObject({ x: 20, y: 36, width: 80 });
   });
 
+  it('reduces super/subscript font size and flags the segment', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        { text: 'x', font: font() },
+        { text: '2', font: font({ sizePt: 10 }), vertAlign: 'super' },
+      ],
+    };
+    const [base, sup] = layoutBlocks([block], config()).pages[0].lines[0].segments;
+    expect(base.vertAlign).toBeUndefined();
+    expect(sup.vertAlign).toBe('super');
+    expect(sup.font.sizePt).toBeCloseTo(6.6); // 10 × 0.66
+  });
+
   it('carries highlight onto segments and cell fill onto resolved cells', () => {
     const block: FlowBlock = {
       type: 'paragraph',

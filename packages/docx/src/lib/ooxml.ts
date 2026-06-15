@@ -111,6 +111,7 @@ export interface RunProps {
   sizePt?: number; // points
   fontFamily?: string;
   highlight?: string; // background "#RRGGBB" (w:highlight / w:shd w:fill)
+  vertAlign?: 'super' | 'sub'; // w:vertAlign
 }
 
 /** Word's 16 named highlight colors → hex. */
@@ -177,6 +178,10 @@ export function parseRunProps(
   const rFonts = child(rPr, 'w:rFonts');
   const family = attrOf(rFonts, 'w:ascii') ?? attrOf(rFonts, 'w:hAnsi');
   if (family) props.fontFamily = family;
+
+  const va = attrOf(child(rPr, 'w:vertAlign'), 'w:val');
+  if (va === 'superscript') props.vertAlign = 'super';
+  else if (va === 'subscript') props.vertAlign = 'sub';
 
   // Background: w:highlight (named) takes precedence, else w:shd w:fill (hex).
   const hl = attrOf(child(rPr, 'w:highlight'), 'w:val');

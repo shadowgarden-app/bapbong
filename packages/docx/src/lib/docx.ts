@@ -100,6 +100,7 @@ function propsToMarks(p: RunProps): Mark[] {
   if (p.sizePt !== undefined) marks.push(schema.marks.fontSize.create({ size: p.sizePt }));
   if (p.fontFamily) marks.push(schema.marks.fontFamily.create({ family: p.fontFamily }));
   if (p.highlight) marks.push(schema.marks.highlight.create({ color: p.highlight }));
+  if (p.vertAlign) marks.push(schema.marks.vertAlign.create({ value: p.vertAlign }));
   return marks;
 }
 
