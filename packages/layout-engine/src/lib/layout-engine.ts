@@ -151,6 +151,7 @@ function paragraphToFlow(
       }
     } else if (child.type.name === 'page_field')
       runs.push(resolveField(child, base, contentStart + offset));
+    else if (child.type.name === 'hard_break') runs.push({ break: true, pos: contentStart + offset });
   });
   const list = node.attrs['list'] as { marker?: string } | null;
   const align = node.attrs['align'] as Align | null | undefined;
@@ -275,6 +276,8 @@ interface Token {
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
   isTab?: boolean;
+  /** A forced line break (w:br): flushes the current line. */
+  isBreak?: boolean;
   /** Original PM position of a tab token (pos is stripped when it becomes a
    *  leader decoration, and must be restorable on a re-resolve after a wrap). */
   origPos?: number;
@@ -287,6 +290,9 @@ interface Token {
 /** Tokenize one inline item: words / spaces / tabs for text, a single atom for
  *  images. Tab widths are placeholders, resolved against tab stops at layout. */
 function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
+  if ('break' in inline) {
+    return [{ isBreak: true, font: ctx.base, width: 0, isSpace: false, pos: inline.pos, size: 1 }];
+  }
   if ('src' in inline) {
     return [
       {
@@ -632,6 +638,14 @@ function wrapParagraph(
 
   for (let ti = 0; ti < tokens.length; ti++) {
     const token = tokens[ti];
+    // A forced break (w:br) ends the current line; its PM position is the slot
+    // after the line so the caret can sit on it.
+    if (token.isBreak) {
+      if (token.pos != null) prevTo = token.pos + 1;
+      flushLine(false);
+      resetCluster();
+      continue;
+    }
     // Skip leading spaces (but keep a leading tab — it indents the line).
     if (token.isSpace && !token.isTab && lineTokens.length === 0) continue;
     if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);

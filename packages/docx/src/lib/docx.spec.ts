@@ -292,6 +292,22 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.indent).toEqual({ left: 144, hanging: 24 });
   });
 
+  it('maps w:br to hard_break nodes and page breaks to pageBreakBefore', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>line1</w:t><w:br/><w:t>line2</w:t></w:r></w:p>
+      <w:p><w:r><w:br w:type="page"/><w:t>next page</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>also new</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p0 = doc.child(0);
+    expect(p0.childCount).toBe(3); // text, hard_break, text
+    expect(p0.child(1).type.name).toBe('hard_break');
+    expect(p0.child(0).text).toBe('line1');
+    expect(p0.child(2).text).toBe('line2');
+    expect(doc.child(1).attrs.pageBreakBefore).toBe(true); // w:br type=page
+    expect(doc.child(2).attrs.pageBreakBefore).toBe(true); // w:pageBreakBefore
+  });
+
   it('imports page size and margins from w:sectPr', async () => {
     // US Letter (12240×15840 twips) landscape, 0.5in (720tw) margins.
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>

@@ -462,6 +462,21 @@ describe('layoutBlocks', () => {
     expect(lc.y).toBe(84);
   });
 
+  it('forces a new line at a hard break', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        { text: 'a', font: font(), pos: 1 },
+        { break: true, pos: 2 },
+        { text: 'b', font: font(), pos: 3 },
+      ],
+    };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].lines).toHaveLength(2);
+    expect(pages[0].lines[0].segments[0].text).toBe('a');
+    expect(pages[0].lines[1].segments[0].text).toBe('b');
+  });
+
   it('starts a pageBreakBefore paragraph on a new page', () => {
     const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };
     const b: FlowBlock = { type: 'paragraph', runs: [{ text: 'b', font: font() }], pageBreakBefore: true };
@@ -567,10 +582,10 @@ describe('toFlowBlocks', () => {
     expect(block.type).toBe('paragraph');
     if (block.type !== 'paragraph') return;
     const [r0, r1] = block.runs;
-    // both are text runs; narrow off the InlineRun | InlineImage union.
-    expect('src' in r0).toBe(false);
-    if (!('src' in r0)) expect(r0.font.bold).toBe(true);
-    if (!('src' in r1)) expect(r1.font.sizePt).toBe(20);
+    // both are text runs; narrow off the FlowInline union (text has `text`).
+    expect('text' in r0).toBe(true);
+    if ('text' in r0) expect(r0.font.bold).toBe(true);
+    if ('text' in r1) expect(r1.font.sizePt).toBe(20);
   });
 
   it('emits an inline image from an image node', () => {

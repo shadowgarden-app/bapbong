@@ -63,9 +63,15 @@ export interface InlineField {
   pos?: number;
 }
 
-/** One piece of a paragraph's inline content. Distinguish with
- *  `'src' in x` (image) / `'field' in x` (field) / otherwise text run. */
-export type FlowInline = InlineRun | InlineImage | InlineField;
+/** A forced line break inside a paragraph (w:br). Occupies one PM position. */
+export interface InlineBreak {
+  break: true;
+  pos?: number;
+}
+
+/** One piece of a paragraph's inline content. Distinguish with `'src' in x`
+ *  (image) / `'field' in x` (field) / `'break' in x` / otherwise text run. */
+export type FlowInline = InlineRun | InlineImage | InlineField | InlineBreak;
 
 /** A floating image (wp:anchor) anchored to a paragraph. Text flows around
  *  its rectangle ('square'), skips below it ('topAndBottom'), or ignores it

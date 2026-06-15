@@ -55,6 +55,16 @@ export const schema = new Schema({
 
     text: { group: 'inline' },
 
+    // A soft line break inside a paragraph (w:br) — forces a new line without
+    // ending the paragraph. Occupies one PM position, like an image atom.
+    hard_break: {
+      inline: true,
+      group: 'inline',
+      selectable: false,
+      parseDOM: [{ tag: 'br' }],
+      toDOM: () => ['br'],
+    },
+
     // Inline image. `src` is typically a data URL (the importer inlines the
     // embedded media); width/height are CSS pixels, null if unspecified.
     image: {

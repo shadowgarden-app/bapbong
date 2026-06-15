@@ -101,13 +101,32 @@ function propsToMarks(p: RunProps): Mark[] {
   return marks;
 }
 
-/** A run's text content in order: w:t segments plus w:tab elements (→ \t). */
-function runText(run: OoxmlNode): string {
-  let out = '';
+/** Whether a run carries an explicit page break (w:br w:type="page"). */
+function hasPageBreak(run: OoxmlNode): boolean {
+  return run.children.some((n) => n.name === 'w:br' && attrOf(n, 'w:type') === 'page');
+}
+
+/** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
+ *  (page breaks are handled at the paragraph level, not here). */
+function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
+  const image = parseImage(run, ctx);
+  if (image) return [image];
+
+  const out: PMNode[] = [];
+  let buf = '';
+  const flush = () => {
+    if (buf.length > 0) out.push(schema.text(buf, marks));
+    buf = '';
+  };
   for (const node of run.children) {
-    if (node.name === 'w:t') out += node.text;
-    else if (node.name === 'w:tab') out += '\t';
+    if (node.name === 'w:t') buf += node.text;
+    else if (node.name === 'w:tab') buf += '\t';
+    else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
+      flush();
+      out.push(schema.nodes.hard_break.create());
+    }
   }
+  flush();
   return out;
 }
 
@@ -193,16 +212,12 @@ function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href
   return marks;
 }
 
-/** Map one w:r into inline nodes (image or marked text), optionally hyperlinked. */
+/** Map one w:r into inline nodes (image, hard breaks or marked text). */
 function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string | null): PMNode[] {
   const marks = runMarks(run, paraBase, ctx, href);
-
-  const image = parseImage(run, ctx);
-  if (image) return [href ? image.mark([schema.marks.link.create({ href })]) : image];
-
-  const text = runText(run);
-  if (text.length === 0) return [];
-  return [schema.text(text, marks)];
+  const nodes = runInlineNodes(run, marks, ctx);
+  // A linked image keeps its link mark; image nodes carry no marks otherwise.
+  return href ? nodes.map((n) => (n.type.name === 'image' ? n.mark(marks) : n)) : nodes;
 }
 
 /** PAGE / NUMPAGES from a field instruction, or null for any other field. */
@@ -254,8 +269,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
 
   const inline: PMNode[] = [];
   let field: FieldState | null = null;
+  let pageBreak = lastWith(pPrChain, 'w:pageBreakBefore') !== undefined;
   for (const node of p.children) {
     if (node.name === 'w:r') {
+      if (hasPageBreak(node)) pageBreak = true;
       const fldType = attrOf(child(node, 'w:fldChar'), 'w:fldCharType');
       if (fldType === 'begin') {
         field = { instr: '', resultRuns: [], phase: 'instr' };
@@ -306,12 +323,14 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     indent?: Indent;
     spacing?: Spacing;
     tabs?: { pos: number; val: string; leader?: string }[];
+    pageBreakBefore?: boolean;
   } = {};
   if (list) attrs.list = list;
   if (align) attrs.align = align;
   if (indent) attrs.indent = indent;
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
+  if (pageBreak) attrs.pageBreakBefore = true;
   return schema.nodes.paragraph.create(attrs, inline);
 }
 
