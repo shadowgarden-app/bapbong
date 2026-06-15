@@ -122,6 +122,23 @@ function hasPageBreak(run: OoxmlNode): boolean {
   return run.children.some((n) => n.name === 'w:br' && attrOf(n, 'w:type') === 'page');
 }
 
+/** Flatten tracked changes for the "accept all changes" view: w:ins unwraps
+ *  to its child runs (inserted text was otherwise lost — the run loop only
+ *  walked top-level w:r), w:del is dropped (deleted text). Other nodes pass
+ *  through. Recurses so ins/del can nest or wrap hyperlinks. */
+function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
+  const out: OoxmlNode[] = [];
+  for (const node of nodes) {
+    if (node.name === 'w:del' || node.name === 'w:moveFrom') continue;
+    if (node.name === 'w:ins' || node.name === 'w:moveTo') {
+      out.push(...effectiveChildren(node.children));
+    } else {
+      out.push(node);
+    }
+  }
+  return out;
+}
+
 /** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
  *  (page breaks are handled at the paragraph level, not here). */
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
@@ -287,7 +304,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const inline: PMNode[] = [];
   let field: FieldState | null = null;
   let pageBreak = lastWith(pPrChain, 'w:pageBreakBefore') !== undefined;
-  for (const node of p.children) {
+  for (const node of effectiveChildren(p.children)) {
     if (node.name === 'w:r') {
       if (hasPageBreak(node)) pageBreak = true;
       const fldType = attrOf(child(node, 'w:fldChar'), 'w:fldCharType');

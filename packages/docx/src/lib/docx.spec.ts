@@ -518,6 +518,20 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.borders).toBeNull(); // borderless by default
   });
 
+  it('accepts tracked changes: keeps w:ins text, drops w:del', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:t>Keep </w:t></w:r>
+        <w:ins><w:r><w:t>inserted </w:t></w:r></w:ins>
+        <w:del><w:r><w:delText>removed </w:delText></w:r></w:del>
+        <w:r><w:t>tail</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    // inserted text is preserved (was dropped before); deleted text is gone.
+    expect(doc.child(0).textContent).toBe('Keep inserted tail');
+  });
+
   it('parses per-cell borders (w:tcBorders) and w:sym symbols', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:sym w:font="Wingdings" w:char="F0B7"/><w:t> item</w:t></w:r></w:p>
