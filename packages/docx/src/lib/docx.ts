@@ -31,6 +31,13 @@ export type DocxInput = ArrayBuffer | Uint8Array | Blob;
  * `word/document.xml` we parsed it from. The raw string is kept so a later
  * export step can round-trip parts of the document we don't model yet.
  */
+/** Page geometry in CSS px (structurally a bapbong-contracts PageConfig). */
+export interface PageConfig {
+  width: number;
+  height: number;
+  margin: { top: number; right: number; bottom: number; left: number };
+}
+
 export interface DocxImport {
   doc: PMNode;
   rawDocumentXml: string;
@@ -38,6 +45,8 @@ export interface DocxImport {
   headers: Record<string, PMNode>;
   /** Footer stories keyed by w:type. */
   footers: Record<string, PMNode>;
+  /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
+  page: PageConfig;
 }
 
 interface Ctx {
@@ -676,5 +685,38 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     await collect('w:footerReference', footers, 'w:ftr');
   }
 
-  return { doc, rawDocumentXml, headers, footers };
+  return { doc, rawDocumentXml, headers, footers, page: parsePageGeometry(sectPr) };
+}
+
+/** Page size + margins from w:sectPr (twips→px). Defaults to A4 @96dpi with
+ *  1in margins; landscape swaps w/h. Header/footer distances aren't returned —
+ *  the layout engine uses its own chrome distance. */
+function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
+  const A4: PageConfig = {
+    width: 794,
+    height: 1123,
+    margin: { top: 96, right: 96, bottom: 96, left: 96 },
+  };
+  if (!sectPr) return A4;
+  const pgSz = child(sectPr, 'w:pgSz');
+  const pgMar = child(sectPr, 'w:pgMar');
+  const px = (el: OoxmlNode | undefined, attr: string, fallback: number) => {
+    const v = el && attrOf(el, attr);
+    return v === undefined || v === null ? fallback : twipsToPx(Number(v));
+  };
+  let width = px(pgSz, 'w:w', A4.width);
+  let height = px(pgSz, 'w:h', A4.height);
+  if (attrOf(pgSz, 'w:orient') === 'landscape' && height > width) {
+    [width, height] = [height, width];
+  }
+  return {
+    width,
+    height,
+    margin: {
+      top: px(pgMar, 'w:top', 96),
+      right: px(pgMar, 'w:right', 96),
+      bottom: px(pgMar, 'w:bottom', 96),
+      left: px(pgMar, 'w:left', 96),
+    },
+  };
 }

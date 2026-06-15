@@ -292,6 +292,28 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.indent).toEqual({ left: 144, hanging: 24 });
   });
 
+  it('imports page size and margins from w:sectPr', async () => {
+    // US Letter (12240×15840 twips) landscape, 0.5in (720tw) margins.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>x</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:pgSz w:w="12240" w:h="15840" w:orient="landscape"/>
+        <w:pgMar w:top="720" w:right="1080" w:bottom="720" w:left="1080"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const { page } = await importDocx(await makeDocx(documentXml));
+    expect(page).toEqual({
+      width: 1056, // 15840tw → 1056px (landscape swap)
+      height: 816, // 12240tw → 816px
+      margin: { top: 48, right: 72, bottom: 48, left: 72 },
+    });
+  });
+
+  it('defaults page geometry to A4 when sectPr omits it', async () => {
+    const { page } = await importDocx(await makeDocx(DOCUMENT_XML));
+    expect(page).toEqual({ width: 794, height: 1123, margin: { top: 96, right: 96, bottom: 96, left: 96 } });
+  });
+
   it('parses w:spacing (before/after + line rule)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:pPr><w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>

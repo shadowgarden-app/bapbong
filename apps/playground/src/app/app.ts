@@ -27,7 +27,7 @@ import type {
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
-/** A4 at 96 dpi with 1in margins. */
+/** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
 const A4: PageConfig = {
   width: 794,
   height: 1123,
@@ -65,6 +65,8 @@ export class App implements OnDestroy {
   // Page chrome from the imported docx ('default' header/footer).
   private chromeHeader: ProseMirrorNode | undefined;
   private chromeFooter: ProseMirrorNode | undefined;
+  // Page geometry from the imported docx's sectPr (A4 until imported).
+  private page: PageConfig = A4;
   private dragAnchor: number | null = null;
   // Incremental re-layout: unchanged paragraphs skip measuring on each keystroke.
   // Replaced wholesale when late-loading fonts invalidate every measurement.
@@ -109,11 +111,12 @@ export class App implements OnDestroy {
     this.fileName.set(name);
 
     try {
-      const { doc, headers, footers } = await importDocx(bytes);
+      const { doc, headers, footers, page } = await importDocx(bytes);
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
       this.chromeHeader = headers['default'];
       this.chromeFooter = footers['default'];
+      this.page = page;
       // Measure with the real fonts, not their fallbacks.
       await ensureFontsLoaded(collectFontFamilies(doc, this.chromeHeader, this.chromeFooter));
       this.setupEditor(doc);
@@ -160,7 +163,7 @@ export class App implements OnDestroy {
     if (docChanged || !this.resolved) {
       this.resolved = layout(
         state.doc,
-        { page: A4, measureText: this.measureText, measureMetrics: this.measureMetrics },
+        { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
         this.layoutCache,
         { header: this.chromeHeader, footer: this.chromeFooter },
       );
