@@ -104,6 +104,19 @@ function propsToMarks(p: RunProps): Mark[] {
   return marks;
 }
 
+/** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode. Unknown codes
+ *  map to the raw code point; symbol-font fidelity is out of scope. */
+const SYMBOL_MAP: Record<string, string> = {
+  F0B7: '•', F06C: '●', F0A7: '▪', F0A8: '▫', F0FC: '✔', F0FB: '✗', F0E0: '→',
+};
+function symbolChar(code: string | undefined): string {
+  if (!code) return '';
+  const upper = code.toUpperCase();
+  if (SYMBOL_MAP[upper]) return SYMBOL_MAP[upper];
+  const n = parseInt(code, 16);
+  return Number.isNaN(n) ? '' : String.fromCodePoint(n >= 0xf000 ? n - 0xf000 + 0x20 : n);
+}
+
 /** Whether a run carries an explicit page break (w:br w:type="page"). */
 function hasPageBreak(run: OoxmlNode): boolean {
   return run.children.some((n) => n.name === 'w:br' && attrOf(n, 'w:type') === 'page');
@@ -124,6 +137,7 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   for (const node of run.children) {
     if (node.name === 'w:t') buf += node.text;
     else if (node.name === 'w:tab') buf += '\t';
+    else if (node.name === 'w:sym') buf += symbolChar(attrOf(node, 'w:char'));
     else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
       flush();
       out.push(schema.nodes.hard_break.create());
@@ -475,6 +489,7 @@ interface LogicalCell {
   colwidth: number[] | null;
   background: string | null;
   vAlign: string | null;
+  borders: Record<string, boolean> | null;
   content: PMNode[];
 }
 
@@ -508,25 +523,32 @@ function parseCellMargins(
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** Per-side visibility from a w:tblBorders / w:tcBorders node. A side's val of
+ *  none/nil records `false` (explicitly hidden), any other value `true`. */
+function parseBordersEl(bordersEl: OoxmlNode | undefined, sides: readonly string[]): Record<string, boolean> | null {
+  if (!bordersEl) return null;
+  const out: Record<string, boolean> = {};
+  for (const side of sides) {
+    const el = child(bordersEl, `w:${side}`);
+    if (!el) continue;
+    const val = attrOf(el, 'w:val');
+    out[side] = val !== undefined && val !== 'none' && val !== 'nil';
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+const TABLE_SIDES = ['top', 'bottom', 'left', 'right', 'insideH', 'insideV'] as const;
+const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
+
 /** Border visibility from a w:tblBorders node (direct tblPr or table style).
  *  OOXML tables are borderless unless declared; val none/nil hides a side. */
 function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): Record<string, boolean> | null {
   const tblPr = child(tbl, 'w:tblPr');
   const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
   const bordersEl = child(tblPr, 'w:tblBorders') ?? ctx.styles.resolveTableBorders(styleId);
-  if (!bordersEl) return null;
-  const sides = ['top', 'bottom', 'left', 'right', 'insideH', 'insideV'] as const;
-  const out: Record<string, boolean> = {};
-  let any = false;
-  for (const side of sides) {
-    const el = child(bordersEl, `w:${side}`);
-    if (!el) continue;
-    const val = attrOf(el, 'w:val');
-    const visible = val !== undefined && val !== 'none' && val !== 'nil';
-    out[side] = visible;
-    if (visible) any = true;
-  }
-  return any ? out : null;
+  const out = parseBordersEl(bordersEl, TABLE_SIDES);
+  // Only treat the table as bordered if at least one side is actually visible.
+  return out && Object.values(out).some(Boolean) ? out : null;
 }
 
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
@@ -552,9 +574,10 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       const background = normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
       const vAlign = vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
+      const borders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
       const content = parseBlocks(tc, ctx);
       if (content.length === 0) content.push(schema.nodes.paragraph.create());
-      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, vAlign, content });
+      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, vAlign, borders, content });
       col += colspan;
     }
     return cells;
@@ -594,6 +617,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
             colwidth: cell.colwidth,
             background: cell.background,
             vAlign: cell.vAlign,
+            borders: cell.borders,
           },
           cell.content,
         ),

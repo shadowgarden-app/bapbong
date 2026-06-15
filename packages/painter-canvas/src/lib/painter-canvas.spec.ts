@@ -173,6 +173,24 @@ describe('CanvasPainter', () => {
     expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]);
   });
 
+  it('draws per-cell border overrides even with no table borders', () => {
+    const ctx = new RecordingCtx();
+    const p = {
+      ...page([]),
+      tables: [
+        {
+          x: 20, y: 20, width: 100, height: 16,
+          cells: [
+            { x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, borders: { bottom: true }, lines: [] },
+          ],
+        },
+      ],
+    };
+    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    // only the bottom edge → one line segment despite no table borders
+    expect(ctx.of('lineTo')).toHaveLength(1);
+  });
+
   it('paints tables WITHOUT borders when none are declared (OOXML default)', () => {
     const ctx = new RecordingCtx();
     const p = {

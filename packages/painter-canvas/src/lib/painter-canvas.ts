@@ -321,8 +321,9 @@ export class CanvasPainter {
     }
     // OOXML tables are borderless unless w:tblBorders (or a table style) says
     // otherwise. Outer edges use top/bottom/left/right; shared edges insideH/V.
+    // A cell's own w:tcBorders override its four edges.
     const b = table.borders;
-    if (b) {
+    if (b || table.cells.some((c) => c.borders)) {
       ctx.strokeStyle = o.tableBorder;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -332,6 +333,7 @@ export class CanvasPainter {
       };
       const eps = 0.5;
       for (const cell of table.cells) {
+        const cb = cell.borders;
         const x0 = cell.x + 0.5;
         const x1 = cell.x + cell.width + 0.5;
         const y0 = yOffset + cell.y + 0.5;
@@ -340,10 +342,11 @@ export class CanvasPainter {
         const bottomOuter = Math.abs(cell.y + cell.height - (table.y + table.height)) < eps;
         const leftOuter = Math.abs(cell.x - table.x) < eps;
         const rightOuter = Math.abs(cell.x + cell.width - (table.x + table.width)) < eps;
-        if (topOuter ? b.top : b.insideH) edge(x0, y0, x1, y0);
-        if (bottomOuter ? b.bottom : b.insideH) edge(x0, y1, x1, y1);
-        if (leftOuter ? b.left : b.insideV) edge(x0, y0, x0, y1);
-        if (rightOuter ? b.right : b.insideV) edge(x1, y0, x1, y1);
+        // Cell border wins; else the table's outer/inside edge.
+        if (cb?.top ?? (topOuter ? b?.top : b?.insideH)) edge(x0, y0, x1, y0);
+        if (cb?.bottom ?? (bottomOuter ? b?.bottom : b?.insideH)) edge(x0, y1, x1, y1);
+        if (cb?.left ?? (leftOuter ? b?.left : b?.insideV)) edge(x0, y0, x0, y1);
+        if (cb?.right ?? (rightOuter ? b?.right : b?.insideV)) edge(x1, y0, x1, y1);
       }
       ctx.stroke();
     }

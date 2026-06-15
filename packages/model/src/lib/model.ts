@@ -145,6 +145,7 @@ export const schema = new Schema({
         colwidth: { default: null }, // px widths of the spanned columns, or null
         background: { default: null }, // w:shd w:fill — cell fill "#RRGGBB"
         vAlign: { default: null }, // w:vAlign — 'center' | 'bottom' (top default)
+        borders: { default: null }, // w:tcBorders per-side visibility override
       },
       parseDOM: [{ tag: 'td' }, { tag: 'th' }],
       toDOM(node) {

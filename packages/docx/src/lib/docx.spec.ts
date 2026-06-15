@@ -518,6 +518,22 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.borders).toBeNull(); // borderless by default
   });
 
+  it('parses per-cell borders (w:tcBorders) and w:sym symbols', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:sym w:font="Wingdings" w:char="F0B7"/><w:t> item</w:t></w:r></w:p>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc>
+          <w:tcPr><w:tcBorders><w:bottom w:val="single"/><w:top w:val="nil"/></w:tcBorders></w:tcPr>
+          <w:p><w:r><w:t>x</w:t></w:r></w:p>
+        </w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    expect(doc.child(0).textContent).toBe('• item'); // F0B7 → bullet
+    expect(doc.child(1).child(0).child(0).attrs.borders).toEqual({ bottom: true, top: false });
+  });
+
   it('parses table alignment, row height and cell vAlign', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

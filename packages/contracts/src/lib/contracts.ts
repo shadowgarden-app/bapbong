@@ -166,6 +166,8 @@ export interface FlowTableCell {
   background?: string;
   /** Vertical alignment of content within the cell (w:vAlign); top default. */
   vAlign?: 'center' | 'bottom';
+  /** Per-cell border overrides (w:tcBorders); each side overrides the table. */
+  borders?: TableBorders;
   content: FlowBlock[];
 }
 
@@ -289,6 +291,8 @@ export interface ResolvedCell {
   lines: LayoutLine[];
   /** Cell fill color, painted behind the content. */
   background?: string;
+  /** Per-cell border overrides; each side overrides the table's edge. */
+  borders?: TableBorders;
   /** Tables nested inside this cell. */
   tables?: ResolvedTable[];
 }

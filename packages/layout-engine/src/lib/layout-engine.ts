@@ -237,6 +237,7 @@ function tableToFlow(
         colwidth: (a['colwidth'] as number[] | null) ?? null,
         background: (a['background'] as string | null) ?? undefined,
         vAlign: (a['vAlign'] as 'center' | 'bottom' | null) ?? undefined,
+        borders: (a['borders'] as TableBorders | null) ?? undefined,
         content,
       });
     });
@@ -818,6 +819,7 @@ function layoutTable(
     contentHeight: number;
     background?: string;
     vAlign?: 'center' | 'bottom';
+    borders?: TableBorders;
   }
   // Per-table cell margins (w:tblCellMar) override the Word defaults.
   const pad = {
@@ -847,6 +849,7 @@ function layoutTable(
         contentHeight: flow.height,
         background: cell.background,
         vAlign: cell.vAlign,
+        borders: cell.borders,
       });
       col += cell.colspan;
     }
@@ -899,6 +902,7 @@ function layoutTable(
       lines,
     };
     if (c.background) cell.background = c.background;
+    if (c.borders) cell.borders = c.borders;
     if (c.tables.length > 0) cell.tables = c.tables;
     return cell;
   });
