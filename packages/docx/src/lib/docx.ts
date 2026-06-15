@@ -6,6 +6,7 @@ import {
   type Indent,
   type ListInfo,
   type NumberingDefs,
+  type Spacing,
 } from '@shadow-garden/bapbong-model';
 import {
   attrOf,
@@ -239,6 +240,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   }
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
+  const spacing = resolveSpacing(pPrChain);
   const tabs = resolveTabs(pPrChain);
 
   const inline: PMNode[] = [];
@@ -293,11 +295,13 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     list?: ListInfo;
     align?: Align;
     indent?: Indent;
+    spacing?: Spacing;
     tabs?: { pos: number; val: string; leader?: string }[];
   } = {};
   if (list) attrs.list = list;
   if (align) attrs.align = align;
   if (indent) attrs.indent = indent;
+  if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
   return schema.nodes.paragraph.create(attrs, inline);
 }
@@ -377,6 +381,29 @@ function resolveIndent(chain: (OoxmlNode | undefined)[]): Indent | null {
   if (right !== undefined) out.right = right;
   if (hanging !== undefined) out.hanging = hanging;
   else if (firstLine !== undefined) out.firstLine = firstLine;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Resolve w:spacing through the cascade: the last layer with each attribute
+ *  wins. before/after are twips→px; line is 240ths of a line for lineRule
+ *  'auto' (→ multiplier), else twips→px for 'exact'/'atLeast'. */
+function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
+  const out: Spacing = {};
+  for (const pPr of chain) {
+    const sp = child(pPr, 'w:spacing');
+    if (!sp) continue;
+    const before = attrOf(sp, 'w:before');
+    const after = attrOf(sp, 'w:after');
+    const line = attrOf(sp, 'w:line');
+    const rule = attrOf(sp, 'w:lineRule');
+    if (before !== undefined) out.before = twipsToPx(Number(before));
+    if (after !== undefined) out.after = twipsToPx(Number(after));
+    if (line !== undefined) {
+      const lineRule = rule === 'exact' || rule === 'atLeast' ? rule : 'auto';
+      out.lineRule = lineRule;
+      out.line = lineRule === 'auto' ? Number(line) / 240 : twipsToPx(Number(line));
+    }
+  }
   return Object.keys(out).length > 0 ? out : null;
 }
 

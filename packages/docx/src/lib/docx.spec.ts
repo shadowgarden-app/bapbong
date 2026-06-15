@@ -292,6 +292,18 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.indent).toEqual({ left: 144, hanging: 24 });
   });
 
+  it('parses w:spacing (before/after + line rule)', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:pPr><w:spacing w:line="480" w:lineRule="exact"/></w:pPr><w:r><w:t>b</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    // 240tw=16px before, 120tw=8px after, line 360/240 = 1.5× (auto).
+    expect(doc.child(0).attrs.spacing).toEqual({ before: 16, after: 8, line: 1.5, lineRule: 'auto' });
+    // exact: 480tw → 32px.
+    expect(doc.child(1).attrs.spacing).toEqual({ line: 32, lineRule: 'exact' });
+  });
+
   it('cascades w:jc and w:ind from paragraph styles (pPr)', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:docDefaults><w:pPrDefault><w:pPr><w:jc w:val="both"/></w:pPr></w:pPrDefault></w:docDefaults>

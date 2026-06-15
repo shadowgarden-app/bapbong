@@ -443,6 +443,33 @@ describe('layoutBlocks', () => {
     expect(pages[0].lines[0]).toMatchObject({ from: 7, to: 7 });
   });
 
+  it('applies paragraph spacing (before/after gaps + line multiplier)', () => {
+    const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
+    const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };
+    const b: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      spacing: { before: 10, after: 6, line: 2, lineRule: 'auto' },
+    };
+    const c: FlowBlock = { type: 'paragraph', runs: [{ text: 'c', font: font() }] };
+    const { pages } = layoutBlocks([a, b, c], cfg);
+    const [la, lb, lc] = pages[0].lines;
+    expect(la.y).toBe(20); // top margin
+    // b: before=10 gap → y 36+10=46; line 2× of 16 → height 32.
+    expect(lb.y).toBe(46);
+    expect(lb.height).toBe(32);
+    // c follows b's line (32) + after gap (6): 46+32+6 = 84.
+    expect(lc.y).toBe(84);
+  });
+
+  it('starts a pageBreakBefore paragraph on a new page', () => {
+    const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };
+    const b: FlowBlock = { type: 'paragraph', runs: [{ text: 'b', font: font() }], pageBreakBefore: true };
+    const { pages } = layoutBlocks([a, b], config());
+    expect(pages).toHaveLength(2);
+    expect(pages[1].lines[0].segments[0].text).toBe('b');
+  });
+
   it('uses injected font metrics for the line box and baseline', () => {
     const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
     const { pages } = layoutBlocks([para('hi')], cfg);

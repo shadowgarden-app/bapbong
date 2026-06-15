@@ -25,6 +25,7 @@ import type {
   MeasureMetrics,
   MeasureText,
   ParagraphIndent,
+  ParagraphSpacing,
   ResolvedCell,
   ResolvedChrome,
   ResolvedFloat,
@@ -166,6 +167,9 @@ function paragraphToFlow(
   if (floats.length > 0) flow.floats = floats;
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
+  const spacing = node.attrs['spacing'] as ParagraphSpacing | null;
+  if (spacing) flow.spacing = spacing;
+  if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
   return flow;
 }
 
@@ -581,6 +585,15 @@ function wrapParagraph(
       height = Math.max(maxFontPx * LINE_HEIGHT_FACTOR, maxImagePx);
       baseline = height * BASELINE_FACTOR;
     }
+    // w:spacing/w:line: 'auto' multiplies the natural height (extra space split
+    // below the baseline), 'exact' forces it, 'atLeast' is a floor.
+    const sp = block.spacing;
+    if (sp?.line) {
+      const target =
+        sp.lineRule === 'exact' ? sp.line : sp.lineRule === 'atLeast' ? Math.max(height, sp.line) : height * sp.line;
+      baseline += Math.max(0, target - height) * (sp.lineRule === 'exact' ? baseline / height : 1);
+      height = target;
+    }
     const painted = firstLine && marker ? [marker, ...segments] : segments;
     emit({ x: startX, width: lineRight - startX, height, baseline, segments: painted, images, from, to });
     prevTo = to;
@@ -856,6 +869,10 @@ type ParaItem = {
   /** Pre-wrapped constant-band lines; null when the paragraph anchors floats
    *  (those must wrap at placement time, when their y is known). */
   drafts: LineDraft[] | null;
+  /** w:spacing before/after gaps (px) and a forced page break. */
+  before?: number;
+  after?: number;
+  pageBreakBefore?: boolean;
 };
 type BlockItem = { para: ParaItem } | { table: ResolvedTable };
 
@@ -1127,6 +1144,9 @@ function placeBlocks(
 
   for (const item of items) {
     if ('para' in item) {
+      if (item.para.pageBreakBefore && pageHasContent()) finalizePage();
+      // Space-before: a gap above the paragraph (collapsed away at a page top).
+      if (item.para.before && pageHasContent()) y += item.para.before;
       const drafts = item.para.drafts;
       const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
       const floatsAhead = exclusions.some((ex) => ex.bottom > y && ex.top < y + draftsHeight);
@@ -1139,6 +1159,7 @@ function placeBlocks(
       } else {
         placeParaBanded(item.para.getFlow());
       }
+      if (item.para.after) y += item.para.after; // space-after gap
     } else {
       // Tables flow across pages: split at row boundaries when possible, and
       // mid-row when a single row is taller than a whole page. Header rows
@@ -1240,6 +1261,9 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
           para: {
             getFlow: () => block,
             drafts: block.floats?.length ? null : layoutParagraph(block, left, right, ctx),
+            before: block.spacing?.before,
+            after: block.spacing?.after,
+            pageBreakBefore: block.pageBreakBefore,
           },
         }
       : { table: layoutTable(block, left, right, ctx) },
@@ -1369,10 +1393,18 @@ export function layout(
     if (node.type.name === 'paragraph') {
       const marker = markerFor(node, counter);
       const getFlow = () => paragraphToFlow(node, ctx.base, offset, true, marker);
+      const sp = node.attrs['spacing'] as ParagraphSpacing | null;
+      const para = (drafts: LineDraft[] | null) => ({
+        getFlow,
+        drafts,
+        before: sp?.before,
+        after: sp?.after,
+        pageBreakBefore: node.attrs['pageBreakBefore'] === true,
+      });
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land) — never cached.
       if (nodeHasFloats(node)) {
-        items.push({ para: { getFlow, drafts: null } });
+        items.push({ para: para(null) });
         return;
       }
       const contentStart = offset + 1;
@@ -1382,13 +1414,13 @@ export function layout(
           hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
           hit.basePos = contentStart;
         }
-        items.push({ para: { getFlow, drafts: hit.drafts } });
+        items.push({ para: para(hit.drafts) });
         return;
       }
       const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
       const drafts = layoutParagraph(flow, left, right, ctx);
       cache?.paragraphs.set(node, { left, right, basePos: contentStart, marker, drafts });
-      items.push({ para: { getFlow: () => flow, drafts } });
+      items.push({ para: { ...para(drafts), getFlow: () => flow } });
     } else if (node.type.name === 'table') {
       items.push({
         table: layoutTable(tableToFlow(node, ctx.base, offset, counter), left, right, ctx),

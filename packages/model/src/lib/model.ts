@@ -38,6 +38,10 @@ export const schema = new Schema({
         // w:tabs — [{ pos, val: 'left'|'right'|'center'|'decimal', leader? }]
         // in px from the paragraph's content left edge, or null. Importer-set.
         tabs: { default: null },
+        // w:spacing — { before?, after?, line?, lineRule? }, or null.
+        spacing: { default: null },
+        // w:pageBreakBefore — start this paragraph on a new page.
+        pageBreakBefore: { default: false },
       },
       // No getAttrs: nothing in the pipeline parses paragraphs from the DOM
       // yet (the importer builds nodes directly). align/indent still round-trip
@@ -217,14 +221,22 @@ export interface Indent {
 }
 
 /** Shape of the paragraph node's attrs (for typed toDOM/serialization). */
+export interface Spacing {
+  before?: number;
+  after?: number;
+  line?: number;
+  lineRule?: 'auto' | 'exact' | 'atLeast';
+}
+
 export interface ParagraphAttrs {
   list: ListInfo | null;
   align: Align | null;
   indent: Indent | null;
+  spacing?: Spacing | null;
 }
 
-/** Build an inline CSS `style` string for a paragraph's align/indent, or ''
- *  when nothing applies. Used by toDOM (and the DOM preview in playground). */
+/** Build an inline CSS `style` string for a paragraph's align/indent/spacing,
+ *  or '' when nothing applies. Used by toDOM (and the DOM preview). */
 function paragraphStyle(attrs: ParagraphAttrs): string {
   const parts: string[] = [];
   if (attrs.align) parts.push(`text-align: ${attrs.align}`);
@@ -235,6 +247,13 @@ function paragraphStyle(attrs: ParagraphAttrs): string {
     // hanging wins over firstLine; negative text-indent renders the hang.
     if (ind.hanging) parts.push(`text-indent: ${-ind.hanging}px`);
     else if (ind.firstLine) parts.push(`text-indent: ${ind.firstLine}px`);
+  }
+  const sp = attrs.spacing;
+  if (sp) {
+    if (sp.before) parts.push(`margin-top: ${sp.before}px`);
+    if (sp.after) parts.push(`margin-bottom: ${sp.after}px`);
+    if (sp.line && sp.lineRule === 'auto') parts.push(`line-height: ${sp.line}`);
+    else if (sp.line) parts.push(`line-height: ${sp.line}px`);
   }
   return parts.join('; ');
 }

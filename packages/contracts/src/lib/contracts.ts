@@ -110,6 +110,16 @@ export interface ParagraphIndent {
   hanging?: number;
 }
 
+/** Paragraph spacing (mirrors w:spacing). `before`/`after` are px gaps around
+ *  the paragraph; `line` is the inter-line measure interpreted by `lineRule`:
+ *  'auto' → multiple of the natural line height, 'exact'/'atLeast' → px. */
+export interface ParagraphSpacing {
+  before?: number;
+  after?: number;
+  line?: number;
+  lineRule?: 'auto' | 'exact' | 'atLeast';
+}
+
 /** A block flattened and ready for layout (paragraph only, for now). */
 export interface FlowParagraph {
   type: 'paragraph';
@@ -121,6 +131,11 @@ export interface FlowParagraph {
   align?: Align;
   /** Indentation in CSS px; defaults to no indent when omitted. */
   indent?: ParagraphIndent;
+  /** Line spacing + space before/after; defaults to single, no gaps. */
+  spacing?: ParagraphSpacing;
+  /** Force this paragraph to start a new page (w:pageBreakBefore / a page
+   *  break run at its head). */
+  pageBreakBefore?: boolean;
   /** Absolute PM position where the paragraph's content starts (nodePos + 1). */
   pos?: number;
   /** Absolute PM position after the paragraph's last character. */
