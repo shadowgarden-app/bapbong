@@ -195,6 +195,22 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[2]).toMatchObject({ x: 20, y: 36, width: 80 });
   });
 
+  it('carries highlight onto segments and cell fill onto resolved cells', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font(), background: '#FFFF00' }],
+    };
+    const seg = layoutBlocks([block], config()).pages[0].lines[0].segments[0];
+    expect(seg.background).toBe('#FFFF00');
+
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [{ ...cell('h'), background: '#D9E2F3' }] }],
+    };
+    const resolvedCell = layoutBlocks([t], config()).pages[0].tables?.[0]?.cells[0];
+    expect(resolvedCell?.background).toBe('#D9E2F3');
+  });
+
   it('carries underline/strike flags and measured width onto segments', () => {
     const block: FlowBlock = {
       type: 'paragraph',

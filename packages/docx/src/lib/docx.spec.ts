@@ -292,6 +292,24 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.indent).toEqual({ left: 144, hanging: 24 });
   });
 
+  it('parses highlight/shading on runs and w:shd cell fills', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>hi</w:t></w:r>
+        <w:r><w:rPr><w:shd w:fill="C0E0FF"/></w:rPr><w:t>shaded</w:t></w:r>
+      </w:p>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:tcPr><w:shd w:fill="D9E2F3"/></w:tcPr><w:p><w:r><w:t>head</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(markMap(p.child(0).marks).highlight.color).toBe('#FFFF00'); // named → hex
+    expect(markMap(p.child(1).marks).highlight.color).toBe('#C0E0FF'); // w:shd fill
+    expect(doc.child(1).child(0).child(0).attrs.background).toBe('#D9E2F3'); // cell fill
+  });
+
   it('maps w:br to hard_break nodes and page breaks to pageBreakBefore', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:t>line1</w:t><w:br/><w:t>line2</w:t></w:r></w:p>

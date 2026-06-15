@@ -110,6 +110,28 @@ describe('CanvasPainter', () => {
     expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 310 + 32]);
   });
 
+  it('fills segment highlight behind the text and cell shading behind content', () => {
+    const ctx = new RecordingCtx();
+    const hl = { ...helloLine, segments: [{ x: 20, text: 'Hi', font: font(), background: '#FFFF00', width: 30 }] };
+    const p = {
+      ...page([hl]),
+      tables: [
+        {
+          x: 20, y: 60, width: 100, height: 16,
+          cells: [{ x: 20, y: 60, width: 100, height: 16, colspan: 1, rowspan: 1, background: '#D9E2F3', lines: [] }],
+        },
+      ],
+    };
+    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    const fills = ctx.of('fillRect');
+    const hlFill = fills.find((c) => c.fillStyle === '#FFFF00');
+    expect(hlFill?.args).toEqual([20, 20, 30, 16]); // segment bg over the line box
+    const cellFill = fills.find((c) => c.fillStyle === '#D9E2F3');
+    expect(cellFill?.args).toEqual([20, 60, 100, 16]);
+    // highlight is painted before the glyph
+    expect(ctx.calls.indexOf(hlFill as never)).toBeLessThan(ctx.calls.findIndex((c) => c.method === 'fillText'));
+  });
+
   it('draws underline and strike from layout-measured widths', () => {
     const ctx = new RecordingCtx();
     const decorated = {

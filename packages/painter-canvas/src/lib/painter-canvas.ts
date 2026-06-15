@@ -267,6 +267,13 @@ export class CanvasPainter {
   ): void {
     const ctx = this.ctx;
     const baselineY = yOffset + line.y + line.baseline;
+    // Highlight / shading behind the text first, so glyphs sit on top.
+    for (const seg of line.segments) {
+      if (seg.background && seg.width) {
+        ctx.fillStyle = seg.background;
+        ctx.fillRect(seg.x, yOffset + line.y, seg.width, line.height);
+      }
+    }
     for (const seg of line.segments) {
       ctx.font = fontCss(seg.font);
       ctx.fillStyle = seg.color ?? o.textColor;
@@ -301,6 +308,13 @@ export class CanvasPainter {
     pageInfo?: PageInfo,
   ): void {
     const ctx = this.ctx;
+    // Cell fills (w:shd) first — behind borders and content.
+    for (const cell of table.cells) {
+      if (cell.background) {
+        ctx.fillStyle = cell.background;
+        ctx.fillRect(cell.x, yOffset + cell.y, cell.width, cell.height);
+      }
+    }
     // OOXML tables are borderless unless w:tblBorders (or a table style) says
     // otherwise. Outer edges use top/bottom/left/right; shared edges insideH/V.
     const b = table.borders;

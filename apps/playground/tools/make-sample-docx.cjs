@@ -77,6 +77,8 @@ const SPECIALS = [
         run(', '),
         run('gạch ngang', '<w:strike/>'),
         run(', '),
+        run('tô vàng', '<w:highlight w:val="yellow"/>'),
+        run(', '),
         run('chữ to 14pt', '<w:sz w:val="28"/>'),
         run(' và '),
         run('chữ nhỏ 8pt', '<w:sz w:val="16"/>'),
@@ -102,9 +104,9 @@ const SPECIALS = [
       ${TBL_BORDERS}
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="3315"/><w:gridCol w:w="3315"/></w:tblGrid>
       <w:tr>
-        ${td(p(run('Khu vực', '<w:b/>')))}
-        ${td(p(run('Quý 1', '<w:b/>')))}
-        ${td(p(run('Quý 2', '<w:b/>')))}
+        ${td(p(run('Khu vực', '<w:b/>')), '<w:shd w:fill="D9E2F3"/>')}
+        ${td(p(run('Quý 1', '<w:b/>')), '<w:shd w:fill="D9E2F3"/>')}
+        ${td(p(run('Quý 2', '<w:b/>')), '<w:shd w:fill="D9E2F3"/>')}
       </w:tr>
       <w:tr>
         ${td(p(run('Miền Bắc — ô gộp dọc qua hai hàng')), '<w:vMerge w:val="restart"/>')}

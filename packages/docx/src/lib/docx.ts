@@ -14,6 +14,7 @@ import {
   children,
   findDescendant,
   mergeRunProps,
+  normalizeHex,
   OoxmlNode,
   parseRunProps,
   parseXml,
@@ -98,6 +99,7 @@ function propsToMarks(p: RunProps): Mark[] {
   if (p.color) marks.push(schema.marks.textColor.create({ color: p.color }));
   if (p.sizePt !== undefined) marks.push(schema.marks.fontSize.create({ size: p.sizePt }));
   if (p.fontFamily) marks.push(schema.marks.fontFamily.create({ family: p.fontFamily }));
+  if (p.highlight) marks.push(schema.marks.highlight.create({ color: p.highlight }));
   return marks;
 }
 
@@ -470,6 +472,7 @@ interface LogicalCell {
   colspan: number;
   vMerge: 'restart' | 'continue' | null;
   colwidth: number[] | null;
+  background: string | null;
   content: PMNode[];
 }
 
@@ -544,9 +547,10 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
           ? 'restart'
           : 'continue'; // omitted w:val defaults to continue
       const widths = grid.length ? grid.slice(col, col + colspan).map(twipsToPx) : [];
+      const background = normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
       const content = parseBlocks(tc, ctx);
       if (content.length === 0) content.push(schema.nodes.paragraph.create());
-      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, content });
+      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, content });
       col += colspan;
     }
     return cells;
@@ -576,7 +580,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       }
       emitted.push(
         schema.nodes.table_cell.create(
-          { colspan: cell.colspan, rowspan, colwidth: cell.colwidth },
+          { colspan: cell.colspan, rowspan, colwidth: cell.colwidth, background: cell.background },
           cell.content,
         ),
       );

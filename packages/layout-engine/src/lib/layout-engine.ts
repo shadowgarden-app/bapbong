@@ -85,6 +85,8 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   };
   if (findMark(marks, 'underline')) run.underline = true;
   if (findMark(marks, 'strike')) run.strike = true;
+  const highlight = findMark(marks, 'highlight');
+  if (highlight) run.background = String(highlight.attrs['color']);
   return run;
 }
 
@@ -229,6 +231,7 @@ function tableToFlow(
         colspan: Number(a['colspan']) || 1,
         rowspan: Number(a['rowspan']) || 1,
         colwidth: (a['colwidth'] as number[] | null) ?? null,
+        background: (a['background'] as string | null) ?? undefined,
         content,
       });
     });
@@ -272,6 +275,7 @@ interface Token {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  background?: string;
   width: number;
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
@@ -336,6 +340,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         link: inline.link,
         underline: inline.underline,
         strike: inline.strike,
+        background: inline.background,
         width: isTab ? 0 : ctx.measure(part, inline.font),
         isSpace,
         isTab,
@@ -556,6 +561,7 @@ function wrapParagraph(
           link: t.link,
           underline: t.underline,
           strike: t.strike,
+          background: t.background,
           width: t.width,
           pos: t.pos,
         };
@@ -787,6 +793,7 @@ function layoutTable(
     lines: LayoutLine[];
     tables: ResolvedTable[];
     contentHeight: number;
+    background?: string;
   }
   // Per-table cell margins (w:tblCellMar) override the Word defaults.
   const pad = {
@@ -814,6 +821,7 @@ function layoutTable(
         lines: flow.lines,
         tables: flow.tables,
         contentHeight: flow.height,
+        background: cell.background,
       });
       col += cell.colspan;
     }
@@ -857,6 +865,7 @@ function layoutTable(
       rowspan: c.rowspan,
       lines,
     };
+    if (c.background) cell.background = c.background;
     if (c.tables.length > 0) cell.tables = c.tables;
     return cell;
   });

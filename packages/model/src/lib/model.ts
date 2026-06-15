@@ -139,12 +139,14 @@ export const schema = new Schema({
         colspan: { default: 1 },
         rowspan: { default: 1 },
         colwidth: { default: null }, // px widths of the spanned columns, or null
+        background: { default: null }, // w:shd w:fill — cell fill "#RRGGBB"
       },
       parseDOM: [{ tag: 'td' }, { tag: 'th' }],
       toDOM(node) {
         const attrs: Record<string, string> = {};
         if (node.attrs['colspan'] !== 1) attrs['colspan'] = String(node.attrs['colspan']);
         if (node.attrs['rowspan'] !== 1) attrs['rowspan'] = String(node.attrs['rowspan']);
+        if (node.attrs['background']) attrs['style'] = `background-color: ${node.attrs['background']}`;
         return ['td', attrs, 0];
       },
     },
@@ -194,6 +196,16 @@ export const schema = new Schema({
       ],
       toDOM(mark) {
         return ['span', { style: `font-size: ${mark.attrs['size'] as number}pt` }, 0];
+      },
+    },
+    // w:highlight / w:shd w:fill — run background color ("#RRGGBB")
+    highlight: {
+      attrs: { color: {} },
+      parseDOM: [
+        { style: 'background-color', getAttrs: (value) => ({ color: value as string }) },
+      ],
+      toDOM(mark) {
+        return ['span', { style: `background-color: ${mark.attrs['color'] as string}` }, 0];
       },
     },
     // w:rFonts — font family

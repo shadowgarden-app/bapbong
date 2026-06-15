@@ -40,6 +40,8 @@ export interface InlineRun {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  /** Highlight / shading background color, e.g. "#FFFF00". */
+  background?: string;
   /** Absolute ProseMirror position of the run's first character. */
   pos?: number;
 }
@@ -158,6 +160,8 @@ export interface FlowTableCell {
   rowspan: number;
   /** Px widths of the spanned grid columns, or null to derive equally. */
   colwidth: number[] | null;
+  /** Cell fill color (w:shd), e.g. "#D9E2F3". */
+  background?: string;
   content: FlowBlock[];
 }
 
@@ -220,6 +224,8 @@ export interface LayoutSegment {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  /** Highlight / shading background painted behind the text. */
+  background?: string;
   /** Measured width (px) — lets the painter draw text decorations without
    *  re-measuring at paint time. */
   width?: number;
@@ -270,6 +276,8 @@ export interface ResolvedCell {
   colspan: number;
   rowspan: number;
   lines: LayoutLine[];
+  /** Cell fill color, painted behind the content. */
+  background?: string;
   /** Tables nested inside this cell. */
   tables?: ResolvedTable[];
 }

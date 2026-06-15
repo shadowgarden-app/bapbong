@@ -110,6 +110,22 @@ export interface RunProps {
   color?: string; // "#RRGGBB"
   sizePt?: number; // points
   fontFamily?: string;
+  highlight?: string; // background "#RRGGBB" (w:highlight / w:shd w:fill)
+}
+
+/** Word's 16 named highlight colors → hex. */
+const HIGHLIGHT_COLORS: Record<string, string> = {
+  yellow: '#FFFF00', green: '#00FF00', cyan: '#00FFFF', magenta: '#FF00FF',
+  blue: '#0000FF', red: '#FF0000', darkBlue: '#000080', darkCyan: '#008080',
+  darkGreen: '#008000', darkMagenta: '#800080', darkRed: '#800000',
+  darkYellow: '#808000', darkGray: '#808080', lightGray: '#C0C0C0',
+  black: '#000000', white: '#FFFFFF',
+};
+
+/** Normalize an OOXML hex color ("FF0000" or "#ff0000") to "#FF0000". */
+export function normalizeHex(v: string | undefined): string | undefined {
+  if (!v || v.toLowerCase() === 'auto') return undefined;
+  return v.startsWith('#') ? v.toUpperCase() : `#${v.toUpperCase()}`;
 }
 
 /** Resolve a `w:themeColor` (+ optional tint/shade) to "#RRGGBB". */
@@ -161,6 +177,15 @@ export function parseRunProps(
   const rFonts = child(rPr, 'w:rFonts');
   const family = attrOf(rFonts, 'w:ascii') ?? attrOf(rFonts, 'w:hAnsi');
   if (family) props.fontFamily = family;
+
+  // Background: w:highlight (named) takes precedence, else w:shd w:fill (hex).
+  const hl = attrOf(child(rPr, 'w:highlight'), 'w:val');
+  if (hl && hl !== 'none') {
+    props.highlight = HIGHLIGHT_COLORS[hl] ?? normalizeHex(hl);
+  } else {
+    const hex = normalizeHex(attrOf(child(rPr, 'w:shd'), 'w:fill'));
+    if (hex) props.highlight = hex;
+  }
 
   return props;
 }
