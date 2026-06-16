@@ -65,6 +65,8 @@ export class App implements OnDestroy {
   // Page chrome from the imported docx ('default' header/footer).
   private chromeHeader: ProseMirrorNode | undefined;
   private chromeFooter: ProseMirrorNode | undefined;
+  // Footnote bodies keyed by display number (laid out at the page bottom).
+  private footnotes: Record<number, ProseMirrorNode> | undefined;
   // Page geometry from the imported docx's sectPr (A4 until imported).
   private page: PageConfig = A4;
   private dragAnchor: number | null = null;
@@ -111,11 +113,12 @@ export class App implements OnDestroy {
     this.fileName.set(name);
 
     try {
-      const { doc, headers, footers, page } = await importDocx(bytes);
+      const { doc, headers, footers, footnotes, page } = await importDocx(bytes);
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
       this.chromeHeader = headers['default'];
       this.chromeFooter = footers['default'];
+      this.footnotes = footnotes;
       this.page = page;
       // Measure with the real fonts, not their fallbacks.
       await ensureFontsLoaded(collectFontFamilies(doc, this.chromeHeader, this.chromeFooter));
@@ -166,6 +169,7 @@ export class App implements OnDestroy {
         { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
         this.layoutCache,
         { header: this.chromeHeader, footer: this.chromeFooter },
+        this.footnotes,
       );
       this.pageCount.set(this.resolved.pages.length);
       this.schedulePanelSync(state);

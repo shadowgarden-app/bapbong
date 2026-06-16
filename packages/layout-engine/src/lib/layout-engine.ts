@@ -29,6 +29,7 @@ import type {
   ResolvedCell,
   ResolvedChrome,
   ResolvedFloat,
+  ResolvedFootnotes,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
@@ -46,8 +47,20 @@ const SUPERSUB_SCALE = 0.66; // super/subscript font size relative to the run
 // (= 7.2px) left/right, 0 top/bottom. Tables can override via cellPadding.
 const CELL_PAD_X = 7.2;
 const CELL_PAD_Y = 0;
+// Footnotes render smaller than the body (Word's footnote style ~ 10/12pt).
+const FOOTNOTE_FONT_SCALE = 0.85;
+// Vertical gap reserved above the first footnote line — holds the separator
+// rule with a little breathing room above and below.
+const FOOTNOTE_AREA_GAP = 12;
 
 const sizePx = (font: FontSpec) => font.sizePt * PT_TO_PX;
+
+/** A footnote body laid out flat (relative to y = 0), keyed by display number
+ *  for the placer to pull from when a reference lands on a page. */
+interface FootnoteBody {
+  lines: LayoutLine[];
+  height: number;
+}
 
 /** Shared layout inputs, threaded through paragraph/table/cell layout. */
 interface Ctx {
@@ -91,6 +104,8 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const va = findMark(marks, 'vertAlign');
   // The font is reduced in tokenizeInline (one place, both entry paths).
   if (va) run.vertAlign = va.attrs['value'] === 'sub' ? 'sub' : 'super';
+  const fn = findMark(marks, 'footnote');
+  if (fn) run.footnoteRef = Number(fn.attrs['num']) || undefined;
   return run;
 }
 
@@ -287,6 +302,7 @@ interface Token {
   strike?: boolean;
   background?: string;
   vertAlign?: 'super' | 'sub';
+  footnoteRef?: number;
   width: number;
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
@@ -357,6 +373,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         strike: inline.strike,
         background: inline.background,
         vertAlign: inline.vertAlign,
+        footnoteRef: inline.footnoteRef,
         width: isTab ? 0 : ctx.measure(part, font),
         isSpace,
         isTab,
@@ -583,6 +600,7 @@ function wrapParagraph(
           pos: t.pos,
         };
         if (t.field) seg.field = t.field;
+        if (t.footnoteRef != null) seg.footnoteRef = t.footnoteRef;
         segments.push(seg);
       }
       x += t.width + (t.isSpace && !t.isTab ? extraPerGap : 0);
@@ -1093,6 +1111,7 @@ function placeBlocks(
   config: LayoutConfig,
   ctx: Ctx,
   band?: { top: number; bottom: number },
+  footnotes?: Map<number, FootnoteBody>,
 ): ResolvedLayout {
   const { page } = config;
   const top = band?.top ?? page.margin.top;
@@ -1107,16 +1126,72 @@ function placeBlocks(
   let exclusions: Exclusion[] = []; // floats die at their page's end
   let y = top;
 
+  // Footnotes referenced on the current page, in first-appearance order. Their
+  // bodies are reserved at the page bottom; `limit()` is the body's lowered
+  // floor once that space is committed.
+  let pageFnNums: number[] = [];
+  const pageFnSet = new Set<number>();
+  const noteHeight = (n: number) => footnotes?.get(n)?.height ?? 0;
+  const reservedFor = (nums: number[]) =>
+    nums.length === 0 ? 0 : FOOTNOTE_AREA_GAP + nums.reduce((s, n) => s + noteHeight(n), 0);
+  /** Bottom of the body band, lowered by the footnotes committed to this page. */
+  const limit = () => bottom - reservedFor(pageFnNums);
+  /** Footnote numbers a draft line references that have a known body. */
+  const lineFnNums = (segs: LayoutSegment[]): number[] => {
+    const out: number[] = [];
+    for (const s of segs) {
+      if (s.footnoteRef != null && footnotes?.has(s.footnoteRef) && !out.includes(s.footnoteRef)) {
+        out.push(s.footnoteRef);
+      }
+    }
+    return out;
+  };
+
+  /** Lay the page's reserved footnote bodies out at the bottom, above the
+   *  footer, with a separator rule. Positions are already stripped. */
+  const buildFootnoteArea = (nums: number[]): ResolvedFootnotes => {
+    const areaTop = bottom - reservedFor(nums);
+    let fy = areaTop + FOOTNOTE_AREA_GAP;
+    const out: LayoutLine[] = [];
+    for (const n of nums) {
+      const body = footnotes?.get(n);
+      if (!body) continue;
+      for (const l of body.lines) out.push({ ...l, y: l.y + fy });
+      fy += body.height;
+    }
+    return { separatorY: areaTop + FOOTNOTE_AREA_GAP / 2, lines: out };
+  };
+
   const finalizePage = () => {
     const resolved: ResolvedPage = { index: pages.length, width: page.width, height: page.height, lines };
     if (tables.length > 0) resolved.tables = tables;
     if (pageFloats.length > 0) resolved.floats = pageFloats;
+    if (pageFnNums.length > 0) resolved.footnotes = buildFootnoteArea(pageFnNums);
     pages.push(resolved);
     lines = [];
     tables = [];
     pageFloats = [];
     exclusions = [];
+    pageFnNums = [];
+    pageFnSet.clear();
     y = top;
+  };
+
+  /** Place one finished line, reserving bottom space for any footnotes it
+   *  references. Breaks to a fresh page when the line + its (and the page's
+   *  already-committed) footnotes no longer fit. */
+  const emitLine = (draft: LineDraft) => {
+    let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
+    if (y + draft.height > bottom - reservedFor([...pageFnNums, ...add]) && pageHasContent()) {
+      finalizePage(); // line (and its footnotes) move to the next page
+      add = lineFnNums(draft.segments); // page reset → all refs are fresh
+    }
+    lines.push(draftToLine(draft, y));
+    y += draft.height;
+    for (const n of add) {
+      pageFnNums.push(n);
+      pageFnSet.add(n);
+    }
   };
 
   /** Whether the current page already holds content (so a break is meaningful). */
@@ -1183,7 +1258,7 @@ function placeBlocks(
       ctx,
       (estH) => {
         for (;;) {
-          if (y + estH > bottom && pageHasContent()) {
+          if (y + estH > limit() && pageHasContent()) {
             finalizePage(); // fresh page: exclusions are gone
             continue;
           }
@@ -1194,11 +1269,7 @@ function placeBlocks(
           y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
         }
       },
-      (draft) => {
-        if (y + draft.height > bottom && pageHasContent()) finalizePage();
-        lines.push(draftToLine(draft, y));
-        y += draft.height;
-      },
+      (draft) => emitLine(draft),
     );
   };
 
@@ -1211,11 +1282,7 @@ function placeBlocks(
       const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
       const floatsAhead = exclusions.some((ex) => ex.bottom > y && ex.top < y + draftsHeight);
       if (drafts && !floatsAhead) {
-        for (const d of drafts) {
-          if (y + d.height > bottom && pageHasContent()) finalizePage();
-          lines.push(draftToLine(d, y));
-          y += d.height;
-        }
+        for (const d of drafts) emitLine(d);
       } else {
         placeParaBanded(item.para.getFlow());
       }
@@ -1226,7 +1293,7 @@ function placeBlocks(
       // (w:tblHeader) repeat at the top of every continuation fragment.
       let table = item.table; // laid out relative to y = 0
       for (;;) {
-        const avail = bottom - y;
+        const avail = limit() - y;
         if (table.height <= avail) {
           offsetTable(table, y);
           tables.push(table);
@@ -1235,7 +1302,7 @@ function placeBlocks(
         }
         // The header band repeats only while it leaves reasonable page room.
         const hb =
-          table.headerBottom != null && table.headerBottom < (bottom - top) / 2
+          table.headerBottom != null && table.headerBottom < (limit() - top) / 2
             ? table.headerBottom
             : 0;
         // Prefer the lowest row boundary that still fits (never inside the header).
@@ -1251,7 +1318,7 @@ function placeBlocks(
           for (const cell of table.cells) {
             if (cell.y > hb && cell.y < firstRowBottom) firstRowBottom = cell.y;
           }
-          const fitsFullPage = firstRowBottom - hb <= bottom - top;
+          const fitsFullPage = firstRowBottom - hb <= limit() - top;
           if (fitsFullPage && pageHasContent()) {
             finalizePage(); // retry with a full fresh page
             continue;
@@ -1408,15 +1475,27 @@ function layoutChrome(
   return { lines, tables: flow.tables, height: flow.height };
 }
 
+/** Lay out one footnote body (reduced font) flat from y = 0, stripping PM
+ *  positions (it belongs to a separate note story — never caret-addressable). */
+function layoutFootnoteBody(doc: PMNode, left: number, right: number, ctx: Ctx): FootnoteBody {
+  const fnCtx: Ctx = { ...ctx, base: { ...ctx.base, sizePt: ctx.base.sizePt * FOOTNOTE_FONT_SCALE } };
+  const flow = layoutFlow(toFlowBlocks(doc, fnCtx.base, false), left, right, fnCtx);
+  stripPositions(flow.lines, flow.tables);
+  return { lines: flow.lines, height: flow.height };
+}
+
 /** Lay out a ProseMirror document into paint-ready pages. With a `cache`,
  *  only paragraphs whose node changed since the previous call are re-measured.
  *  `chrome` (page header/footer documents) repeats on every page; the body
- *  band shrinks when a chrome band is taller than the page margin. */
+ *  band shrinks when a chrome band is taller than the page margin. `footnotes`
+ *  (note bodies keyed by display number) are laid out at the bottom of the page
+ *  their reference falls on. */
 export function layout(
   doc: PMNode,
   config: LayoutConfig,
   cache?: LayoutCache,
   chrome?: PageChrome,
+  footnotes?: Record<number, PMNode>,
 ): ResolvedLayout {
   const ctx = buildCtx(config);
   const { page } = config;
@@ -1487,7 +1566,16 @@ export function layout(
       });
     }
   });
-  const resolved = placeBlocks(items, config, ctx, { top, bottom });
+  // Pre-lay footnote bodies so the placer knows their heights up front.
+  let fnMap: Map<number, FootnoteBody> | undefined;
+  if (footnotes) {
+    fnMap = new Map();
+    for (const key of Object.keys(footnotes)) {
+      const num = Number(key);
+      fnMap.set(num, layoutFootnoteBody(footnotes[num], left, right, ctx));
+    }
+  }
+  const resolved = placeBlocks(items, config, ctx, { top, bottom }, fnMap);
 
   // Chrome with page-number fields: re-lay it out now that the page total is
   // known, so the field slot is as wide as the widest number it will show.

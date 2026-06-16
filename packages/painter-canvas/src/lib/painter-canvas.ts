@@ -249,6 +249,20 @@ export class CanvasPainter {
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
     for (const table of page.tables ?? []) this.paintTable(table, yOffset, o, pageInfo);
 
+    // Footnotes at the page bottom: a short separator rule above the bodies.
+    if (page.footnotes) {
+      const fn = page.footnotes;
+      const startX = fn.lines[0]?.x ?? 0;
+      const sepY = Math.round(yOffset + fn.separatorY) + 0.5;
+      ctx.strokeStyle = o.pageBorder;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(startX, sepY);
+      ctx.lineTo(startX + Math.min(192, page.width * 0.3), sepY);
+      ctx.stroke();
+      for (const line of fn.lines) this.paintLine(line, yOffset, o, pageInfo);
+    }
+
     // Single-canvas mode: caret on top.
     if (inlineOverlay) {
       const caret = this.lastOverlay.caret;

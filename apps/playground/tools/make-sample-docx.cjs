@@ -5,7 +5,8 @@
 // spacing (w:spacing) + soft line breaks (w:br) + symbol runs (w:sym) +
 // page-break-before, multi-level numbered + bullet lists, tables (colwidth,
 // colspan, rowspan/vMerge, table align, row height, cell vAlign, per-cell &
-// table borders, shading), inline + floating images, hyperlinks, tab stops.
+// table borders, shading), inline + floating images, hyperlinks, tab stops,
+// and footnotes (laid out at the bottom of the page their reference falls on).
 //
 //   node apps/playground/tools/make-sample-docx.cjs
 const fs = require('node:fs');
@@ -46,6 +47,10 @@ const image = (relId, sizePx, alt) =>
   `<w:r><w:drawing><wp:inline><wp:extent cx="${sizePx * 9525}" cy="${sizePx * 9525}"/><wp:docPr id="1" name="${alt}" descr="${alt}"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="${relId}"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
 
 const heading = (text) => p(run(text, '<w:b/><w:sz w:val="28"/>'), jc('left'));
+
+// A footnote reference run — renders as a superscript number; the body lives
+// in footnotes.xml and is laid out at the bottom of the page it lands on.
+const fnRef = (id) => `<w:r><w:footnoteReference w:id="${id}"/></w:r>`;
 
 // Lưới viền đầy đủ — OOXML mặc định KHÔNG có viền; bảng nào muốn lưới phải khai.
 const TBL_BORDERS = `<w:tblPr><w:tblBorders><w:top w:val="single"/><w:bottom w:val="single"/><w:left w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr>`;
@@ -89,7 +94,9 @@ const SPECIALS = [
         run('chữ to 14pt', '<w:sz w:val="28"/>'),
         run(' và '),
         run('chữ nhỏ 8pt', '<w:sz w:val="16"/>'),
-        run(' trong cùng một dòng để kiểm tra đo chữ theo từng run.'),
+        run(' trong cùng một dòng để kiểm tra đo chữ theo từng run'),
+        fnRef(1),
+        run('.'),
       ].join(''),
       `<w:ind w:firstLine="720"/>`,
     ),
@@ -225,7 +232,9 @@ const SPECIALS = [
     xml: [
       // w:spacing: giãn dòng 1.5 (line=360 auto) + cách trên 12pt / dưới 6pt.
       p(
-        run('Đoạn này dùng w:spacing — giãn dòng 1.5, cách đoạn trên 12pt và dưới 6pt nên trông thưa hơn hẳn các đoạn quanh nó. ' + LOREM[2]),
+        run('Đoạn này dùng w:spacing — giãn dòng 1.5, cách đoạn trên 12pt và dưới 6pt nên trông thưa hơn hẳn các đoạn quanh nó') +
+          fnRef(2) +
+          run('. ' + LOREM[2]),
         '<w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/>',
       ),
       // w:br: ngắt dòng mềm — vẫn cùng một đoạn, không tạo paragraph mới.
@@ -323,6 +332,15 @@ const STYLES_XML = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
   <w:style w:styleId="Quote"><w:basedOn w:val="Indented"/><w:rPr><w:i/><w:color w:val="555555"/></w:rPr></w:style>
 </w:styles>`;
 
+// Footnote bodies: the separator notes (negative / 0 ids) are skipped on
+// import; ids 1 and 2 are the real notes referenced from the body.
+const FOOTNOTES_XML = `<?xml version="1.0"?><w:footnotes xmlns:w="${W_NS}">
+  <w:footnote w:id="-1" w:type="separator"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>
+  <w:footnote w:id="0" w:type="continuationSeparator"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>
+  <w:footnote w:id="1"><w:p>${run('Chú thích chân trang đầu tiên — bản thân ghi chú được layout ở đáy của chính trang chứa tham chiếu, với cỡ chữ nhỏ hơn phần thân.')}</w:p></w:footnote>
+  <w:footnote w:id="2"><w:p>${run('Chú thích thứ hai nằm ở một trang khác, chứng minh mỗi trang tự gom ghi chú riêng phía trên footer.')}</w:p></w:footnote>
+</w:footnotes>`;
+
 const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
   <w:abstractNum w:abstractNumId="0">
     <w:lvl w:ilvl="0"><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
@@ -341,13 +359,14 @@ const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId9" Type="${R_NS}/hyperlink" Target="https://prosemirror.net/" TargetMode="External"/>
   <Relationship Id="rId20" Type="${R_NS}/header" Target="header1.xml"/>
   <Relationship Id="rId21" Type="${R_NS}/footer" Target="footer1.xml"/>
+  <Relationship Id="rId22" Type="${R_NS}/footnotes" Target="footnotes.xml"/>
 </Relationships>`;
 
 async function main() {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
-    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>`,
   );
   zip.file(
     '_rels/.rels',
@@ -359,6 +378,7 @@ async function main() {
   zip.file('word/_rels/document.xml.rels', RELS_XML);
   zip.file('word/header1.xml', HEADER_XML);
   zip.file('word/footer1.xml', FOOTER_XML);
+  zip.file('word/footnotes.xml', FOOTNOTES_XML);
   zip.file('word/media/image1.png', PNG_RED, { base64: true });
   zip.file('word/media/image2.png', PNG_BLUE, { base64: true });
 

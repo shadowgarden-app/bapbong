@@ -239,6 +239,25 @@ export const schema = new Schema({
         return ['a', { href: mark.attrs['href'] as string, rel: 'noopener', target: '_blank' }, 0];
       },
     },
+    // w:footnoteReference — the carrier text is the superscript number; `num`
+    // lets the layout engine match the reference to its page-bottom body.
+    footnote: {
+      attrs: { num: {} },
+      inclusive: false,
+      parseDOM: [
+        {
+          tag: 'sup[data-footnote]',
+          // `el` is an HTMLElement at runtime; this package has no DOM lib, so
+          // narrow structurally rather than naming the type.
+          getAttrs: (el) => ({
+            num: Number((el as { getAttribute(n: string): string | null }).getAttribute('data-footnote')) || 0,
+          }),
+        },
+      ],
+      toDOM(mark) {
+        return ['sup', { 'data-footnote': String(mark.attrs['num'] as number) }, 0];
+      },
+    },
   },
 });
 

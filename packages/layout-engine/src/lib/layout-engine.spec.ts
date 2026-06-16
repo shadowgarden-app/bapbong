@@ -860,6 +860,67 @@ describe('layout with page chrome (header/footer)', () => {
   });
 });
 
+describe('layout with footnotes', () => {
+  const fnSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: { footnote: { attrs: { num: {} } }, vertAlign: { attrs: { value: {} } } },
+  });
+  const p = (text: string) => fnSchema.node('paragraph', null, [fnSchema.text(text)]);
+  // A paragraph ending in a footnote reference (superscript number + mark).
+  const refPara = (text: string, num: number) =>
+    fnSchema.node('paragraph', null, [
+      fnSchema.text(text),
+      fnSchema.text(String(num), [
+        fnSchema.mark('footnote', { num }),
+        fnSchema.mark('vertAlign', { value: 'super' }),
+      ]),
+    ]);
+  const noteDoc = (text: string) => fnSchema.node('doc', null, [p(text)]);
+
+  it('reserves bottom space and lays the note body there', () => {
+    const cfg = config({ height: 300 }); // body band [20, 280]
+    const body = fnSchema.node('doc', null, [refPara('See', 1), ...Array.from({ length: 8 }, (_, i) => p(`p${i}`))]);
+    const resolved = layout(body, cfg, undefined, undefined, { 1: noteDoc('Note one') });
+
+    const fn = resolved.pages[0].footnotes;
+    expect(fn).toBeDefined();
+    // the note body is painted at the page bottom, below every body line…
+    const noteLine = fn?.lines[0];
+    const lastBody = resolved.pages[0].lines.at(-1);
+    const noteText = (noteLine?.segments ?? []).map((s) => s.text).join('');
+    expect(noteText).toContain('Note one');
+    expect(noteLine?.y ?? 0).toBeGreaterThan((lastBody?.y ?? 0));
+    // …and within the page (above the bottom margin).
+    expect((noteLine?.y ?? 0) + (noteLine?.height ?? 0)).toBeLessThanOrEqual(280.01);
+    // the separator rule sits above the first note line.
+    expect(fn?.separatorY ?? Infinity).toBeLessThan(noteLine?.y ?? 0);
+    // footnote lines belong to a separate story — never caret-addressable.
+    expect(noteLine?.segments[0].pos).toBeUndefined();
+    expect(noteLine?.from).toBeUndefined();
+  });
+
+  it('shrinks the body band so fewer lines fit the reference page', () => {
+    const cfg = config({ height: 300 });
+    const body = fnSchema.node('doc', null, [refPara('See', 1), ...Array.from({ length: 40 }, (_, i) => p(`p${i}`))]);
+    const without = layout(body, cfg);
+    const withFn = layout(body, cfg, undefined, undefined, { 1: noteDoc('Note one') });
+    expect(withFn.pages[0].footnotes).toBeDefined();
+    expect(without.pages[0].footnotes).toBeUndefined();
+    // the reserved footnote area pushes a body line off page 1.
+    expect(withFn.pages[0].lines.length).toBeLessThan(without.pages[0].lines.length);
+  });
+
+  it('leaves pages free of footnotes when none are passed', () => {
+    const body = fnSchema.node('doc', null, [refPara('See', 1), p('tail')]);
+    const resolved = layout(body, config({ height: 300 }));
+    expect(resolved.pages.every((pg) => pg.footnotes === undefined)).toBe(true);
+  });
+});
+
 describe('live list numbering', () => {
   const numbering = {
     '1': { key: 'a0', levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } } },

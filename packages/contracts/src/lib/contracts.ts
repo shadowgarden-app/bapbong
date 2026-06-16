@@ -44,6 +44,9 @@ export interface InlineRun {
   background?: string;
   /** Superscript / subscript (font already reduced; painter shifts baseline). */
   vertAlign?: 'super' | 'sub';
+  /** Footnote reference number (w:footnoteReference): the run's text is the
+   *  superscript mark; the body is laid out at the bottom of its page. */
+  footnoteRef?: number;
   /** Absolute ProseMirror position of the run's first character. */
   pos?: number;
 }
@@ -245,6 +248,9 @@ export interface LayoutSegment {
   /** Dynamic field: the painter substitutes the page number / page count for
    *  `text` while painting. The segment occupies ONE PM position. */
   field?: 'pageNumber' | 'pageCount';
+  /** Footnote reference number: the placer counts which notes land on each
+   *  page so it can reserve bottom space and lay their bodies out there. */
+  footnoteRef?: number;
   /** Absolute PM position of the segment's first character. Segments without
    *  a position (list markers) are decoration — not addressable by a caret. */
   pos?: number;
@@ -329,6 +335,17 @@ export interface ResolvedPage {
   tables?: ResolvedTable[];
   /** Floating images on this page (painted behind the text). */
   floats?: ResolvedFloat[];
+  /** Footnote bodies whose references fall on this page, laid out at the
+   *  bottom above the footer. Absent when the page has no footnotes. */
+  footnotes?: ResolvedFootnotes;
+}
+
+/** Footnote bodies reserved at the bottom of a page. `separatorY` is where the
+ *  short rule above the notes is drawn; `lines` are the note bodies, already
+ *  positioned in page coordinates (px). */
+export interface ResolvedFootnotes {
+  separatorY: number;
+  lines: LayoutLine[];
 }
 
 /** Repeating page furniture (a header or footer band). Coordinates are

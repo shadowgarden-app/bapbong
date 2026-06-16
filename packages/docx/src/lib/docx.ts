@@ -46,6 +46,10 @@ export interface DocxImport {
   headers: Record<string, PMNode>;
   /** Footer stories keyed by w:type. */
   footers: Record<string, PMNode>;
+  /** Footnote body stories keyed by display number (w:footnoteReference). Laid
+   *  out at the bottom of the page their reference falls on. Endnotes are NOT
+   *  here — they're appended to `doc`. */
+  footnotes: Record<number, PMNode>;
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
   page: PageConfig;
 }
@@ -173,9 +177,12 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
       if (id && ctx.notes.bodies[kind].has(id)) {
         flush();
         const num = ctx.notes.ref(kind, id);
-        out.push(
-          schema.text(String(num), [...marks, schema.marks.vertAlign.create({ value: 'super' })]),
-        );
+        const refMarks = [...marks, schema.marks.vertAlign.create({ value: 'super' })];
+        // Footnotes carry a `footnote` mark so the layout engine can match the
+        // reference to its page-bottom body; endnotes stay plain superscripts
+        // (their bodies are appended at the document end).
+        if (kind === 'footnote') refMarks.push(schema.marks.footnote.create({ num }));
+        out.push(schema.text(String(num), refMarks));
       }
     }
     else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
@@ -738,31 +745,50 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
   return reg;
 }
 
-/** Render referenced notes as an appended section (a heading + one paragraph
- *  per note prefixed with its superscript number). Page-bottom footnote layout
- *  is a later milestone. */
+/** Parse one note body into blocks, prefixing the first paragraph with its
+ *  display number (so "1. note text" reads naturally). Shared by the appended
+ *  endnote section and the page-bottom footnote map. */
+function noteBlocks(note: OoxmlNode, num: number, ctx: Ctx): PMNode[] {
+  const blocks = parseBlocks(note, ctx);
+  const marker = schema.text(`${num}. `, [schema.marks.vertAlign.create({ value: 'super' })]);
+  const first = blocks[0];
+  if (first && first.type.name === 'paragraph') {
+    const kids: PMNode[] = [marker];
+    first.forEach((k) => kids.push(k));
+    blocks[0] = schema.nodes.paragraph.create(first.attrs, kids);
+  } else {
+    blocks.unshift(schema.nodes.paragraph.create(null, [marker]));
+  }
+  return blocks;
+}
+
+/** Footnote bodies keyed by display number, each a standalone story document.
+ *  The layout engine lays these out and reserves space for them at the bottom
+ *  of whichever page their reference falls on. */
+function buildFootnotesMap(ctx: Ctx): Record<number, PMNode> {
+  const out: Record<number, PMNode> = {};
+  for (const { kind, id, num } of ctx.notes.refs) {
+    if (kind !== 'footnote') continue;
+    const note = ctx.notes.bodies.footnote.get(id);
+    if (note) out[num] = storyDoc(noteBlocks(note, num, ctx), null);
+  }
+  return out;
+}
+
+/** Endnotes render as an appended section at the document end (a heading + one
+ *  paragraph per note). Footnotes are NOT appended here — they go to the bottom
+ *  of their page (see buildFootnotesMap). */
 function buildNotesSection(ctx: Ctx): PMNode[] {
-  const { refs, bodies } = ctx.notes;
-  if (refs.length === 0) return [];
+  const endnotes = ctx.notes.refs.filter((r) => r.kind === 'endnote');
+  if (endnotes.length === 0) return [];
   const out: PMNode[] = [
     schema.nodes.paragraph.create({ spacing: { before: 12 } }, [
-      schema.text('Chú thích', [schema.marks.strong.create()]),
+      schema.text('Ghi chú cuối', [schema.marks.strong.create()]),
     ]),
   ];
-  for (const { kind, id, num } of refs) {
-    const note = bodies[kind].get(id);
-    if (!note) continue;
-    const blocks = parseBlocks(note, ctx);
-    const marker = schema.text(`${num}. `, [schema.marks.vertAlign.create({ value: 'super' })]);
-    const first = blocks[0];
-    if (first && first.type.name === 'paragraph') {
-      const kids: PMNode[] = [marker];
-      first.forEach((k) => kids.push(k));
-      blocks[0] = schema.nodes.paragraph.create(first.attrs, kids);
-    } else {
-      out.push(schema.nodes.paragraph.create(null, [marker]));
-    }
-    out.push(...blocks);
+  for (const { id, num } of endnotes) {
+    const note = ctx.notes.bodies.endnote.get(id);
+    if (note) out.push(...noteBlocks(note, num, ctx));
   }
   return out;
 }
@@ -828,6 +854,9 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
   const bodyBlocks = body ? parseBlocks(body, ctx) : [];
+  // References are now assigned (in document order); footnotes go to the page
+  // bottom, endnotes stay appended.
+  const footnotes = buildFootnotesMap(ctx);
   const doc = storyDoc([...bodyBlocks, ...buildNotesSection(ctx)], ctx.numbering.defs);
 
   // Headers/footers referenced by the section properties.
@@ -853,7 +882,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     await collect('w:footerReference', footers, 'w:ftr');
   }
 
-  return { doc, rawDocumentXml, headers, footers, page: parsePageGeometry(sectPr) };
+  return { doc, rawDocumentXml, headers, footers, footnotes, page: parsePageGeometry(sectPr) };
 }
 
 /** Page size + margins from w:sectPr (twips→px). Defaults to A4 @96dpi with
