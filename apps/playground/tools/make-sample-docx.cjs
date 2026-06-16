@@ -1,8 +1,11 @@
 // Generates apps/playground/public/sample.docx — a multi-page document that
 // exercises the import + layout + paint pipeline end to end: marks (bold,
-// italic, color, size), alignment (center/right/justify), first-line and
-// hanging indent, multi-level numbered + bullet lists, tables (colwidth,
-// colspan, rowspan/vMerge), inline images, hyperlinks.
+// italic, color, size, underline, strike, highlight, super/subscript),
+// alignment (center/right/justify), first-line and hanging indent, paragraph
+// spacing (w:spacing) + soft line breaks (w:br) + symbol runs (w:sym) +
+// page-break-before, multi-level numbered + bullet lists, tables (colwidth,
+// colspan, rowspan/vMerge, table align, row height, cell vAlign, per-cell &
+// table borders, shading), inline + floating images, hyperlinks, tab stops.
 //
 //   node apps/playground/tools/make-sample-docx.cjs
 const fs = require('node:fs');
@@ -78,7 +81,11 @@ const SPECIALS = [
         run('gạch ngang', '<w:strike/>'),
         run(', '),
         run('tô vàng', '<w:highlight w:val="yellow"/>'),
-        run(', '),
+        run(', công thức E=mc'),
+        run('2', '<w:vertAlign w:val="superscript"/>'),
+        run(' và H'),
+        run('2', '<w:vertAlign w:val="subscript"/>'),
+        run('O (super/subscript), '),
         run('chữ to 14pt', '<w:sz w:val="28"/>'),
         run(' và '),
         run('chữ nhỏ 8pt', '<w:sz w:val="16"/>'),
@@ -99,14 +106,20 @@ const SPECIALS = [
     ].join('\n'),
   },
   {
-    title: 'Bảng: độ rộng cột, gộp ngang và dọc',
+    title: 'Bảng: căn giữa, gộp ô, nền & viền ô',
+    // Bảng căn giữa (w:jc), hàng tiêu đề cao 0.4in + canh dọc giữa (w:vAlign),
+    // nền xanh; một ô body khai viền riêng (w:tcBorders).
     xml: `<w:tbl>
-      ${TBL_BORDERS}
-      <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="3315"/><w:gridCol w:w="3315"/></w:tblGrid>
+      <w:tblPr>
+        <w:jc w:val="center"/>
+        <w:tblBorders><w:top w:val="single"/><w:bottom w:val="single"/><w:left w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders>
+      </w:tblPr>
+      <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="2800"/><w:gridCol w:w="2800"/></w:tblGrid>
       <w:tr>
-        ${td(p(run('Khu vực', '<w:b/>')), '<w:shd w:fill="D9E2F3"/>')}
-        ${td(p(run('Quý 1', '<w:b/>')), '<w:shd w:fill="D9E2F3"/>')}
-        ${td(p(run('Quý 2', '<w:b/>')), '<w:shd w:fill="D9E2F3"/>')}
+        <w:trPr><w:trHeight w:val="600" w:hRule="atLeast"/></w:trPr>
+        ${td(p(run('Khu vực', '<w:b/>')), '<w:shd w:fill="D9E2F3"/><w:vAlign w:val="center"/>')}
+        ${td(p(run('Quý 1', '<w:b/>')), '<w:shd w:fill="D9E2F3"/><w:vAlign w:val="center"/>')}
+        ${td(p(run('Quý 2', '<w:b/>')), '<w:shd w:fill="D9E2F3"/><w:vAlign w:val="center"/>')}
       </w:tr>
       <w:tr>
         ${td(p(run('Miền Bắc — ô gộp dọc qua hai hàng')), '<w:vMerge w:val="restart"/>')}
@@ -115,11 +128,11 @@ const SPECIALS = [
       </w:tr>
       <w:tr>
         ${td('<w:p/>', '<w:vMerge/>')}
-        ${td(p(run('95')))}
+        ${td(p(run('95')), '<w:tcBorders><w:top w:val="nil"/><w:bottom w:val="nil"/></w:tcBorders>')}
         ${td(p(run('102')))}
       </w:tr>
       <w:tr>
-        ${td(p(run('Tổng hợp cả nước — ô gộp ngang ba cột', '<w:i/>')), '<w:gridSpan w:val="3"/>')}
+        ${td(p(run('Tổng hợp cả nước — ô gộp ngang ba cột, canh dưới', '<w:i/>')), '<w:gridSpan w:val="3"/><w:vAlign w:val="bottom"/>')}
       </w:tr>
     </w:tbl>`,
   },
@@ -207,21 +220,46 @@ const SPECIALS = [
       ),
     ].join('\n'),
   },
+  {
+    title: 'Giãn dòng, ngắt dòng mềm & ký hiệu',
+    xml: [
+      // w:spacing: giãn dòng 1.5 (line=360 auto) + cách trên 12pt / dưới 6pt.
+      p(
+        run('Đoạn này dùng w:spacing — giãn dòng 1.5, cách đoạn trên 12pt và dưới 6pt nên trông thưa hơn hẳn các đoạn quanh nó. ' + LOREM[2]),
+        '<w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/>',
+      ),
+      // w:br: ngắt dòng mềm — vẫn cùng một đoạn, không tạo paragraph mới.
+      p(
+        run('Dòng đầu của đoạn này') +
+          '<w:r><w:br/></w:r>' +
+          run('được ngắt dòng mềm (w:br) xuống dòng hai mà vẫn nằm trong cùng một paragraph.'),
+      ),
+      // w:sym: ký tự từ font symbol (Wingdings F0B7 → •) chèn giữa văn bản.
+      p(
+        '<w:r><w:sym w:font="Wingdings" w:char="F0B7"/></w:r>' +
+          run(' Ký hiệu w:sym (Wingdings F0B7 → •) chèn ngay đầu dòng — khác với bullet của danh sách.'),
+      ),
+    ].join('\n'),
+  },
 ];
 
 function buildDocumentXml() {
   const chapters = SPECIALS.map((s, i) => chapter(i + 1, s));
   // Padding chương cuối để chắc chắn tràn sang trang 3.
   const tail = [
-    heading('8. Phần đệm cho đủ độ dài'),
+    // w:pageBreakBefore — chương này luôn bắt đầu ở đầu một trang mới.
+    p(
+      run('9. Phần đệm — bắt đầu trang mới (w:pageBreakBefore)', '<w:b/><w:sz w:val="28"/>'),
+      '<w:pageBreakBefore/>' + jc('left'),
+    ),
     ...Array.from({ length: 20 }, (_, i) => p(run(LOREM[i % LOREM.length]), jc('both'))),
-    heading('9. Bảng thứ hai ở cuối tài liệu'),
+    heading('10. Bảng thứ hai ở cuối tài liệu'),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="4515"/><w:gridCol w:w="4515"/></w:tblGrid>
       <w:tr>${td(p(run('Cột trái', '<w:b/>')))}${td(p(run('Cột phải', '<w:b/>')))}</w:tr>
       <w:tr>${td(p(run('Bảng nằm gần cuối tài liệu để kiểm tra ngắt-trang-nguyên-bảng khi không đủ chỗ.')))}${td(p(run('Ô bên phải.')))}</w:tr>
     </w:tbl>`,
-    heading('10. Bảng dài trải qua nhiều trang'),
+    heading('11. Bảng dài trải qua nhiều trang'),
     p(run('Bảng dưới đây có 36 hàng — dài hơn một trang, buộc layout engine phải ngắt trang theo từng hàng (M5).')),
     `<w:tbl>
       <w:tblGrid><w:gridCol w:w="2400"/><w:gridCol w:w="6630"/></w:tblGrid>
@@ -230,7 +268,7 @@ function buildDocumentXml() {
         `<w:tr>${td(p(run(`Hàng ${i + 1}`)))}${td(p(run(`Nội dung ô bên phải của hàng ${i + 1} — một dòng mô tả đủ dài để chiếm trọn bề ngang cột và đôi khi xuống dòng thứ hai.`)))}</w:tr>`,
       ).join('\n')}
     </w:tbl>`,
-    heading('11. Hàng cao hơn một trang'),
+    heading('12. Hàng cao hơn một trang'),
     p(run('Hàng thứ nhất của bảng sau chứa 60 đoạn — cao hơn cả một trang, buộc phải tách giữa hàng.')),
     `<w:tbl>
       ${TBL_BORDERS}
