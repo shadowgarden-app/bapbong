@@ -49,3 +49,7 @@ Thumbs.db
 .nx/self-healing
 vitest.config.*.timestamp*
 .angular
+
+# Large local-only stress-test doc for the playground (10MB; not committed —
+# drop your own here to use the "Load large sample" button).
+apps/playground/public/large_sample.docx
