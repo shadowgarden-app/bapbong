@@ -766,6 +766,49 @@ describe('importDocx', () => {
     expect(footers.default.textContent).toBe('Footer text');
   });
 
+  it('parses first/even header variants + titlePg + evenAndOddHeaders', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>
+      <w:p><w:r><w:t>body</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:titlePg/>
+        <w:headerReference w:type="default" r:id="rIdH"/>
+        <w:headerReference w:type="first" r:id="rIdHF"/>
+        <w:headerReference w:type="even" r:id="rIdHE"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
+      <Relationship Id="rIdH" Type="${R_NS}/header" Target="header1.xml"/>
+      <Relationship Id="rIdHF" Type="${R_NS}/header" Target="header2.xml"/>
+      <Relationship Id="rIdHE" Type="${R_NS}/header" Target="header3.xml"/>
+    </Relationships>`;
+    const hdr = (t: string) => `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:hdr>`;
+    const settingsXml = `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:evenAndOddHeaders/></w:settings>`;
+
+    const { headers, titlePg, evenAndOdd } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, undefined, undefined, {
+        'word/header1.xml': hdr('Default hdr'),
+        'word/header2.xml': hdr('First hdr'),
+        'word/header3.xml': hdr('Even hdr'),
+        'word/settings.xml': settingsXml,
+      }),
+    );
+    expect(headers.default.textContent).toBe('Default hdr');
+    expect(headers.first.textContent).toBe('First hdr');
+    expect(headers.even.textContent).toBe('Even hdr');
+    expect(titlePg).toBe(true);
+    expect(evenAndOdd).toBe(true);
+  });
+
+  it('leaves titlePg/evenAndOdd false when unset', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>body</w:t></w:r></w:p>
+      <w:sectPr/>
+    </w:body></w:document>`;
+    const { titlePg, evenAndOdd } = await importDocx(await makeDocx(documentXml));
+    expect(titlePg).toBe(false);
+    expect(evenAndOdd).toBe(false);
+  });
+
   it('maps w:jc to paragraph alignment', async () => {
     const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>c</w:t></w:r></w:p>

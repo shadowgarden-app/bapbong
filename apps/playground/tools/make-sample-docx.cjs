@@ -6,8 +6,9 @@
 // page-break-before, multi-level numbered + bullet lists, tables (colwidth,
 // colspan, rowspan/vMerge, table align, row height, cell vAlign, per-cell &
 // table borders, shading), inline + floating images, hyperlinks, tab stops,
-// footnotes (laid out at the bottom of the page their reference falls on), and
-// a two-column section (w:cols) introduced by a continuous section break.
+// footnotes (laid out at the bottom of the page their reference falls on), a
+// two-column section (w:cols) introduced by a continuous section break, and
+// first/even header variants (w:titlePg + w:evenAndOddHeaders).
 //
 //   node apps/playground/tools/make-sample-docx.cjs
 const fs = require('node:fs');
@@ -318,6 +319,9 @@ function buildDocumentXml() {
     <w:sectPr>
       <w:headerReference w:type="default" r:id="rId20"/>
       <w:footerReference w:type="default" r:id="rId21"/>
+      <w:headerReference w:type="first" r:id="rId23"/>
+      <w:headerReference w:type="even" r:id="rId24"/>
+      <w:titlePg/>
       <w:type w:val="continuous"/>
       <w:cols w:num="1"/>
     </w:sectPr>
@@ -325,8 +329,16 @@ function buildDocumentXml() {
 </w:document>`;
 }
 
+// Default header = odd pages (right-aligned). With w:titlePg + w:evenAndOddHeaders,
+// page 1 uses HEADER_FIRST_XML and even pages use HEADER_EVEN_XML.
 const HEADER_XML = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}">
-  ${p(run('bapbong sample — tài liệu mẫu nhiều trang', '<w:i/><w:color w:val="6B6B70"/>'), jc('right'))}
+  ${p(run('bapbong sample — trang lẻ', '<w:i/><w:color w:val="6B6B70"/>'), jc('right'))}
+</w:hdr>`;
+const HEADER_FIRST_XML = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}">
+  ${p(run('« TRANG BÌA — header riêng cho trang đầu »', '<w:b/><w:color w:val="1F6FEB"/>'), jc('center'))}
+</w:hdr>`;
+const HEADER_EVEN_XML = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}">
+  ${p(run('trang chẵn — bapbong sample', '<w:i/><w:color w:val="6B6B70"/>'), jc('left'))}
 </w:hdr>`;
 
 // Footer "Trang X / Y": PAGE qua complex field (fldChar), NUMPAGES qua
@@ -373,6 +385,9 @@ const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
   <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>
 </w:numbering>`;
 
+// Document settings — w:evenAndOddHeaders turns on the even-page header variant.
+const SETTINGS_XML = `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:evenAndOddHeaders/></w:settings>`;
+
 const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/>
   <Relationship Id="rId8" Type="${R_NS}/image" Target="media/image2.png"/>
@@ -380,13 +395,16 @@ const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId20" Type="${R_NS}/header" Target="header1.xml"/>
   <Relationship Id="rId21" Type="${R_NS}/footer" Target="footer1.xml"/>
   <Relationship Id="rId22" Type="${R_NS}/footnotes" Target="footnotes.xml"/>
+  <Relationship Id="rId23" Type="${R_NS}/header" Target="header2.xml"/>
+  <Relationship Id="rId24" Type="${R_NS}/header" Target="header3.xml"/>
+  <Relationship Id="rId25" Type="${R_NS}/settings" Target="settings.xml"/>
 </Relationships>`;
 
 async function main() {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
-    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>`,
+    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>`,
   );
   zip.file(
     '_rels/.rels',
@@ -397,8 +415,11 @@ async function main() {
   zip.file('word/numbering.xml', NUMBERING_XML);
   zip.file('word/_rels/document.xml.rels', RELS_XML);
   zip.file('word/header1.xml', HEADER_XML);
+  zip.file('word/header2.xml', HEADER_FIRST_XML);
+  zip.file('word/header3.xml', HEADER_EVEN_XML);
   zip.file('word/footer1.xml', FOOTER_XML);
   zip.file('word/footnotes.xml', FOOTNOTES_XML);
+  zip.file('word/settings.xml', SETTINGS_XML);
   zip.file('word/media/image1.png', PNG_RED, { base64: true });
   zip.file('word/media/image2.png', PNG_BLUE, { base64: true });
 

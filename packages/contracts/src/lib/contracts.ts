@@ -380,8 +380,21 @@ export interface ResolvedChrome {
 /** The paint-ready result the canvas painter consumes (M3). */
 export interface ResolvedLayout {
   pages: ResolvedPage[];
+  /** Default (odd-page) header/footer, stamped on every page unless a
+   *  first/even variant applies (see chromeSelect). */
   pageHeader?: ResolvedChrome;
   pageFooter?: ResolvedChrome;
+  /** Title-page header/footer (w:type="first"), shown on page 1 when
+   *  chromeSelect.titlePg is set. */
+  pageHeaderFirst?: ResolvedChrome;
+  pageFooterFirst?: ResolvedChrome;
+  /** Even-page header/footer (w:type="even"), shown on even pages when
+   *  chromeSelect.evenAndOdd is set. */
+  pageHeaderEven?: ResolvedChrome;
+  pageFooterEven?: ResolvedChrome;
+  /** Which chrome variant applies per page. `titlePg` → page 1 uses the first
+   *  variant (blank if none); `evenAndOdd` → even pages use the even variant. */
+  chromeSelect?: { titlePg: boolean; evenAndOdd: boolean };
 }
 
 // ── Interaction (M4): caret, selection, hit-testing ────────────────

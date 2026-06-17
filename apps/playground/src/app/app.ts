@@ -62,9 +62,11 @@ export class App implements OnDestroy {
   private measureMetrics: MeasureMetrics | null = null;
   private bridge: InputBridge | null = null;
   private resolved: ResolvedLayout | null = null;
-  // Page chrome from the imported docx ('default' header/footer).
-  private chromeHeader: ProseMirrorNode | undefined;
-  private chromeFooter: ProseMirrorNode | undefined;
+  // Page chrome from the imported docx, keyed by w:type (default/first/even).
+  private chromeHeaders: Record<string, ProseMirrorNode> = {};
+  private chromeFooters: Record<string, ProseMirrorNode> = {};
+  private chromeTitlePg = false;
+  private chromeEvenAndOdd = false;
   // Footnote bodies keyed by display number (laid out at the page bottom).
   private footnotes: Record<number, ProseMirrorNode> | undefined;
   // Page geometry from the imported docx's sectPr (A4 until imported).
@@ -113,15 +115,19 @@ export class App implements OnDestroy {
     this.fileName.set(name);
 
     try {
-      const { doc, headers, footers, footnotes, page } = await importDocx(bytes);
+      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page } = await importDocx(bytes);
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
-      this.chromeHeader = headers['default'];
-      this.chromeFooter = footers['default'];
+      this.chromeHeaders = headers;
+      this.chromeFooters = footers;
+      this.chromeTitlePg = titlePg;
+      this.chromeEvenAndOdd = evenAndOdd;
       this.footnotes = footnotes;
       this.page = page;
       // Measure with the real fonts, not their fallbacks.
-      await ensureFontsLoaded(collectFontFamilies(doc, this.chromeHeader, this.chromeFooter));
+      await ensureFontsLoaded(
+        collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers)),
+      );
       this.setupEditor(doc);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : String(err));
@@ -169,7 +175,16 @@ export class App implements OnDestroy {
         state.doc,
         { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
         this.layoutCache,
-        { header: this.chromeHeader, footer: this.chromeFooter },
+        {
+          header: this.chromeHeaders['default'],
+          footer: this.chromeFooters['default'],
+          headerFirst: this.chromeHeaders['first'],
+          footerFirst: this.chromeFooters['first'],
+          headerEven: this.chromeHeaders['even'],
+          footerEven: this.chromeFooters['even'],
+          titlePg: this.chromeTitlePg,
+          evenAndOdd: this.chromeEvenAndOdd,
+        },
         this.footnotes,
       );
       this.pageCount.set(this.resolved.pages.length);

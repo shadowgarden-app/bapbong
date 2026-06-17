@@ -858,6 +858,22 @@ describe('layout with page chrome (header/footer)', () => {
     const last = resolved.pages[0].lines.at(-1);
     expect((last?.y ?? 0) + (last?.height ?? 0)).toBeLessThanOrEqual(236.01);
   });
+
+  it('lays out first/even chrome variants and records the selection', () => {
+    const cfg = { ...config({ height: 400 }) };
+    const body = schema.node('doc', null, Array.from({ length: 20 }, (_, i) => p(`p${i}`)));
+    const resolved = layout(body, cfg, undefined, {
+      header: docOf('def'),
+      headerFirst: docOf('first'),
+      headerEven: docOf('even'),
+      titlePg: true,
+      evenAndOdd: true,
+    });
+    expect(resolved.pageHeader?.lines[0].segments[0].text).toBe('def');
+    expect(resolved.pageHeaderFirst?.lines[0].segments[0].text).toBe('first');
+    expect(resolved.pageHeaderEven?.lines[0].segments[0].text).toBe('even');
+    expect(resolved.chromeSelect).toEqual({ titlePg: true, evenAndOdd: true });
+  });
 });
 
 describe('layout with footnotes', () => {

@@ -50,6 +50,10 @@ export interface DocxImport {
    *  out at the bottom of the page their reference falls on. Endnotes are NOT
    *  here — they're appended to `doc`. */
   footnotes: Record<number, PMNode>;
+  /** w:titlePg — page 1 uses the "first" header/footer (headers/footers['first']). */
+  titlePg: boolean;
+  /** w:evenAndOddHeaders — even pages use the "even" header/footer. */
+  evenAndOdd: boolean;
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
   page: PageConfig;
 }
@@ -961,7 +965,31 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     await collect('w:footerReference', footers, 'w:ftr');
   }
 
-  return { doc, rawDocumentXml, headers, footers, footnotes, page: parsePageGeometry(sectPr) };
+  // w:titlePg (section) → page 1 uses the "first" chrome; w:evenAndOddHeaders
+  // (document settings) → even pages use the "even" chrome.
+  const titlePg = sectPr ? isToggleOn(child(sectPr, 'w:titlePg')) : false;
+  const settingsXml = await readPart(zip, 'word/settings.xml');
+  const settings = settingsXml ? child(parseXml(settingsXml), 'w:settings') : undefined;
+  const evenAndOdd = settings ? isToggleOn(child(settings, 'w:evenAndOddHeaders')) : false;
+
+  return {
+    doc,
+    rawDocumentXml,
+    headers,
+    footers,
+    footnotes,
+    titlePg,
+    evenAndOdd,
+    page: parsePageGeometry(sectPr),
+  };
+}
+
+/** An OOXML on/off toggle element (w:titlePg, w:evenAndOddHeaders, …): present
+ *  means on, unless it carries w:val="false"/"0"/"off". */
+function isToggleOn(el: OoxmlNode | undefined): boolean {
+  if (!el) return false;
+  const val = attrOf(el, 'w:val');
+  return val === undefined || !['false', '0', 'off'].includes(val);
 }
 
 /** Page size + margins from w:sectPr (twips→px). Defaults to A4 @96dpi with

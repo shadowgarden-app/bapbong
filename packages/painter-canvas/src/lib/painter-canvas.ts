@@ -3,6 +3,7 @@ import type {
   FontSpec,
   LayoutLine,
   PagePoint,
+  ResolvedChrome,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
@@ -201,11 +202,29 @@ export class CanvasPainter {
     const pageInfo = { page: page.index + 1, pages: this.lastLayout?.pages.length ?? 1 };
     // Each canvas is page-local, so everything draws at yOffset 0.
     this.paintPage(page, 0, o, pageInfo);
-    for (const chrome of [this.lastLayout?.pageHeader, this.lastLayout?.pageFooter]) {
+    for (const chrome of [this.chromeFor(i, 'header'), this.chromeFor(i, 'footer')]) {
       if (!chrome) continue;
       for (const line of chrome.lines) this.paintLine(line, 0, o, pageInfo);
       for (const table of chrome.tables) this.paintTable(table, 0, o, pageInfo);
     }
+  }
+
+  /** Pick the header/footer band for page `i`: the first variant on page 1 when
+   *  titlePg is set, the even variant on even pages when evenAndOdd is set, else
+   *  the default. A selected-but-absent variant means a blank band (no fallback
+   *  to the default — that's Word's behavior for title/even pages). */
+  private chromeFor(i: number, kind: 'header' | 'footer'): ResolvedChrome | undefined {
+    const L = this.lastLayout;
+    if (!L) return undefined;
+    const s = L.chromeSelect;
+    const pick = (def?: ResolvedChrome, first?: ResolvedChrome, even?: ResolvedChrome) => {
+      if (s?.titlePg && i === 0) return first;
+      if (s?.evenAndOdd && (i + 1) % 2 === 0) return even;
+      return def;
+    };
+    return kind === 'header'
+      ? pick(L.pageHeader, L.pageHeaderFirst, L.pageHeaderEven)
+      : pick(L.pageFooter, L.pageFooterFirst, L.pageFooterEven);
   }
 
   /** Get page `i`'s slot, reusing a pooled canvas or creating one. */

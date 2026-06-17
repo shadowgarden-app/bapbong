@@ -1652,10 +1652,48 @@ export function createLayoutCache(): LayoutCache {
 /** Word's default header/footer distance from the page edge (720 twips). */
 const CHROME_DISTANCE = 48;
 
-/** Repeating page furniture passed alongside the body document. */
+/** Repeating page furniture passed alongside the body document. `header`/
+ *  `footer` are the default (odd-page) bands; the `*First`/`*Even` variants
+ *  apply on page 1 (when `titlePg`) and even pages (when `evenAndOdd`). */
 export interface PageChrome {
   header?: PMNode;
   footer?: PMNode;
+  headerFirst?: PMNode;
+  footerFirst?: PMNode;
+  headerEven?: PMNode;
+  footerEven?: PMNode;
+  /** w:titlePg — page 1 uses the first variant (blank if none declared). */
+  titlePg?: boolean;
+  /** w:evenAndOddHeaders — even pages use the even variant (blank if none). */
+  evenAndOdd?: boolean;
+}
+
+/** Header/footer documents grouped by variant. */
+interface ChromeDocs {
+  default?: PMNode;
+  first?: PMNode;
+  even?: PMNode;
+}
+interface ChromeBands {
+  default?: ResolvedChrome;
+  first?: ResolvedChrome;
+  even?: ResolvedChrome;
+}
+function layVariants(docs: ChromeDocs, fn: (doc: PMNode) => ResolvedChrome): ChromeBands {
+  const out: ChromeBands = {};
+  if (docs.default) out.default = fn(docs.default);
+  if (docs.first) out.first = fn(docs.first);
+  if (docs.even) out.even = fn(docs.even);
+  return out;
+}
+/** Tallest band among present variants (sizes the body band conservatively). */
+function maxBandHeight(bands: ChromeBands): number {
+  return Math.max(0, ...[bands.default, bands.first, bands.even].filter(Boolean).map((b) => b!.height));
+}
+function anyBandHasFields(bands: ChromeBands): boolean {
+  return [bands.default, bands.first, bands.even].some(
+    (b) => b?.lines.some((l) => l.segments.some((s) => s.field)) ?? false,
+  );
 }
 
 /** Strip PM positions from chrome content: the band belongs to a separate
@@ -1688,6 +1726,25 @@ function layoutChrome(
   return { lines, tables: flow.tables, height: flow.height };
 }
 
+/** Lay out a footer document pinned `CHROME_DISTANCE` from the page bottom. */
+function layoutFooterChrome(
+  doc: PMNode,
+  pageHeight: number,
+  left: number,
+  right: number,
+  ctx: Ctx,
+): ResolvedChrome {
+  const flow = layoutChrome(doc, 0, left, right, ctx);
+  const topY = pageHeight - CHROME_DISTANCE - flow.height;
+  const band: ResolvedChrome = {
+    lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
+    tables: flow.tables,
+    height: flow.height,
+  };
+  band.tables.forEach((t) => offsetTable(t, topY));
+  return band;
+}
+
 /** Lay out one footnote body (reduced font) flat from y = 0, stripping PM
  *  positions (it belongs to a separate note story — never caret-addressable). */
 function layoutFootnoteBody(doc: PMNode, left: number, right: number, ctx: Ctx): FootnoteBody {
@@ -1715,25 +1772,22 @@ export function layout(
   const left = page.margin.left;
   const right = page.width - page.margin.right;
 
-  // Page chrome first — a tall header/footer pushes the body band inward.
-  let pageHeader: ResolvedChrome | undefined;
-  let pageFooter: ResolvedChrome | undefined;
+  // Page chrome first — a tall header/footer pushes the body band inward. The
+  // first/even variants are laid out alongside the default; the band shrinks by
+  // the TALLEST variant so no page's content overlaps its chrome.
+  const headerDocs: ChromeDocs = { default: chrome?.header, first: chrome?.headerFirst, even: chrome?.headerEven };
+  const footerDocs: ChromeDocs = { default: chrome?.footer, first: chrome?.footerFirst, even: chrome?.footerEven };
+  const layHeaders = (c: Ctx) => layVariants(headerDocs, (d) => layoutChrome(d, CHROME_DISTANCE, left, right, c));
+  const layFooters = (c: Ctx) => layVariants(footerDocs, (d) => layoutFooterChrome(d, page.height, left, right, c));
+  let headers = layHeaders(ctx);
+  let footers = layFooters(ctx);
   let top = page.margin.top;
   let bottom = page.height - page.margin.bottom;
-  if (chrome?.header) {
-    pageHeader = layoutChrome(chrome.header, CHROME_DISTANCE, left, right, ctx);
-    top = Math.max(top, CHROME_DISTANCE + pageHeader.height);
+  if (headers.default || headers.first || headers.even) {
+    top = Math.max(top, CHROME_DISTANCE + maxBandHeight(headers));
   }
-  if (chrome?.footer) {
-    const flow = layoutChrome(chrome.footer, 0, left, right, ctx);
-    const topY = page.height - CHROME_DISTANCE - flow.height;
-    pageFooter = {
-      lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
-      tables: flow.tables,
-      height: flow.height,
-    };
-    pageFooter.tables.forEach((t) => offsetTable(t, topY));
-    bottom = Math.min(bottom, topY);
+  if (footers.default || footers.first || footers.even) {
+    bottom = Math.min(bottom, page.height - CHROME_DISTANCE - maxBandHeight(footers));
   }
 
   // Markers are recounted on every layout, so list edits renumber live. The
@@ -1815,28 +1869,22 @@ export function layout(
   assignSectionHeights(items);
   const resolved = placeBlocks(items, config, ctx, { top, bottom }, fnMap);
 
-  // Chrome with page-number fields: re-lay it out now that the page total is
-  // known, so the field slot is as wide as the widest number it will show.
-  const hasFields = (c?: ResolvedChrome) =>
-    c?.lines.some((l) => l.segments.some((s) => s.field)) ?? false;
-  if (hasFields(pageHeader) || hasFields(pageFooter)) {
+  // Chrome with page-number fields: re-lay every variant now that the page
+  // total is known, so each field slot is as wide as the widest number shown.
+  if (anyBandHasFields(headers) || anyBandHasFields(footers)) {
     const fieldCtx: Ctx = { ...ctx, fieldPlaceholder: String(resolved.pages.length) };
-    if (chrome?.header && hasFields(pageHeader)) {
-      pageHeader = layoutChrome(chrome.header, CHROME_DISTANCE, left, right, fieldCtx);
-    }
-    if (chrome?.footer && hasFields(pageFooter)) {
-      const flow = layoutChrome(chrome.footer, 0, left, right, fieldCtx);
-      const topY = page.height - CHROME_DISTANCE - flow.height;
-      pageFooter = {
-        lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
-        tables: flow.tables,
-        height: flow.height,
-      };
-      pageFooter.tables.forEach((t) => offsetTable(t, topY));
-    }
+    headers = layHeaders(fieldCtx);
+    footers = layFooters(fieldCtx);
   }
 
-  if (pageHeader) resolved.pageHeader = pageHeader;
-  if (pageFooter) resolved.pageFooter = pageFooter;
+  if (headers.default) resolved.pageHeader = headers.default;
+  if (headers.first) resolved.pageHeaderFirst = headers.first;
+  if (headers.even) resolved.pageHeaderEven = headers.even;
+  if (footers.default) resolved.pageFooter = footers.default;
+  if (footers.first) resolved.pageFooterFirst = footers.first;
+  if (footers.even) resolved.pageFooterEven = footers.even;
+  if (chrome?.titlePg || chrome?.evenAndOdd) {
+    resolved.chromeSelect = { titlePg: !!chrome.titlePg, evenAndOdd: !!chrome.evenAndOdd };
+  }
   return resolved;
 }

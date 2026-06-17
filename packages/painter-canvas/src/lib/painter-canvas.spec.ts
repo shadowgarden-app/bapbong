@@ -384,6 +384,49 @@ describe('CanvasPainter', () => {
     expect(container.children[1].style['top']).toBe('310px');
   });
 
+  it('selects first/even header variants per page', () => {
+    const { painter, container } = setup();
+    const chrome = (text: string) => ({
+      lines: [{ ...helloLine, segments: [{ x: 20, text, font: font() }] }],
+      tables: [],
+      height: 16,
+    });
+    painter.paint(
+      {
+        pages: [page([]), page([], 1), page([], 2), page([], 3)],
+        pageHeader: chrome('def'),
+        pageHeaderFirst: chrome('first'),
+        pageHeaderEven: chrome('even'),
+        chromeSelect: { titlePg: true, evenAndOdd: true },
+      },
+      { devicePixelRatio: 1 },
+    );
+    const txt = (i: number) => ctxAt(container, i).of('fillText').map((c) => c.args[0]);
+    expect(txt(0)).toEqual(['first']); // page 1 → title page
+    expect(txt(1)).toEqual(['even']); // page 2 → even
+    expect(txt(2)).toEqual(['def']); // page 3 → odd/default
+    expect(txt(3)).toEqual(['even']); // page 4 → even
+  });
+
+  it('shows a blank band when the selected variant is absent', () => {
+    const { painter, container } = setup();
+    const chrome = (text: string) => ({
+      lines: [{ ...helloLine, segments: [{ x: 20, text, font: font() }] }],
+      tables: [],
+      height: 16,
+    });
+    painter.paint(
+      {
+        pages: [page([]), page([], 1)],
+        pageHeader: chrome('def'),
+        chromeSelect: { titlePg: true, evenAndOdd: false },
+      },
+      { devicePixelRatio: 1 },
+    );
+    expect(ctxAt(container, 0).of('fillText')).toHaveLength(0); // page 1: titlePg, no first → blank
+    expect(ctxAt(container, 1).of('fillText').map((c) => c.args[0])).toEqual(['def']);
+  });
+
   it('virtualizes pages outside the viewport (unmounted, no canvas)', () => {
     const { painter, container } = setup();
     const layout: ResolvedLayout = { pages: [page([]), page([helloLine], 1)] };
