@@ -27,10 +27,16 @@ export interface PaintOptions {
   selection?: SelectionRect[];
   caretColor?: string;
   selectionColor?: string;
-  /** Visible region of the canvas in CSS px (e.g. the scroll container's
-   *  window onto it). Pages outside it paint only their background — call
-   *  paint() again on scroll. Omit to paint every page in full. */
+  /** Visible region in container CSS px (the scroll window onto the stack).
+   *  Only pages intersecting it (plus a margin) get a canvas + content; the
+   *  rest are unmounted to keep memory bounded. Omit to render every page. */
   viewport?: { top: number; height: number };
+}
+
+/** Injected so the painter can be unit-tested without a DOM. */
+export interface PainterDeps {
+  /** Creates a blank canvas element (defaults to document.createElement). */
+  createCanvas?: () => HTMLCanvasElement;
 }
 
 /** Live numbering for the page being painted (PAGE / NUMPAGES fields). */
@@ -45,9 +51,11 @@ type ResolvedOptions = Required_<
 > &
   Pick<PaintOptions, 'caret' | 'selection' | 'viewport'>;
 
-/** Extra band (layout px) painted above/below the viewport so slow scrolls
+/** Extra band (layout px) mounted above/below the viewport so slow scrolls
  *  reveal content instead of blank page. */
 const VIEWPORT_MARGIN = 200;
+/** Idle page canvases kept for reuse rather than discarded on scroll. */
+const POOL_LIMIT = 8;
 
 const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   zoom: 1,
@@ -69,19 +77,34 @@ const fontCss = (f: FontSpec) =>
 const defaultDpr = () =>
   typeof globalThis.devicePixelRatio === 'number' ? Math.min(globalThis.devicePixelRatio, 2) : 1;
 
+/** One mounted page: its own `<canvas>` element + 2D context. */
+interface PageSlot {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+}
+
 /**
- * Paints a ResolvedLayout onto a `<canvas>`. Pages are stacked vertically.
+ * Paints a ResolvedLayout into a scroll container, one `<canvas>` per page.
+ *
+ * A single canvas can't represent a long document: browsers cap a canvas at
+ * 65535 px per side, so a tall doc (≈57+ A4 pages) silently renders blank. One
+ * canvas per page keeps every backing store small, and only the pages near the
+ * viewport are allocated — the rest are unmounted, so memory stays bounded no
+ * matter how long the document is.
  *
  * The painter consumes pre-computed coordinates only — it never measures or
- * re-flows text. Inline images load asynchronously: the painter caches them
- * and repaints the last layout once an image becomes available.
+ * re-flows text. Inline images load asynchronously: the painter caches them and
+ * repaints once an image becomes available.
  */
 export class CanvasPainter {
-  private readonly ctx: CanvasRenderingContext2D;
-  /** Optional second canvas stacked on top: caret + selection live here so
-   *  drag/blink redraws never re-rasterize the document text. */
-  private readonly overlayCtx: CanvasRenderingContext2D | null;
+  private readonly createCanvas: () => HTMLCanvasElement;
   private readonly images = new Map<string, HTMLImageElement>();
+  /** pageIndex → its mounted canvas; idle canvases wait in `pool`. */
+  private readonly mounted = new Map<number, PageSlot>();
+  private readonly pool: PageSlot[] = [];
+  /** The 2D context of the page currently being drawn (paint* read this). */
+  private ctx!: CanvasRenderingContext2D;
+
   private lastLayout: ResolvedLayout | null = null;
   /** Last paint options, minus caret/selection (those live in lastOverlay). */
   private lastOptions: PaintOptions = {};
@@ -89,20 +112,18 @@ export class CanvasPainter {
     caret: null,
     selection: [],
   };
-  private lastFrame: { o: ResolvedOptions; dpr: number; width: number; height: number } | null =
-    null;
+  private lastFrame: { o: ResolvedOptions; dpr: number } | null = null;
+  /** Top edge (layout px) of each page in the stacked document. */
+  private pageY: number[] = [];
+  /** Pages currently showing caret/selection (so an overlay change can clear them). */
+  private overlayPages = new Set<number>();
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
-    private readonly overlayCanvas?: HTMLCanvasElement,
+    private readonly container: HTMLElement,
+    deps: PainterDeps = {},
   ) {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('bapbong-painter-canvas: 2D canvas context unavailable');
-    this.ctx = ctx;
-    this.overlayCtx = overlayCanvas?.getContext('2d') ?? null;
-    if (overlayCanvas && !this.overlayCtx) {
-      throw new Error('bapbong-painter-canvas: 2D overlay context unavailable');
-    }
+    this.createCanvas =
+      deps.createCanvas ?? (() => document.createElement('canvas'));
   }
 
   paint(layout: ResolvedLayout, options: PaintOptions = {}): void {
@@ -114,64 +135,112 @@ export class CanvasPainter {
     }
     const o: ResolvedOptions = { ...DEFAULTS, ...rest };
     const dpr = options.devicePixelRatio ?? defaultDpr();
+    this.lastFrame = { o, dpr };
 
+    // Stacked geometry: page top edges + the container's scroll range.
     const width = layout.pages.reduce((m, p) => Math.max(m, p.width), 0);
-    const height =
-      layout.pages.reduce((s, p) => s + p.height, 0) +
-      Math.max(0, layout.pages.length - 1) * o.pageGap;
-    this.lastFrame = { o, dpr, width, height };
+    this.pageY = [];
+    let acc = 0;
+    for (const page of layout.pages) {
+      this.pageY.push(acc);
+      acc += page.height + o.pageGap;
+    }
+    const totalHeight = Math.max(0, acc - o.pageGap);
+    this.container.style.position ||= 'relative';
+    this.container.style.width = `${Math.round(width * o.zoom)}px`;
+    this.container.style.height = `${Math.round(totalHeight * o.zoom)}px`;
 
-    this.sizeCanvas(this.canvas, width, height, o.zoom, dpr);
-    if (this.overlayCanvas) this.sizeCanvas(this.overlayCanvas, width, height, o.zoom, dpr);
-
-    const ctx = this.ctx;
-    ctx.setTransform(o.zoom * dpr, 0, 0, o.zoom * dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    ctx.textBaseline = 'alphabetic';
-
-    // Page virtualization: only pages intersecting the viewport get their
-    // content drawn (backgrounds always paint, so scrolling shows pages).
+    // Which pages to keep mounted: those intersecting the viewport (+ margin).
     const vp = options.viewport;
     const vTop = vp ? vp.top / o.zoom - VIEWPORT_MARGIN : -Infinity;
     const vBottom = vp ? (vp.top + vp.height) / o.zoom + VIEWPORT_MARGIN : Infinity;
+    const desired = new Set<number>();
+    layout.pages.forEach((page, i) => {
+      const top = this.pageY[i];
+      if (top + page.height >= vTop && top <= vBottom) desired.add(i);
+    });
 
-    let yOffset = 0;
-    for (const page of layout.pages) {
-      const contentVisible = yOffset + page.height >= vTop && yOffset <= vBottom;
-      const pageInfo = { page: page.index + 1, pages: layout.pages.length };
-      this.paintPage(page, yOffset, o, this.overlayCtx == null, contentVisible, pageInfo);
-      if (contentVisible) {
-        // Page chrome (header/footer) repeats on every page.
-        for (const chrome of [layout.pageHeader, layout.pageFooter]) {
-          if (!chrome) continue;
-          for (const line of chrome.lines) this.paintLine(line, yOffset, o, pageInfo);
-          for (const table of chrome.tables) this.paintTable(table, yOffset, o, pageInfo);
-        }
-      }
-      yOffset += page.height + o.pageGap;
+    for (const idx of [...this.mounted.keys()]) {
+      if (!desired.has(idx)) this.unmountPage(idx);
     }
-    if (this.overlayCtx) this.renderOverlay();
+    this.overlayPages = new Set();
+    for (const i of desired) this.drawPage(i, o, dpr);
+    if (this.lastOverlay.caret) this.overlayPages.add(this.lastOverlay.caret.pageIndex);
+    for (const r of this.lastOverlay.selection) this.overlayPages.add(r.pageIndex);
   }
 
-  /** Redraw only the caret/selection layer — the cheap path for drag and
-   *  blink. Without an overlay canvas this falls back to a full repaint. */
+  /** Redraw just the pages whose caret/selection changed — the cheap path for
+   *  blink and drag (one page for a blink, a handful for a drag). */
   paintOverlay(overlay: { caret?: CaretRect | null; selection?: SelectionRect[] } = {}): void {
     this.lastOverlay = { caret: overlay.caret ?? null, selection: overlay.selection ?? [] };
-    if (!this.overlayCtx) {
-      if (this.lastLayout) {
-        this.paint(this.lastLayout, {
-          ...this.lastOptions,
-          caret: this.lastOverlay.caret,
-          selection: this.lastOverlay.selection,
-        });
-      }
-      return;
+    const frame = this.lastFrame;
+    if (!frame || !this.lastLayout) return;
+    const next = new Set<number>();
+    if (this.lastOverlay.caret) next.add(this.lastOverlay.caret.pageIndex);
+    for (const r of this.lastOverlay.selection) next.add(r.pageIndex);
+    const affected = new Set([...this.overlayPages, ...next]);
+    this.overlayPages = next;
+    for (const i of affected) {
+      if (this.mounted.has(i)) this.drawPage(i, frame.o, frame.dpr);
     }
-    this.renderOverlay();
+  }
+
+  /** Mount (or reuse) page `i`'s canvas, size + position it, and draw it. */
+  private drawPage(i: number, o: ResolvedOptions, dpr: number): void {
+    const page = this.lastLayout?.pages[i];
+    if (!page) return;
+    const slot = this.mountPage(i);
+    this.sizeCanvas(slot.canvas, page.width, page.height, o.zoom, dpr);
+    slot.canvas.style.top = `${Math.round(this.pageY[i] * o.zoom)}px`;
+
+    this.ctx = slot.ctx;
+    this.ctx.setTransform(o.zoom * dpr, 0, 0, o.zoom * dpr, 0, 0);
+    this.ctx.clearRect(0, 0, page.width, page.height);
+    this.ctx.textBaseline = 'alphabetic';
+
+    const pageInfo = { page: page.index + 1, pages: this.lastLayout?.pages.length ?? 1 };
+    // Each canvas is page-local, so everything draws at yOffset 0.
+    this.paintPage(page, 0, o, pageInfo);
+    for (const chrome of [this.lastLayout?.pageHeader, this.lastLayout?.pageFooter]) {
+      if (!chrome) continue;
+      for (const line of chrome.lines) this.paintLine(line, 0, o, pageInfo);
+      for (const table of chrome.tables) this.paintTable(table, 0, o, pageInfo);
+    }
+  }
+
+  /** Get page `i`'s slot, reusing a pooled canvas or creating one. */
+  private mountPage(i: number): PageSlot {
+    const existing = this.mounted.get(i);
+    if (existing) return existing;
+    let slot = this.pool.pop();
+    if (!slot) {
+      const canvas = this.createCanvas();
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('bapbong-painter-canvas: 2D canvas context unavailable');
+      canvas.style.position = 'absolute';
+      canvas.style.left = '0';
+      canvas.style.display = 'block';
+      canvas.style.pointerEvents = 'none'; // pointer events go to the container
+      slot = { canvas, ctx };
+    }
+    this.container.appendChild(slot.canvas);
+    this.mounted.set(i, slot);
+    return slot;
+  }
+
+  /** Detach page `i`, freeing its backing store (kept in the pool for reuse). */
+  private unmountPage(i: number): void {
+    const slot = this.mounted.get(i);
+    if (!slot) return;
+    this.mounted.delete(i);
+    slot.canvas.width = 0;
+    slot.canvas.height = 0; // release the (large) backing store
+    slot.canvas.parentNode?.removeChild(slot.canvas);
+    if (this.pool.length < POOL_LIMIT) this.pool.push(slot);
   }
 
   /** Only resize when needed: assigning width/height — even the same value —
-   *  clears and reallocates the backing store (expensive on a multi-page canvas). */
+   *  clears and reallocates the backing store. */
   private sizeCanvas(c: HTMLCanvasElement, width: number, height: number, zoom: number, dpr: number): void {
     const deviceW = Math.max(1, Math.round(width * zoom * dpr));
     const deviceH = Math.max(1, Math.round(height * zoom * dpr));
@@ -181,54 +250,13 @@ export class CanvasPainter {
     c.style.height = `${Math.round(height * zoom)}px`;
   }
 
-  /** Clear + redraw the overlay canvas from lastOverlay. */
-  private renderOverlay(): void {
-    const octx = this.overlayCtx;
-    const frame = this.lastFrame;
-    if (!octx || !frame || !this.lastLayout) return;
-    const { o, dpr, width, height } = frame;
-    octx.setTransform(o.zoom * dpr, 0, 0, o.zoom * dpr, 0, 0);
-    octx.clearRect(0, 0, width, height);
-    let yOffset = 0;
-    for (const page of this.lastLayout.pages) {
-      this.paintPageOverlay(octx, page.index, yOffset, o);
-      yOffset += page.height + o.pageGap;
-    }
-  }
-
-  /** Selection rects + caret for one page onto `ctx` (page-stacking applied). */
-  private paintPageOverlay(
-    ctx: CanvasRenderingContext2D,
-    pageIndex: number,
-    yOffset: number,
-    o: ResolvedOptions,
-  ): void {
-    ctx.fillStyle = o.selectionColor;
-    for (const r of this.lastOverlay.selection) {
-      if (r.pageIndex === pageIndex) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
-    }
-    const caret = this.lastOverlay.caret;
-    if (caret && caret.pageIndex === pageIndex) {
-      ctx.fillStyle = o.caretColor;
-      ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
-    }
-  }
-
-  private paintPage(
-    page: ResolvedPage,
-    yOffset: number,
-    o: ResolvedOptions,
-    inlineOverlay: boolean,
-    contentVisible: boolean,
-    pageInfo?: PageInfo,
-  ): void {
+  private paintPage(page: ResolvedPage, yOffset: number, o: ResolvedOptions, pageInfo?: PageInfo): void {
     const ctx = this.ctx;
     ctx.fillStyle = o.pageBackground;
     ctx.fillRect(0, yOffset, page.width, page.height);
     ctx.strokeStyle = o.pageBorder;
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
-    if (!contentVisible) return; // virtualized away — background only
 
     // Floating images sit behind the text (text already flows around them).
     for (const f of page.floats ?? []) {
@@ -238,12 +266,10 @@ export class CanvasPainter {
       }
     }
 
-    // Single-canvas mode: selection sits under the text.
-    if (inlineOverlay) {
-      ctx.fillStyle = o.selectionColor;
-      for (const r of this.lastOverlay.selection) {
-        if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
-      }
+    // Selection sits under the text.
+    ctx.fillStyle = o.selectionColor;
+    for (const r of this.lastOverlay.selection) {
+      if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
     }
 
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
@@ -263,13 +289,11 @@ export class CanvasPainter {
       for (const line of fn.lines) this.paintLine(line, yOffset, o, pageInfo);
     }
 
-    // Single-canvas mode: caret on top.
-    if (inlineOverlay) {
-      const caret = this.lastOverlay.caret;
-      if (caret && caret.pageIndex === page.index) {
-        ctx.fillStyle = o.caretColor;
-        ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
-      }
+    // Caret on top.
+    const caret = this.lastOverlay.caret;
+    if (caret && caret.pageIndex === page.index) {
+      ctx.fillStyle = o.caretColor;
+      ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
     }
   }
 
@@ -370,7 +394,7 @@ export class CanvasPainter {
     }
   }
 
-  /** Canvas CSS-px point → page-local point. Points in the gap between pages
+  /** Container CSS-px point → page-local point. Points in the gap between pages
    *  clamp to the nearer page edge; null before the first paint. */
   canvasToPage(cssX: number, cssY: number): PagePoint | null {
     if (!this.lastLayout) return null;
@@ -393,7 +417,7 @@ export class CanvasPainter {
     return null;
   }
 
-  /** Page-local point → canvas CSS-px point; null before the first paint. */
+  /** Page-local point → container CSS-px point; null before the first paint. */
   pageToCanvas(point: PagePoint): { x: number; y: number } | null {
     if (!this.lastLayout) return null;
     const zoom = this.lastOptions.zoom ?? DEFAULTS.zoom;
@@ -416,7 +440,13 @@ export class CanvasPainter {
     if (typeof Image === 'undefined') return undefined;
     const el = new Image();
     el.onload = () => {
-      if (this.lastLayout) this.paint(this.lastLayout, this.lastOptions);
+      if (this.lastLayout) {
+        this.paint(this.lastLayout, {
+          ...this.lastOptions,
+          caret: this.lastOverlay.caret,
+          selection: this.lastOverlay.selection,
+        });
+      }
     };
     el.src = src;
     this.images.set(src, el);

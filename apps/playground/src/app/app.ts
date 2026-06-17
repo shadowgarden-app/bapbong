@@ -53,8 +53,8 @@ export class App implements OnDestroy {
   protected readonly pageCount = signal(0);
 
   private readonly previewHost = viewChild<ElementRef<HTMLDivElement>>('preview');
-  private readonly canvasHost = viewChild<ElementRef<HTMLCanvasElement>>('docCanvas');
-  private readonly overlayHost = viewChild<ElementRef<HTMLCanvasElement>>('overlayCanvas');
+  // The painter fills this container with one <canvas> per page (virtualized).
+  private readonly stackHost = viewChild<ElementRef<HTMLDivElement>>('canvasStack');
   private readonly serializer = DOMSerializer.fromSchema(schema);
 
   private painter: CanvasPainter | null = null;
@@ -132,11 +132,11 @@ export class App implements OnDestroy {
 
   /** M4: mount the hidden ProseMirror editor and run the first paint. */
   private setupEditor(doc: ProseMirrorNode): void {
-    const canvas = this.canvasHost()?.nativeElement;
-    if (!canvas) return;
+    const stack = this.stackHost()?.nativeElement;
+    if (!stack) return;
     this.measureText ??= createCanvasMeasurer();
     this.measureMetrics ??= createCanvasMetrics();
-    this.painter ??= new CanvasPainter(canvas, this.overlayHost()?.nativeElement);
+    this.painter ??= new CanvasPainter(stack);
     // Fonts that finish loading later invalidate every measurement.
     document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
 
@@ -152,8 +152,9 @@ export class App implements OnDestroy {
       },
       onUpdate: (state, tr) => this.refresh(state, tr),
     });
-    // Same scroll container as the canvas, so IME anchoring scrolls along.
-    canvas.parentElement?.appendChild(this.bridge.dom);
+    // Hidden editor lives in the page-canvas container, so IME anchoring
+    // scrolls along (positioned at the painted caret, in container coords).
+    stack.appendChild(this.bridge.dom);
     this.refresh(this.bridge.state);
   }
 
@@ -194,17 +195,15 @@ export class App implements OnDestroy {
     if (contentDirty) {
       this.repaintContent();
     } else {
-      this.repaintOverlay(); // overlay-only: no text re-rasterization
+      this.repaintOverlay(); // redraw only the caret/selection page(s)
     }
 
-    // Anchor the hidden editor (and its IME popup) at the painted caret.
+    // Anchor the hidden editor (and its IME popup) at the painted caret
+    // (pageToCanvas returns container-relative coords, where the editor lives).
     const caret = this.lastCaret;
     if (caret && this.bridge) {
-      const canvas = this.canvasHost()?.nativeElement;
       const pt = this.painter.pageToCanvas({ pageIndex: caret.pageIndex, x: caret.x, y: caret.y });
-      if (canvas && pt) {
-        this.bridge.place(canvas.offsetLeft + pt.x, canvas.offsetTop + pt.y, caret.height);
-      }
+      if (pt) this.bridge.place(pt.x, pt.y, caret.height);
     }
   }
 
@@ -218,7 +217,8 @@ export class App implements OnDestroy {
     }, PANEL_SYNC_MS);
   }
 
-  /** Redraw caret/selection in the current blink phase (overlay layer only). */
+  /** Redraw caret/selection in the current blink phase (only the affected
+   *  page canvases — a blink touches just the caret's page). */
   private repaintOverlay(): void {
     if (!this.painter || !this.resolved) return;
     this.painter.paintOverlay({
@@ -237,14 +237,14 @@ export class App implements OnDestroy {
     });
   }
 
-  /** The canvas-wrap's window onto the canvas, in canvas CSS px. */
+  /** The canvas-wrap's window onto the page stack, in container CSS px. */
   private currentViewport(): { top: number; height: number } | undefined {
-    const canvas = this.canvasHost()?.nativeElement;
-    const wrap = canvas?.closest('.canvas-wrap');
-    if (!canvas || !wrap) return undefined;
+    const stack = this.stackHost()?.nativeElement;
+    const wrap = stack?.closest('.canvas-wrap');
+    if (!stack || !wrap) return undefined;
     const wrapRect = wrap.getBoundingClientRect();
-    const canvasRect = canvas.getBoundingClientRect();
-    return { top: wrapRect.top - canvasRect.top, height: wrap.clientHeight };
+    const stackRect = stack.getBoundingClientRect();
+    return { top: wrapRect.top - stackRect.top, height: wrap.clientHeight };
   }
 
   /** Repaint newly visible pages while scrolling (rAF-throttled). */
@@ -348,7 +348,13 @@ export class App implements OnDestroy {
 
   private posAtEvent(ev: MouseEvent): number | null {
     if (!this.painter || !this.resolved || !this.measureText) return null;
-    const pt = this.painter.canvasToPage(ev.offsetX, ev.offsetY);
+    // Page canvases have pointer-events:none, so events land on the container;
+    // map client coords to container-relative CSS px (offsetX/Y would be
+    // relative to whichever child the pointer happens to be over).
+    const stack = this.stackHost()?.nativeElement;
+    if (!stack) return null;
+    const rect = stack.getBoundingClientRect();
+    const pt = this.painter.canvasToPage(ev.clientX - rect.left, ev.clientY - rect.top);
     if (!pt) return null;
     return hitTest(this.resolved, pt, this.measureText);
   }

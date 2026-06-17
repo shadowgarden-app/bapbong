@@ -38,14 +38,63 @@ class RecordingCtx {
   }
 }
 
-function makeCanvas(ctx: RecordingCtx) {
+/** A fake <canvas>: own recording ctx, tracked width/height/style/parent. */
+interface FakeCanvas {
+  width: number;
+  height: number;
+  style: Record<string, string>;
+  parentNode: FakeContainer | null;
+  _ctx: RecordingCtx;
+  getContext(): RecordingCtx;
+}
+function makeCanvas(): FakeCanvas {
+  const ctx = new RecordingCtx();
   return {
     width: 0,
     height: 0,
-    style: {} as Record<string, string>,
+    style: {},
+    parentNode: null,
+    _ctx: ctx,
     getContext: () => ctx,
-  } as unknown as HTMLCanvasElement;
+  };
 }
+
+/** A fake container element the painter fills with page canvases. */
+interface FakeContainer {
+  style: Record<string, string>;
+  children: FakeCanvas[];
+  appendChild(c: FakeCanvas): FakeCanvas;
+  removeChild(c: FakeCanvas): FakeCanvas;
+}
+function makeContainer(): FakeContainer {
+  const children: FakeCanvas[] = [];
+  return {
+    style: {},
+    children,
+    appendChild(c) {
+      c.parentNode = this;
+      children.push(c);
+      return c;
+    },
+    removeChild(c) {
+      const i = children.indexOf(c);
+      if (i >= 0) children.splice(i, 1);
+      c.parentNode = null;
+      return c;
+    },
+  };
+}
+
+/** Painter whose pages each get their own recording ctx (created on demand). */
+function setup() {
+  const container = makeContainer();
+  const painter = new CanvasPainter(container as unknown as HTMLElement, {
+    createCanvas: () => makeCanvas() as unknown as HTMLCanvasElement,
+  });
+  return { painter, container };
+}
+/** The recording ctx of the i-th currently-mounted page canvas. */
+const ctxAt = (container: FakeContainer, i: number) => container.children[i]._ctx;
 
 const font = (over: Partial<FontSpec> = {}): FontSpec => ({
   family: 'Arial',
@@ -72,25 +121,26 @@ const helloLine = {
 };
 
 describe('CanvasPainter', () => {
-  it('sizes the canvas for zoom × devicePixelRatio and styles in CSS px', () => {
-    const ctx = new RecordingCtx();
-    const canvas = makeCanvas(ctx);
-    new CanvasPainter(canvas).paint(
+  it('sizes each page canvas for zoom × dpr and the container for scroll range', () => {
+    const { painter, container } = setup();
+    painter.paint(
       { pages: [page([helloLine]), page([], 1)] },
       { zoom: 2, devicePixelRatio: 2, pageGap: 10 },
     );
-    expect(canvas.width).toBe(200 * 2 * 2);
-    expect(canvas.height).toBe((300 + 10 + 300) * 2 * 2);
-    expect((canvas.style as unknown as Record<string, string>)['width']).toBe('400px');
-    expect(ctx.of('setTransform')[0].args).toEqual([4, 0, 0, 4, 0, 0]);
+    const c0 = container.children[0];
+    expect(c0.width).toBe(200 * 2 * 2);
+    expect(c0.height).toBe(300 * 2 * 2);
+    expect(c0.style['width']).toBe('400px');
+    expect(ctxAt(container, 0).of('setTransform')[0].args).toEqual([4, 0, 0, 4, 0, 0]);
+    // The container carries the full stacked size so the wrap can scroll.
+    expect(container.style['width']).toBe('400px');
+    expect(container.style['height']).toBe(`${(300 + 10 + 300) * 2}px`);
   });
 
   it('paints the page background and text at the baseline', () => {
-    const ctx = new RecordingCtx();
-    new CanvasPainter(makeCanvas(ctx)).paint(
-      { pages: [page([helloLine])] },
-      { devicePixelRatio: 1 },
-    );
+    const { painter, container } = setup();
+    painter.paint({ pages: [page([helloLine])] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
     const bg = ctx.of('fillRect')[0];
     expect(bg.args).toEqual([0, 0, 200, 300]);
     expect(bg.fillStyle).toBe('#ffffff');
@@ -100,18 +150,21 @@ describe('CanvasPainter', () => {
     expect(text.fillStyle).toBe('#ff0000');
   });
 
-  it('offsets the second page by page height + gap', () => {
-    const ctx = new RecordingCtx();
-    new CanvasPainter(makeCanvas(ctx)).paint(
+  it('positions the second page canvas by page height + gap (content is page-local)', () => {
+    const { painter, container } = setup();
+    painter.paint(
       { pages: [page([]), page([helloLine], 1)] },
       { devicePixelRatio: 1, pageGap: 10 },
     );
-    expect(ctx.of('fillRect')[1].args).toEqual([0, 310, 200, 300]);
-    expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 310 + 32]);
+    const page1 = container.children[1];
+    expect(page1.style['top']).toBe('310px'); // 300 + 10
+    const ctx1 = ctxAt(container, 1);
+    expect(ctx1.of('fillRect')[0].args).toEqual([0, 0, 200, 300]); // bg, page-local
+    expect(ctx1.of('fillText')[0].args).toEqual(['Hello', 20, 32]); // local baseline
   });
 
   it('fills segment highlight behind the text and cell shading behind content', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const hl = { ...helloLine, segments: [{ x: 20, text: 'Hi', font: font(), background: '#FFFF00', width: 30 }] };
     const p = {
       ...page([hl]),
@@ -122,7 +175,8 @@ describe('CanvasPainter', () => {
         },
       ],
     };
-    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    painter.paint({ pages: [p] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
     const fills = ctx.of('fillRect');
     const hlFill = fills.find((c) => c.fillStyle === '#FFFF00');
     expect(hlFill?.args).toEqual([20, 20, 30, 16]); // segment bg over the line box
@@ -133,13 +187,13 @@ describe('CanvasPainter', () => {
   });
 
   it('draws underline and strike from layout-measured widths', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const decorated = {
       ...helloLine,
       segments: [{ x: 20, text: 'Hi', font: font(), underline: true, strike: true, width: 30 }],
     };
-    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [page([decorated])] }, { devicePixelRatio: 1 });
-    const rects = ctx.of('fillRect').slice(1); // [0] is the page background
+    painter.paint({ pages: [page([decorated])] }, { devicePixelRatio: 1 });
+    const rects = ctxAt(container, 0).of('fillRect').slice(1); // [0] is the page background
     // 11pt → em ≈ 14.67px: underline ≈ baseline+1.47, strike ≈ baseline−3.96.
     expect(rects).toHaveLength(2);
     const [under, strike] = rects;
@@ -150,23 +204,19 @@ describe('CanvasPainter', () => {
   });
 
   it('draws declared table borders and paints cell content', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const p = {
       ...page([]),
       tables: [
         {
-          x: 20,
-          y: 20,
-          width: 100,
-          height: 16,
+          x: 20, y: 20, width: 100, height: 16,
           borders: { top: true, bottom: true, left: true, right: true, insideH: true, insideV: true },
-          cells: [
-            { x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, lines: [helloLine] },
-          ],
+          cells: [{ x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, lines: [helloLine] }],
         },
       ],
     };
-    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    painter.paint({ pages: [p] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
     // single cell, all edges outer → 4 edges drawn in one path
     expect(ctx.of('lineTo')).toHaveLength(4);
     expect(ctx.of('stroke').length).toBeGreaterThan(0);
@@ -174,48 +224,42 @@ describe('CanvasPainter', () => {
   });
 
   it('draws per-cell border overrides even with no table borders', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const p = {
       ...page([]),
       tables: [
         {
           x: 20, y: 20, width: 100, height: 16,
-          cells: [
-            { x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, borders: { bottom: true }, lines: [] },
-          ],
+          cells: [{ x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, borders: { bottom: true }, lines: [] }],
         },
       ],
     };
-    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    painter.paint({ pages: [p] }, { devicePixelRatio: 1 });
     // only the bottom edge → one line segment despite no table borders
-    expect(ctx.of('lineTo')).toHaveLength(1);
+    expect(ctxAt(container, 0).of('lineTo')).toHaveLength(1);
   });
 
   it('paints tables WITHOUT borders when none are declared (OOXML default)', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const p = {
       ...page([]),
       tables: [
         {
-          x: 20,
-          y: 20,
-          width: 100,
-          height: 16,
-          cells: [
-            { x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, lines: [helloLine] },
-          ],
+          x: 20, y: 20, width: 100, height: 16,
+          cells: [{ x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, lines: [helloLine] }],
         },
       ],
     };
-    new CanvasPainter(makeCanvas(ctx)).paint({ pages: [p] }, { devicePixelRatio: 1 });
+    painter.paint({ pages: [p] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
     expect(ctx.of('lineTo')).toHaveLength(0); // no borders
     expect(ctx.of('strokeRect')).toHaveLength(1); // only the page border
     expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]); // content intact
   });
 
-  it('draws selection under the text and the caret on top, page-offset', () => {
-    const ctx = new RecordingCtx();
-    new CanvasPainter(makeCanvas(ctx)).paint(
+  it('draws selection under the text and the caret on top (page-local)', () => {
+    const { painter, container } = setup();
+    painter.paint(
       { pages: [page([]), page([helloLine], 1)] },
       {
         devicePixelRatio: 1,
@@ -224,58 +268,51 @@ describe('CanvasPainter', () => {
         caret: { pageIndex: 1, x: 50, y: 20, height: 16 },
       },
     );
-    // page 1 starts at y = 310; selection rect lands at 330, caret at 330.
-    const fills = ctx.of('fillRect');
+    expect(container.children[1].style['top']).toBe('310px'); // page-offset lives here
+    const ctx1 = ctxAt(container, 1);
+    const fills = ctx1.of('fillRect');
     const sel = fills.find((c) => c.fillStyle.startsWith('rgba'));
-    expect(sel?.args).toEqual([20, 330, 30, 16]);
+    expect(sel?.args).toEqual([20, 20, 30, 16]); // page-local
     const caret = fills[fills.length - 1];
-    expect(caret.args).toEqual([50, 330, 1.5, 16]);
+    expect(caret.args).toEqual([50, 20, 1.5, 16]);
     // selection painted before the line's text, caret after.
-    const textIdx = ctx.calls.findIndex((c) => c.method === 'fillText');
-    expect(ctx.calls.indexOf(sel as never)).toBeLessThan(textIdx);
-    expect(ctx.calls.indexOf(caret)).toBeGreaterThan(textIdx);
+    const textIdx = ctx1.calls.findIndex((c) => c.method === 'fillText');
+    expect(ctx1.calls.indexOf(sel as never)).toBeLessThan(textIdx);
+    expect(ctx1.calls.indexOf(caret)).toBeGreaterThan(textIdx);
   });
 
-  it('routes caret/selection to the overlay canvas when one is provided', () => {
-    const content = new RecordingCtx();
-    const overlay = new RecordingCtx();
-    const painter = new CanvasPainter(makeCanvas(content), makeCanvas(overlay));
+  it('paintOverlay redraws only the pages whose caret/selection changed', () => {
+    const { painter, container } = setup();
     painter.paint(
-      { pages: [page([helloLine])] },
-      { devicePixelRatio: 1, caret: { pageIndex: 0, x: 50, y: 20, height: 16 } },
+      { pages: [page([helloLine]), page([helloLine], 1), page([helloLine], 2)] },
+      { devicePixelRatio: 1, caret: { pageIndex: 1, x: 50, y: 20, height: 16 } },
     );
-    // content canvas: text only — no caret rect, no selection fill.
-    expect(content.of('fillText')).toHaveLength(1);
-    expect(content.of('fillRect')).toHaveLength(1); // page background only
-    // overlay canvas: cleared + caret drawn, no text.
-    expect(overlay.of('fillText')).toHaveLength(0);
-    expect(overlay.of('fillRect')[0].args).toEqual([50, 20, 1.5, 16]);
-
-    // paintOverlay redraws ONLY the overlay (content untouched).
-    const contentCalls = content.calls.length;
-    painter.paintOverlay({
-      caret: null,
-      selection: [{ pageIndex: 0, x: 20, y: 20, width: 30, height: 16 }],
-    });
-    expect(content.calls.length).toBe(contentCalls);
-    const sel = overlay.of('fillRect').at(-1);
-    expect(sel?.args).toEqual([20, 20, 30, 16]);
-    expect(sel?.fillStyle.startsWith('rgba')).toBe(true);
+    const before = container.children.map((c) => c._ctx.calls.length);
+    painter.paintOverlay({ caret: { pageIndex: 1, x: 60, y: 20, height: 16 }, selection: [] });
+    const after = container.children.map((c) => c._ctx.calls.length);
+    expect(after[0]).toBe(before[0]); // page 0 untouched
+    expect(after[2]).toBe(before[2]); // page 2 untouched
+    expect(after[1]).toBeGreaterThan(before[1]); // only the caret's page redrew
+    expect(ctxAt(container, 1).of('fillRect').at(-1)?.args).toEqual([60, 20, 1.5, 16]);
   });
 
   it('skips the backing-store resize when dimensions are unchanged', () => {
-    const ctx = new RecordingCtx();
+    const container = makeContainer();
     let widthSets = 0;
-    const canvas = makeCanvas(ctx) as unknown as { width: number };
-    let w = 0;
-    Object.defineProperty(canvas, 'width', {
-      get: () => w,
-      set: (v: number) => {
-        widthSets++;
-        w = v;
+    const painter = new CanvasPainter(container as unknown as HTMLElement, {
+      createCanvas: () => {
+        const c = makeCanvas();
+        let w = 0;
+        Object.defineProperty(c, 'width', {
+          get: () => w,
+          set: (v: number) => {
+            widthSets++;
+            w = v;
+          },
+        });
+        return c as unknown as HTMLCanvasElement;
       },
     });
-    const painter = new CanvasPainter(canvas as unknown as HTMLCanvasElement);
     const layout: ResolvedLayout = { pages: [page([helloLine])] };
     painter.paint(layout, { devicePixelRatio: 1 });
     expect(widthSets).toBe(1);
@@ -298,16 +335,17 @@ describe('CanvasPainter', () => {
     }
     vi.stubGlobal('Image', FakeImage);
     try {
-      const ctx = new RecordingCtx();
-      new CanvasPainter(makeCanvas(ctx)).paint(
+      const { painter, container } = setup();
+      painter.paint(
         { pages: [{ ...page([helloLine]), floats: [{ x: 140, y: 20, width: 80, height: 40, src: 'f' }] }] },
         { devicePixelRatio: 1 },
       );
       await new Promise((r) => setTimeout(r, 0));
+      const ctx = ctxAt(container, 0);
       const draw = ctx.of('drawImage')[0];
       expect(draw.args.slice(1)).toEqual([140, 20, 80, 40]);
       // behind the text: drawImage precedes the repaint's fillText
-      const lastDraw = ctx.calls.lastIndexOf(ctx.of('drawImage')[0]);
+      const lastDraw = ctx.calls.lastIndexOf(ctx.of('drawImage').at(-1) as never);
       const lastText = ctx.calls.lastIndexOf(ctx.of('fillText').at(-1) as never);
       expect(lastDraw).toBeLessThan(lastText);
     } finally {
@@ -316,7 +354,7 @@ describe('CanvasPainter', () => {
   });
 
   it('substitutes live page numbers into chrome field segments', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const fieldLine = {
       ...helloLine,
       segments: [
@@ -324,46 +362,45 @@ describe('CanvasPainter', () => {
         { x: 35, text: '1', font: font(), field: 'pageCount' as const, width: 10 },
       ],
     };
-    new CanvasPainter(makeCanvas(ctx)).paint(
+    painter.paint(
       { pages: [page([]), page([], 1)], pageFooter: { lines: [fieldLine], tables: [], height: 16 } },
       { devicePixelRatio: 1, pageGap: 10 },
     );
-    const texts = ctx.of('fillText').map((c) => c.args[0]);
-    expect(texts).toEqual(['1', '2', '2', '2']); // page1: 1/2 — page2: 2/2
+    // Each page's footer renders its own page number against the total.
+    expect(ctxAt(container, 0).of('fillText').map((c) => c.args[0])).toEqual(['1', '2']);
+    expect(ctxAt(container, 1).of('fillText').map((c) => c.args[0])).toEqual(['2', '2']);
   });
 
   it('stamps page chrome (header/footer) onto every page', () => {
-    const ctx = new RecordingCtx();
+    const { painter, container } = setup();
     const headerLine = { ...helloLine, y: 5, segments: [{ x: 20, text: 'hdr', font: font() }] };
-    new CanvasPainter(makeCanvas(ctx)).paint(
-      {
-        pages: [page([]), page([], 1)],
-        pageHeader: { lines: [headerLine], tables: [], height: 16 },
-      },
+    painter.paint(
+      { pages: [page([]), page([], 1)], pageHeader: { lines: [headerLine], tables: [], height: 16 } },
       { devicePixelRatio: 1, pageGap: 10 },
     );
-    const hdrCalls = ctx.of('fillText').filter((c) => c.args[0] === 'hdr');
-    expect(hdrCalls).toHaveLength(2); // once per page
-    expect(hdrCalls.map((c) => c.args[2])).toEqual([5 + 12, 310 + 5 + 12]); // y + baseline, page-offset
+    // Header drawn on each page canvas at its page-local y (offset is in style.top).
+    expect(ctxAt(container, 0).of('fillText')[0].args).toEqual(['hdr', 20, 17]); // 5 + baseline 12
+    expect(ctxAt(container, 1).of('fillText')[0].args).toEqual(['hdr', 20, 17]);
+    expect(container.children[1].style['top']).toBe('310px');
   });
 
-  it('virtualizes pages outside the viewport (background only)', () => {
-    const ctx = new RecordingCtx();
-    const painter = new CanvasPainter(makeCanvas(ctx));
+  it('virtualizes pages outside the viewport (unmounted, no canvas)', () => {
+    const { painter, container } = setup();
     const layout: ResolvedLayout = { pages: [page([]), page([helloLine], 1)] };
     // Page 1 spans y 310..610 (gap 10). Viewport 0..50 + 200 margin → hidden.
     painter.paint(layout, { devicePixelRatio: 1, pageGap: 10, viewport: { top: 0, height: 50 } });
-    expect(ctx.of('fillText')).toHaveLength(0);
-    expect(ctx.of('fillRect')).toHaveLength(2); // both page backgrounds
+    expect(container.children).toHaveLength(1); // only page 0 mounted
+    expect(ctxAt(container, 0).of('fillText')).toHaveLength(0);
 
-    // Scrolled down: viewport reaches page 1 → its text paints.
+    // Scrolled down: page 1 enters the viewport → mounted, its text paints.
     painter.paint(layout, { devicePixelRatio: 1, pageGap: 10, viewport: { top: 320, height: 50 } });
-    expect(ctx.of('fillText')).toHaveLength(1);
+    const allText = container.children.flatMap((c) => c._ctx.of('fillText'));
+    expect(allText).toHaveLength(1);
+    expect(allText[0].args).toEqual(['Hello', 20, 32]);
   });
 
-  it('maps canvas coords to page-local coords and back (zoom + gap aware)', () => {
-    const ctx = new RecordingCtx();
-    const painter = new CanvasPainter(makeCanvas(ctx));
+  it('maps container coords to page-local coords and back (zoom + gap aware)', () => {
+    const { painter } = setup();
     painter.paint({ pages: [page([]), page([], 1)] }, { devicePixelRatio: 1, zoom: 2, pageGap: 10 });
     // CSS y = (300 + 10 + 5) * 2 = 630 → page 1, y = 5.
     expect(painter.canvasToPage(40, 630)).toEqual({ pageIndex: 1, x: 20, y: 5 });
@@ -373,17 +410,16 @@ describe('CanvasPainter', () => {
   });
 
   it('skips images where Image is unavailable, draws after async load', async () => {
-    const ctx = new RecordingCtx();
-    const imageLine = {
-      ...helloLine,
-      segments: [],
-      images: [{ x: 30, src: 'data:img', width: 40, height: 10 }],
+    const layout: ResolvedLayout = {
+      pages: [page([{ ...helloLine, segments: [], images: [{ x: 30, src: 'data:img', width: 40, height: 10 }] }])],
     };
-    const layout: ResolvedLayout = { pages: [page([imageLine])] };
 
     // Node (no Image): paint must not throw and must not draw.
-    new CanvasPainter(makeCanvas(ctx)).paint(layout, { devicePixelRatio: 1 });
-    expect(ctx.of('drawImage')).toHaveLength(0);
+    {
+      const { painter, container } = setup();
+      painter.paint(layout, { devicePixelRatio: 1 });
+      expect(ctxAt(container, 0).of('drawImage')).toHaveLength(0);
+    }
 
     // Stubbed Image: load completes on a microtask → painter repaints with it.
     class FakeImage {
@@ -400,11 +436,11 @@ describe('CanvasPainter', () => {
     }
     vi.stubGlobal('Image', FakeImage);
     try {
-      const ctx2 = new RecordingCtx();
-      new CanvasPainter(makeCanvas(ctx2)).paint(layout, { devicePixelRatio: 1 });
-      expect(ctx2.of('drawImage')).toHaveLength(0); // not loaded yet
+      const { painter, container } = setup();
+      painter.paint(layout, { devicePixelRatio: 1 });
+      expect(ctxAt(container, 0).of('drawImage')).toHaveLength(0); // not loaded yet
       await new Promise((r) => setTimeout(r, 0));
-      const draw = ctx2.of('drawImage')[0];
+      const draw = ctxAt(container, 0).of('drawImage')[0];
       // x, baselineY (20 + 12) − height 10 = 22, w, h
       expect(draw.args.slice(1)).toEqual([30, 22, 40, 10]);
     } finally {

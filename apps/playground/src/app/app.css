@@ -66,18 +66,12 @@ h2 {
   justify-content: safe center;
 }
 .canvas-stack {
-  position: relative; /* anchors the overlay canvas + hidden editor */
+  position: relative; /* anchors the per-page canvases + hidden editor */
   flex: none;
+  cursor: text; /* pointer events land here (page canvases are pass-through) */
 }
 .canvas-wrap canvas {
   display: block;
-  cursor: text;
-}
-.canvas-stack .overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none; /* mouse goes to the document canvas underneath */
 }
 .hint {
   color: #6b6b70;
