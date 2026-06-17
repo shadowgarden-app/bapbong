@@ -921,6 +921,81 @@ describe('layout with footnotes', () => {
   });
 });
 
+describe('multi-column layout', () => {
+  // content width 200; 2 cols, gap 20 → colWidth 90; col0 x=20, col1 x=130.
+  it('flows down column 0, then column 1, before a new page', () => {
+    const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
+    // band [20,180] = 160px → 10 lines of 16px per column.
+    const blocks = Array.from({ length: 15 }, (_, i) => para(`p${i}`));
+    const r = layoutBlocks(blocks, cfg);
+    expect(r.pages).toHaveLength(1);
+    const col0 = r.pages[0].lines.filter((l) => l.x === 20);
+    const col1 = r.pages[0].lines.filter((l) => l.x === 130);
+    expect(col0).toHaveLength(10);
+    expect(col1).toHaveLength(5);
+    expect(col1[0].y).toBe(20); // column 1 restarts at the band top
+  });
+
+  it('spills to a new page only after the last column fills', () => {
+    const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
+    const blocks = Array.from({ length: 25 }, (_, i) => para(`p${i}`));
+    const r = layoutBlocks(blocks, cfg);
+    expect(r.pages).toHaveLength(2);
+    expect(r.pages[0].lines).toHaveLength(20); // 10 per column
+    expect(r.pages[1].lines).toHaveLength(5);
+  });
+
+  it('single column is unchanged (no x shift)', () => {
+    const cfg = { ...config({ height: 200 }), columns: { count: 1, gap: 20 } };
+    const r = layoutBlocks([para('a'), para('b')], cfg);
+    expect(r.pages[0].lines.every((l) => l.x === 20)).toBe(true);
+  });
+
+  const secSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+', attrs: { sections: { default: null } } },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const secDoc = (sections: unknown, n: number) =>
+    secSchema.node(
+      'doc',
+      { sections },
+      Array.from({ length: n }, (_, i) => secSchema.node('paragraph', null, [secSchema.text(`p${i}`)])),
+    );
+
+  it('switches columns at a continuous section break', () => {
+    // section A: 2 paras, 1 col; section B: 20 paras, 2 cols, continuous.
+    const doc = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: false },
+        { blockCount: 20, columns: { count: 2, gap: 20 }, newPage: false },
+      ],
+      22,
+    );
+    const r = layout(doc, config({ height: 200 }));
+    const all = r.pages.flatMap((p) => p.lines);
+    expect(all.some((l) => l.x === 130)).toBe(true); // column 1 of section B
+    expect(r.pages.length).toBeGreaterThan(1);
+  });
+
+  it('starts a new page at a next-page section break', () => {
+    // Both sections are short enough to share a page, but the break forces two.
+    const doc = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: true },
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: true },
+      ],
+      4,
+    );
+    const r = layout(doc, config({ height: 1000 }));
+    expect(r.pages).toHaveLength(2);
+    expect(r.pages[1].lines[0].y).toBe(20); // section B at the new page top
+  });
+});
+
 describe('live list numbering', () => {
   const numbering = {
     '1': { key: 'a0', levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } } },

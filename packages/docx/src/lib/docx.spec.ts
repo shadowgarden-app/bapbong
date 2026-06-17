@@ -568,6 +568,35 @@ describe('importDocx', () => {
     expect(tail.join('\n')).toMatch(/1\. End gamma/);
   });
 
+  it('parses w:cols + section breaks into doc.sections', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:sectPr><w:type w:val="continuous"/><w:cols w:num="1"/></w:sectPr></w:pPr><w:r><w:t>Intro</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Col A</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Col B</w:t></w:r></w:p>
+      <w:sectPr><w:cols w:num="2" w:space="425"/></w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const sections = doc.attrs['sections'] as
+      | { blockCount: number; columns: { count: number; gap: number }; newPage: boolean }[]
+      | null;
+    expect(sections).toHaveLength(2);
+    // First section ended by the in-paragraph sectPr: 1 block, continuous, 1 col.
+    expect(sections?.[0]).toMatchObject({ blockCount: 1, newPage: false });
+    expect(sections?.[0].columns.count).toBe(1);
+    // Final body sectPr: the remaining 2 blocks, 2 columns, 425 twips ≈ 28px gap.
+    expect(sections?.[1].blockCount).toBe(2);
+    expect(sections?.[1].columns).toEqual({ count: 2, gap: Math.round(425 / 15) });
+  });
+
+  it('leaves doc.sections null for a plain single-column document', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>Plain</w:t></w:r></w:p>
+      <w:sectPr><w:cols w:num="1"/></w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    expect(doc.attrs['sections']).toBeNull();
+  });
+
   it('accepts tracked changes: keeps w:ins text, drops w:del', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

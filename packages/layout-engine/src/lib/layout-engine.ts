@@ -7,6 +7,7 @@ import {
 import type {
   Align,
   CellPadding,
+  ColumnConfig,
   FlowBlock,
   FlowFloat,
   FlowInline,
@@ -33,6 +34,7 @@ import type {
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
+  SectionConfig,
   TableBorders,
   TabStop,
 } from '@shadow-garden/bapbong-contracts';
@@ -396,16 +398,21 @@ interface LineDraft {
   to?: number;
 }
 
-function draftToLine(d: LineDraft, y: number): LayoutLine {
+/** Materialize a positioned line from a draft. `dx` drops the (column-width)
+ *  draft into its column; segments are cloned only when shifting, so cached
+ *  drafts are never mutated. */
+function draftToLine(d: LineDraft, y: number, dx = 0): LayoutLine {
   const line: LayoutLine = {
-    x: d.x,
+    x: d.x + dx,
     y,
     width: d.width,
     height: d.height,
     baseline: d.baseline,
-    segments: d.segments,
+    segments: dx === 0 ? d.segments : d.segments.map((s) => ({ ...s, x: s.x + dx })),
   };
-  if (d.images.length > 0) line.images = d.images;
+  if (d.images.length > 0) {
+    line.images = dx === 0 ? d.images : d.images.map((im) => ({ ...im, x: im.x + dx }));
+  }
   if (d.from != null) line.from = d.from;
   if (d.to != null) line.to = d.to;
   return line;
@@ -750,6 +757,26 @@ function offsetTable(table: ResolvedTable, dy: number): void {
   }
 }
 
+/** Shift a laid-out line (box + segments + images) horizontally in place. */
+function shiftLineX(line: LayoutLine, dx: number): void {
+  line.x += dx;
+  for (const seg of line.segments) seg.x += dx;
+  if (line.images) for (const im of line.images) im.x += dx;
+}
+
+/** Shift a resolved table (and everything inside) horizontally by `dx` px —
+ *  drops a column-width table into its column. Safe to mutate: tables are laid
+ *  out fresh each pass (never cached). */
+function shiftTableX(table: ResolvedTable, dx: number): void {
+  if (dx === 0) return;
+  table.x += dx;
+  for (const cell of table.cells) {
+    cell.x += dx;
+    for (const line of cell.lines) shiftLineX(line, dx);
+    if (cell.tables) for (const t of cell.tables) shiftTableX(t, dx);
+  }
+}
+
 /** Lay out a sequence of blocks within a content box, stacking vertically from
  *  y = 0. No pagination — used for table-cell content. */
 function layoutFlow(
@@ -952,7 +979,10 @@ type ParaItem = {
   after?: number;
   pageBreakBefore?: boolean;
 };
-type BlockItem = { para: ParaItem } | { table: ResolvedTable };
+type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
+  /** Set on the first block of each section: switch column flow here. */
+  section?: ColumnConfig & { newPage: boolean };
+};
 
 /** A rectangle text must flow around (a float's box plus its text gaps). */
 interface Exclusion {
@@ -1126,6 +1156,31 @@ function placeBlocks(
   let exclusions: Exclusion[] = []; // floats die at their page's end
   let y = top;
 
+  // Multi-column flow. A section's blocks fill column 0 top→bottom, then column
+  // 1, etc.; the page finalizes only when the last column overflows. `bandTop`
+  // is where columns start on the current page (top, or the handoff y after a
+  // continuous section break); `sectionMaxY` tracks the deepest content so the
+  // next continuous section can resume below it. count 1 ⇒ ordinary flow.
+  const contentWidth = contentRight - contentLeft;
+  let colCount = 1;
+  let colGap = 0;
+  let colWidth = contentWidth;
+  let colIndex = 0;
+  let bandTop = top;
+  let sectionMaxY = top;
+  let colDirty = false; // current column holds content (a break would progress)
+  const xShift = () => colIndex * (colWidth + colGap);
+  const colX0 = () => contentLeft + xShift();
+  const colX1 = () => colX0() + colWidth;
+  const bump = () => {
+    if (y > sectionMaxY) sectionMaxY = y;
+  };
+  const applyColumns = (cols: ColumnConfig) => {
+    colCount = Math.max(1, cols.count);
+    colGap = colCount > 1 ? cols.gap : 0;
+    colWidth = (contentWidth - colGap * (colCount - 1)) / colCount;
+  };
+
   // Footnotes referenced on the current page, in first-appearance order. Their
   // bodies are reserved at the page bottom; `limit()` is the body's lowered
   // floor once that space is committed.
@@ -1174,7 +1229,24 @@ function placeBlocks(
     exclusions = [];
     pageFnNums = [];
     pageFnSet.clear();
+    colIndex = 0;
+    bandTop = top;
+    sectionMaxY = top;
+    colDirty = false;
     y = top;
+  };
+
+  /** End the current column: move to the next column, or finalize the page when
+   *  the last column is full. */
+  const breakBand = () => {
+    bump();
+    if (colIndex < colCount - 1) {
+      colIndex++;
+      colDirty = false;
+      y = bandTop;
+    } else {
+      finalizePage();
+    }
   };
 
   /** Place one finished line, reserving bottom space for any footnotes it
@@ -1182,12 +1254,14 @@ function placeBlocks(
    *  already-committed) footnotes no longer fit. */
   const emitLine = (draft: LineDraft) => {
     let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
-    if (y + draft.height > bottom - reservedFor([...pageFnNums, ...add]) && pageHasContent()) {
-      finalizePage(); // line (and its footnotes) move to the next page
-      add = lineFnNums(draft.segments); // page reset → all refs are fresh
+    if (y + draft.height > bottom - reservedFor([...pageFnNums, ...add]) && colDirty) {
+      breakBand(); // next column, or next page; footnotes ride the page
+      add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     }
-    lines.push(draftToLine(draft, y));
+    lines.push(draftToLine(draft, y, xShift()));
+    colDirty = true;
     y += draft.height;
+    bump();
     for (const n of add) {
       pageFnNums.push(n);
       pageFnSet.add(n);
@@ -1217,6 +1291,7 @@ function placeBlocks(
             ? top + (f.vOffset ?? 0)
             : yPara + (f.vOffset ?? 0);
       pageFloats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src });
+      colDirty = true;
       if (f.wrap === 'square') {
         exclusions.push({
           left: fx - (f.distL ?? 0),
@@ -1238,8 +1313,8 @@ function placeBlocks(
   /** Widest text band at [yy, yy+h) after carving out the exclusions; null
    *  when nothing usable remains (the caller skips below the blocker). */
   const bandAt = (yy: number, h: number): { left: number; right: number } | null => {
-    let L = contentLeft;
-    let R = contentRight;
+    let L = colX0();
+    let R = colX1();
     for (const ex of exclusions) {
       if (ex.bottom <= yy || ex.top >= yy + h) continue;
       const leftGap = Math.min(R, ex.left) - L;
@@ -1258,14 +1333,14 @@ function placeBlocks(
       ctx,
       (estH) => {
         for (;;) {
-          if (y + estH > limit() && pageHasContent()) {
-            finalizePage(); // fresh page: exclusions are gone
+          if (y + estH > limit() && colDirty) {
+            breakBand(); // next column/page: exclusions are gone
             continue;
           }
           const b = bandAt(y, estH);
           if (b) return b;
           const blockers = exclusions.filter((ex) => ex.top < y + estH && ex.bottom > y);
-          if (blockers.length === 0) return { left: contentLeft, right: contentRight };
+          if (blockers.length === 0) return { left: colX0(), right: colX1() };
           y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
         }
       },
@@ -1273,11 +1348,36 @@ function placeBlocks(
     );
   };
 
+  let firstItem = true;
   for (const item of items) {
+    // Section boundary: switch column flow (and break) before the block.
+    if (item.section) {
+      if (firstItem) {
+        applyColumns(item.section);
+      } else if (item.section.newPage) {
+        if (pageHasContent()) finalizePage();
+        applyColumns(item.section);
+      } else {
+        // Continuous break: resume below the finishing section's deepest column,
+        // unless that's already at the band floor (then start a fresh page).
+        bump();
+        if (sectionMaxY >= limit()) {
+          finalizePage();
+        } else {
+          bandTop = sectionMaxY;
+          y = bandTop;
+          colIndex = 0;
+          colDirty = false;
+        }
+        applyColumns(item.section);
+      }
+    }
+    firstItem = false;
+
     if ('para' in item) {
       if (item.para.pageBreakBefore && pageHasContent()) finalizePage();
-      // Space-before: a gap above the paragraph (collapsed away at a page top).
-      if (item.para.before && pageHasContent()) y += item.para.before;
+      // Space-before: a gap above the paragraph (collapsed away at a band top).
+      if (item.para.before && colDirty) y += item.para.before;
       const drafts = item.para.drafts;
       const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
       const floatsAhead = exclusions.some((ex) => ex.bottom > y && ex.top < y + draftsHeight);
@@ -1288,21 +1388,28 @@ function placeBlocks(
       }
       if (item.para.after) y += item.para.after; // space-after gap
     } else {
-      // Tables flow across pages: split at row boundaries when possible, and
-      // mid-row when a single row is taller than a whole page. Header rows
-      // (w:tblHeader) repeat at the top of every continuation fragment.
-      let table = item.table; // laid out relative to y = 0
+      // Tables flow across columns/pages: split at row boundaries when
+      // possible, and mid-row when a single row is taller than a whole band.
+      // Header rows (w:tblHeader) repeat at the top of every fragment. Tables
+      // are laid out at column width, then shifted into the current column.
+      let table = item.table; // laid out relative to y = 0, column-0 x
+      const placeTable = (t: ResolvedTable) => {
+        offsetTable(t, y);
+        shiftTableX(t, xShift());
+        tables.push(t);
+        colDirty = true;
+        y += t.height;
+        bump();
+      };
       for (;;) {
         const avail = limit() - y;
         if (table.height <= avail) {
-          offsetTable(table, y);
-          tables.push(table);
-          y += table.height;
+          placeTable(table);
           break;
         }
-        // The header band repeats only while it leaves reasonable page room.
+        // The header band repeats only while it leaves reasonable band room.
         const hb =
-          table.headerBottom != null && table.headerBottom < (limit() - top) / 2
+          table.headerBottom != null && table.headerBottom < (limit() - bandTop) / 2
             ? table.headerBottom
             : 0;
         // Prefer the lowest row boundary that still fits (never inside the header).
@@ -1312,47 +1419,43 @@ function placeBlocks(
         }
         if (cut === 0) {
           // No row boundary fits the remaining space. Word only moves the row
-          // to a fresh page when it would fit one whole; a row taller than a
-          // full page starts right here and splits mid-row (no blank gap).
+          // to a fresh band when it would fit one whole; a row taller than a
+          // full band starts right here and splits mid-row (no blank gap).
           let firstRowBottom = table.height;
           for (const cell of table.cells) {
             if (cell.y > hb && cell.y < firstRowBottom) firstRowBottom = cell.y;
           }
-          const fitsFullPage = firstRowBottom - hb <= limit() - top;
-          if (fitsFullPage && pageHasContent()) {
-            finalizePage(); // retry with a full fresh page
+          const fitsFullBand = firstRowBottom - hb <= limit() - bandTop;
+          if (fitsFullBand && colDirty) {
+            breakBand(); // retry with a full fresh column/page
             continue;
           }
           cut = avail; // split the oversize row in the space we have
         }
         if (cut <= hb) {
-          // Header band swallows the remaining space — try a fresh page, or
+          // Header band swallows the remaining space — try a fresh band, or
           // place whole when the geometry is truly degenerate.
-          if (pageHasContent()) {
-            finalizePage();
+          if (colDirty) {
+            breakBand();
             continue;
           }
-          offsetTable(table, y);
-          tables.push(table);
-          y += table.height;
+          placeTable(table);
           break;
         }
         const { top: topFrag, rest } = splitTableAt(table, cut);
         if (rest.height >= table.height) {
-          // No progress (e.g. one line taller than the page) — place whole.
+          // No progress (e.g. one line taller than the band) — place whole.
           // splitTableAt copies whatever it moves, so `table` is intact.
-          offsetTable(table, y);
-          tables.push(table);
-          y += table.height;
+          placeTable(table);
           break;
         }
         const topHasContent = topFrag.cells.some(
           (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
         );
-        if (!topHasContent && pageHasContent()) {
+        if (!topHasContent && colDirty) {
           // Not even one line fits the leftover space — don't paint an empty
-          // table stub; start on the next page instead.
-          finalizePage();
+          // table stub; start on the next column/page instead.
+          breakBand();
           continue;
         }
         if (hb > 0) {
@@ -1364,9 +1467,8 @@ function placeBlocks(
             rest.headerBottom = hb; // continuations keep repeating it
           }
         }
-        offsetTable(topFrag, y);
-        tables.push(topFrag);
-        finalizePage();
+        placeTable(topFrag);
+        breakBand();
         table = rest;
       }
     }
@@ -1382,20 +1484,34 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
   const ctx = buildCtx(config);
   const left = config.page.margin.left;
   const right = config.page.width - config.page.margin.right;
-  const items: BlockItem[] = blocks.map((block) =>
-    block.type === 'paragraph'
-      ? {
-          para: {
-            getFlow: () => block,
-            drafts: block.floats?.length ? null : layoutParagraph(block, left, right, ctx),
-            before: block.spacing?.before,
-            after: block.spacing?.after,
-            pageBreakBefore: block.pageBreakBefore,
-          },
-        }
-      : { table: layoutTable(block, left, right, ctx) },
-  );
+  // Whole-document column flow: lay every block at the column content width.
+  const cols: ColumnConfig = config.columns ?? { count: 1, gap: 0 };
+  const colWidth = columnWidth(right - left, cols);
+  const colRight = left + colWidth;
+  const items: BlockItem[] = blocks.map((block, i) => {
+    const item: BlockItem =
+      block.type === 'paragraph'
+        ? {
+            para: {
+              getFlow: () => block,
+              drafts: block.floats?.length ? null : layoutParagraph(block, left, colRight, ctx),
+              before: block.spacing?.before,
+              after: block.spacing?.after,
+              pageBreakBefore: block.pageBreakBefore,
+            },
+          }
+        : { table: layoutTable(block, left, colRight, ctx) };
+    if (i === 0) item.section = { ...cols, newPage: true };
+    return item;
+  });
   return placeBlocks(items, config, ctx);
+}
+
+/** Equal-column content width: total width minus the inter-column gaps. */
+function columnWidth(totalWidth: number, cols: ColumnConfig): number {
+  const count = Math.max(1, cols.count);
+  const gap = count > 1 ? cols.gap : 0;
+  return (totalWidth - gap * (count - 1)) / count;
 }
 
 // ── Incremental re-layout (M4+) ─────────────────────────────────────
@@ -1527,8 +1643,32 @@ export function layout(
   // counter advances for every list paragraph — including cache hits.
   const counter = createNumberingCounter(doc.attrs['numbering'] as NumberingDefs | null);
 
+  // Section column flow: each block carries its section's columns and whether
+  // it opens a section. Absent → one implicit single-column section.
+  const sections = (doc.attrs['sections'] as SectionConfig[] | null) ?? [
+    { blockCount: doc.childCount, columns: { count: 1, gap: 0 }, newPage: true },
+  ];
+  const blockSection: { columns: ColumnConfig; start: boolean; newPage: boolean }[] = [];
+  for (const sec of sections) {
+    for (let k = 0; k < sec.blockCount; k++) {
+      blockSection.push({ columns: sec.columns, start: k === 0, newPage: sec.newPage });
+    }
+  }
+  const lastSec = sections[sections.length - 1];
+  while (blockSection.length < doc.childCount) {
+    blockSection.push({ columns: lastSec.columns, start: false, newPage: lastSec.newPage });
+  }
+
   const items: BlockItem[] = [];
-  doc.forEach((node, offset) => {
+  doc.forEach((node, offset, index) => {
+    const bs = blockSection[index] ?? { columns: { count: 1, gap: 0 }, start: false, newPage: true };
+    // Blocks wrap at their section's column width; the placer shifts each into
+    // its column. `right` (cache key) is the column's right edge.
+    const colRight = left + columnWidth(right - left, bs.columns);
+    const tag = (item: BlockItem): BlockItem => {
+      if (bs.start) item.section = { ...bs.columns, newPage: bs.newPage };
+      return item;
+    };
     if (node.type.name === 'paragraph') {
       const marker = markerFor(node, counter);
       const getFlow = () => paragraphToFlow(node, ctx.base, offset, true, marker);
@@ -1543,27 +1683,27 @@ export function layout(
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land) — never cached.
       if (nodeHasFloats(node)) {
-        items.push({ para: para(null) });
+        items.push(tag({ para: para(null) }));
         return;
       }
       const contentStart = offset + 1;
       const hit = cache?.paragraphs.get(node);
-      if (hit && hit.left === left && hit.right === right && hit.marker === marker) {
+      if (hit && hit.left === left && hit.right === colRight && hit.marker === marker) {
         if (hit.basePos !== contentStart) {
           hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
           hit.basePos = contentStart;
         }
-        items.push({ para: para(hit.drafts) });
+        items.push(tag({ para: para(hit.drafts) }));
         return;
       }
       const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
-      const drafts = layoutParagraph(flow, left, right, ctx);
-      cache?.paragraphs.set(node, { left, right, basePos: contentStart, marker, drafts });
-      items.push({ para: { ...para(drafts), getFlow: () => flow } });
+      const drafts = layoutParagraph(flow, left, colRight, ctx);
+      cache?.paragraphs.set(node, { left, right: colRight, basePos: contentStart, marker, drafts });
+      items.push(tag({ para: { ...para(drafts), getFlow: () => flow } }));
     } else if (node.type.name === 'table') {
-      items.push({
-        table: layoutTable(tableToFlow(node, ctx.base, offset, counter), left, right, ctx),
-      });
+      items.push(
+        tag({ table: layoutTable(tableToFlow(node, ctx.base, offset, counter), left, colRight, ctx) }),
+      );
     }
   });
   // Pre-lay footnote bodies so the placer knows their heights up front.

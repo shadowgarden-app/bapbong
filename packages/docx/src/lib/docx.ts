@@ -703,6 +703,67 @@ function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   return blocks;
 }
 
+interface SectionConfig {
+  blockCount: number;
+  columns: { count: number; gap: number };
+  newPage: boolean;
+}
+
+/** Column flow from a section's w:cols (equal-width only). count defaults to 1;
+ *  the gap is w:space (twips→px), Word's default 720 twips = 0.5in. */
+function parseColumns(sectPr: OoxmlNode | undefined): { count: number; gap: number } {
+  const cols = sectPr && child(sectPr, 'w:cols');
+  const num = Number(attrOf(cols, 'w:num') ?? '1');
+  const explicit = cols ? children(cols, 'w:col').length : 0;
+  const count = Math.max(Number.isNaN(num) ? 1 : num, explicit, 1);
+  const spaceTw = Number(attrOf(cols, 'w:space') ?? '720');
+  return { count, gap: twipsToPx(Number.isNaN(spaceTw) ? 720 : spaceTw) };
+}
+
+/** A continuous section break switches columns mid-page; every other type
+ *  (next/odd/even page, or unspecified) starts the section on a new page. */
+function sectionStartsNewPage(sectPr: OoxmlNode | undefined): boolean {
+  return attrOf(child(sectPr, 'w:type'), 'w:val') !== 'continuous';
+}
+
+/** Parse the body into blocks while recording section boundaries. A w:p whose
+ *  w:pPr carries a w:sectPr ends a section (with that sectPr's columns); the
+ *  trailing w:body/w:sectPr ends the final section. */
+function parseBodyBlocks(
+  body: OoxmlNode,
+  ctx: Ctx,
+): { blocks: PMNode[]; sections: SectionConfig[] } {
+  const blocks: PMNode[] = [];
+  const sections: SectionConfig[] = [];
+  let start = 0;
+  for (const node of body.children) {
+    if (node.name === 'w:p') {
+      blocks.push(parseParagraph(node, ctx));
+      const sectPr = child(child(node, 'w:pPr'), 'w:sectPr');
+      if (sectPr) {
+        sections.push({
+          blockCount: blocks.length - start,
+          columns: parseColumns(sectPr),
+          newPage: sectionStartsNewPage(sectPr),
+        });
+        start = blocks.length;
+      }
+    } else if (node.name === 'w:tbl') {
+      blocks.push(parseTable(node, ctx));
+    }
+  }
+  // The trailing body sectPr closes the last (or only) section.
+  const bodySectPr = child(body, 'w:sectPr');
+  if (blocks.length > start || sections.length === 0) {
+    sections.push({
+      blockCount: blocks.length - start,
+      columns: parseColumns(bodySectPr),
+      newPage: sectionStartsNewPage(bodySectPr),
+    });
+  }
+  return { blocks, sections };
+}
+
 async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
   const entry = zip.file(path);
   return entry ? entry.async('string') : undefined;
@@ -793,11 +854,18 @@ function buildNotesSection(ctx: Ctx): PMNode[] {
   return out;
 }
 
-function storyDoc(blocks: PMNode[], numbering: NumberingDefs | null): PMNode {
+function storyDoc(
+  blocks: PMNode[],
+  numbering: NumberingDefs | null,
+  sections: SectionConfig[] | null = null,
+): PMNode {
   // doc content is `block+` — guarantee at least one paragraph. The numbering
-  // defs ride the doc so markers can be recounted live at layout time.
+  // defs (live markers) and section column flow ride the doc as attrs.
+  const attrs: Record<string, unknown> = {};
+  if (numbering) attrs['numbering'] = numbering;
+  if (sections) attrs['sections'] = sections;
   return schema.nodes.doc.create(
-    numbering ? { numbering } : null,
+    Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [schema.nodes.paragraph.create()],
   );
 }
@@ -853,11 +921,22 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
-  const bodyBlocks = body ? parseBlocks(body, ctx) : [];
+  const parsed = body ? parseBodyBlocks(body, ctx) : { blocks: [], sections: [] };
   // References are now assigned (in document order); footnotes go to the page
-  // bottom, endnotes stay appended.
+  // bottom, endnotes stay appended (and fall into the last section).
   const footnotes = buildFootnotesMap(ctx);
-  const doc = storyDoc([...bodyBlocks, ...buildNotesSection(ctx)], ctx.numbering.defs);
+  const endnoteBlocks = buildNotesSection(ctx);
+  const { sections } = parsed;
+  if (endnoteBlocks.length > 0 && sections.length > 0) {
+    sections[sections.length - 1].blockCount += endnoteBlocks.length;
+  }
+  // Only ride the sections attr when it changes layout (>1 section, or columns).
+  const multiSection = sections.length > 1 || sections.some((s) => s.columns.count > 1);
+  const doc = storyDoc(
+    [...parsed.blocks, ...endnoteBlocks],
+    ctx.numbering.defs,
+    multiSection ? sections : null,
+  );
 
   // Headers/footers referenced by the section properties.
   const headers: Record<string, PMNode> = {};

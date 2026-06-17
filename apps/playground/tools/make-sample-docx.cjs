@@ -6,7 +6,8 @@
 // page-break-before, multi-level numbered + bullet lists, tables (colwidth,
 // colspan, rowspan/vMerge, table align, row height, cell vAlign, per-cell &
 // table borders, shading), inline + floating images, hyperlinks, tab stops,
-// and footnotes (laid out at the bottom of the page their reference falls on).
+// footnotes (laid out at the bottom of the page their reference falls on), and
+// a two-column section (w:cols) introduced by a continuous section break.
 //
 //   node apps/playground/tools/make-sample-docx.cjs
 const fs = require('node:fs');
@@ -288,6 +289,22 @@ function buildDocumentXml() {
       </w:tr>
       <w:tr>${td(p(run('Hàng sau')))}${td(p(run('Hàng bình thường ngay sau hàng siêu cao.')))}</w:tr>
     </w:tbl>`,
+    heading('13. Bố cục nhiều cột (w:cols)'),
+    // This paragraph carries the section break that CLOSES the single-column
+    // section (everything above). The next section flows in two columns.
+    p(
+      run('Đoạn giới thiệu trình bày một cột. Phần thân ngay bên dưới chuyển sang HAI cột bằng một section break liên tục (w:type=continuous): văn bản rót đầy cột trái rồi mới sang cột phải, đúng kiểu bản tin / tạp chí.'),
+      jc('both') + '<w:sectPr><w:type w:val="continuous"/><w:cols w:num="1"/></w:sectPr>',
+    ),
+    // Two-column body — the LAST paragraph carries the 2-column section break.
+    ...Array.from({ length: 7 }, (_, i) =>
+      p(run(`(${i + 1}) ` + LOREM[i % LOREM.length]), jc('both')),
+    ),
+    p(
+      run('(8) ' + LOREM[3] + ' ' + LOREM[5]),
+      jc('both') + '<w:sectPr><w:type w:val="continuous"/><w:cols w:num="2" w:space="425"/></w:sectPr>',
+    ),
+    p(run('Trở lại bố cục một cột sau section break thứ hai — phần kết của tài liệu chiếm trọn bề ngang trang trở lại.'), jc('both')),
     p(run('— Hết tài liệu mẫu —', '<w:i/>'), jc('center')),
   ].join('\n');
 
@@ -301,6 +318,8 @@ function buildDocumentXml() {
     <w:sectPr>
       <w:headerReference w:type="default" r:id="rId20"/>
       <w:footerReference w:type="default" r:id="rId21"/>
+      <w:type w:val="continuous"/>
+      <w:cols w:num="1"/>
     </w:sectPr>
   </w:body>
 </w:document>`;

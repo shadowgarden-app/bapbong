@@ -7,6 +7,23 @@ export interface PageConfig {
   margin: { top: number; right: number; bottom: number; left: number };
 }
 
+/** Multi-column layout (w:cols): `count` equal-width columns separated by
+ *  `gap` px. count 1 is the ordinary single-column flow. */
+export interface ColumnConfig {
+  count: number;
+  gap: number;
+}
+
+/** One document section's flow properties. Sections are delimited by section
+ *  breaks (w:sectPr); each spans `blockCount` top-level blocks. `newPage` is
+ *  true for a next-page break (the section starts a fresh page), false for a
+ *  continuous break (columns switch mid-page). */
+export interface SectionConfig {
+  blockCount: number;
+  columns: ColumnConfig;
+  newPage: boolean;
+}
+
 /** A resolved font used for both measuring and painting. */
 export interface FontSpec {
   family: string;
@@ -224,6 +241,9 @@ export interface LayoutConfig {
   tabWidth?: number;
   /** Defaults for runs that don't specify a value. */
   defaultFont?: Partial<FontSpec>;
+  /** Whole-document column config for the flat (FlowBlock) layout path. The PM
+   *  doc path reads per-section columns from the doc instead. */
+  columns?: ColumnConfig;
 }
 
 // ── Resolved (paint-ready) output ──────────────────────────────────

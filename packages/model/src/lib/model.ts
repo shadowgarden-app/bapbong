@@ -17,6 +17,9 @@ export const schema = new Schema({
         // NumberingDefs (numbering.ts) — list markers are recomputed from
         // these at layout time, so edits renumber live. Importer-set.
         numbering: { default: null },
+        // SectionConfig[] (contracts) — per-section column flow, delimited by
+        // w:sectPr breaks. null/absent → one implicit single-column section.
+        sections: { default: null },
       },
     },
 
