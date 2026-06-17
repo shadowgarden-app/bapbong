@@ -8,6 +8,7 @@
       <span>Choose a .docx file…</span>
     </label>
     <button type="button" class="sample" (click)="loadSample()">Load sample</button>
+    <button type="button" class="sample" (click)="loadSample('large_sample.docx')">Load large sample</button>
   </div>
 
   @if (loading()) {

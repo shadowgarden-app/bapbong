@@ -96,11 +96,11 @@ export class App implements OnDestroy {
     await this.load(file.name, await file.arrayBuffer());
   }
 
-  protected async loadSample(): Promise<void> {
+  protected async loadSample(name = 'sample.docx'): Promise<void> {
     try {
-      const res = await fetch('sample.docx');
-      if (!res.ok) throw new Error(`sample.docx: HTTP ${res.status}`);
-      await this.load('sample.docx', await res.arrayBuffer());
+      const res = await fetch(name);
+      if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+      await this.load(name, await res.arrayBuffer());
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : String(err));
     }
