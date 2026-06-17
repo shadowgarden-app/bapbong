@@ -1635,14 +1635,68 @@ interface ParagraphCacheEntry {
   drafts: LineDraft[];
 }
 
+interface TableCacheEntry {
+  left: number;
+  right: number;
+  /** Table node position the cached layout was computed at. */
+  basePos: number;
+  /** Canonical layout (y = 0, column-0 x, positions at basePos). Cloned per
+   *  paint so the placer can mutate (offset/shift/split) without corrupting it. */
+  table: ResolvedTable;
+}
+
+/** Shift a laid-out line's PM positions by `delta`, deep-cloning it (geometry
+ *  is unchanged — the line just moved in the document). */
+function cloneLineShifted(l: LayoutLine, delta: number): LayoutLine {
+  const out: LayoutLine = {
+    ...l,
+    segments: l.segments.map((s) => (s.pos != null ? { ...s, pos: s.pos + delta } : { ...s })),
+  };
+  if (l.images) out.images = l.images.map((im) => (im.pos != null ? { ...im, pos: im.pos + delta } : { ...im }));
+  if (l.from != null) out.from = l.from + delta;
+  if (l.to != null) out.to = l.to + delta;
+  return out;
+}
+
+/** Deep-clone a resolved table, shifting every PM position by `delta`. Unlike
+ *  `cloneTable` (which shares segment arrays), this clones segments too, so the
+ *  paginator can offset/shift/split the result without touching the cached one. */
+function cloneTableShifted(t: ResolvedTable, delta: number): ResolvedTable {
+  return {
+    ...t,
+    borders: t.borders ? { ...t.borders } : t.borders,
+    cells: t.cells.map((c) => ({
+      ...c,
+      borders: c.borders ? { ...c.borders } : c.borders,
+      lines: c.lines.map((l) => cloneLineShifted(l, delta)),
+      tables: c.tables?.map((nt) => cloneTableShifted(nt, delta)),
+    })),
+  };
+}
+
+/** Whether a table contains any list paragraph. Such tables advance the live
+ *  numbering counter, so they're laid out fresh (never cached) to keep markers
+ *  in sync with edits elsewhere in the document. */
+function tableHasList(node: PMNode): boolean {
+  let found = false;
+  node.descendants((n) => {
+    if (found) return false;
+    if (n.type.name === 'paragraph' && n.attrs['list']) found = true;
+    return !found;
+  });
+  return found;
+}
+
 /**
- * Paragraph-level layout cache keyed on ProseMirror node identity (PM keeps
- * unchanged nodes identical across transactions). An unchanged paragraph skips
- * measuring/wrapping entirely; one that merely moved in the document gets its
- * positions shifted. Tables are not cached (laid out fresh every time).
+ * Layout cache keyed on ProseMirror node identity (PM keeps unchanged nodes
+ * identical across transactions). An unchanged paragraph/table skips
+ * measuring/wrapping entirely; one that merely moved gets its positions
+ * shifted. Tables that host list paragraphs are not cached (they advance the
+ * live numbering counter).
  */
 export class LayoutCache {
   readonly paragraphs = new WeakMap<PMNode, ParagraphCacheEntry>();
+  readonly tables = new WeakMap<PMNode, TableCacheEntry>();
 }
 
 export function createLayoutCache(): LayoutCache {
@@ -1852,9 +1906,21 @@ export function layout(
       cache?.paragraphs.set(node, { left, right: colRight, basePos: contentStart, marker, drafts });
       items.push(tag({ para: { ...para(drafts), getFlow: () => flow } }));
     } else if (node.type.name === 'table') {
-      items.push(
-        tag({ table: layoutTable(tableToFlow(node, ctx.base, offset, counter), left, colRight, ctx) }),
-      );
+      // Cache hit: clone the canonical layout (shifting PM positions if it
+      // moved) instead of re-measuring every cell. List-bearing tables are
+      // never cached — they advance the live numbering counter.
+      const hit = cache?.tables.get(node);
+      if (hit && hit.left === left && hit.right === colRight) {
+        items.push(tag({ table: cloneTableShifted(hit.table, offset - hit.basePos) }));
+        return;
+      }
+      const table = layoutTable(tableToFlow(node, ctx.base, offset, counter), left, colRight, ctx);
+      if (cache && !tableHasList(node)) {
+        cache.tables.set(node, { left, right: colRight, basePos: offset, table });
+        items.push(tag({ table: cloneTableShifted(table, 0) }));
+      } else {
+        items.push(tag({ table }));
+      }
     }
   });
   // Pre-lay footnote bodies so the placer knows their heights up front.

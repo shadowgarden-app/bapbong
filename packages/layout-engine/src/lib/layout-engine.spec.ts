@@ -1054,6 +1054,75 @@ describe('multi-column layout', () => {
   });
 });
 
+describe('incremental table re-layout', () => {
+  const tSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+      table: { group: 'block', content: 'table_row+', attrs: { cellPadding: { default: null }, borders: { default: null }, align: { default: null } } },
+      table_row: { content: 'table_cell+', attrs: { header: { default: false }, height: { default: null } } },
+      table_cell: {
+        content: 'block+',
+        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null }, background: { default: null }, vAlign: { default: null }, borders: { default: null } },
+      },
+    },
+    marks: {},
+  });
+  const para = (t: string) => tSchema.node('paragraph', null, [tSchema.text(t)]);
+  const cell = (t: string) => tSchema.node('table_cell', null, [para(t)]);
+  // ONE table node reused across layouts (PM keeps unchanged nodes identical).
+  const tableNode = tSchema.node('table', null, [tSchema.node('table_row', null, [cell('ZZZ'), cell('ZZZ')])]);
+  const firstCellFrom = (r: ReturnType<typeof layout>) => {
+    for (const pg of r.pages) for (const t of pg.tables ?? []) {
+      const l = t.cells[0]?.lines[0];
+      if (l?.from != null) return l.from;
+    }
+    return -1;
+  };
+
+  it('reuses a cached table instead of re-measuring its cells', () => {
+    let zzz = 0;
+    const measure: MeasureText = (text) => {
+      if (text.includes('ZZZ')) zzz++;
+      return text.length * 10;
+    };
+    const cfg = { ...config(), measureText: measure };
+    const cache = createLayoutCache();
+    layout(tSchema.node('doc', null, [para('a'), tableNode]), cfg, cache);
+    const first = zzz;
+    expect(first).toBeGreaterThan(0);
+    // Edit elsewhere: a new paragraph before the SAME table node.
+    layout(tSchema.node('doc', null, [para('a'), para('b'), tableNode]), cfg, cache);
+    expect(zzz).toBe(first); // table cells were NOT re-measured
+  });
+
+  it("shifts a cached table's PM positions when it moves", () => {
+    const cfg = config();
+    const cache = createLayoutCache();
+    const r1 = layout(tSchema.node('doc', null, [para('a'), tableNode]), cfg, cache);
+    const r2 = layout(tSchema.node('doc', null, [para('aa'), para('bb'), tableNode]), cfg, cache);
+    expect(firstCellFrom(r2)).toBeGreaterThan(firstCellFrom(r1)); // moved down → positions shifted
+  });
+
+  it('lays a list-bearing table fresh (no stale numbering)', () => {
+    let measures = 0;
+    const measure: MeasureText = (t) => {
+      measures++;
+      return t.length * 10;
+    };
+    const cfg = { ...config(), measureText: measure };
+    const cache = createLayoutCache();
+    const listCell = tSchema.node('table_cell', null, [tSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [tSchema.text('item')])]);
+    const listTable = tSchema.node('table', null, [tSchema.node('table_row', null, [listCell])]);
+    const doc = tSchema.node('doc', null, [listTable]);
+    layout(doc, cfg, cache);
+    const first = measures;
+    layout(doc, cfg, cache); // same node, but list tables aren't cached
+    expect(measures).toBeGreaterThan(first); // re-measured (not cached)
+  });
+});
+
 describe('live list numbering', () => {
   const numbering = {
     '1': { key: 'a0', levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } } },
