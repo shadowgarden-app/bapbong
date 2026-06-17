@@ -919,30 +919,72 @@ describe('layout with footnotes', () => {
     const resolved = layout(body, config({ height: 300 }));
     expect(resolved.pages.every((pg) => pg.footnotes === undefined)).toBe(true);
   });
+
+  const tblSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+      table: { group: 'block', content: 'table_row+', attrs: { cellPadding: { default: null }, borders: { default: null }, align: { default: null } } },
+      table_row: { content: 'table_cell+', attrs: { header: { default: false }, height: { default: null } } },
+      table_cell: {
+        content: 'block+',
+        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null }, background: { default: null }, vAlign: { default: null }, borders: { default: null } },
+      },
+    },
+    marks: { footnote: { attrs: { num: {} } }, vertAlign: { attrs: { value: {} } } },
+  });
+
+  it('reserves a footnote referenced inside a table cell', () => {
+    const cellPara = tblSchema.node('paragraph', null, [
+      tblSchema.text('Cell '),
+      tblSchema.text('1', [tblSchema.mark('footnote', { num: 1 }), tblSchema.mark('vertAlign', { value: 'super' })]),
+    ]);
+    const doc = tblSchema.node('doc', null, [
+      tblSchema.node('table', null, [
+        tblSchema.node('table_row', null, [tblSchema.node('table_cell', null, [cellPara])]),
+      ]),
+    ]);
+    const note = tblSchema.node('doc', null, [tblSchema.node('paragraph', null, [tblSchema.text('Table note')])]);
+    const r = layout(doc, config({ height: 300 }), undefined, undefined, { 1: note });
+    const fn = r.pages[0].footnotes;
+    expect(fn).toBeDefined();
+    expect((fn?.lines ?? []).flatMap((l) => l.segments).map((s) => s.text).join('')).toContain(
+      'Table note',
+    );
+  });
 });
 
 describe('multi-column layout', () => {
   // content width 200; 2 cols, gap 20 → colWidth 90; col0 x=20, col1 x=130.
-  it('flows down column 0, then column 1, before a new page', () => {
+  it('balances columns evenly on a single-page section', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
-    // band [20,180] = 160px → 10 lines of 16px per column.
+    // band [20,180] = 160px → 10 lines fit a column, but 15 lines balance to
+    // ~7/8 across the two columns instead of packing column 0 to 10.
     const blocks = Array.from({ length: 15 }, (_, i) => para(`p${i}`));
     const r = layoutBlocks(blocks, cfg);
     expect(r.pages).toHaveLength(1);
     const col0 = r.pages[0].lines.filter((l) => l.x === 20);
     const col1 = r.pages[0].lines.filter((l) => l.x === 130);
-    expect(col0).toHaveLength(10);
-    expect(col1).toHaveLength(5);
+    expect(col0.length + col1.length).toBe(15);
+    expect(Math.abs(col0.length - col1.length)).toBeLessThanOrEqual(1); // even
+    expect(col0.length).toBeLessThan(10); // not greedily packed
     expect(col1[0].y).toBe(20); // column 1 restarts at the band top
   });
 
-  it('spills to a new page only after the last column fills', () => {
+  it('fills full-height columns on non-final pages, balances the last', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
     const blocks = Array.from({ length: 25 }, (_, i) => para(`p${i}`));
     const r = layoutBlocks(blocks, cfg);
     expect(r.pages).toHaveLength(2);
-    expect(r.pages[0].lines).toHaveLength(20); // 10 per column
-    expect(r.pages[1].lines).toHaveLength(5);
+    // Page 1 is greedy: column 0 packs to the full 10 lines.
+    expect(r.pages[0].lines.filter((l) => l.x === 20)).toHaveLength(10);
+    expect(r.pages[0].lines).toHaveLength(20);
+    // Page 2 (the final page) balances its 5 lines ~3/2 across the columns.
+    const p2col0 = r.pages[1].lines.filter((l) => l.x === 20);
+    const p2col1 = r.pages[1].lines.filter((l) => l.x === 130);
+    expect(p2col0.length + p2col1.length).toBe(5);
+    expect(Math.abs(p2col0.length - p2col1.length)).toBeLessThanOrEqual(1);
   });
 
   it('single column is unchanged (no x shift)', () => {

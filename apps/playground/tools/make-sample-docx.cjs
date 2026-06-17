@@ -132,7 +132,7 @@ const SPECIALS = [
       <w:tr>
         ${td(p(run('Miền Bắc — ô gộp dọc qua hai hàng')), '<w:vMerge w:val="restart"/>')}
         ${td(p(run('120 đơn hàng')))}
-        ${td(p(run('158 đơn hàng, tăng trưởng tốt nhờ chiến dịch mới')))}
+        ${td(p(run('158 đơn hàng, tăng trưởng tốt nhờ chiến dịch mới') + fnRef(3)))}
       </w:tr>
       <w:tr>
         ${td('<w:p/>', '<w:vMerge/>')}
@@ -358,6 +358,7 @@ const FOOTNOTES_XML = `<?xml version="1.0"?><w:footnotes xmlns:w="${W_NS}">
   <w:footnote w:id="0" w:type="continuationSeparator"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>
   <w:footnote w:id="1"><w:p>${run('Chú thích chân trang đầu tiên — bản thân ghi chú được layout ở đáy của chính trang chứa tham chiếu, với cỡ chữ nhỏ hơn phần thân.')}</w:p></w:footnote>
   <w:footnote w:id="2"><w:p>${run('Chú thích thứ hai nằm ở một trang khác, chứng minh mỗi trang tự gom ghi chú riêng phía trên footer.')}</w:p></w:footnote>
+  <w:footnote w:id="3"><w:p>${run('Chú thích này được tham chiếu từ bên trong một ô bảng — vẫn được gom xuống đáy trang chứa bảng.')}</w:p></w:footnote>
 </w:footnotes>`;
 
 const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">

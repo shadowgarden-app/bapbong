@@ -979,10 +979,35 @@ type ParaItem = {
   after?: number;
   pageBreakBefore?: boolean;
 };
+type SectionMarker = ColumnConfig & { newPage: boolean; height?: number };
 type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
-  /** Set on the first block of each section: switch column flow here. */
-  section?: ColumnConfig & { newPage: boolean };
+  /** Set on the first block of each section: switch column flow here. `height`
+   *  (filled by assignSectionHeights) is the section's total content height,
+   *  used to balance the columns on the section's final page. */
+  section?: SectionMarker;
 };
+
+/** Estimated laid-out height of a block item (drafts + spacing, or table). */
+function blockItemHeight(item: BlockItem): number {
+  if ('para' in item) {
+    const lines = item.para.drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
+    return lines + (item.para.before ?? 0) + (item.para.after ?? 0);
+  }
+  return item.table.height;
+}
+
+/** Fill each section marker's `height` with the sum of its blocks' heights, so
+ *  the placer can balance columns on the section's final page. */
+function assignSectionHeights(items: BlockItem[]): void {
+  let current: SectionMarker | null = null;
+  for (const item of items) {
+    if (item.section) {
+      current = item.section;
+      current.height = 0;
+    }
+    if (current) current.height = (current.height ?? 0) + blockItemHeight(item);
+  }
+}
 
 /** A rectangle text must flow around (a float's box plus its text gaps). */
 interface Exclusion {
@@ -1201,6 +1226,61 @@ function placeBlocks(
     }
     return out;
   };
+  /** Commit footnote numbers to the current page (reserve bottom space). */
+  const commitFns = (nums: number[]) => {
+    for (const n of nums) {
+      if (!pageFnSet.has(n)) {
+        pageFnNums.push(n);
+        pageFnSet.add(n);
+      }
+    }
+  };
+  /** Extra bottom space new footnotes would add beyond what's reserved. */
+  const addedReserve = (nums: number[]) => {
+    const fresh = nums.filter((n) => !pageFnSet.has(n));
+    return fresh.length === 0 ? 0 : reservedFor([...pageFnNums, ...fresh]) - reservedFor(pageFnNums);
+  };
+  /** Fresh footnote numbers referenced in a table's cells above `maxY` (cell-y
+   *  relative to the table top) — so a placed fragment reserves its notes. */
+  const tableFootnoteNums = (t: ResolvedTable, maxY = Infinity): number[] => {
+    const out: number[] = [];
+    const scan = (ls: LayoutLine[]) => {
+      for (const l of ls)
+        for (const s of l.segments) {
+          const n = s.footnoteRef;
+          if (n != null && footnotes?.has(n) && !pageFnSet.has(n) && !out.includes(n)) out.push(n);
+        }
+    };
+    for (const c of t.cells) {
+      if (c.y >= maxY) continue;
+      scan(c.lines);
+      if (c.tables) for (const nt of c.tables) for (const nc of nt.cells) scan(nc.lines);
+    }
+    return out;
+  };
+
+  // Column balancing: on a multi-column section's final page, fill every column
+  // to an even target height instead of packing column 0 first. `balanceTarget`
+  // is that per-column height (non-last columns break there; the last column
+  // keeps the full band to absorb rounding). null ⇒ greedy full-height columns.
+  let balanceTarget: number | null = null;
+  let sectionRemaining = 0; // unplaced height left in the current section
+  let balancing = false;
+  const colBottom = () =>
+    balanceTarget != null && colIndex < colCount - 1
+      ? Math.min(limit(), bandTop + balanceTarget)
+      : limit();
+  /** Recompute the balance target for the current page: balance only when the
+   *  section's remaining content fits this page's columns. */
+  const rebalance = () => {
+    if (!balancing) {
+      balanceTarget = null;
+      return;
+    }
+    const pageColH = limit() - bandTop;
+    balanceTarget =
+      sectionRemaining <= colCount * pageColH ? Math.max(1, sectionRemaining / colCount) : null;
+  };
 
   /** Lay the page's reserved footnote bodies out at the bottom, above the
    *  footer, with a separator rule. Positions are already stripped. */
@@ -1246,26 +1326,27 @@ function placeBlocks(
       y = bandTop;
     } else {
       finalizePage();
+      rebalance(); // fresh page within a balanced section → new target
     }
   };
 
   /** Place one finished line, reserving bottom space for any footnotes it
-   *  references. Breaks to a fresh page when the line + its (and the page's
-   *  already-committed) footnotes no longer fit. */
+   *  references. Breaks to the next column/page when the line + its (and the
+   *  page's already-committed) footnotes no longer fit, or it would cross the
+   *  balance target. */
   const emitLine = (draft: LineDraft) => {
     let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
-    if (y + draft.height > bottom - reservedFor([...pageFnNums, ...add]) && colDirty) {
+    const floor = () => Math.min(colBottom(), bottom - reservedFor([...pageFnNums, ...add]));
+    if (y + draft.height > floor() && colDirty) {
       breakBand(); // next column, or next page; footnotes ride the page
       add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     }
     lines.push(draftToLine(draft, y, xShift()));
     colDirty = true;
     y += draft.height;
+    sectionRemaining -= draft.height;
     bump();
-    for (const n of add) {
-      pageFnNums.push(n);
-      pageFnSet.add(n);
-    }
+    commitFns(add);
   };
 
   /** Whether the current page already holds content (so a break is meaningful). */
@@ -1333,7 +1414,7 @@ function placeBlocks(
       ctx,
       (estH) => {
         for (;;) {
-          if (y + estH > limit() && colDirty) {
+          if (y + estH > colBottom() && colDirty) {
             breakBand(); // next column/page: exclusions are gone
             continue;
           }
@@ -1371,13 +1452,23 @@ function placeBlocks(
         }
         applyColumns(item.section);
       }
+      // Balance the new section's columns once its content fits a page.
+      balancing = colCount > 1;
+      sectionRemaining = item.section.height ?? 0;
+      rebalance();
     }
     firstItem = false;
 
     if ('para' in item) {
-      if (item.para.pageBreakBefore && pageHasContent()) finalizePage();
+      if (item.para.pageBreakBefore && pageHasContent()) {
+        finalizePage();
+        rebalance();
+      }
       // Space-before: a gap above the paragraph (collapsed away at a band top).
-      if (item.para.before && colDirty) y += item.para.before;
+      if (item.para.before && colDirty) {
+        y += item.para.before;
+        sectionRemaining -= item.para.before;
+      }
       const drafts = item.para.drafts;
       const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
       const floatsAhead = exclusions.some((ex) => ex.bottom > y && ex.top < y + draftsHeight);
@@ -1386,7 +1477,10 @@ function placeBlocks(
       } else {
         placeParaBanded(item.para.getFlow());
       }
-      if (item.para.after) y += item.para.after; // space-after gap
+      if (item.para.after) {
+        y += item.para.after; // space-after gap
+        sectionRemaining -= item.para.after;
+      }
     } else {
       // Tables flow across columns/pages: split at row boundaries when
       // possible, and mid-row when a single row is taller than a whole band.
@@ -1398,12 +1492,14 @@ function placeBlocks(
         shiftTableX(t, xShift());
         tables.push(t);
         colDirty = true;
+        commitFns(tableFootnoteNums(t)); // footnotes referenced in the cells
         y += t.height;
+        sectionRemaining -= t.height;
         bump();
       };
       for (;;) {
-        const avail = limit() - y;
-        if (table.height <= avail) {
+        const avail = colBottom() - y;
+        if (table.height + addedReserve(tableFootnoteNums(table)) <= avail) {
           placeTable(table);
           break;
         }
@@ -1504,6 +1600,7 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
     if (i === 0) item.section = { ...cols, newPage: true };
     return item;
   });
+  assignSectionHeights(items);
   return placeBlocks(items, config, ctx);
 }
 
@@ -1715,6 +1812,7 @@ export function layout(
       fnMap.set(num, layoutFootnoteBody(footnotes[num], left, right, ctx));
     }
   }
+  assignSectionHeights(items);
   const resolved = placeBlocks(items, config, ctx, { top, bottom }, fnMap);
 
   // Chrome with page-number fields: re-lay it out now that the page total is
