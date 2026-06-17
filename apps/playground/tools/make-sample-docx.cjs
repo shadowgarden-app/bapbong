@@ -7,8 +7,9 @@
 // colspan, rowspan/vMerge, table align, row height, cell vAlign, per-cell &
 // table borders, shading), inline + floating images, hyperlinks, tab stops,
 // footnotes (laid out at the bottom of the page their reference falls on), a
-// two-column section (w:cols) introduced by a continuous section break, and
-// first/even header variants (w:titlePg + w:evenAndOddHeaders).
+// two-column section (w:cols) introduced by a continuous section break,
+// first/even header variants (w:titlePg + w:evenAndOddHeaders), and comments
+// (w:commentRange + comments.xml) shown in a sidebar.
 //
 //   node apps/playground/tools/make-sample-docx.cjs
 const fs = require('node:fs');
@@ -54,6 +55,10 @@ const heading = (text) => p(run(text, '<w:b/><w:sz w:val="28"/>'), jc('left'));
 // in footnotes.xml and is laid out at the bottom of the page it lands on.
 const fnRef = (id) => `<w:r><w:footnoteReference w:id="${id}"/></w:r>`;
 
+// Wrap run content in a comment range (the body lives in comments.xml).
+const commented = (id, content) =>
+  `<w:commentRangeStart w:id="${id}"/>${content}<w:commentRangeEnd w:id="${id}"/><w:r><w:commentReference w:id="${id}"/></w:r>`;
+
 // Lưới viền đầy đủ — OOXML mặc định KHÔNG có viền; bảng nào muốn lưới phải khai.
 const TBL_BORDERS = `<w:tblPr><w:tblBorders><w:top w:val="single"/><w:bottom w:val="single"/><w:left w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr>`;
 
@@ -79,7 +84,7 @@ const SPECIALS = [
         run(', '),
         run('đậm nghiêng', '<w:b/><w:i/>'),
         run(', '),
-        run('màu đỏ', '<w:color w:val="C0392B"/>'),
+        commented(0, run('màu đỏ', '<w:color w:val="C0392B"/>')),
         run(', '),
         run('màu xanh', '<w:color w:val="1F6FEB"/>'),
         run(', '),
@@ -294,7 +299,9 @@ function buildDocumentXml() {
     // This paragraph carries the section break that CLOSES the single-column
     // section (everything above). The next section flows in two columns.
     p(
-      run('Đoạn giới thiệu trình bày một cột. Phần thân ngay bên dưới chuyển sang HAI cột bằng một section break liên tục (w:type=continuous): văn bản rót đầy cột trái rồi mới sang cột phải, đúng kiểu bản tin / tạp chí.'),
+      run('Đoạn giới thiệu trình bày một cột. ') +
+        commented(1, run('Phần thân ngay bên dưới chuyển sang HAI cột bằng một section break liên tục')) +
+        run(' (w:type=continuous): văn bản rót đầy cột trái rồi mới sang cột phải, đúng kiểu bản tin / tạp chí.'),
       jc('both') + '<w:sectPr><w:type w:val="continuous"/><w:cols w:num="1"/></w:sectPr>',
     ),
     // Two-column body — the LAST paragraph carries the 2-column section break.
@@ -388,6 +395,12 @@ const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
 // Document settings — w:evenAndOddHeaders turns on the even-page header variant.
 const SETTINGS_XML = `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:evenAndOddHeaders/></w:settings>`;
 
+// Comment bodies referenced by w:commentRange in the document body.
+const COMMENTS_XML = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}">
+  <w:comment w:id="0" w:author="Phương Minh" w:date="2026-06-17T09:00:00Z" w:initials="PM"><w:p><w:r><w:t>Cụm "màu đỏ" được tô comment — bấm vào đây để chọn vùng tương ứng trên canvas.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="1" w:author="Reviewer" w:date="2026-06-17T10:30:00Z" w:initials="RV"><w:p><w:r><w:t>Comment vắt qua nhiều run trong phần bố cục nhiều cột.</w:t></w:r></w:p></w:comment>
+</w:comments>`;
+
 const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/>
   <Relationship Id="rId8" Type="${R_NS}/image" Target="media/image2.png"/>
@@ -398,13 +411,14 @@ const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId23" Type="${R_NS}/header" Target="header2.xml"/>
   <Relationship Id="rId24" Type="${R_NS}/header" Target="header3.xml"/>
   <Relationship Id="rId25" Type="${R_NS}/settings" Target="settings.xml"/>
+  <Relationship Id="rId26" Type="${R_NS}/comments" Target="comments.xml"/>
 </Relationships>`;
 
 async function main() {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
-    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>`,
+    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>`,
   );
   zip.file(
     '_rels/.rels',
@@ -420,6 +434,7 @@ async function main() {
   zip.file('word/footer1.xml', FOOTER_XML);
   zip.file('word/footnotes.xml', FOOTNOTES_XML);
   zip.file('word/settings.xml', SETTINGS_XML);
+  zip.file('word/comments.xml', COMMENTS_XML);
   zip.file('word/media/image1.png', PNG_RED, { base64: true });
   zip.file('word/media/image2.png', PNG_BLUE, { base64: true });
 

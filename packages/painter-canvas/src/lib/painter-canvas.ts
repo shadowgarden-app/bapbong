@@ -28,6 +28,8 @@ export interface PaintOptions {
   selection?: SelectionRect[];
   caretColor?: string;
   selectionColor?: string;
+  /** Tint painted behind commented text (w:commentRange). */
+  commentColor?: string;
   /** Visible region in container CSS px (the scroll window onto the stack).
    *  Only pages intersecting it (plus a margin) get a canvas + content; the
    *  rest are unmounted to keep memory bounded. Omit to render every page. */
@@ -67,6 +69,7 @@ const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   textColor: '#000000',
   caretColor: '#1a1a1a',
   selectionColor: 'rgba(59, 130, 246, 0.30)',
+  commentColor: 'rgba(255, 193, 7, 0.28)',
 };
 
 /** CSS font shorthand. Duplicated from bapbong-measuring: the painter may only
@@ -324,10 +327,14 @@ export class CanvasPainter {
   ): void {
     const ctx = this.ctx;
     const baselineY = yOffset + line.y + line.baseline;
-    // Highlight / shading behind the text first, so glyphs sit on top.
+    // Highlight / shading + comment tint behind the text first, so glyphs sit on top.
     for (const seg of line.segments) {
       if (seg.background && seg.width) {
         ctx.fillStyle = seg.background;
+        ctx.fillRect(seg.x, yOffset + line.y, seg.width, line.height);
+      }
+      if (seg.commentIds?.length && seg.width) {
+        ctx.fillStyle = o.commentColor;
         ctx.fillRect(seg.x, yOffset + line.y, seg.width, line.height);
       }
     }

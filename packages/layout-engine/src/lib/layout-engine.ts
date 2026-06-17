@@ -108,6 +108,8 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   if (va) run.vertAlign = va.attrs['value'] === 'sub' ? 'sub' : 'super';
   const fn = findMark(marks, 'footnote');
   if (fn) run.footnoteRef = Number(fn.attrs['num']) || undefined;
+  const cm = findMark(marks, 'comment');
+  if (cm) run.commentIds = cm.attrs['ids'] as number[];
   return run;
 }
 
@@ -305,6 +307,7 @@ interface Token {
   background?: string;
   vertAlign?: 'super' | 'sub';
   footnoteRef?: number;
+  commentIds?: number[];
   width: number;
   isSpace: boolean;
   /** A tab character: its width is resolved to the next tab stop at layout. */
@@ -376,6 +379,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         background: inline.background,
         vertAlign: inline.vertAlign,
         footnoteRef: inline.footnoteRef,
+        commentIds: inline.commentIds,
         width: isTab ? 0 : ctx.measure(part, font),
         isSpace,
         isTab,
@@ -608,6 +612,7 @@ function wrapParagraph(
         };
         if (t.field) seg.field = t.field;
         if (t.footnoteRef != null) seg.footnoteRef = t.footnoteRef;
+        if (t.commentIds) seg.commentIds = t.commentIds;
         segments.push(seg);
       }
       x += t.width + (t.isSpace && !t.isTab ? extraPerGap : 0);

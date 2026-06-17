@@ -24,6 +24,15 @@ export interface SectionConfig {
   newPage: boolean;
 }
 
+/** A document comment (w:comment) referenced by a w:commentRange in the body.
+ *  `id` matches the comment mark's ids; `text` is the flattened comment body. */
+export interface CommentData {
+  id: number;
+  author: string;
+  date: string;
+  text: string;
+}
+
 /** A resolved font used for both measuring and painting. */
 export interface FontSpec {
   family: string;
@@ -64,6 +73,9 @@ export interface InlineRun {
   /** Footnote reference number (w:footnoteReference): the run's text is the
    *  superscript mark; the body is laid out at the bottom of its page. */
   footnoteRef?: number;
+  /** Comment ids covering this run (w:commentRangeStart/End) — painted with a
+   *  comment tint; the sidebar locates the range by these ids. */
+  commentIds?: number[];
   /** Absolute ProseMirror position of the run's first character. */
   pos?: number;
 }
@@ -271,6 +283,9 @@ export interface LayoutSegment {
   /** Footnote reference number: the placer counts which notes land on each
    *  page so it can reserve bottom space and lay their bodies out there. */
   footnoteRef?: number;
+  /** Comment ids covering this segment (w:commentRangeStart/End) — the painter
+   *  tints it; null/absent means no comment. */
+  commentIds?: number[];
   /** Absolute PM position of the segment's first character. Segments without
    *  a position (list markers) are decoration — not addressable by a caret. */
   pos?: number;

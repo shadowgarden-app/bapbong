@@ -20,6 +20,7 @@ import {
 import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
 import type {
   CaretRect,
+  CommentData,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -51,6 +52,7 @@ export class App implements OnDestroy {
   protected readonly footerKeys = signal<string[]>([]);
   protected readonly loading = signal(false);
   protected readonly pageCount = signal(0);
+  protected readonly comments = signal<CommentData[]>([]);
 
   private readonly previewHost = viewChild<ElementRef<HTMLDivElement>>('preview');
   // The painter fills this container with one <canvas> per page (virtualized).
@@ -115,7 +117,8 @@ export class App implements OnDestroy {
     this.fileName.set(name);
 
     try {
-      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page } = await importDocx(bytes);
+      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, comments, page } =
+        await importDocx(bytes);
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
       this.chromeHeaders = headers;
@@ -123,6 +126,7 @@ export class App implements OnDestroy {
       this.chromeTitlePg = titlePg;
       this.chromeEvenAndOdd = evenAndOdd;
       this.footnotes = footnotes;
+      this.comments.set(comments);
       this.page = page;
       // Measure with the real fonts, not their fallbacks.
       await ensureFontsLoaded(
@@ -359,6 +363,37 @@ export class App implements OnDestroy {
     ev.preventDefault();
     this.bridge.selectWordAt(pos);
     this.bridge.focus();
+  }
+
+  /** Click a sidebar comment → select its commented range and scroll to it. */
+  protected onCommentClick(id: number): void {
+    const range = this.commentRange(id);
+    if (!range || !this.bridge) return;
+    this.bridge.setSelection(range.from, range.to);
+    this.bridge.focus();
+    if (this.painter && this.resolved && this.measureText) {
+      const cr = caretRect(this.resolved, range.from, this.measureText);
+      const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
+      const wrap = this.stackHost()?.nativeElement.closest('.canvas-wrap') as HTMLElement | null;
+      if (pt && wrap) wrap.scrollTop = Math.max(0, pt.y - 80);
+    }
+  }
+
+  /** PM range (from..to) covered by the comment mark carrying `id`, or null. */
+  private commentRange(id: number): { from: number; to: number } | null {
+    const doc = this.bridge?.state.doc;
+    if (!doc) return null;
+    let from = Infinity;
+    let to = -Infinity;
+    doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      const m = node.marks.find((mk) => mk.type.name === 'comment');
+      if (m && (m.attrs['ids'] as number[]).includes(id)) {
+        from = Math.min(from, pos);
+        to = Math.max(to, pos + node.nodeSize);
+      }
+    });
+    return from <= to ? { from, to } : null;
   }
 
   private posAtEvent(ev: MouseEvent): number | null {

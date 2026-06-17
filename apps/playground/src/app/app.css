@@ -55,6 +55,11 @@ h2 {
   background: #f4f4f6;
 }
 
+.canvas-layout {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
 .canvas-wrap {
   position: relative; /* hidden input-bridge editor is positioned in here */
   background: #525659;
@@ -64,6 +69,46 @@ h2 {
   max-height: 760px;
   display: flex;
   justify-content: safe center;
+  flex: 1 1 auto;
+  min-width: 0; /* let the flex item shrink instead of overflowing */
+}
+.comments {
+  flex: 0 0 248px;
+  align-self: stretch;
+  max-height: 760px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comments h3 {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+}
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-left: 3px solid #ffc107;
+  border-radius: 6px;
+  background: #fffdf5;
+  cursor: pointer;
+  font: inherit;
+}
+.comment:hover {
+  background: #fff7e0;
+}
+.comment-meta {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.comment-text {
+  font-size: 0.85rem;
+  color: #333;
+  white-space: pre-wrap;
 }
 .canvas-stack {
   position: relative; /* anchors the per-page canvases + hidden editor */

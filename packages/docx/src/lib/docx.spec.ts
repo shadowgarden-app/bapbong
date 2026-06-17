@@ -799,6 +799,35 @@ describe('importDocx', () => {
     expect(evenAndOdd).toBe(true);
   });
 
+  it('imports comments + marks the commented range', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:t>Before </w:t></w:r>
+        <w:commentRangeStart w:id="0"/>
+        <w:r><w:t>commented</w:t></w:r>
+        <w:commentRangeEnd w:id="0"/>
+        <w:r><w:commentReference w:id="0"/></w:r>
+        <w:r><w:t> after</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const commentsXml = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}">
+      <w:comment w:id="0" w:author="Reviewer" w:date="2026-01-02"><w:p><w:r><w:t>Note body</w:t></w:r></w:p></w:comment>
+    </w:comments>`;
+    const { doc, comments } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
+        'word/comments.xml': commentsXml,
+      }),
+    );
+    expect(comments).toEqual([{ id: 0, author: 'Reviewer', date: '2026-01-02', text: 'Note body' }]);
+    // Only the "commented" run carries the comment mark.
+    const p0 = doc.child(0);
+    const byText = new Map<string, readonly Mark[]>();
+    p0.forEach((n) => { if (n.isText) byText.set(n.text ?? '', n.marks); });
+    expect(markMap(byText.get('commented') ?? []).comment.ids).toEqual([0]);
+    expect(byText.get('Before ')?.some((m) => m.type.name === 'comment')).toBeFalsy();
+    expect(byText.get(' after')?.some((m) => m.type.name === 'comment')).toBeFalsy();
+  });
+
   it('leaves titlePg/evenAndOdd false when unset', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:t>body</w:t></w:r></w:p>

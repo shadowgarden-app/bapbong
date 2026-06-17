@@ -27,17 +27,30 @@
 
   <section [hidden]="!pageCount()">
     <h2>Canvas <span class="dim">(editable — click to place the caret, type, undo with ⌘Z · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
-    <div class="canvas-wrap" (scroll)="onCanvasScroll()">
-      <!-- The painter fills this with one <canvas> per page (virtualized). -->
-      <div
-        #canvasStack
-        class="canvas-stack"
-        (pointerdown)="onCanvasPointerDown($event)"
-        (pointermove)="onCanvasPointerMove($event)"
-        (pointerup)="onCanvasPointerUp()"
-        (pointercancel)="onCanvasPointerUp()"
-        (dblclick)="onCanvasDblClick($event)"
-      ></div>
+    <div class="canvas-layout">
+      <div class="canvas-wrap" (scroll)="onCanvasScroll()">
+        <!-- The painter fills this with one <canvas> per page (virtualized). -->
+        <div
+          #canvasStack
+          class="canvas-stack"
+          (pointerdown)="onCanvasPointerDown($event)"
+          (pointermove)="onCanvasPointerMove($event)"
+          (pointerup)="onCanvasPointerUp()"
+          (pointercancel)="onCanvasPointerUp()"
+          (dblclick)="onCanvasDblClick($event)"
+        ></div>
+      </div>
+      @if (comments().length) {
+        <aside class="comments">
+          <h3>Comments <span class="dim">({{ comments().length }})</span></h3>
+          @for (c of comments(); track c.id) {
+            <button type="button" class="comment" (click)="onCommentClick(c.id)">
+              <span class="comment-meta">{{ c.author || 'Unknown' }}<span class="dim">{{ c.date ? ' · ' + c.date : '' }}</span></span>
+              <span class="comment-text">{{ c.text }}</span>
+            </button>
+          }
+        </aside>
+      }
     </div>
   </section>
 

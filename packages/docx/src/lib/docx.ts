@@ -39,6 +39,14 @@ export interface PageConfig {
   margin: { top: number; right: number; bottom: number; left: number };
 }
 
+/** A document comment (structurally a bapbong-contracts CommentData). */
+export interface CommentData {
+  id: number;
+  author: string;
+  date: string;
+  text: string;
+}
+
 export interface DocxImport {
   doc: PMNode;
   rawDocumentXml: string;
@@ -54,6 +62,8 @@ export interface DocxImport {
   titlePg: boolean;
   /** w:evenAndOddHeaders — even pages use the "even" header/footer. */
   evenAndOdd: boolean;
+  /** Comments referenced by the body (w:commentRange), in appearance order. */
+  comments: CommentData[];
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
   page: PageConfig;
 }
@@ -69,6 +79,15 @@ interface NotesRegistry {
   ref(kind: 'footnote' | 'endnote', id: string): number;
 }
 
+/** Comment bodies (w:comment) + the live set covering the text being parsed.
+ *  `active` toggles on w:commentRangeStart/End; `used` records referenced
+ *  comments in first-appearance order. */
+interface CommentsRegistry {
+  defs: Map<number, { author: string; date: string; body: OoxmlNode }>;
+  active: Set<number>;
+  used: number[];
+}
+
 interface Ctx {
   styles: StyleRegistry;
   numbering: NumberingResolver;
@@ -76,6 +95,7 @@ interface Ctx {
   media: Map<string, string>; // zip path → data URL
   resolveTheme: ThemeResolver;
   notes: NotesRegistry;
+  comments: CommentsRegistry;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -277,6 +297,11 @@ function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href
   ].reduce(mergeRunProps, {} as RunProps);
   const marks = propsToMarks(effective);
   if (href) marks.push(schema.marks.link.create({ href }));
+  // Comments active over this run (w:commentRangeStart/End) become a comment mark.
+  if (ctx.comments.active.size > 0) {
+    const ids = [...ctx.comments.active].sort((a, b) => a - b);
+    marks.push(schema.marks.comment.create({ ids }));
+  }
   return marks;
 }
 
@@ -383,6 +408,15 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       for (const run of children(node, 'w:r')) {
         inline.push(...runToInline(run, paraBase, ctx, href));
       }
+    } else if (node.name === 'w:commentRangeStart') {
+      const id = Number(attrOf(node, 'w:id'));
+      if (!Number.isNaN(id) && ctx.comments.defs.has(id)) {
+        ctx.comments.active.add(id);
+        if (!ctx.comments.used.includes(id)) ctx.comments.used.push(id);
+      }
+    } else if (node.name === 'w:commentRangeEnd') {
+      const id = Number(attrOf(node, 'w:id'));
+      if (!Number.isNaN(id)) ctx.comments.active.delete(id);
     }
   }
   const attrs: {
@@ -810,6 +844,40 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
   return reg;
 }
 
+/** Load comments.xml into a registry (bodies + author/date keyed by id). */
+async function buildCommentsRegistry(zip: JSZip): Promise<CommentsRegistry> {
+  const defs = new Map<number, { author: string; date: string; body: OoxmlNode }>();
+  const xml = await readPart(zip, 'word/comments.xml');
+  if (xml) {
+    for (const c of children(child(parseXml(xml), 'w:comments'), 'w:comment')) {
+      const id = Number(attrOf(c, 'w:id'));
+      if (Number.isNaN(id)) continue;
+      defs.set(id, {
+        author: attrOf(c, 'w:author') ?? '',
+        date: attrOf(c, 'w:date') ?? '',
+        body: c,
+      });
+    }
+  }
+  return { defs, active: new Set(), used: [] };
+}
+
+/** All w:t text under a node, concatenated (no side effects). */
+function collectText(node: OoxmlNode): string {
+  if (node.name === 'w:t') return node.text ?? '';
+  return node.children.map(collectText).join('');
+}
+
+/** Referenced comments as flat data, in first-appearance order. */
+function buildCommentsList(ctx: Ctx): CommentData[] {
+  const out: CommentData[] = [];
+  for (const id of ctx.comments.used) {
+    const def = ctx.comments.defs.get(id);
+    if (def) out.push({ id, author: def.author, date: def.date, text: collectText(def.body).trim() });
+  }
+  return out;
+}
+
 /** Parse one note body into blocks, prefixing the first paragraph with its
  *  display number (so "1. note text" reads naturally). Shared by the appended
  *  endnote section and the page-bottom footnote map. */
@@ -912,6 +980,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   const numberingRoot = numberingXml ? parseXml(numberingXml) : undefined;
   const media = await extractMedia(zip);
   const notes = await buildNotesRegistry(zip);
+  const comments = await buildCommentsRegistry(zip);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     styles,
     numbering: buildNumbering(numberingRoot),
@@ -919,6 +988,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     media,
     resolveTheme,
     notes,
+    comments,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
@@ -980,6 +1050,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     footnotes,
     titlePg,
     evenAndOdd,
+    comments: buildCommentsList(ctx),
     page: parsePageGeometry(sectPr),
   };
 }

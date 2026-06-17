@@ -186,6 +186,17 @@ describe('CanvasPainter', () => {
     expect(ctx.calls.indexOf(hlFill as never)).toBeLessThan(ctx.calls.findIndex((c) => c.method === 'fillText'));
   });
 
+  it('tints commented text behind the glyphs', () => {
+    const { painter, container } = setup();
+    const commented = { ...helloLine, segments: [{ x: 20, text: 'Hi', font: font(), commentIds: [0], width: 30 }] };
+    painter.paint({ pages: [page([commented])] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
+    const tint = ctx.of('fillRect').find((c) => c.fillStyle.startsWith('rgba(255'));
+    expect(tint?.args).toEqual([20, 20, 30, 16]); // over the line box
+    // painted before the glyph
+    expect(ctx.calls.indexOf(tint as never)).toBeLessThan(ctx.calls.findIndex((c) => c.method === 'fillText'));
+  });
+
   it('draws underline and strike from layout-measured widths', () => {
     const { painter, container } = setup();
     const decorated = {

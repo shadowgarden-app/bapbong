@@ -1123,6 +1123,29 @@ describe('incremental table re-layout', () => {
   });
 });
 
+describe('layout with comments', () => {
+  const cSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+    },
+    marks: { comment: { attrs: { ids: {} } } },
+  });
+
+  it('carries comment ids onto the commented segments only', () => {
+    const doc = cSchema.node('doc', null, [
+      cSchema.node('paragraph', null, [
+        cSchema.text('plain '),
+        cSchema.text('noted', [cSchema.mark('comment', { ids: [3, 7] })]),
+      ]),
+    ]);
+    const segs = layout(doc, config()).pages[0].lines[0].segments;
+    expect(segs.find((s) => s.text === 'noted')?.commentIds).toEqual([3, 7]);
+    expect(segs.find((s) => s.text === 'plain')?.commentIds).toBeUndefined();
+  });
+});
+
 describe('live list numbering', () => {
   const numbering = {
     '1': { key: 'a0', levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } } },
