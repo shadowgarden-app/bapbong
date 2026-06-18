@@ -92,26 +92,31 @@
               @for (a of anchoredComments(); track a.node.id) {
                 <div class="anchor" [style.top.px]="a.top">
                   @if (commentView() === 'minimize') {
-                    <button type="button" class="bubble" [title]="a.node.user.name" (click)="onCommentClick(a.node.id)">
+                    <button
+                      type="button"
+                      class="bubble"
+                      [class.open]="openBubble() === a.node.id"
+                      [title]="a.node.user.name"
+                      (click)="toggleBubble(a.node.id)"
+                    >
                       {{ initial(a.node.user.name) }}
                     </button>
-                  } @else {
-                    <div class="comment anchored-card">
-                      <div class="comment-meta">
-                        {{ a.node.user.name || 'Unknown' }}
-                        <span class="dim">{{ a.node.date }}</span>
-                      </div>
-                      <div class="comment-text">{{ commentText(a.node.body) }}</div>
-                      <div class="comment-actions">
-                        <button type="button" (click)="onCommentClick(a.node.id)">Tới chỗ</button>
-                        <button type="button" (click)="resolveComment(a.node.id, true)">Resolve</button>
-                        <button type="button" (click)="startReply(a.node.id)">Reply</button>
-                        @if (canModify(a.node)) {
-                          <button type="button" (click)="startEdit(a.node)">Sửa</button>
-                          <button type="button" (click)="deleteComment(a.node.id)">Xoá</button>
+                    @if (openBubble() === a.node.id) {
+                      <!-- Floating thread popover (reuses the card layout). -->
+                      <div class="comment-popover">
+                        @for (item of threadFor(a.node.id); track item.node.id) {
+                          <ng-container
+                            [ngTemplateOutlet]="threadCard"
+                            [ngTemplateOutletContext]="{ $implicit: item }"
+                          ></ng-container>
                         }
                       </div>
-                    </div>
+                    }
+                  } @else {
+                    <ng-container
+                      [ngTemplateOutlet]="threadCard"
+                      [ngTemplateOutletContext]="{ $implicit: { node: a.node, depth: 0 } }"
+                    ></ng-container>
                   }
                 </div>
               }
@@ -127,35 +132,40 @@
             <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
           }
           @for (item of threadList(); track item.node.id) {
-            <div
-              class="comment"
-              [class.is-reply]="item.depth > 0"
-              [class.resolved]="item.node.resolved && item.depth === 0"
-              [style.margin-left.px]="item.depth * 14"
-            >
-              <div class="comment-meta">
-                {{ item.node.user.name || 'Unknown' }}
-                <span class="dim">{{ item.node.date }}</span>
-              </div>
-              <div class="comment-text">{{ commentText(item.node.body) }}</div>
-              <div class="comment-actions">
-                @if (item.depth === 0) {
-                  <button type="button" (click)="onCommentClick(item.node.id)">Tới chỗ</button>
-                  <button type="button" (click)="resolveComment(item.node.id, !item.node.resolved)">
-                    {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
-                  </button>
-                }
-                <button type="button" (click)="startReply(item.node.id)">Reply</button>
-                @if (canModify(item.node)) {
-                  <button type="button" (click)="startEdit(item.node)">Sửa</button>
-                  <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
-                }
-              </div>
-            </div>
+            <ng-container [ngTemplateOutlet]="threadCard" [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
           }
         </aside>
       }
     </div>
+
+    <!-- One comment card (a thread node), reused by panel / expand / popover. -->
+    <ng-template #threadCard let-item>
+      <div
+        class="comment"
+        [class.is-reply]="item.depth > 0"
+        [class.resolved]="item.node.resolved && item.depth === 0"
+        [style.margin-left.px]="item.depth * 14"
+      >
+        <div class="comment-meta">
+          {{ item.node.user.name || 'Unknown' }}
+          <span class="dim">{{ item.node.date }}</span>
+        </div>
+        <div class="comment-text">{{ commentText(item.node.body) }}</div>
+        <div class="comment-actions">
+          @if (item.depth === 0) {
+            <button type="button" (click)="onCommentClick(item.node.id)">Tới chỗ</button>
+            <button type="button" (click)="resolveComment(item.node.id, !item.node.resolved)">
+              {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
+            </button>
+          }
+          <button type="button" (click)="startReply(item.node.id)">Reply</button>
+          @if (canModify(item.node)) {
+            <button type="button" (click)="startEdit(item.node)">Sửa</button>
+            <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
+          }
+        </div>
+      </div>
+    </ng-template>
   </section>
 
   <h2>Rendered <span class="dim">(via schema toDOM)</span></h2>

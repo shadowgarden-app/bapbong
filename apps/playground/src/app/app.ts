@@ -1,4 +1,5 @@
 import { Component, ElementRef, OnDestroy, computed, signal, viewChild } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { commentSchema, schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from '@shadow-garden/bapbong-docx';
@@ -60,6 +61,7 @@ interface ComposerSpec {
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.css',
+  imports: [NgTemplateOutlet],
 })
 export class App implements OnDestroy {
   protected readonly fileName = signal<string | null>(null);
@@ -86,6 +88,8 @@ export class App implements OnDestroy {
   protected readonly showResolved = signal(false);
   /** Roots positioned in the margin (minimize/expand), with on-screen top. */
   protected readonly anchoredComments = signal<{ node: CommentNode; top: number }[]>([]);
+  /** In minimize mode, the root whose thread popover is open (or null). */
+  protected readonly openBubble = signal<number | null>(null);
   private allCommentIds: number[] = [];
   protected readonly hasSelection = signal(false);
   protected readonly composerFor = signal<ComposerSpec | null>(null);
@@ -479,6 +483,26 @@ export class App implements OnDestroy {
     return (name || '?').trim().charAt(0).toUpperCase() || '?';
   }
 
+  /** Toggle the minimize-mode thread popover for a bubble (and locate it). */
+  protected toggleBubble(rootId: number): void {
+    this.openBubble.update((cur) => (cur === rootId ? null : rootId));
+    if (this.openBubble() === rootId) this.onCommentClick(rootId);
+  }
+
+  /** A root's thread (the root + its reply subtree), flattened depth-first. */
+  protected threadFor(rootId: number): { node: CommentNode; depth: number }[] {
+    const all = this.comments();
+    const out: { node: CommentNode; depth: number }[] = [];
+    const walk = (id: number, depth: number) => {
+      const node = all.find((c) => c.id === id);
+      if (!node) return;
+      out.push({ node, depth });
+      for (const c of all) if (c.parentId === id) walk(c.id, depth + 1);
+    };
+    walk(rootId, 0);
+    return out;
+  }
+
   /** Plain-text preview of a comment body (commentSchema doc JSON). */
   protected commentText(body: unknown): string {
     try {
@@ -559,6 +583,7 @@ export class App implements OnDestroy {
     if (this.commentView() === view) return;
     this.commentView.set(view);
     if (view !== 'panel') this.closeComposer();
+    this.openBubble.set(null);
     this.repaintContent();
     this.recomputeAnchors();
   }

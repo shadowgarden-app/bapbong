@@ -132,8 +132,32 @@ h2 {
   justify-content: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
-.anchored-card {
+.bubble.open {
+  outline: 2px solid #1f6feb;
+}
+/* Anchored expand cards float over the gutter with a slight elevation. */
+.comment-anchors:not(.bubbles) .comment {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+/* Minimize mode: clicking a bubble opens its thread in a floating popover to
+   the right of the bubble (reuses the card layout inside). */
+.comment-popover {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  margin-left: 8px;
+  width: 280px;
+  max-height: 340px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  z-index: 5;
 }
 .author-field {
   font-size: 0.75rem;
