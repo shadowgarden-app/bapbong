@@ -391,6 +391,30 @@ export class App implements OnDestroy {
     (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
     this.bridge.setSelection(pos); // caret placement (cheap, anchors the IME)
     this.bridge.focus();
+    this.selectCommentAt(pos); // clicking commented text selects its anchored card
+  }
+
+  /** The unresolved root comment whose marked range covers `pos`, or null. */
+  private commentIdAt(pos: number): number | null {
+    for (const [id, r] of this.allCommentRanges()) {
+      if (pos < r.from || pos > r.to) continue;
+      const c = this.comments().find((x) => x.id === id);
+      if (c && c.parentId == null && !c.resolved) return id;
+    }
+    return null;
+  }
+
+  /** Clicking commented text in the doc selects the matching anchored card /
+   *  bubble, mirroring a click on the card itself (active-snap / open popover).*/
+  private selectCommentAt(pos: number): void {
+    const id = this.commentIdAt(pos);
+    if (id == null) return;
+    if (this.commentView() === 'expand') {
+      this.onCardFocus(id);
+    } else if (this.commentView() === 'minimize' && this.openBubble() !== id) {
+      this.openBubble.set(id);
+      this.recomputeAnchors();
+    }
   }
 
   protected onCanvasPointerMove(ev: PointerEvent): void {
