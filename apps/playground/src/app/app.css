@@ -72,8 +72,17 @@ h2 {
   flex: 1 1 auto;
   min-width: 0; /* let the flex item shrink instead of overflowing */
 }
-.comments {
-  flex: 0 0 248px;
+/* View-mode toolbar above the canvas. */
+.comment-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+/* Panel mode: fixed scrollable list of every thread. */
+.comments.panel {
+  flex: 0 0 280px;
   align-self: stretch;
   max-height: 760px;
   overflow: auto;
@@ -81,19 +90,42 @@ h2 {
   flex-direction: column;
   gap: 8px;
 }
-.comments h3 {
-  margin: 0 0 4px;
-  font-size: 0.9rem;
+/* Anchored modes: a relative layer; items absolutely placed at their doc y. */
+.comments.anchored {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: stretch;
+  max-height: 760px;
+  overflow: hidden;
 }
-.comments-head {
+.comments.anchored {
+  width: 300px;
+}
+.comments.anchored.bubbles {
+  width: 52px;
+}
+.anchor {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+}
+.bubble {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: #7b1fa2;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
-.comments-head h3 {
-  margin: 0;
-  flex: 1 1 auto;
+.anchored-card {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 .author-field {
   font-size: 0.75rem;
@@ -223,19 +255,6 @@ h2 {
   gap: 3px;
   font-size: 0.72rem;
   color: #555;
-}
-/* Minimized view: compact one-line cards, no per-comment actions. */
-.comments.minimized .comment {
-  padding: 5px 8px;
-  gap: 1px;
-}
-.comments.minimized .comment-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.comments.minimized .comment-actions {
-  display: none;
 }
 .canvas-stack {
   position: relative; /* anchors the per-page canvases + hidden editor */

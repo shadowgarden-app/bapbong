@@ -27,6 +27,45 @@
 
   <section [hidden]="!pageCount()">
     <h2>Canvas <span class="dim">(editable — click to place the caret, type, undo with ⌘Z · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
+
+    <!-- Comment view-mode toolbar (Google-Docs style). -->
+    <div class="comment-toolbar">
+      <span class="dim">Comments ({{ comments().length }})</span>
+      <div class="view-modes">
+        <button type="button" [class.active]="commentView() === 'hide'" (click)="setCommentView('hide')" title="⌘⌥⇧J">Ẩn</button>
+        <button type="button" [class.active]="commentView() === 'minimize'" (click)="setCommentView('minimize')" title="⌘⌥⇧M">Bong bóng</button>
+        <button type="button" [class.active]="commentView() === 'expand'" (click)="setCommentView('expand')" title="⌘⌥⇧E">Card</button>
+        <button type="button" [class.active]="commentView() === 'panel'" (click)="setCommentView('panel')" title="⌘⌥⇧A">Panel</button>
+      </div>
+      <label class="author-field">Bạn:
+        <input type="text" [value]="author()" (input)="author.set($any($event.target).value)" />
+      </label>
+      <button
+        type="button"
+        class="add-comment"
+        [disabled]="!hasSelection() || commentView() === 'hide'"
+        (click)="startAddComment()"
+      >
+        + Bình luận
+      </button>
+      @if (commentView() === 'panel') {
+        <label class="show-resolved" title="⌘⌥⇧A">
+          <input type="checkbox" [checked]="showResolved()" (change)="showResolved.set($any($event.target).checked)" />
+          Hiện đã giải quyết
+        </label>
+      }
+    </div>
+
+    <!-- Shared composer (mounts a small ProseMirror editor on demand). -->
+    <div class="composer" [hidden]="!composerFor()">
+      <div class="dim">{{ composerFor()?.label }}</div>
+      <div #composerHost class="composer-mount"></div>
+      <div class="composer-actions">
+        <button type="button" (click)="submitComposer()">Gửi</button>
+        <button type="button" (click)="closeComposer()">Huỷ</button>
+      </div>
+    </div>
+
     <div class="canvas-layout">
       <div class="canvas-wrap" (scroll)="onCanvasScroll()">
         <!-- The painter fills this with one <canvas> per page (virtualized). -->
@@ -40,80 +79,72 @@
           (dblclick)="onCanvasDblClick($event)"
         ></div>
       </div>
-      <aside class="comments" [class.minimized]="commentView() === 'minimized'">
-        <div class="comments-head">
-          <h3>Comments <span class="dim">({{ comments().length }})</span></h3>
-          <label class="author-field">Bạn:
-            <input type="text" [value]="author()" (input)="author.set($any($event.target).value)" />
-          </label>
-          <button
-            type="button"
-            class="add-comment"
-            [disabled]="!hasSelection() || commentView() === 'hidden'"
-            (click)="startAddComment()"
-          >
-            + Bình luận
-          </button>
-        </div>
 
-        <!-- View modes (Google-Docs style): hide / minimize / expand + show resolved. -->
-        <div class="view-modes">
-          <button type="button" [class.active]="commentView() === 'hidden'" (click)="setCommentView('hidden')" title="⌘⌥⇧J">Ẩn</button>
-          <button type="button" [class.active]="commentView() === 'minimized'" (click)="setCommentView('minimized')" title="⌘⌥⇧M">Thu gọn</button>
-          <button type="button" [class.active]="commentView() === 'expanded'" (click)="setCommentView('expanded')" title="⌘⌥⇧E">Mở rộng</button>
-          <label class="show-resolved" title="⌘⌥⇧A">
-            <input type="checkbox" [checked]="showResolved()" (change)="showResolved.set($any($event.target).checked)" />
-            Hiện đã giải quyết
-          </label>
-        </div>
-
-        @if (commentView() === 'hidden') {
-          <p class="dim">Bình luận đang ẩn (⌘⌥⇧E để hiện).</p>
-        } @else {
-
-        <!-- Single composer area (always in the DOM so it can mount on demand). -->
-        <div class="composer" [hidden]="!composerFor()">
-          <div class="dim">{{ composerFor()?.label }}</div>
-          <div #composerHost class="composer-mount"></div>
-          <div class="composer-actions">
-            <button type="button" (click)="submitComposer()">Gửi</button>
-            <button type="button" (click)="closeComposer()">Huỷ</button>
-          </div>
-        </div>
-
-        @if (!comments().length) {
-          <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
-        }
-        @for (item of threadList(); track item.node.id) {
-          <div
-            class="comment"
-            [class.is-reply]="item.depth > 0"
-            [class.resolved]="item.node.resolved && item.depth === 0"
-            [style.margin-left.px]="item.depth * 14"
-          >
-            <div class="comment-meta">
-              {{ item.node.user.name || 'Unknown' }}
-              <span class="dim">{{ item.node.date }}</span>
+      @if (commentView() === 'panel') {
+        <!-- Panel: fixed list of every thread (nested replies + resolved). -->
+        <aside class="comments panel">
+          @if (!comments().length) {
+            <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
+          }
+          @for (item of threadList(); track item.node.id) {
+            <div
+              class="comment"
+              [class.is-reply]="item.depth > 0"
+              [class.resolved]="item.node.resolved && item.depth === 0"
+              [style.margin-left.px]="item.depth * 14"
+            >
+              <div class="comment-meta">
+                {{ item.node.user.name || 'Unknown' }}
+                <span class="dim">{{ item.node.date }}</span>
+              </div>
+              <div class="comment-text">{{ commentText(item.node.body) }}</div>
+              <div class="comment-actions">
+                @if (item.depth === 0) {
+                  <button type="button" (click)="onCommentClick(item.node.id)">Tới chỗ</button>
+                  <button type="button" (click)="resolveComment(item.node.id, !item.node.resolved)">
+                    {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
+                  </button>
+                }
+                <button type="button" (click)="startReply(item.node.id)">Reply</button>
+                @if (canModify(item.node)) {
+                  <button type="button" (click)="startEdit(item.node)">Sửa</button>
+                  <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
+                }
+              </div>
             </div>
-            <div class="comment-text">{{ commentText(item.node.body) }}</div>
-            <div class="comment-actions">
-              @if (item.depth === 0) {
-                <button type="button" (click)="onCommentClick(item.node.id)">Tới chỗ</button>
-                <button type="button" (click)="resolveComment(item.node.id, !item.node.resolved)">
-                  {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
+          }
+        </aside>
+      } @else if (commentView() === 'minimize' || commentView() === 'expand') {
+        <!-- Anchored: each thread positioned in the margin at its doc location. -->
+        <aside class="comments anchored" [class.bubbles]="commentView() === 'minimize'">
+          @for (a of anchoredComments(); track a.node.id) {
+            <div class="anchor" [style.top.px]="a.top">
+              @if (commentView() === 'minimize') {
+                <button type="button" class="bubble" [title]="a.node.user.name" (click)="onCommentClick(a.node.id)">
+                  {{ initial(a.node.user.name) }}
                 </button>
-              }
-              <button type="button" (click)="startReply(item.node.id)">Reply</button>
-              @if (canModify(item.node)) {
-                <button type="button" (click)="startEdit(item.node)">Sửa</button>
-                <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
+              } @else {
+                <div class="comment anchored-card">
+                  <div class="comment-meta">
+                    {{ a.node.user.name || 'Unknown' }}
+                    <span class="dim">{{ a.node.date }}</span>
+                  </div>
+                  <div class="comment-text">{{ commentText(a.node.body) }}</div>
+                  <div class="comment-actions">
+                    <button type="button" (click)="onCommentClick(a.node.id)">Tới chỗ</button>
+                    <button type="button" (click)="resolveComment(a.node.id, true)">Resolve</button>
+                    <button type="button" (click)="startReply(a.node.id)">Reply</button>
+                    @if (canModify(a.node)) {
+                      <button type="button" (click)="startEdit(a.node)">Sửa</button>
+                      <button type="button" (click)="deleteComment(a.node.id)">Xoá</button>
+                    }
+                  </div>
+                </div>
               }
             </div>
-          </div>
-        }
-
-        }
-      </aside>
+          }
+        </aside>
+      }
     </div>
   </section>
 

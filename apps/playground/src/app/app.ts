@@ -45,6 +45,8 @@ const A4: PageConfig = {
 const CARET_BLINK_MS = 530;
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
+/** `.canvas-wrap` padding (px) — anchored comments offset by it to line up. */
+const CANVAS_WRAP_PAD = 24;
 
 /** What the single comment composer is currently composing. */
 interface ComposerSpec {
@@ -77,10 +79,15 @@ export class App implements OnDestroy {
     const name = this.author().trim() || 'Me';
     return { id: name, name };
   });
-  // Comment view modes (Google-Docs style): hide tint+list, compact cards, or
-  // full cards; `showResolved` reveals resolved threads in the list.
-  protected readonly commentView = signal<'hidden' | 'minimized' | 'expanded'>('expanded');
+  // Comment view modes (Google-Docs style):
+  //  hide     — no tint, nothing shown
+  //  minimize — avatar bubbles anchored to each comment's position (margin)
+  //  expand   — full cards anchored to each comment's position (margin)
+  //  panel    — fixed right-hand list of all comments (authoring view)
+  protected readonly commentView = signal<'hide' | 'minimize' | 'expand' | 'panel'>('panel');
   protected readonly showResolved = signal(false);
+  /** Roots positioned in the margin (minimize/expand), with on-screen top. */
+  protected readonly anchoredComments = signal<{ node: CommentNode; top: number }[]>([]);
   private allCommentIds: number[] = [];
   protected readonly hasSelection = signal(false);
   protected readonly composerFor = signal<ComposerSpec | null>(null);
@@ -257,6 +264,7 @@ export class App implements OnDestroy {
       const roots = cs.filter((c) => c.parentId == null);
       this.allCommentIds = roots.map((c) => c.id);
       this.resolvedCommentIds = roots.filter((c) => c.resolved).map((c) => c.id);
+      this.recomputeAnchors();
     }
 
     const sel = state.selection;
@@ -318,7 +326,7 @@ export class App implements OnDestroy {
       selection: this.lastSelection,
       viewport: this.currentViewport(),
       // "Hide comments" suppresses every tint; otherwise only resolved ones.
-      resolvedComments: this.commentView() === 'hidden' ? this.allCommentIds : this.resolvedCommentIds,
+      resolvedComments: this.commentView() === 'hide' ? this.allCommentIds : this.resolvedCommentIds,
     });
   }
 
@@ -338,6 +346,7 @@ export class App implements OnDestroy {
     this.scrollRaf = requestAnimationFrame(() => {
       this.scrollRaf = null;
       this.repaintContent();
+      this.recomputeAnchors(); // anchored comments track the scroll
     });
   }
 
@@ -466,6 +475,11 @@ export class App implements OnDestroy {
 
   // ── Comment authoring ──────────────────────────────────────────────
 
+  /** First letter of a name, for the minimize-mode avatar bubble. */
+  protected initial(name: string): string {
+    return (name || '?').trim().charAt(0).toUpperCase() || '?';
+  }
+
   /** Plain-text preview of a comment body (commentSchema doc JSON). */
   protected commentText(body: unknown): string {
     try {
@@ -541,27 +555,68 @@ export class App implements OnDestroy {
     if (this.bridge) this.bridge.dispatch(deleteCommentTr(this.bridge.state, id));
   }
 
-  /** Switch the comment view mode; repaint so the tint follows (hidden ⇒ none). */
-  protected setCommentView(view: 'hidden' | 'minimized' | 'expanded'): void {
+  /** Switch the comment view mode; repaint (tint follows) + reposition anchors. */
+  protected setCommentView(view: 'hide' | 'minimize' | 'expand' | 'panel'): void {
     if (this.commentView() === view) return;
     this.commentView.set(view);
-    if (view !== 'expanded') this.closeComposer();
+    if (view !== 'panel') this.closeComposer();
     this.repaintContent();
+    this.recomputeAnchors();
   }
 
-  /** ⌘⌥⇧ + J/M/E hide/minimize/expand, + A toggles resolved (Google-Docs keys). */
+  /** ⌘⌥⇧ + J/M/E/A → hide / minimize / expand / panel (Google-Docs keys). */
   private readonly onCommentKey = (ev: KeyboardEvent): void => {
     if (!(ev.metaKey && ev.altKey && ev.shiftKey)) return;
+    const view = { j: 'hide', m: 'minimize', e: 'expand', a: 'panel' } as const;
     const key = ev.key.toLowerCase();
-    const view = { j: 'hidden', m: 'minimized', e: 'expanded' } as const;
     if (key in view) {
       ev.preventDefault();
       this.setCommentView(view[key as keyof typeof view]);
-    } else if (key === 'a') {
-      ev.preventDefault();
-      this.showResolved.update((v) => !v);
     }
   };
+
+  /** Position each (unresolved) root comment in the margin at its anchor's
+   *  on-screen y — only for the minimize/expand modes. */
+  private recomputeAnchors(): void {
+    const view = this.commentView();
+    if (view !== 'minimize' && view !== 'expand') {
+      if (this.anchoredComments().length) this.anchoredComments.set([]);
+      return;
+    }
+    if (!this.painter || !this.resolved || !this.measureText) return;
+    const wrap = this.stackHost()?.nativeElement.closest('.canvas-wrap') as HTMLElement | null;
+    const scrollTop = wrap?.scrollTop ?? 0;
+    const ranges = this.allCommentRanges();
+    const out: { node: CommentNode; top: number }[] = [];
+    for (const c of this.comments()) {
+      if (c.parentId != null || c.resolved) continue; // anchored = unresolved roots
+      const range = ranges.get(c.id);
+      if (!range) continue;
+      const cr = caretRect(this.resolved, range.from, this.measureText);
+      const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
+      if (pt) out.push({ node: c, top: CANVAS_WRAP_PAD + pt.y - scrollTop });
+    }
+    this.anchoredComments.set(out);
+  }
+
+  /** Every comment's PM range in ONE doc scan (id → from..to). */
+  private allCommentRanges(): Map<number, { from: number; to: number }> {
+    const m = new Map<number, { from: number; to: number }>();
+    const doc = this.bridge?.state.doc;
+    if (!doc) return m;
+    doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      const mk = node.marks.find((x) => x.type.name === 'comment');
+      if (!mk) return;
+      for (const id of mk.attrs['ids'] as number[]) {
+        const cur = m.get(id) ?? { from: Infinity, to: -Infinity };
+        cur.from = Math.min(cur.from, pos);
+        cur.to = Math.max(cur.to, pos + node.nodeSize);
+        m.set(id, cur);
+      }
+    });
+    return m;
+  }
 
   private posAtEvent(ev: MouseEvent): number | null {
     if (!this.painter || !this.resolved || !this.measureText) return null;
