@@ -445,13 +445,14 @@ export class App implements OnDestroy {
     this.bridge.focus();
   }
 
-  /** Click a sidebar comment → select its commented range and scroll to it. */
-  protected onCommentClick(id: number): void {
+  /** Select a comment's range (highlight it); `scroll` also brings it into view.
+   *  Bubble clicks pass scroll=false — the bubble is already at the right spot. */
+  protected onCommentClick(id: number, scroll = true): void {
     const range = this.commentRange(id);
     if (!range || !this.bridge) return;
     this.bridge.setSelection(range.from, range.to);
     this.bridge.focus();
-    if (this.painter && this.resolved && this.measureText) {
+    if (scroll && this.painter && this.resolved && this.measureText) {
       const cr = caretRect(this.resolved, range.from, this.measureText);
       const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
       const wrap = this.stackHost()?.nativeElement.closest('.canvas-wrap') as HTMLElement | null;
@@ -486,7 +487,8 @@ export class App implements OnDestroy {
   /** Toggle the minimize-mode thread popover for a bubble (and locate it). */
   protected toggleBubble(rootId: number): void {
     this.openBubble.update((cur) => (cur === rootId ? null : rootId));
-    if (this.openBubble() === rootId) this.onCommentClick(rootId);
+    // Highlight the range but DON'T scroll — the bubble is already in view.
+    if (this.openBubble() === rootId) this.onCommentClick(rootId, false);
   }
 
   /** A root's thread (the root + its reply subtree), flattened depth-first. */
