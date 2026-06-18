@@ -82,13 +82,13 @@ const SPECIALS = [
         run(', '),
         run('nghiêng', '<w:i/>'),
         run(', '),
-        run('đậm nghiêng', '<w:b/><w:i/>'),
+        commented(2, run('đậm nghiêng', '<w:b/><w:i/>')),
         run(', '),
         commented(0, run('màu đỏ', '<w:color w:val="C0392B"/>')),
         run(', '),
-        run('màu xanh', '<w:color w:val="1F6FEB"/>'),
+        commented(3, run('màu xanh', '<w:color w:val="1F6FEB"/>')),
         run(', '),
-        run('gạch chân', '<w:u w:val="single"/>'),
+        commented(4, run('gạch chân', '<w:u w:val="single"/>')),
         run(', '),
         run('gạch ngang', '<w:strike/>'),
         run(', '),
@@ -396,9 +396,16 @@ const NUMBERING_XML = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
 const SETTINGS_XML = `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:evenAndOddHeaders/></w:settings>`;
 
 // Comment bodies referenced by w:commentRange in the document body.
+// ids 0/2/3/4 land in the same "Chữ đậm…" paragraph, so their anchors cluster
+// on nearby lines — a ready-made case for the comment collision-avoidance /
+// active-snap behaviour (minimize bubbles + expand cards). id 1 sits far away
+// (multi-column section) as the non-colliding control.
 const COMMENTS_XML = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}">
   <w:comment w:id="0" w:author="Phương Minh" w:date="2026-06-17T09:00:00Z" w:initials="PM"><w:p><w:r><w:t>Cụm "màu đỏ" được tô comment — bấm vào đây để chọn vùng tương ứng trên canvas.</w:t></w:r></w:p></w:comment>
   <w:comment w:id="1" w:author="Reviewer" w:date="2026-06-17T10:30:00Z" w:initials="RV"><w:p><w:r><w:t>Comment vắt qua nhiều run trong phần bố cục nhiều cột.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="2" w:author="Minh Lê" w:date="2026-06-17T09:05:00Z" w:initials="ML"><w:p><w:r><w:t>Comment trên "đậm nghiêng" — neo sát các comment kế bên để test chống đè.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="3" w:author="Reviewer" w:date="2026-06-17T09:10:00Z" w:initials="RV"><w:p><w:r><w:t>Comment trên "màu xanh" cùng dòng.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="4" w:author="Phương Minh" w:date="2026-06-17T09:15:00Z" w:initials="PM"><w:p><w:r><w:t>Comment trên "gạch chân" — cụm này dùng để kiểm tra active-snap khi chọn từng card/bong bóng.</w:t></w:r></w:p></w:comment>
 </w:comments>`;
 
 const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
