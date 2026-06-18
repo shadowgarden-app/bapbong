@@ -40,17 +40,58 @@
           (dblclick)="onCanvasDblClick($event)"
         ></div>
       </div>
-      @if (comments().length) {
-        <aside class="comments">
+      <aside class="comments">
+        <div class="comments-head">
           <h3>Comments <span class="dim">({{ comments().length }})</span></h3>
-          @for (c of comments(); track c.id) {
-            <button type="button" class="comment" (click)="onCommentClick(c.id)">
-              <span class="comment-meta">{{ c.author || 'Unknown' }}<span class="dim">{{ c.date ? ' · ' + c.date : '' }}</span></span>
-              <span class="comment-text">{{ c.text }}</span>
-            </button>
-          }
-        </aside>
-      }
+          <label class="author-field">Bạn:
+            <input type="text" [value]="author()" (input)="author.set($any($event.target).value)" />
+          </label>
+          <button type="button" class="add-comment" [disabled]="!hasSelection()" (click)="startAddComment()">
+            + Bình luận
+          </button>
+        </div>
+
+        <!-- Single composer area (always in the DOM so it can mount on demand). -->
+        <div class="composer" [hidden]="!composerFor()">
+          <div class="dim">{{ composerFor()?.label }}</div>
+          <div #composerHost class="composer-mount"></div>
+          <div class="composer-actions">
+            <button type="button" (click)="submitComposer()">Gửi</button>
+            <button type="button" (click)="closeComposer()">Huỷ</button>
+          </div>
+        </div>
+
+        @if (!comments().length) {
+          <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
+        }
+        @for (item of threadList(); track item.node.id) {
+          <div
+            class="comment"
+            [class.is-reply]="item.depth > 0"
+            [class.resolved]="item.node.resolved && item.depth === 0"
+            [style.margin-left.px]="item.depth * 14"
+          >
+            <div class="comment-meta">
+              {{ item.node.author || 'Unknown' }}
+              <span class="dim">{{ item.node.date }}</span>
+            </div>
+            <div class="comment-text">{{ commentText(item.node.body) }}</div>
+            <div class="comment-actions">
+              @if (item.depth === 0) {
+                <button type="button" (click)="onCommentClick(item.node.id)">Tới chỗ</button>
+                <button type="button" (click)="resolveComment(item.node.id, !item.node.resolved)">
+                  {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
+                </button>
+              }
+              <button type="button" (click)="startReply(item.node.id)">Reply</button>
+              @if (canModify(item.node)) {
+                <button type="button" (click)="startEdit(item.node)">Sửa</button>
+                <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
+              }
+            </div>
+          </div>
+        }
+      </aside>
     </div>
   </section>
 

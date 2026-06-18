@@ -1,7 +1,7 @@
 import { baseKeymap } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
-import type { Node as PMNode } from 'prosemirror-model';
+import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { EditorState, TextSelection, type Command, type Transaction } from 'prosemirror-state';
 import { canSplit } from 'prosemirror-transform';
 import { EditorView } from 'prosemirror-view';
@@ -77,6 +77,98 @@ export function wordRangeAt(doc: PMNode, pos: number): { from: number; to: numbe
   return { from: $pos.start() + from, to: $pos.start() + to };
 }
 
+// ── Comment authoring commands ──────────────────────────────────────
+// Comment threads live on doc.attrs.comments and are edited via
+// setDocAttribute, so every op (add/reply/resolve/delete/edit) is one
+// undoable transaction. The `comment` mark on text anchors a thread by id.
+
+/** A comment thread node (structurally a bapbong-contracts CommentNode). */
+export interface CommentNode {
+  id: number;
+  parentId: number | null;
+  author: string;
+  date: string;
+  body: unknown;
+  resolved?: boolean;
+}
+
+type NewComment = { author: string; date: string; body: unknown };
+
+const getComments = (state: EditorState): CommentNode[] =>
+  (state.doc.attrs['comments'] as CommentNode[] | null) ?? [];
+const nextCommentId = (comments: CommentNode[]) =>
+  comments.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+
+/** Add a comment over `range`, tagging the text with the comment mark (merging
+ *  ids where comments overlap) and appending the thread root. */
+export function addCommentTr(
+  state: EditorState,
+  range: { from: number; to: number },
+  comment: NewComment,
+): Transaction {
+  const comments = getComments(state);
+  const id = nextCommentId(comments);
+  const markType = state.schema.marks['comment'];
+  const tr = state.tr;
+  state.doc.nodesBetween(range.from, range.to, (node, pos) => {
+    if (!node.isText) return;
+    const from = Math.max(range.from, pos);
+    const to = Math.min(range.to, pos + node.nodeSize);
+    if (to <= from) return;
+    const existing = node.marks.find((m) => m.type === markType);
+    const ids = existing ? [...(existing.attrs['ids'] as number[])] : [];
+    if (!ids.includes(id)) ids.push(id);
+    tr.addMark(from, to, markType.create({ ids: ids.sort((a, b) => a - b) }));
+  });
+  const root: CommentNode = { id, parentId: null, ...comment, resolved: false };
+  return tr.setDocAttribute('comments', [...comments, root]);
+}
+
+/** Append a reply under `parentId` (no range anchor — replies aren't marked). */
+export function replyCommentTr(state: EditorState, parentId: number, comment: NewComment): Transaction {
+  const comments = getComments(state);
+  const reply: CommentNode = { id: nextCommentId(comments), parentId, ...comment };
+  return state.tr.setDocAttribute('comments', [...comments, reply]);
+}
+
+/** Toggle a root thread's resolved flag. */
+export function resolveCommentTr(state: EditorState, rootId: number, resolved: boolean): Transaction {
+  const comments = getComments(state).map((c) => (c.id === rootId ? { ...c, resolved } : c));
+  return state.tr.setDocAttribute('comments', comments);
+}
+
+/** Replace a comment/reply's body. */
+export function editCommentTr(state: EditorState, id: number, body: unknown): Transaction {
+  const comments = getComments(state).map((c) => (c.id === id ? { ...c, body } : c));
+  return state.tr.setDocAttribute('comments', comments);
+}
+
+/** Delete a comment (and its reply subtree); strip its id from comment marks. */
+export function deleteCommentTr(state: EditorState, id: number): Transaction {
+  const all = getComments(state);
+  const dead = new Set<number>([id]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const c of all) {
+      if (c.parentId != null && dead.has(c.parentId) && !dead.has(c.id)) {
+        dead.add(c.id);
+        grew = true;
+      }
+    }
+  }
+  const tr = state.tr.setDocAttribute('comments', all.filter((c) => !dead.has(c.id)));
+  const markType = state.schema.marks['comment'];
+  state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    const m = node.marks.find((mk) => mk.type === markType);
+    if (!m) return;
+    const ids = (m.attrs['ids'] as number[]).filter((x) => !dead.has(x));
+    tr.removeMark(pos, pos + node.nodeSize, markType);
+    if (ids.length) tr.addMark(pos, pos + node.nodeSize, markType.create({ ids }));
+  });
+  return tr;
+}
+
 export interface InputBridgeOptions {
   /** The initial document (its schema drives the editor). */
   doc: PMNode;
@@ -149,6 +241,12 @@ export class InputBridge {
     return this.view.state;
   }
 
+  /** Dispatch a transaction (e.g. a comment authoring command) through the
+   *  editor, so it routes through onUpdate + history like any edit. */
+  dispatch(tr: Transaction): void {
+    this.view.dispatch(tr);
+  }
+
   focus(): void {
     this.view.focus();
   }
@@ -180,5 +278,52 @@ export class InputBridge {
   destroy(): void {
     this.view.destroy();
     this.dom.remove();
+  }
+}
+
+/**
+ * A small standalone ProseMirror editor for composing a comment body. The host
+ * passes the body schema (bapbong-model's commentSchema) so input-bridge stays
+ * schema-agnostic; `getJSON()` returns the composed doc to store on the thread.
+ */
+export class CommentComposer {
+  readonly view: EditorView;
+
+  constructor(
+    private readonly schema: Schema,
+    mount: HTMLElement,
+    initialDoc?: unknown,
+  ) {
+    const doc = initialDoc ? schema.nodeFromJSON(initialDoc) : undefined;
+    this.view = new EditorView(mount, {
+      state: EditorState.create({
+        ...(doc ? { doc } : { schema }),
+        plugins: [history(), keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }), keymap(baseKeymap)],
+      }),
+    });
+  }
+
+  /** Whether the composer has no visible text. */
+  isEmpty(): boolean {
+    return this.view.state.doc.textContent.trim().length === 0;
+  }
+
+  /** The composed body as commentSchema doc JSON. */
+  getJSON(): unknown {
+    return this.view.state.doc.toJSON();
+  }
+
+  /** Reset to an empty document. */
+  clear(): void {
+    const empty = EditorState.create({ schema: this.schema, plugins: this.view.state.plugins });
+    this.view.updateState(empty);
+  }
+
+  focus(): void {
+    this.view.focus();
+  }
+
+  destroy(): void {
+    this.view.destroy();
   }
 }

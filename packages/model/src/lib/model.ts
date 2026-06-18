@@ -20,6 +20,9 @@ export const schema = new Schema({
         // SectionConfig[] (contracts) — per-section column flow, delimited by
         // w:sectPr breaks. null/absent → one implicit single-column section.
         sections: { default: null },
+        // CommentNode[] (contracts) — comment threads keyed to `comment` marks.
+        // Edited via setDocAttribute so add/reply/resolve/delete undo cleanly.
+        comments: { default: null },
       },
     },
 
@@ -286,6 +289,23 @@ export const schema = new Schema({
 
 /** Concrete schema type, handy for typing Node/Mark across packages. */
 export type BapbongSchema = typeof schema;
+
+/**
+ * Minimal schema for composing a comment body (the comment sidebar's little
+ * editors). Rich enough for paragraphs of text; the `mention` node (Phase B)
+ * extends this. Comment bodies are stored as this schema's JSON on the comment
+ * thread, kept separate from the document schema.
+ */
+export const commentSchema = new Schema({
+  nodes: {
+    doc: { content: 'block+' },
+    paragraph: { group: 'block', content: 'inline*', parseDOM: [{ tag: 'p' }], toDOM: () => ['p', 0] },
+    text: { group: 'inline' },
+  },
+  marks: {},
+});
+
+export type CommentSchema = typeof commentSchema;
 
 /** Paragraph horizontal alignment (mirrors w:jc). */
 export type Align = 'left' | 'center' | 'right' | 'justify';

@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { Node as PMNode, Mark } from 'prosemirror-model';
 import {
+  commentSchema,
   schema,
   type Align,
   type Indent,
@@ -45,6 +46,17 @@ export interface CommentData {
   author: string;
   date: string;
   text: string;
+}
+
+/** A comment thread root for doc.attrs.comments (structurally a
+ *  bapbong-contracts CommentNode); `body` is commentSchema doc JSON. */
+interface CommentNode {
+  id: number;
+  parentId: number | null;
+  author: string;
+  date: string;
+  body: unknown;
+  resolved: boolean;
 }
 
 export interface DocxImport {
@@ -878,6 +890,27 @@ function buildCommentsList(ctx: Ctx): CommentData[] {
   return out;
 }
 
+/** A comment body (w:comment) as commentSchema doc JSON — paragraphs of text. */
+function commentBodyJSON(comment: OoxmlNode): unknown {
+  const paras = children(comment, 'w:p').map((p) => {
+    const text = collectText(p);
+    return commentSchema.node('paragraph', null, text ? [commentSchema.text(text)] : []);
+  });
+  return commentSchema.node('doc', null, paras.length ? paras : [commentSchema.node('paragraph')]).toJSON();
+}
+
+/** Referenced comments as authoring thread roots for doc.attrs.comments. */
+function buildCommentNodes(ctx: Ctx): CommentNode[] {
+  const out: CommentNode[] = [];
+  for (const id of ctx.comments.used) {
+    const def = ctx.comments.defs.get(id);
+    if (def) {
+      out.push({ id, parentId: null, author: def.author, date: def.date, body: commentBodyJSON(def.body), resolved: false });
+    }
+  }
+  return out;
+}
+
 /** Parse one note body into blocks, prefixing the first paragraph with its
  *  display number (so "1. note text" reads naturally). Shared by the appended
  *  endnote section and the page-bottom footnote map. */
@@ -930,12 +963,15 @@ function storyDoc(
   blocks: PMNode[],
   numbering: NumberingDefs | null,
   sections: SectionConfig[] | null = null,
+  comments: CommentNode[] | null = null,
 ): PMNode {
   // doc content is `block+` — guarantee at least one paragraph. The numbering
-  // defs (live markers) and section column flow ride the doc as attrs.
+  // defs (live markers), section column flow, and comment threads ride the doc
+  // as attrs.
   const attrs: Record<string, unknown> = {};
   if (numbering) attrs['numbering'] = numbering;
   if (sections) attrs['sections'] = sections;
+  if (comments && comments.length > 0) attrs['comments'] = comments;
   return schema.nodes.doc.create(
     Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [schema.nodes.paragraph.create()],
@@ -1010,6 +1046,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     [...parsed.blocks, ...endnoteBlocks],
     ctx.numbering.defs,
     multiSection ? sections : null,
+    buildCommentNodes(ctx),
   );
 
   // Headers/footers referenced by the section properties.

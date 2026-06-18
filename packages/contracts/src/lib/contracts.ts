@@ -33,6 +33,19 @@ export interface CommentData {
   text: string;
 }
 
+/** A comment thread node stored on `doc.attrs.comments` (authoring model). The
+ *  thread is a tree via `parentId` (null = root, the node a comment mark
+ *  anchors to). `body` is commentSchema ProseMirror-doc JSON. `resolved` is
+ *  meaningful only on roots. */
+export interface CommentNode {
+  id: number;
+  parentId: number | null;
+  author: string;
+  date: string;
+  body: unknown;
+  resolved?: boolean;
+}
+
 /** A resolved font used for both measuring and painting. */
 export interface FontSpec {
   family: string;

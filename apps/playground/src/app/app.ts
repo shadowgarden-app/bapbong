@@ -1,6 +1,6 @@
-import { Component, ElementRef, OnDestroy, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, computed, signal, viewChild } from '@angular/core';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
-import { schema } from '@shadow-garden/bapbong-model';
+import { commentSchema, schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from '@shadow-garden/bapbong-docx';
 import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
 import {
@@ -10,8 +10,14 @@ import {
 } from '@shadow-garden/bapbong-measuring';
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import {
+  CommentComposer,
   InputBridge,
+  addCommentTr,
+  deleteCommentTr,
+  editCommentTr,
   moveCaretCommand,
+  replyCommentTr,
+  resolveCommentTr,
   splitListItem,
   type Command,
   type EditorState,
@@ -20,7 +26,7 @@ import {
 import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
 import type {
   CaretRect,
-  CommentData,
+  CommentNode,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -39,6 +45,16 @@ const CARET_BLINK_MS = 530;
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
 
+/** What the single comment composer is currently composing. */
+interface ComposerSpec {
+  kind: 'add' | 'reply' | 'edit';
+  label: string;
+  from?: number;
+  to?: number;
+  parentId?: number;
+  id?: number;
+}
+
 @Component({
   selector: 'app-root',
   templateUrl: './app.html',
@@ -52,7 +68,33 @@ export class App implements OnDestroy {
   protected readonly footerKeys = signal<string[]>([]);
   protected readonly loading = signal(false);
   protected readonly pageCount = signal(0);
-  protected readonly comments = signal<CommentData[]>([]);
+  // Comment threads (from doc.attrs.comments) + authoring UI state.
+  protected readonly comments = signal<CommentNode[]>([]);
+  protected readonly author = signal('Me');
+  protected readonly hasSelection = signal(false);
+  protected readonly composerFor = signal<ComposerSpec | null>(null);
+  /** Comment threads flattened depth-first with nesting depth (for the sidebar). */
+  protected readonly threadList = computed<{ node: CommentNode; depth: number }[]>(() => {
+    const all = this.comments();
+    const byParent = new Map<number | null, CommentNode[]>();
+    for (const c of all) {
+      const list = byParent.get(c.parentId) ?? [];
+      list.push(c);
+      byParent.set(c.parentId, list);
+    }
+    const out: { node: CommentNode; depth: number }[] = [];
+    const walk = (parentId: number | null, depth: number) => {
+      for (const c of byParent.get(parentId) ?? []) {
+        out.push({ node: c, depth });
+        walk(c.id, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return out;
+  });
+  private readonly composerHost = viewChild<ElementRef<HTMLDivElement>>('composerHost');
+  private composer: CommentComposer | null = null;
+  private resolvedCommentIds: number[] = [];
 
   private readonly previewHost = viewChild<ElementRef<HTMLDivElement>>('preview');
   // The painter fills this container with one <canvas> per page (virtualized).
@@ -117,8 +159,7 @@ export class App implements OnDestroy {
     this.fileName.set(name);
 
     try {
-      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, comments, page } =
-        await importDocx(bytes);
+      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page } = await importDocx(bytes);
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
       this.chromeHeaders = headers;
@@ -126,8 +167,9 @@ export class App implements OnDestroy {
       this.chromeTitlePg = titlePg;
       this.chromeEvenAndOdd = evenAndOdd;
       this.footnotes = footnotes;
-      this.comments.set(comments);
+      this.closeComposer(); // a stale composer would point at the old doc
       this.page = page;
+      // comments now ride doc.attrs.comments — refresh() reads them.
       // Measure with the real fonts, not their fallbacks.
       await ensureFontsLoaded(
         collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers)),
@@ -194,9 +236,15 @@ export class App implements OnDestroy {
       this.pageCount.set(this.resolved.pages.length);
       this.schedulePanelSync(state);
       contentDirty = true;
+      // Comment threads live on doc.attrs.comments — refresh the sidebar +
+      // the resolved-id set (resolved comments paint no tint).
+      const cs = (state.doc.attrs['comments'] as CommentNode[] | null) ?? [];
+      this.comments.set(cs);
+      this.resolvedCommentIds = cs.filter((c) => c.parentId == null && c.resolved).map((c) => c.id);
     }
 
     const sel = state.selection;
+    this.hasSelection.set(!sel.empty);
     this.lastCaret = caretRect(this.resolved, sel.head, this.measureText);
     this.lastSelection = sel.empty
       ? []
@@ -253,6 +301,7 @@ export class App implements OnDestroy {
       caret: this.caretVisible ? this.lastCaret : null,
       selection: this.lastSelection,
       viewport: this.currentViewport(),
+      resolvedComments: this.resolvedCommentIds,
     });
   }
 
@@ -295,6 +344,7 @@ export class App implements OnDestroy {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
     if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
+    this.composer?.destroy();
     this.bridge?.destroy();
   }
 
@@ -394,6 +444,83 @@ export class App implements OnDestroy {
       }
     });
     return from <= to ? { from, to } : null;
+  }
+
+  // ── Comment authoring ──────────────────────────────────────────────
+
+  /** Plain-text preview of a comment body (commentSchema doc JSON). */
+  protected commentText(body: unknown): string {
+    try {
+      return commentSchema.nodeFromJSON(body).textContent;
+    } catch {
+      return '';
+    }
+  }
+
+  /** Whether the current author may edit/delete a node (UX guard, not security
+   *  — there is no authenticated identity; the author name is self-declared). */
+  protected canModify(node: CommentNode): boolean {
+    return node.author === this.author().trim();
+  }
+
+  protected startAddComment(): void {
+    const sel = this.bridge?.state.selection;
+    if (!sel || sel.empty) return;
+    this.openComposer({ kind: 'add', label: 'Bình luận mới', from: sel.from, to: sel.to });
+  }
+
+  protected startReply(parentId: number): void {
+    this.openComposer({ kind: 'reply', label: 'Trả lời', parentId });
+  }
+
+  protected startEdit(node: CommentNode): void {
+    this.openComposer({ kind: 'edit', label: 'Sửa', id: node.id }, node.body);
+  }
+
+  private openComposer(spec: ComposerSpec, initialBody?: unknown): void {
+    this.closeComposer();
+    this.composerFor.set(spec);
+    const host = this.composerHost()?.nativeElement;
+    if (host) {
+      this.composer = new CommentComposer(commentSchema, host, initialBody);
+      setTimeout(() => this.composer?.focus(), 0); // after the host un-hides
+    }
+  }
+
+  protected submitComposer(): void {
+    const spec = this.composerFor();
+    if (!spec || !this.bridge || !this.composer || this.composer.isEmpty()) {
+      this.closeComposer();
+      return;
+    }
+    const body = this.composer.getJSON();
+    const author = this.author().trim() || 'Me';
+    const date = new Date().toISOString();
+    const state = this.bridge.state;
+    let tr: Transaction | null = null;
+    if (spec.kind === 'add' && spec.from != null && spec.to != null) {
+      tr = addCommentTr(state, { from: spec.from, to: spec.to }, { author, date, body });
+    } else if (spec.kind === 'reply' && spec.parentId != null) {
+      tr = replyCommentTr(state, spec.parentId, { author, date, body });
+    } else if (spec.kind === 'edit' && spec.id != null) {
+      tr = editCommentTr(state, spec.id, body);
+    }
+    if (tr) this.bridge.dispatch(tr);
+    this.closeComposer();
+  }
+
+  protected closeComposer(): void {
+    this.composer?.destroy();
+    this.composer = null;
+    this.composerFor.set(null);
+  }
+
+  protected resolveComment(rootId: number, resolved: boolean): void {
+    if (this.bridge) this.bridge.dispatch(resolveCommentTr(this.bridge.state, rootId, resolved));
+  }
+
+  protected deleteComment(id: number): void {
+    if (this.bridge) this.bridge.dispatch(deleteCommentTr(this.bridge.state, id));
   }
 
   private posAtEvent(ev: MouseEvent): number | null {

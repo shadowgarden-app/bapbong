@@ -197,6 +197,14 @@ describe('CanvasPainter', () => {
     expect(ctx.calls.indexOf(tint as never)).toBeLessThan(ctx.calls.findIndex((c) => c.method === 'fillText'));
   });
 
+  it('skips the comment tint when every covering comment is resolved', () => {
+    const { painter, container } = setup();
+    const commented = { ...helloLine, segments: [{ x: 20, text: 'Hi', font: font(), commentIds: [0], width: 30 }] };
+    painter.paint({ pages: [page([commented])] }, { devicePixelRatio: 1, resolvedComments: [0] });
+    const tint = ctxAt(container, 0).of('fillRect').find((c) => c.fillStyle.startsWith('rgba(255'));
+    expect(tint).toBeUndefined();
+  });
+
   it('draws underline and strike from layout-measured widths', () => {
     const { painter, container } = setup();
     const decorated = {

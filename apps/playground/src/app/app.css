@@ -85,21 +85,89 @@ h2 {
   margin: 0 0 4px;
   font-size: 0.9rem;
 }
+.comments-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.comments-head h3 {
+  margin: 0;
+  flex: 1 1 auto;
+}
+.author-field {
+  font-size: 0.75rem;
+  color: #555;
+}
+.author-field input {
+  width: 70px;
+  font: inherit;
+  font-size: 0.75rem;
+}
+.add-comment {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  background: #fff7e0;
+  cursor: pointer;
+}
+.add-comment:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #ffe08a;
+  border-radius: 6px;
+  background: #fffdf5;
+}
+/* display:flex overrides the UA [hidden] rule — re-hide explicitly. */
+.composer[hidden] {
+  display: none;
+}
+/* The composer's ProseMirror view is injected imperatively (no scoped attr),
+   so pierce view encapsulation to style it. */
+.composer-mount ::ng-deep .ProseMirror {
+  min-height: 40px;
+  outline: none;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #fff;
+  font-size: 0.85rem;
+}
+.composer-actions {
+  display: flex;
+  gap: 6px;
+}
+.composer-actions button {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  cursor: pointer;
+}
 .comment {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  text-align: left;
   padding: 8px 10px;
   border: 1px solid #e0e0e0;
   border-left: 3px solid #ffc107;
   border-radius: 6px;
   background: #fffdf5;
-  cursor: pointer;
-  font: inherit;
 }
-.comment:hover {
-  background: #fff7e0;
+.comment.is-reply {
+  border-left-color: #c8c8c8;
+  background: #fafafa;
+}
+.comment.resolved {
+  opacity: 0.55;
+  border-left-color: #9ccc9c;
 }
 .comment-meta {
   font-size: 0.8rem;
@@ -109,6 +177,24 @@ h2 {
   font-size: 0.85rem;
   color: #333;
   white-space: pre-wrap;
+}
+.comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.comment-actions button {
+  font: inherit;
+  font-size: 0.72rem;
+  color: #1f6feb;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.comment-actions button:hover {
+  text-decoration: underline;
 }
 .canvas-stack {
   position: relative; /* anchors the per-page canvases + hidden editor */

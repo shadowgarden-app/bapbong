@@ -30,6 +30,8 @@ export interface PaintOptions {
   selectionColor?: string;
   /** Tint painted behind commented text (w:commentRange). */
   commentColor?: string;
+  /** Resolved comment ids — segments commented ONLY by these get no tint. */
+  resolvedComments?: number[];
   /** Visible region in container CSS px (the scroll window onto the stack).
    *  Only pages intersecting it (plus a margin) get a canvas + content; the
    *  rest are unmounted to keep memory bounded. Omit to render every page. */
@@ -70,6 +72,7 @@ const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   caretColor: '#1a1a1a',
   selectionColor: 'rgba(59, 130, 246, 0.30)',
   commentColor: 'rgba(255, 193, 7, 0.28)',
+  resolvedComments: [],
 };
 
 /** CSS font shorthand. Duplicated from bapbong-measuring: the painter may only
@@ -333,7 +336,12 @@ export class CanvasPainter {
         ctx.fillStyle = seg.background;
         ctx.fillRect(seg.x, yOffset + line.y, seg.width, line.height);
       }
-      if (seg.commentIds?.length && seg.width) {
+      // Tint commented text, unless every covering comment is resolved.
+      if (
+        seg.commentIds?.length &&
+        seg.width &&
+        seg.commentIds.some((id) => !o.resolvedComments.includes(id))
+      ) {
         ctx.fillStyle = o.commentColor;
         ctx.fillRect(seg.x, yOffset + line.y, seg.width, line.height);
       }
