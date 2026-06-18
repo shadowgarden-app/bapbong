@@ -145,7 +145,14 @@
             <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
           }
           @for (root of rootComments(); track root.id) {
-            <div class="panel-thread" tabindex="0">
+            <div
+              class="panel-thread"
+              tabindex="0"
+              [attr.data-id]="root.id"
+              [class.active]="activeCard() === root.id"
+              (click)="onPanelCardClick(root.id, $event)"
+              (keydown.enter)="onPanelCardClick(root.id, $event)"
+            >
               <ng-container
                 [ngTemplateOutlet]="threadView"
                 [ngTemplateOutletContext]="{ $implicit: root.id, replyMode: 'on-focus' }"

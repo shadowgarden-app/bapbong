@@ -414,7 +414,26 @@ export class App implements OnDestroy {
     } else if (this.commentView() === 'minimize' && this.openBubble() !== id) {
       this.openBubble.set(id);
       this.recomputeAnchors();
+    } else if (this.commentView() === 'panel') {
+      this.activeCard.set(id); // marks the panel card active
+      this.scrollPanelTo(id);
     }
+  }
+
+  /** Panel mode: clicking a card highlights its text in the doc (and scrolls
+   *  the canvas to it), mirroring the bubble/card click in the other modes. */
+  protected onPanelCardClick(rootId: number, ev: Event): void {
+    // Don't hijack clicks on the card's controls (resolve/delete, reply input).
+    if ((ev.target as HTMLElement).closest('button, input, textarea')) return;
+    this.activeCard.set(rootId);
+    this.onCommentClick(rootId, true, false); // highlight + scroll canvas, keep card focus
+  }
+
+  /** Bring the active panel card into view within the panel list. */
+  private scrollPanelTo(id: number): void {
+    document
+      .querySelector(`.comments.panel .panel-thread[data-id="${id}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
   }
 
   protected onCanvasPointerMove(ev: PointerEvent): void {
@@ -461,12 +480,14 @@ export class App implements OnDestroy {
   }
 
   /** Select a comment's range (highlight it); `scroll` also brings it into view.
-   *  Bubble clicks pass scroll=false — the bubble is already at the right spot. */
-  protected onCommentClick(id: number, scroll = true): void {
+   *  Bubble clicks pass scroll=false — the bubble is already at the right spot.
+   *  `focus=false` highlights without grabbing the IME focus (used when the
+   *  click should keep focus on a card / its reply box). */
+  protected onCommentClick(id: number, scroll = true, focus = true): void {
     const range = this.commentRange(id);
     if (!range || !this.bridge) return;
     this.bridge.setSelection(range.from, range.to);
-    this.bridge.focus();
+    if (focus) this.bridge.focus();
     if (scroll && this.painter && this.resolved && this.measureText) {
       const cr = caretRect(this.resolved, range.from, this.measureText);
       const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
@@ -515,6 +536,7 @@ export class App implements OnDestroy {
   protected onCardFocus(id: number): void {
     if (this.activeCard() === id) return;
     this.activeCard.set(id);
+    this.onCommentClick(id, false, false); // highlight the doc range (keep card focus)
     afterNextRender(() => this.packExpandCards(), { injector: this.injector });
   }
 
