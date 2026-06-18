@@ -58,13 +58,30 @@
 
     <!-- Shared composer (mounts a small ProseMirror editor on demand). -->
     <div class="composer" [hidden]="!composerFor()">
-      <div class="dim">{{ composerFor()?.label }}</div>
+      <div class="dim">{{ composerFor()?.label }} · gõ &commat; để nhắc người dùng</div>
       <div #composerHost class="composer-mount"></div>
       <div class="composer-actions">
         <button type="button" (click)="submitComposer()">Gửi</button>
         <button type="button" (click)="closeComposer()">Huỷ</button>
       </div>
     </div>
+
+    <!-- @mention popup, anchored at the caret (client coords from the plugin).
+         mousedown+preventDefault keeps the composer focused through the pick. -->
+    @if (mentionState(); as ms) {
+      <div class="mention-popup" [style.left.px]="ms.left" [style.top.px]="ms.top">
+        @for (u of ms.items; track u.id; let i = $index) {
+          <button
+            type="button"
+            class="mention-item"
+            [class.active]="i === ms.index"
+            (mousedown)="$event.preventDefault(); pickMention(u)"
+          >
+            {{ u.label }}
+          </button>
+        }
+      </div>
+    }
 
     <div class="canvas-layout">
       <div
@@ -192,7 +209,7 @@
             }
           </span>
         </div>
-        <div class="comment-text">{{ commentText(item.node.body) }}</div>
+        <div class="comment-text" [innerHTML]="commentBodyHtml(item.node.body)"></div>
         @if (item.replies) {
           <!-- Collapsed expand-card: reply count lives inside the card box. -->
           <button type="button" class="reply-count" (click)="onCardFocus(item.node.id)">

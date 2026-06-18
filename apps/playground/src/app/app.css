@@ -251,6 +251,50 @@ h2 {
   color: #333;
   white-space: pre-wrap;
 }
+.comment-text p {
+  margin: 0;
+}
+/* @mention chip — in the composer (PM toDOM) and rendered comment bodies
+   ([innerHTML]); neither carries the component scope attr, so pierce it. */
+.comment-text ::ng-deep .mention,
+.composer-mount ::ng-deep .mention {
+  color: #1f6feb;
+  background: #eaf1ff;
+  border-radius: 4px;
+  padding: 0 3px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Suggestion popup, positioned at the caret (position: fixed, client coords). */
+.mention-popup {
+  position: fixed;
+  z-index: 10;
+  min-width: 160px;
+  max-height: 200px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.mention-item {
+  text-align: left;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+}
+.mention-item:hover,
+.mention-item.active {
+  background: #eaf1ff;
+  color: #1f6feb;
+}
 /* Header icon actions (✓ resolve, ✕ delete). */
 .comment-icons {
   display: flex;

@@ -1,4 +1,4 @@
-import { schema } from './model';
+import { commentSchema, schema } from './model';
 
 describe('schema', () => {
   it('defines doc/paragraph/text nodes', () => {
@@ -58,5 +58,33 @@ describe('schema', () => {
     const doc = schema.nodes.doc.create(null, [p]);
     expect(doc.textContent).toBe('hi');
     expect(doc.child(0).child(0).marks[0].type.name).toBe('strong');
+  });
+});
+
+describe('commentSchema', () => {
+  it('mention is an inline atom whose textContent reads "@label"', () => {
+    const mention = commentSchema.nodes['mention'].create({ id: 'alice', label: 'Alice Nguyễn' });
+    const p = commentSchema.nodes['paragraph'].create(null, [
+      commentSchema.text('hi '),
+      mention,
+      commentSchema.text(' bye'),
+    ]);
+    const doc = commentSchema.nodes['doc'].create(null, [p]);
+    expect(mention.isAtom).toBe(true);
+    expect(mention.isInline).toBe(true);
+    expect(doc.textContent).toBe('hi @Alice Nguyễn bye'); // leafText
+  });
+
+  it('mention round-trips through JSON keeping its attrs', () => {
+    const doc = commentSchema.nodes['doc'].create(null, [
+      commentSchema.nodes['paragraph'].create(null, [
+        commentSchema.nodes['mention'].create({ id: 'bob', label: 'Bob' }),
+      ]),
+    ]);
+    const back = commentSchema.nodeFromJSON(doc.toJSON());
+    const node = back.child(0).child(0);
+    expect(node.type.name).toBe('mention');
+    expect(node.attrs['id']).toBe('bob');
+    expect(node.attrs['label']).toBe('Bob');
   });
 });

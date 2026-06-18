@@ -292,8 +292,8 @@ export type BapbongSchema = typeof schema;
 
 /**
  * Minimal schema for composing a comment body (the comment sidebar's little
- * editors). Rich enough for paragraphs of text; the `mention` node (Phase B)
- * extends this. Comment bodies are stored as this schema's JSON on the comment
+ * editors). Rich enough for paragraphs of text plus an inline `mention` atom
+ * (@user). Comment bodies are stored as this schema's JSON on the comment
  * thread, kept separate from the document schema.
  */
 export const commentSchema = new Schema({
@@ -301,6 +301,30 @@ export const commentSchema = new Schema({
     doc: { content: 'block+' },
     paragraph: { group: 'block', content: 'inline*', parseDOM: [{ tag: 'p' }], toDOM: () => ['p', 0] },
     text: { group: 'inline' },
+    // @mention: an inline atom carrying the mentioned user's id + display name.
+    // `leafText` lets textContent include "@Name" (search / plain-text preview).
+    mention: {
+      group: 'inline',
+      inline: true,
+      atom: true,
+      selectable: false,
+      attrs: { id: {}, label: {} },
+      leafText: (node) => `@${node.attrs['label']}`,
+      toDOM: (node) => [
+        'span',
+        { class: 'mention', 'data-id': String(node.attrs['id']) },
+        `@${node.attrs['label']}`,
+      ],
+      parseDOM: [
+        {
+          tag: 'span.mention',
+          getAttrs: (el: unknown) => {
+            const e = el as { getAttribute(n: string): string | null; textContent: string | null };
+            return { id: e.getAttribute('data-id'), label: (e.textContent ?? '').replace(/^@/, '') };
+          },
+        },
+      ],
+    },
   },
   marks: {},
 });

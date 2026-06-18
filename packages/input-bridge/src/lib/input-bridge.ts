@@ -2,7 +2,7 @@ import { baseKeymap } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
-import { EditorState, TextSelection, type Command, type Transaction } from 'prosemirror-state';
+import { EditorState, Plugin, PluginKey, TextSelection, type Command, type Transaction } from 'prosemirror-state';
 import { canSplit } from 'prosemirror-transform';
 import { EditorView } from 'prosemirror-view';
 
@@ -289,10 +289,93 @@ export class InputBridge {
   }
 }
 
+/** A user the composer can @mention. */
+export interface MentionUser {
+  id: string;
+  label: string;
+}
+
+/** Where the @query popup should sit (client coords of the caret). */
+export interface MentionCoords {
+  left: number;
+  top: number;
+  bottom: number;
+}
+
+/** Host hooks for the @mention popup. The composer owns detection + insertion;
+ *  the host owns rendering the popup and choosing the user. */
+export interface MentionHandlers {
+  /** Popup should show/move (state) or hide (null). */
+  query(state: { query: string; coords: MentionCoords } | null): void;
+  /** A nav key fired while the popup is open; return true if the host consumed
+   *  it (then the composer swallows it instead of editing text). */
+  key(key: 'up' | 'down' | 'enter' | 'esc'): boolean;
+}
+
+interface MentionState {
+  active: boolean;
+  from: number; // doc position of the triggering '@'
+  query: string;
+}
+
+const mentionKey = new PluginKey<MentionState>('mention');
+const INACTIVE: MentionState = { active: false, from: 0, query: '' };
+// '@' at a word boundary, then Unicode letters/digits/_ (so Vietnamese works).
+const MENTION_RE = /(?:^|\s)@([\p{L}\p{N}_]*)$/u;
+
+/** Detects a trailing "@query" before the caret and drives the host popup. */
+function mentionPlugin(handlers: MentionHandlers): Plugin<MentionState> {
+  return new Plugin<MentionState>({
+    key: mentionKey,
+    state: {
+      init: () => INACTIVE,
+      apply(tr) {
+        const sel = tr.selection;
+        if (!sel.empty) return INACTIVE;
+        const $from = sel.$from;
+        const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '￼');
+        const m = MENTION_RE.exec(textBefore);
+        if (!m) return INACTIVE;
+        const query = m[1];
+        return { active: true, from: $from.pos - query.length - 1, query };
+      },
+    },
+    view: (editorView) => {
+      const emit = (view: EditorView) => {
+        const st = mentionKey.getState(view.state);
+        if (!st?.active) return handlers.query(null);
+        const c = view.coordsAtPos(view.state.selection.from);
+        handlers.query({ query: st.query, coords: { left: c.left, top: c.top, bottom: c.bottom } });
+      };
+      emit(editorView);
+      return { update: emit, destroy: () => handlers.query(null) };
+    },
+    props: {
+      handleKeyDown(view, event) {
+        if (!mentionKey.getState(view.state)?.active) return false;
+        const map: Record<string, 'up' | 'down' | 'enter' | 'esc'> = {
+          ArrowUp: 'up',
+          ArrowDown: 'down',
+          Enter: 'enter',
+          Tab: 'enter',
+          Escape: 'esc',
+        };
+        const k = map[event.key];
+        if (k && handlers.key(k)) {
+          event.preventDefault();
+          return true;
+        }
+        return false;
+      },
+    },
+  });
+}
+
 /**
  * A small standalone ProseMirror editor for composing a comment body. The host
  * passes the body schema (bapbong-model's commentSchema) so input-bridge stays
  * schema-agnostic; `getJSON()` returns the composed doc to store on the thread.
+ * Pass `mention` handlers to enable @-mentions (the host renders the popup).
  */
 export class CommentComposer {
   readonly view: EditorView;
@@ -301,14 +384,26 @@ export class CommentComposer {
     private readonly schema: Schema,
     mount: HTMLElement,
     initialDoc?: unknown,
+    mention?: MentionHandlers,
   ) {
     const doc = initialDoc ? schema.nodeFromJSON(initialDoc) : undefined;
+    const plugins = [history(), keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }), keymap(baseKeymap)];
+    if (mention && schema.nodes['mention']) plugins.push(mentionPlugin(mention));
     this.view = new EditorView(mount, {
-      state: EditorState.create({
-        ...(doc ? { doc } : { schema }),
-        plugins: [history(), keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }), keymap(baseKeymap)],
-      }),
+      state: EditorState.create({ ...(doc ? { doc } : { schema }), plugins }),
     });
+  }
+
+  /** Replace the active "@query" with a mention node + trailing space. */
+  applyMention(user: MentionUser): void {
+    const st = mentionKey.getState(this.view.state);
+    if (!st?.active) return;
+    const to = this.view.state.selection.from;
+    const node = this.schema.nodes['mention'].create({ id: user.id, label: user.label });
+    const tr = this.view.state.tr.replaceWith(st.from, to, [node, this.schema.text(' ')]);
+    tr.setSelection(TextSelection.create(tr.doc, st.from + 2)); // after mention + space
+    this.view.dispatch(tr);
+    this.view.focus();
   }
 
   /** Whether the composer has no visible text. */

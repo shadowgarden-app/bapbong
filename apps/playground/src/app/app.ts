@@ -13,6 +13,8 @@ import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import {
   CommentComposer,
   InputBridge,
+  type MentionHandlers,
+  type MentionUser,
   addCommentTr,
   deleteCommentTr,
   editCommentTr,
@@ -51,6 +53,13 @@ const PANEL_SYNC_MS = 250;
  *  used to resolve overlapping anchors (see packAnchors). Matches .bubble CSS. */
 const BUBBLE_SIZE = 34;
 const ANCHOR_GAP = 8;
+
+/** Demo users the comment composer can @mention (beyond the doc's own authors). */
+const MENTION_SEED: { id: string; label: string }[] = [
+  { id: 'alice', label: 'Alice Nguyễn' },
+  { id: 'bob', label: 'Bob Trần' },
+  { id: 'charlie', label: 'Charlie Lê' },
+];
 
 /** What the single comment composer is currently composing. */
 interface ComposerSpec {
@@ -610,6 +619,19 @@ export class App implements OnDestroy {
     }
   }
 
+  /** Comment body as HTML so @mentions render as chips (via the schema's
+   *  toDOM). Angular sanitises [innerHTML]; the `.mention` class survives. */
+  protected commentBodyHtml(body: unknown): string {
+    try {
+      const doc = commentSchema.nodeFromJSON(body);
+      const div = document.createElement('div');
+      div.appendChild(DOMSerializer.fromSchema(commentSchema).serializeFragment(doc.content));
+      return div.innerHTML;
+    } catch {
+      return '';
+    }
+  }
+
   /** Whether the current user may edit/delete a node (UX guard, not security
    *  — there is no authenticated identity; the user id is self-declared). */
   protected canModify(node: CommentNode): boolean {
@@ -627,9 +649,57 @@ export class App implements OnDestroy {
     this.composerFor.set(spec);
     const host = this.composerHost()?.nativeElement;
     if (host) {
-      this.composer = new CommentComposer(commentSchema, host, initialBody);
+      this.composer = new CommentComposer(commentSchema, host, initialBody, this.mentionHandlers);
       setTimeout(() => this.composer?.focus(), 0); // after the host un-hides
     }
+  }
+
+  // ── @mention popup ─────────────────────────────────────────────────
+  /** Users the composer can @mention (existing authors + current user + seed). */
+  protected readonly mentionUsers = computed<MentionUser[]>(() => {
+    const map = new Map<string, string>(MENTION_SEED.map((u) => [u.id, u.label]));
+    for (const c of this.comments()) map.set(c.user.id, c.user.name);
+    const me = this.currentUser();
+    map.set(me.id, me.name);
+    return [...map].map(([id, label]) => ({ id, label }));
+  });
+
+  /** Popup state driven by the composer's mention plugin (null = hidden). */
+  protected readonly mentionState = signal<{
+    query: string;
+    items: MentionUser[];
+    index: number;
+    left: number;
+    top: number;
+  } | null>(null);
+
+  private readonly mentionHandlers: MentionHandlers = {
+    query: (s) => {
+      if (!s) return this.mentionState.set(null);
+      const q = s.query.toLowerCase();
+      const items = this.mentionUsers()
+        .filter((u) => u.label.toLowerCase().includes(q))
+        .slice(0, 6);
+      // Only show when there are matches; otherwise keys pass through to the editor.
+      this.mentionState.set(
+        items.length ? { query: s.query, items, index: 0, left: s.coords.left, top: s.coords.bottom } : null,
+      );
+    },
+    key: (k) => {
+      const st = this.mentionState();
+      if (!st) return false;
+      if (k === 'esc') return this.mentionState.set(null), true;
+      if (k === 'up') return this.mentionState.set({ ...st, index: (st.index - 1 + st.items.length) % st.items.length }), true;
+      if (k === 'down') return this.mentionState.set({ ...st, index: (st.index + 1) % st.items.length }), true;
+      if (k === 'enter') return this.pickMention(st.items[st.index]), true;
+      return false;
+    },
+  };
+
+  /** Insert the chosen user as a mention chip and close the popup. */
+  protected pickMention(user: MentionUser): void {
+    this.composer?.applyMention(user);
+    this.mentionState.set(null);
   }
 
   protected submitComposer(): void {
@@ -658,6 +728,7 @@ export class App implements OnDestroy {
     this.composer?.destroy();
     this.composer = null;
     this.composerFor.set(null);
+    this.mentionState.set(null);
   }
 
   protected resolveComment(rootId: number, resolved: boolean): void {
