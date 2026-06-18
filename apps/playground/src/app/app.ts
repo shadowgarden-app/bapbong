@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, computed, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, Injector, OnDestroy, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { commentSchema, schema } from '@shadow-garden/bapbong-model';
@@ -47,6 +47,11 @@ const CARET_BLINK_MS = 530;
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
 
+/** Minimize-mode bubble diameter (px) and the gap between anchored items —
+ *  used to resolve overlapping anchors (see packAnchors). Matches .bubble CSS. */
+const BUBBLE_SIZE = 34;
+const ANCHOR_GAP = 8;
+
 /** What the single comment composer is currently composing. */
 interface ComposerSpec {
   kind: 'add' | 'reply' | 'edit';
@@ -90,6 +95,13 @@ export class App implements OnDestroy {
   protected readonly anchoredComments = signal<{ node: CommentNode; top: number }[]>([]);
   /** In minimize mode, the root whose thread popover is open (or null). */
   protected readonly openBubble = signal<number | null>(null);
+  /** In expand mode, the focused card — pinned to its true line on re-pack. */
+  protected readonly activeCard = signal<number | null>(null);
+  /** Raw (unpacked) expand-card anchors, kept so re-packs start from the true y. */
+  private expandRaw: { node: CommentNode; top: number }[] = [];
+  /** The anchored layer (bubbles/cards), queried to measure expand-card heights. */
+  private readonly anchorLayer = viewChild<ElementRef<HTMLDivElement>>('anchorLayer');
+  private readonly injector = inject(Injector);
   private allCommentIds: number[] = [];
   protected readonly hasSelection = signal(false);
   protected readonly composerFor = signal<ComposerSpec | null>(null);
@@ -468,6 +480,18 @@ export class App implements OnDestroy {
     this.openBubble.update((cur) => (cur === rootId ? null : rootId));
     // Highlight the range but DON'T scroll — the bubble is already in view.
     if (this.openBubble() === rootId) this.onCommentClick(rootId, false);
+    // Re-pack: the open bubble snaps to its true line, the rest flow around it
+    // (or, on close, the stack settles back to the resting cascade).
+    this.recomputeAnchors();
+  }
+
+  /** Expand mode: focusing a card makes it the pinned anchor and re-packs.
+   *  Activating expands this thread and collapses the others, so the heights
+   *  change in the DOM — re-pack AFTER that render (afterNextRender), not now. */
+  protected onCardFocus(id: number): void {
+    if (this.activeCard() === id) return;
+    this.activeCard.set(id);
+    afterNextRender(() => this.packExpandCards(), { injector: this.injector });
   }
 
   /** Root threads for the panel list (respecting the show-resolved toggle). */
@@ -506,6 +530,29 @@ export class App implements OnDestroy {
     };
     walk(rootId, 0);
     return out;
+  }
+
+  /** Number of replies under a root (the thread minus the root itself). */
+  protected replyCount(rootId: number): number {
+    return this.threadFor(rootId).length - 1;
+  }
+
+  /** Human-friendly comment timestamp: "Today hh:mm AM/PM" when it falls on
+   *  today, otherwise "DD/MM/YYYY hh:mm AM/PM". Falls back to the raw string if
+   *  it isn't a parseable date. */
+  protected formatDate(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const ampm = d.getHours() < 12 ? 'AM' : 'PM';
+    const time = `${pad(d.getHours() % 12 || 12)}:${pad(d.getMinutes())} ${ampm}`;
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    if (sameDay) return `Today ${time}`;
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${time}`;
   }
 
   /** Plain-text preview of a comment body (commentSchema doc JSON). */
@@ -581,6 +628,7 @@ export class App implements OnDestroy {
     this.commentView.set(view);
     if (view !== 'panel') this.closeComposer();
     this.openBubble.set(null);
+    this.activeCard.set(null);
     this.repaintContent();
     this.recomputeAnchors();
   }
@@ -618,7 +666,78 @@ export class App implements OnDestroy {
       const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
       if (pt) out.push({ node: c, top: pt.y }); // container/content y; scrolls natively
     }
-    this.anchoredComments.set(out);
+    if (view === 'minimize') {
+      // Fixed-height bubbles: resolve overlaps now, pinning the open bubble to
+      // its true line and pushing the rest away (Google-Docs style).
+      const items = out.map((o) => ({ ...o, h: BUBBLE_SIZE }));
+      this.packAnchors(items, ANCHOR_GAP, this.openBubble());
+      this.setAnchors(items);
+    } else {
+      // Expand cards have dynamic heights — render at the raw y first, then
+      // measure and re-pack once the DOM has them (see packExpandCards). Keep
+      // the raw tops so a re-pack always works from the true anchors, never
+      // from an already-packed layout (which would drift on repeated fires).
+      this.expandRaw = out;
+      this.setAnchors(out);
+      afterNextRender(() => this.packExpandCards(), { injector: this.injector });
+    }
+  }
+
+  /** Measure the rendered expand cards and pack them apart (the focused card
+   *  stays pinned at its true line). Heights are read live, so a focused card —
+   *  whose reply box has revealed — is measured taller and the card below it is
+   *  pushed down accordingly (no overlap). */
+  private packExpandCards(): void {
+    if (this.commentView() !== 'expand') return;
+    const layer = this.anchorLayer()?.nativeElement;
+    if (!layer) return;
+    const heightById = new Map<number, number>();
+    for (const el of Array.from(layer.querySelectorAll<HTMLElement>('.anchor')))
+      heightById.set(Number(el.dataset['id']), el.offsetHeight);
+    const items = this.expandRaw.map((c) => ({
+      node: c.node,
+      top: c.top, // raw (true) y — packed from scratch every time
+      h: heightById.get(c.node.id) ?? 80,
+    }));
+    this.packAnchors(items, ANCHOR_GAP, this.activeCard());
+    this.setAnchors(items);
+  }
+
+  /** Publish anchors in a STABLE order (by id), independent of their packed y.
+   *  Reordering the @for would move DOM nodes and blur a focused card — which
+   *  would hide its reply box mid-measure and corrupt the height. */
+  private setAnchors(items: { node: CommentNode; top: number }[]): void {
+    this.anchoredComments.set(
+      items.map(({ node, top }) => ({ node, top })).sort((a, b) => a.node.id - b.node.id),
+    );
+  }
+
+  /** Push anchored items apart so their boxes don't overlap, using each item's
+   *  own height. With an `activeId`, that item stays pinned at its true line
+   *  and the others flow around it (push down below, push up above); otherwise
+   *  the whole stack cascades top-down. Mutates `items` (sorted by top). */
+  private packAnchors(
+    items: { node: CommentNode; top: number; h: number }[],
+    gap: number,
+    activeId: number | null,
+  ): void {
+    if (items.length < 2) return;
+    items.sort((a, b) => a.top - b.top);
+    const ai = activeId == null ? -1 : items.findIndex((o) => o.node.id === activeId);
+    const minBelow = (i: number) => items[i - 1].top + items[i - 1].h + gap;
+    if (ai < 0) {
+      for (let i = 1; i < items.length; i++) items[i].top = Math.max(items[i].top, minBelow(i));
+    } else {
+      for (let i = ai + 1; i < items.length; i++) items[i].top = Math.max(items[i].top, minBelow(i));
+      for (let i = ai - 1; i >= 0; i--)
+        items[i].top = Math.min(items[i].top, items[i + 1].top - items[i].h - gap);
+    }
+    // If the upward push ran past the content top, slide the cluster back down
+    // so nothing clips (rare; only when many anchors crowd the very top).
+    if (items[0].top < 0) {
+      const shift = -items[0].top;
+      for (const it of items) it.top += shift;
+    }
   }
 
   /** Every comment's PM range in ONE doc scan (id → from..to). */

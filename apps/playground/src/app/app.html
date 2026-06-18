@@ -88,9 +88,9 @@
 
           @if (commentView() === 'minimize' || commentView() === 'expand') {
             <!-- Anchored in the right margin at each thread's document y. -->
-            <div class="comment-anchors" [class.bubbles]="commentView() === 'minimize'">
+            <div #anchorLayer class="comment-anchors" [class.bubbles]="commentView() === 'minimize'">
               @for (a of anchoredComments(); track a.node.id) {
-                <div class="anchor" [style.top.px]="a.top">
+                <div class="anchor" [attr.data-id]="a.node.id" [style.top.px]="a.top">
                   @if (commentView() === 'minimize') {
                     <button
                       type="button"
@@ -111,12 +111,24 @@
                       </div>
                     }
                   } @else {
-                    <!-- Expand: anchored card; reply box reveals on focus. -->
-                    <div class="expand-thread" tabindex="0">
-                      <ng-container
-                        [ngTemplateOutlet]="threadView"
-                        [ngTemplateOutletContext]="{ $implicit: a.node.id, replyMode: 'on-focus' }"
-                      ></ng-container>
+                    <!-- Expand: only the active card shows its full thread +
+                         reply box; the rest collapse to the root + a reply count
+                         (Google-Docs style). Collapsing keeps the others short so
+                         the active card has room to align with its line. -->
+                    <div class="expand-thread" tabindex="0" (focusin)="onCardFocus(a.node.id)">
+                      @if (activeCard() === a.node.id) {
+                        <ng-container
+                          [ngTemplateOutlet]="threadView"
+                          [ngTemplateOutletContext]="{ $implicit: a.node.id, replyMode: 'always' }"
+                        ></ng-container>
+                      } @else {
+                        <!-- Collapsed: root card only; the reply count renders
+                             INSIDE the card (threadCard's `replies` context). -->
+                        <ng-container
+                          [ngTemplateOutlet]="threadCard"
+                          [ngTemplateOutletContext]="{ $implicit: { node: a.node, depth: 0, replies: replyCount(a.node.id) } }"
+                        ></ng-container>
+                      }
                     </div>
                   }
                 </div>
@@ -156,7 +168,7 @@
         <div class="comment-head">
           <span class="comment-meta">
             {{ item.node.user.name || 'Unknown' }}
-            <span class="dim">{{ item.node.date }}</span>
+            <span class="dim">{{ formatDate(item.node.date) }}</span>
           </span>
           <span class="comment-icons">
             @if (item.depth === 0) {
@@ -174,6 +186,12 @@
           </span>
         </div>
         <div class="comment-text">{{ commentText(item.node.body) }}</div>
+        @if (item.replies) {
+          <!-- Collapsed expand-card: reply count lives inside the card box. -->
+          <button type="button" class="reply-count" (click)="onCardFocus(item.node.id)">
+            {{ item.replies }} trả lời
+          </button>
+        }
       </div>
     </ng-template>
 

@@ -116,6 +116,8 @@ h2 {
   position: absolute;
   left: 0;
   right: 0;
+  /* Slide to the new slot when an item is selected / the layout repacks. */
+  transition: top 0.18s ease;
 }
 .bubble {
   width: 34px;
@@ -341,6 +343,22 @@ h2 {
 }
 .reply-input:focus {
   border-color: #1f6feb;
+}
+/* Collapsed expand-card: the "N trả lời" affordance under the root comment. */
+.reply-count {
+  align-self: flex-start;
+  margin-top: 2px;
+  margin-left: 2px;
+  font: inherit;
+  font-size: 0.74rem;
+  color: #1f6feb;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.reply-count:hover {
+  text-decoration: underline;
 }
 /* Panel groups each root thread with a little separation. */
 .panel-thread {
