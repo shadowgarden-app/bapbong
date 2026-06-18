@@ -45,8 +45,6 @@ const A4: PageConfig = {
 const CARET_BLINK_MS = 530;
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
-/** `.canvas-wrap` padding (px) — anchored comments offset by it to line up. */
-const CANVAS_WRAP_PAD = 24;
 
 /** What the single comment composer is currently composing. */
 interface ComposerSpec {
@@ -346,7 +344,8 @@ export class App implements OnDestroy {
     this.scrollRaf = requestAnimationFrame(() => {
       this.scrollRaf = null;
       this.repaintContent();
-      this.recomputeAnchors(); // anchored comments track the scroll
+      // Anchored comments live inside the scroll content → they scroll natively;
+      // no per-scroll repositioning needed.
     });
   }
 
@@ -576,7 +575,10 @@ export class App implements OnDestroy {
   };
 
   /** Position each (unresolved) root comment in the margin at its anchor's
-   *  on-screen y — only for the minimize/expand modes. */
+   *  document y — only for the minimize/expand modes. The anchors are rendered
+   *  INSIDE the scroll container (same coordinate space as the pages), so the
+   *  browser scrolls them natively; we only recompute on layout changes, never
+   *  on scroll. */
   private recomputeAnchors(): void {
     const view = this.commentView();
     if (view !== 'minimize' && view !== 'expand') {
@@ -584,8 +586,6 @@ export class App implements OnDestroy {
       return;
     }
     if (!this.painter || !this.resolved || !this.measureText) return;
-    const wrap = this.stackHost()?.nativeElement.closest('.canvas-wrap') as HTMLElement | null;
-    const scrollTop = wrap?.scrollTop ?? 0;
     const ranges = this.allCommentRanges();
     const out: { node: CommentNode; top: number }[] = [];
     for (const c of this.comments()) {
@@ -594,7 +594,7 @@ export class App implements OnDestroy {
       if (!range) continue;
       const cr = caretRect(this.resolved, range.from, this.measureText);
       const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
-      if (pt) out.push({ node: c, top: CANVAS_WRAP_PAD + pt.y - scrollTop });
+      if (pt) out.push({ node: c, top: pt.y }); // container/content y; scrolls natively
     }
     this.anchoredComments.set(out);
   }

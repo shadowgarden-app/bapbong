@@ -67,17 +67,57 @@
     </div>
 
     <div class="canvas-layout">
-      <div class="canvas-wrap" (scroll)="onCanvasScroll()">
-        <!-- The painter fills this with one <canvas> per page (virtualized). -->
-        <div
-          #canvasStack
-          class="canvas-stack"
-          (pointerdown)="onCanvasPointerDown($event)"
-          (pointermove)="onCanvasPointerMove($event)"
-          (pointerup)="onCanvasPointerUp()"
-          (pointercancel)="onCanvasPointerUp()"
-          (dblclick)="onCanvasDblClick($event)"
-        ></div>
+      <div
+        class="canvas-wrap"
+        [class.anchored-mode]="commentView() === 'minimize' || commentView() === 'expand'"
+        (scroll)="onCanvasScroll()"
+      >
+        <!-- Stack + anchored comments share one scrollable content box, so the
+             bubbles/cards scroll natively with the pages (no per-scroll JS). -->
+        <div class="canvas-content">
+          <!-- The painter fills this with one <canvas> per page (virtualized). -->
+          <div
+            #canvasStack
+            class="canvas-stack"
+            (pointerdown)="onCanvasPointerDown($event)"
+            (pointermove)="onCanvasPointerMove($event)"
+            (pointerup)="onCanvasPointerUp()"
+            (pointercancel)="onCanvasPointerUp()"
+            (dblclick)="onCanvasDblClick($event)"
+          ></div>
+
+          @if (commentView() === 'minimize' || commentView() === 'expand') {
+            <!-- Anchored in the right margin at each thread's document y. -->
+            <div class="comment-anchors" [class.bubbles]="commentView() === 'minimize'">
+              @for (a of anchoredComments(); track a.node.id) {
+                <div class="anchor" [style.top.px]="a.top">
+                  @if (commentView() === 'minimize') {
+                    <button type="button" class="bubble" [title]="a.node.user.name" (click)="onCommentClick(a.node.id)">
+                      {{ initial(a.node.user.name) }}
+                    </button>
+                  } @else {
+                    <div class="comment anchored-card">
+                      <div class="comment-meta">
+                        {{ a.node.user.name || 'Unknown' }}
+                        <span class="dim">{{ a.node.date }}</span>
+                      </div>
+                      <div class="comment-text">{{ commentText(a.node.body) }}</div>
+                      <div class="comment-actions">
+                        <button type="button" (click)="onCommentClick(a.node.id)">Tới chỗ</button>
+                        <button type="button" (click)="resolveComment(a.node.id, true)">Resolve</button>
+                        <button type="button" (click)="startReply(a.node.id)">Reply</button>
+                        @if (canModify(a.node)) {
+                          <button type="button" (click)="startEdit(a.node)">Sửa</button>
+                          <button type="button" (click)="deleteComment(a.node.id)">Xoá</button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
       </div>
 
       @if (commentView() === 'panel') {
@@ -111,36 +151,6 @@
                   <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
                 }
               </div>
-            </div>
-          }
-        </aside>
-      } @else if (commentView() === 'minimize' || commentView() === 'expand') {
-        <!-- Anchored: each thread positioned in the margin at its doc location. -->
-        <aside class="comments anchored" [class.bubbles]="commentView() === 'minimize'">
-          @for (a of anchoredComments(); track a.node.id) {
-            <div class="anchor" [style.top.px]="a.top">
-              @if (commentView() === 'minimize') {
-                <button type="button" class="bubble" [title]="a.node.user.name" (click)="onCommentClick(a.node.id)">
-                  {{ initial(a.node.user.name) }}
-                </button>
-              } @else {
-                <div class="comment anchored-card">
-                  <div class="comment-meta">
-                    {{ a.node.user.name || 'Unknown' }}
-                    <span class="dim">{{ a.node.date }}</span>
-                  </div>
-                  <div class="comment-text">{{ commentText(a.node.body) }}</div>
-                  <div class="comment-actions">
-                    <button type="button" (click)="onCommentClick(a.node.id)">Tới chỗ</button>
-                    <button type="button" (click)="resolveComment(a.node.id, true)">Resolve</button>
-                    <button type="button" (click)="startReply(a.node.id)">Reply</button>
-                    @if (canModify(a.node)) {
-                      <button type="button" (click)="startEdit(a.node)">Sửa</button>
-                      <button type="button" (click)="deleteComment(a.node.id)">Xoá</button>
-                    }
-                  </div>
-                </div>
-              }
             </div>
           }
         </aside>

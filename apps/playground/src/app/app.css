@@ -1,5 +1,5 @@
 .wrap {
-  max-width: 880px;
+  max-width: 1200px; /* room for the page + the comment gutter/panel */
   margin: 0 auto;
   padding: 24px 20px 64px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -72,6 +72,11 @@ h2 {
   flex: 1 1 auto;
   min-width: 0; /* let the flex item shrink instead of overflowing */
 }
+/* Anchored modes: left-align the page so the right margin holds the comment
+   bubbles/cards without clipping. */
+.canvas-wrap.anchored-mode {
+  justify-content: flex-start;
+}
 /* View-mode toolbar above the canvas. */
 .comment-toolbar {
   display: flex;
@@ -90,24 +95,27 @@ h2 {
   flex-direction: column;
   gap: 8px;
 }
-/* Anchored modes: a relative layer; items absolutely placed at their doc y. */
-.comments.anchored {
+/* Stack + anchored comments in one scrollable content box (page-coordinate
+   space), so the anchors scroll natively with the pages. */
+.canvas-content {
   position: relative;
-  flex: 0 0 auto;
-  align-self: stretch;
-  max-height: 760px;
-  overflow: hidden;
+  flex: none;
 }
-.comments.anchored {
+/* Anchored layer: in the right margin (just past the page), at content y. */
+.comment-anchors {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  margin-left: 10px;
   width: 300px;
 }
-.comments.anchored.bubbles {
-  width: 52px;
+.comment-anchors.bubbles {
+  width: 40px;
 }
 .anchor {
   position: absolute;
-  left: 6px;
-  right: 6px;
+  left: 0;
+  right: 0;
 }
 .bubble {
   width: 34px;
