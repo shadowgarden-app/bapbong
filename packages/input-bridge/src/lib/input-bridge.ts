@@ -82,17 +82,25 @@ export function wordRangeAt(doc: PMNode, pos: number): { from: number; to: numbe
 // setDocAttribute, so every op (add/reply/resolve/delete/edit) is one
 // undoable transaction. The `comment` mark on text anchors a thread by id.
 
+/** A comment author (structurally a bapbong-contracts IUser). */
+export interface IUser {
+  id: string;
+  name: string;
+  email?: string;
+  avatar?: string;
+}
+
 /** A comment thread node (structurally a bapbong-contracts CommentNode). */
 export interface CommentNode {
   id: number;
   parentId: number | null;
-  author: string;
+  user: IUser;
   date: string;
   body: unknown;
   resolved?: boolean;
 }
 
-type NewComment = { author: string; date: string; body: unknown };
+type NewComment = { user: IUser; date: string; body: unknown };
 
 const getComments = (state: EditorState): CommentNode[] =>
   (state.doc.attrs['comments'] as CommentNode[] | null) ?? [];

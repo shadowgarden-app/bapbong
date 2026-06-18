@@ -27,6 +27,7 @@ import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garde
 import type {
   CaretRect,
   CommentNode,
+  IUser,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -70,7 +71,12 @@ export class App implements OnDestroy {
   protected readonly pageCount = signal(0);
   // Comment threads (from doc.attrs.comments) + authoring UI state.
   protected readonly comments = signal<CommentNode[]>([]);
+  // Self-declared display name; the current user (id = name — no auth yet).
   protected readonly author = signal('Me');
+  protected readonly currentUser = computed<IUser>(() => {
+    const name = this.author().trim() || 'Me';
+    return { id: name, name };
+  });
   protected readonly hasSelection = signal(false);
   protected readonly composerFor = signal<ComposerSpec | null>(null);
   /** Comment threads flattened depth-first with nesting depth (for the sidebar). */
@@ -457,10 +463,10 @@ export class App implements OnDestroy {
     }
   }
 
-  /** Whether the current author may edit/delete a node (UX guard, not security
-   *  — there is no authenticated identity; the author name is self-declared). */
+  /** Whether the current user may edit/delete a node (UX guard, not security
+   *  — there is no authenticated identity; the user id is self-declared). */
   protected canModify(node: CommentNode): boolean {
-    return node.author === this.author().trim();
+    return node.user.id === this.currentUser().id;
   }
 
   protected startAddComment(): void {
@@ -494,14 +500,14 @@ export class App implements OnDestroy {
       return;
     }
     const body = this.composer.getJSON();
-    const author = this.author().trim() || 'Me';
+    const user = this.currentUser();
     const date = new Date().toISOString();
     const state = this.bridge.state;
     let tr: Transaction | null = null;
     if (spec.kind === 'add' && spec.from != null && spec.to != null) {
-      tr = addCommentTr(state, { from: spec.from, to: spec.to }, { author, date, body });
+      tr = addCommentTr(state, { from: spec.from, to: spec.to }, { user, date, body });
     } else if (spec.kind === 'reply' && spec.parentId != null) {
-      tr = replyCommentTr(state, spec.parentId, { author, date, body });
+      tr = replyCommentTr(state, spec.parentId, { user, date, body });
     } else if (spec.kind === 'edit' && spec.id != null) {
       tr = editCommentTr(state, spec.id, body);
     }

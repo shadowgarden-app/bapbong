@@ -72,7 +72,7 @@
             [style.margin-left.px]="item.depth * 14"
           >
             <div class="comment-meta">
-              {{ item.node.author || 'Unknown' }}
+              {{ item.node.user.name || 'Unknown' }}
               <span class="dim">{{ item.node.date }}</span>
             </div>
             <div class="comment-text">{{ commentText(item.node.body) }}</div>

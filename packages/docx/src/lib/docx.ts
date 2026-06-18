@@ -48,12 +48,20 @@ export interface CommentData {
   text: string;
 }
 
+/** A comment author (structurally a bapbong-contracts IUser). */
+interface IUser {
+  id: string;
+  name: string;
+  email?: string;
+  avatar?: string;
+}
+
 /** A comment thread root for doc.attrs.comments (structurally a
  *  bapbong-contracts CommentNode); `body` is commentSchema doc JSON. */
 interface CommentNode {
   id: number;
   parentId: number | null;
-  author: string;
+  user: IUser;
   date: string;
   body: unknown;
   resolved: boolean;
@@ -899,13 +907,15 @@ function commentBodyJSON(comment: OoxmlNode): unknown {
   return commentSchema.node('doc', null, paras.length ? paras : [commentSchema.node('paragraph')]).toJSON();
 }
 
-/** Referenced comments as authoring thread roots for doc.attrs.comments. */
+/** Referenced comments as authoring thread roots for doc.attrs.comments. OOXML
+ *  comments carry only an author name, so the user id is the name itself. */
 function buildCommentNodes(ctx: Ctx): CommentNode[] {
   const out: CommentNode[] = [];
   for (const id of ctx.comments.used) {
     const def = ctx.comments.defs.get(id);
     if (def) {
-      out.push({ id, parentId: null, author: def.author, date: def.date, body: commentBodyJSON(def.body), resolved: false });
+      const user: IUser = { id: def.author || 'unknown', name: def.author || 'Unknown' };
+      out.push({ id, parentId: null, user, date: def.date, body: commentBodyJSON(def.body), resolved: false });
     }
   }
   return out;

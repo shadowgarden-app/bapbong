@@ -33,6 +33,15 @@ export interface CommentData {
   text: string;
 }
 
+/** Author of a comment / reply. `id` identifies the user (for own-only edit
+ *  checks and @mentions); name/email/avatar are for display. */
+export interface IUser {
+  id: string;
+  name: string;
+  email?: string;
+  avatar?: string;
+}
+
 /** A comment thread node stored on `doc.attrs.comments` (authoring model). The
  *  thread is a tree via `parentId` (null = root, the node a comment mark
  *  anchors to). `body` is commentSchema ProseMirror-doc JSON. `resolved` is
@@ -40,7 +49,7 @@ export interface CommentData {
 export interface CommentNode {
   id: number;
   parentId: number | null;
-  author: string;
+  user: IUser;
   date: string;
   body: unknown;
   resolved?: boolean;
