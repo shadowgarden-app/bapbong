@@ -104,19 +104,20 @@
                     @if (openBubble() === a.node.id) {
                       <!-- Floating thread popover (reuses the card layout). -->
                       <div class="comment-popover">
-                        @for (item of threadFor(a.node.id); track item.node.id) {
-                          <ng-container
-                            [ngTemplateOutlet]="threadCard"
-                            [ngTemplateOutletContext]="{ $implicit: item }"
-                          ></ng-container>
-                        }
+                        <ng-container
+                          [ngTemplateOutlet]="threadView"
+                          [ngTemplateOutletContext]="{ $implicit: a.node.id, replyMode: 'always' }"
+                        ></ng-container>
                       </div>
                     }
                   } @else {
-                    <ng-container
-                      [ngTemplateOutlet]="threadCard"
-                      [ngTemplateOutletContext]="{ $implicit: { node: a.node, depth: 0 } }"
-                    ></ng-container>
+                    <!-- Expand: anchored card; reply box reveals on focus. -->
+                    <div class="expand-thread" tabindex="0">
+                      <ng-container
+                        [ngTemplateOutlet]="threadView"
+                        [ngTemplateOutletContext]="{ $implicit: a.node.id, replyMode: 'on-focus' }"
+                      ></ng-container>
+                    </div>
                   }
                 </div>
               }
@@ -131,14 +132,20 @@
           @if (!comments().length) {
             <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
           }
-          @for (item of threadList(); track item.node.id) {
-            <ng-container [ngTemplateOutlet]="threadCard" [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+          @for (root of rootComments(); track root.id) {
+            <div class="panel-thread" tabindex="0">
+              <ng-container
+                [ngTemplateOutlet]="threadView"
+                [ngTemplateOutletContext]="{ $implicit: root.id, replyMode: 'on-focus' }"
+              ></ng-container>
+            </div>
           }
         </aside>
       }
     </div>
 
-    <!-- One comment card (a thread node), reused by panel / expand / popover. -->
+    <!-- One comment card (a thread node), reused by panel / expand / popover.
+         Header carries the icon actions: ✓ resolve (root only) and ✕ delete. -->
     <ng-template #threadCard let-item>
       <div
         class="comment"
@@ -146,24 +153,45 @@
         [class.resolved]="item.node.resolved && item.depth === 0"
         [style.margin-left.px]="item.depth * 14"
       >
-        <div class="comment-meta">
-          {{ item.node.user.name || 'Unknown' }}
-          <span class="dim">{{ item.node.date }}</span>
+        <div class="comment-head">
+          <span class="comment-meta">
+            {{ item.node.user.name || 'Unknown' }}
+            <span class="dim">{{ item.node.date }}</span>
+          </span>
+          <span class="comment-icons">
+            @if (item.depth === 0) {
+              <button
+                type="button"
+                class="icon-btn"
+                [class.on]="item.node.resolved"
+                [title]="item.node.resolved ? 'Mở lại' : 'Resolve'"
+                (click)="resolveComment(item.node.id, !item.node.resolved)"
+              >✓</button>
+            }
+            @if (canModify(item.node)) {
+              <button type="button" class="icon-btn danger" title="Xoá" (click)="deleteComment(item.node.id)">✕</button>
+            }
+          </span>
         </div>
         <div class="comment-text">{{ commentText(item.node.body) }}</div>
-        <div class="comment-actions">
-          @if (item.depth === 0) {
-            <button type="button" (click)="onCommentClick(item.node.id)">Tới chỗ</button>
-            <button type="button" (click)="resolveComment(item.node.id, !item.node.resolved)">
-              {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
-            </button>
-          }
-          <button type="button" (click)="startReply(item.node.id)">Reply</button>
-          @if (canModify(item.node)) {
-            <button type="button" (click)="startEdit(item.node)">Sửa</button>
-            <button type="button" (click)="deleteComment(item.node.id)">Xoá</button>
-          }
-        </div>
+      </div>
+    </ng-template>
+
+    <!-- A whole thread: its cards followed by an inline "Reply …" box.
+         replyMode 'always' keeps the box visible; 'on-focus' reveals it only
+         while the enclosing thread has focus (see .reply-row.on-focus). -->
+    <ng-template #threadView let-rootId let-replyMode="replyMode">
+      @for (item of threadFor(rootId); track item.node.id) {
+        <ng-container [ngTemplateOutlet]="threadCard" [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+      }
+      <div class="reply-row" [class.on-focus]="replyMode === 'on-focus'">
+        <span class="avatar">{{ initial(currentUser().name) }}</span>
+        <input
+          type="text"
+          class="reply-input"
+          placeholder="Reply …"
+          (keydown.enter)="submitReply(rootId, $event)"
+        />
       </div>
     </ng-template>
   </section>

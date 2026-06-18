@@ -135,10 +135,6 @@ h2 {
 .bubble.open {
   outline: 2px solid #1f6feb;
 }
-/* Anchored expand cards float over the gutter with a slight elevation. */
-.comment-anchors:not(.bubbles) .comment {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-}
 /* Minimize mode: clicking a bubble opens its thread in a floating popover to
    the right of the bubble (reuses the card layout inside). */
 .comment-popover {
@@ -224,6 +220,11 @@ h2 {
   border-left: 3px solid #ffc107;
   border-radius: 6px;
   background: #fffdf5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.15s ease;
+}
+.comment:hover {
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.14);
 }
 .comment.is-reply {
   border-left-color: #c8c8c8;
@@ -232,6 +233,12 @@ h2 {
 .comment.resolved {
   opacity: 0.55;
   border-left-color: #9ccc9c;
+}
+.comment-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
 }
 .comment-meta {
   font-size: 0.8rem;
@@ -242,23 +249,106 @@ h2 {
   color: #333;
   white-space: pre-wrap;
 }
-.comment-actions {
+/* Header icon actions (✓ resolve, ✕ delete). */
+.comment-icons {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 2px;
+  flex: none;
+}
+.icon-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: #9a9aa0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.icon-btn:focus-visible {
+  outline: none;
+}
+/* Icons stay muted until the user hovers the card or focuses its thread —
+   then ✓ turns green and ✕ turns red (no need to hit the tiny button). */
+.comment:hover .icon-btn:not(.danger),
+.comment:focus-within .icon-btn:not(.danger),
+.panel-thread:focus-within .icon-btn:not(.danger),
+.expand-thread:focus-within .icon-btn:not(.danger) {
+  color: #2e7d32;
+  background: #e7f4e8;
+}
+.comment:hover .icon-btn.danger,
+.comment:focus-within .icon-btn.danger,
+.panel-thread:focus-within .icon-btn.danger,
+.expand-thread:focus-within .icon-btn.danger {
+  color: #c0392b;
+  background: #fdecec;
+}
+/* Resolved root keeps the check lit green. */
+.icon-btn.on {
+  color: #2e7d32;
+  background: #e7f4e8;
+}
+/* Inline "Reply …" box at the bottom of a thread. */
+.reply-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 2px;
 }
-.comment-actions button {
-  font: inherit;
-  font-size: 0.72rem;
-  color: #1f6feb;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
+/* on-focus visibility: hidden until the enclosing thread holds focus. */
+.reply-row.on-focus {
+  display: none;
 }
-.comment-actions button:hover {
-  text-decoration: underline;
+.panel-thread:focus-within .reply-row.on-focus,
+.expand-thread:focus-within .reply-row.on-focus {
+  display: flex;
+}
+/* The thread wrappers are focusable only so a click reveals the reply box;
+   suppress their own outline (the inner input keeps its focus ring). */
+.panel-thread:focus,
+.expand-thread:focus {
+  outline: none;
+}
+.avatar {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  background: #7b1fa2;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.reply-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 6px 10px;
+  border: 1px solid #d8d8dc;
+  border-radius: 16px;
+  background: #fff;
+  outline: none;
+}
+.reply-input:focus {
+  border-color: #1f6feb;
+}
+/* Panel groups each root thread with a little separation. */
+.panel-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ececf0;
 }
 .view-modes {
   display: flex;

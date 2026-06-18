@@ -93,27 +93,6 @@ export class App implements OnDestroy {
   private allCommentIds: number[] = [];
   protected readonly hasSelection = signal(false);
   protected readonly composerFor = signal<ComposerSpec | null>(null);
-  /** Comment threads flattened depth-first with nesting depth (for the sidebar). */
-  protected readonly threadList = computed<{ node: CommentNode; depth: number }[]>(() => {
-    const all = this.comments();
-    const byParent = new Map<number | null, CommentNode[]>();
-    for (const c of all) {
-      const list = byParent.get(c.parentId) ?? [];
-      list.push(c);
-      byParent.set(c.parentId, list);
-    }
-    const out: { node: CommentNode; depth: number }[] = [];
-    const showResolved = this.showResolved();
-    const walk = (parentId: number | null, depth: number) => {
-      for (const c of byParent.get(parentId) ?? []) {
-        if (depth === 0 && c.resolved && !showResolved) continue; // hide resolved thread
-        out.push({ node: c, depth });
-        walk(c.id, depth + 1);
-      }
-    };
-    walk(null, 0);
-    return out;
-  });
   private readonly composerHost = viewChild<ElementRef<HTMLDivElement>>('composerHost');
   private composer: CommentComposer | null = null;
   private resolvedCommentIds: number[] = [];
@@ -491,6 +470,30 @@ export class App implements OnDestroy {
     if (this.openBubble() === rootId) this.onCommentClick(rootId, false);
   }
 
+  /** Root threads for the panel list (respecting the show-resolved toggle). */
+  protected readonly rootComments = computed<CommentNode[]>(() => {
+    const showResolved = this.showResolved();
+    return this.comments().filter((c) => c.parentId == null && (showResolved || !c.resolved));
+  });
+
+  /** Inline reply: Enter in a thread's "Reply …" box appends a reply. */
+  protected submitReply(rootId: number, ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const text = input.value.trim();
+    if (!text || !this.bridge) return;
+    const body = commentSchema
+      .node('doc', null, [commentSchema.node('paragraph', null, [commentSchema.text(text)])])
+      .toJSON();
+    this.bridge.dispatch(
+      replyCommentTr(this.bridge.state, rootId, {
+        user: this.currentUser(),
+        date: new Date().toISOString(),
+        body,
+      }),
+    );
+    input.value = '';
+  }
+
   /** A root's thread (the root + its reply subtree), flattened depth-first. */
   protected threadFor(rootId: number): { node: CommentNode; depth: number }[] {
     const all = this.comments();
@@ -524,14 +527,6 @@ export class App implements OnDestroy {
     const sel = this.bridge?.state.selection;
     if (!sel || sel.empty) return;
     this.openComposer({ kind: 'add', label: 'Bình luận mới', from: sel.from, to: sel.to });
-  }
-
-  protected startReply(parentId: number): void {
-    this.openComposer({ kind: 'reply', label: 'Trả lời', parentId });
-  }
-
-  protected startEdit(node: CommentNode): void {
-    this.openComposer({ kind: 'edit', label: 'Sửa', id: node.id }, node.body);
   }
 
   private openComposer(spec: ComposerSpec, initialBody?: unknown): void {
