@@ -77,6 +77,11 @@ export class App implements OnDestroy {
     const name = this.author().trim() || 'Me';
     return { id: name, name };
   });
+  // Comment view modes (Google-Docs style): hide tint+list, compact cards, or
+  // full cards; `showResolved` reveals resolved threads in the list.
+  protected readonly commentView = signal<'hidden' | 'minimized' | 'expanded'>('expanded');
+  protected readonly showResolved = signal(false);
+  private allCommentIds: number[] = [];
   protected readonly hasSelection = signal(false);
   protected readonly composerFor = signal<ComposerSpec | null>(null);
   /** Comment threads flattened depth-first with nesting depth (for the sidebar). */
@@ -89,8 +94,10 @@ export class App implements OnDestroy {
       byParent.set(c.parentId, list);
     }
     const out: { node: CommentNode; depth: number }[] = [];
+    const showResolved = this.showResolved();
     const walk = (parentId: number | null, depth: number) => {
       for (const c of byParent.get(parentId) ?? []) {
+        if (depth === 0 && c.resolved && !showResolved) continue; // hide resolved thread
         out.push({ node: c, depth });
         walk(c.id, depth + 1);
       }
@@ -197,6 +204,7 @@ export class App implements OnDestroy {
     this.painter ??= new CanvasPainter(stack);
     // Fonts that finish loading later invalidate every measurement.
     document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
+    document.addEventListener('keydown', this.onCommentKey);
 
     this.bridge?.destroy();
     this.bridge = new InputBridge({
@@ -246,7 +254,9 @@ export class App implements OnDestroy {
       // the resolved-id set (resolved comments paint no tint).
       const cs = (state.doc.attrs['comments'] as CommentNode[] | null) ?? [];
       this.comments.set(cs);
-      this.resolvedCommentIds = cs.filter((c) => c.parentId == null && c.resolved).map((c) => c.id);
+      const roots = cs.filter((c) => c.parentId == null);
+      this.allCommentIds = roots.map((c) => c.id);
+      this.resolvedCommentIds = roots.filter((c) => c.resolved).map((c) => c.id);
     }
 
     const sel = state.selection;
@@ -307,7 +317,8 @@ export class App implements OnDestroy {
       caret: this.caretVisible ? this.lastCaret : null,
       selection: this.lastSelection,
       viewport: this.currentViewport(),
-      resolvedComments: this.resolvedCommentIds,
+      // "Hide comments" suppresses every tint; otherwise only resolved ones.
+      resolvedComments: this.commentView() === 'hidden' ? this.allCommentIds : this.resolvedCommentIds,
     });
   }
 
@@ -350,6 +361,7 @@ export class App implements OnDestroy {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
     if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
+    document.removeEventListener('keydown', this.onCommentKey);
     this.composer?.destroy();
     this.bridge?.destroy();
   }
@@ -528,6 +540,28 @@ export class App implements OnDestroy {
   protected deleteComment(id: number): void {
     if (this.bridge) this.bridge.dispatch(deleteCommentTr(this.bridge.state, id));
   }
+
+  /** Switch the comment view mode; repaint so the tint follows (hidden ⇒ none). */
+  protected setCommentView(view: 'hidden' | 'minimized' | 'expanded'): void {
+    if (this.commentView() === view) return;
+    this.commentView.set(view);
+    if (view !== 'expanded') this.closeComposer();
+    this.repaintContent();
+  }
+
+  /** ⌘⌥⇧ + J/M/E hide/minimize/expand, + A toggles resolved (Google-Docs keys). */
+  private readonly onCommentKey = (ev: KeyboardEvent): void => {
+    if (!(ev.metaKey && ev.altKey && ev.shiftKey)) return;
+    const key = ev.key.toLowerCase();
+    const view = { j: 'hidden', m: 'minimized', e: 'expanded' } as const;
+    if (key in view) {
+      ev.preventDefault();
+      this.setCommentView(view[key as keyof typeof view]);
+    } else if (key === 'a') {
+      ev.preventDefault();
+      this.showResolved.update((v) => !v);
+    }
+  };
 
   private posAtEvent(ev: MouseEvent): number | null {
     if (!this.painter || !this.resolved || !this.measureText) return null;

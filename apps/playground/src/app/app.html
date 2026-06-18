@@ -40,16 +40,36 @@
           (dblclick)="onCanvasDblClick($event)"
         ></div>
       </div>
-      <aside class="comments">
+      <aside class="comments" [class.minimized]="commentView() === 'minimized'">
         <div class="comments-head">
           <h3>Comments <span class="dim">({{ comments().length }})</span></h3>
           <label class="author-field">Bạn:
             <input type="text" [value]="author()" (input)="author.set($any($event.target).value)" />
           </label>
-          <button type="button" class="add-comment" [disabled]="!hasSelection()" (click)="startAddComment()">
+          <button
+            type="button"
+            class="add-comment"
+            [disabled]="!hasSelection() || commentView() === 'hidden'"
+            (click)="startAddComment()"
+          >
             + Bình luận
           </button>
         </div>
+
+        <!-- View modes (Google-Docs style): hide / minimize / expand + show resolved. -->
+        <div class="view-modes">
+          <button type="button" [class.active]="commentView() === 'hidden'" (click)="setCommentView('hidden')" title="⌘⌥⇧J">Ẩn</button>
+          <button type="button" [class.active]="commentView() === 'minimized'" (click)="setCommentView('minimized')" title="⌘⌥⇧M">Thu gọn</button>
+          <button type="button" [class.active]="commentView() === 'expanded'" (click)="setCommentView('expanded')" title="⌘⌥⇧E">Mở rộng</button>
+          <label class="show-resolved" title="⌘⌥⇧A">
+            <input type="checkbox" [checked]="showResolved()" (change)="showResolved.set($any($event.target).checked)" />
+            Hiện đã giải quyết
+          </label>
+        </div>
+
+        @if (commentView() === 'hidden') {
+          <p class="dim">Bình luận đang ẩn (⌘⌥⇧E để hiện).</p>
+        } @else {
 
         <!-- Single composer area (always in the DOM so it can mount on demand). -->
         <div class="composer" [hidden]="!composerFor()">
@@ -90,6 +110,8 @@
               }
             </div>
           </div>
+        }
+
         }
       </aside>
     </div>

@@ -196,6 +196,47 @@ h2 {
 .comment-actions button:hover {
   text-decoration: underline;
 }
+.view-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.view-modes button {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+.view-modes button.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+.show-resolved {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: #555;
+}
+/* Minimized view: compact one-line cards, no per-comment actions. */
+.comments.minimized .comment {
+  padding: 5px 8px;
+  gap: 1px;
+}
+.comments.minimized .comment-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.comments.minimized .comment-actions {
+  display: none;
+}
 .canvas-stack {
   position: relative; /* anchors the per-page canvases + hidden editor */
   flex: none;
