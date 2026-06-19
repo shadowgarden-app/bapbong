@@ -119,33 +119,13 @@
                       {{ initial(a.node.user.name) }}
                     </button>
                     @if (openBubble() === a.node.id) {
-                      <!-- Floating thread popover (reuses the card layout). -->
                       <div class="comment-popover">
-                        <ng-container
-                          [ngTemplateOutlet]="threadView"
-                          [ngTemplateOutletContext]="{ $implicit: a.node.id, replyMode: 'always' }"
-                        ></ng-container>
+                        <ng-container [ngTemplateOutlet]="threadPost" [ngTemplateOutletContext]="{ $implicit: a.node.id }"></ng-container>
                       </div>
                     }
                   } @else {
-                    <!-- Expand: only the active card shows its full thread +
-                         reply box; the rest collapse to the root + a reply count
-                         (Google-Docs style). Collapsing keeps the others short so
-                         the active card has room to align with its line. -->
                     <div class="expand-thread" tabindex="0" (focusin)="onCardFocus(a.node.id)">
-                      @if (activeCard() === a.node.id) {
-                        <ng-container
-                          [ngTemplateOutlet]="threadView"
-                          [ngTemplateOutletContext]="{ $implicit: a.node.id, replyMode: 'always' }"
-                        ></ng-container>
-                      } @else {
-                        <!-- Collapsed: root card only; the reply count renders
-                             INSIDE the card (threadCard's `replies` context). -->
-                        <ng-container
-                          [ngTemplateOutlet]="threadCard"
-                          [ngTemplateOutletContext]="{ $implicit: { node: a.node, depth: 0, replies: replyCount(a.node.id) } }"
-                        ></ng-container>
-                      }
+                      <ng-container [ngTemplateOutlet]="threadPost" [ngTemplateOutletContext]="{ $implicit: a.node.id }"></ng-container>
                     </div>
                   }
                 </div>
@@ -156,131 +136,112 @@
       </div>
 
       @if (commentView() === 'panel') {
-        <!-- Panel: Facebook-style threads — bubble per comment, actions on hover,
-             per-node "Trả lời" whose editor mounts inside that comment's scope. -->
-        <aside class="comments panel fb">
+        <!-- Panel: each root is a post-style card (the shared #threadPost). -->
+        <aside class="comments panel">
           @if (!comments().length) {
             <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
           }
           @for (root of rootComments(); track root.id) {
             <div
-              class="fb-thread"
+              class="post-thread"
               tabindex="0"
               [attr.data-id]="root.id"
               [class.active]="activeCard() === root.id"
               (click)="onPanelCardClick(root.id, $event)"
               (keydown.enter)="onPanelCardClick(root.id, $event)"
             >
-              @for (item of threadFor(root.id); track item.node.id) {
-                <div class="fb-comment" [style.margin-left.px]="replyIndent(item.depth)">
-                  <span class="fb-av" [style.background]="avatarColor(item.node.user.name)">{{ initial(item.node.user.name) }}</span>
-                  <div class="fb-body">
-                    @if (item.depth > 4 && item.replyTo) {
-                      <div class="reply-to dim">↳ {{ item.replyTo }}</div>
-                    }
-                    <div class="fb-bubble" [class.resolved]="item.node.resolved && item.depth === 0">
-                      <span class="fb-name">{{ item.node.user.name || 'Unknown' }}</span>
-                      <span class="fb-text" [innerHTML]="commentBodyHtml(item.node.body)"></span>
-                    </div>
-                    <div class="fb-meta">
-                      <span class="fb-time" [title]="absoluteDate(item.node.date)">{{ formatDate(item.node.date) }}</span>
-                      <button type="button" class="fb-act" (click)="startInlineReply(item.node.id)">Trả lời</button>
-                      @if (item.depth === 0) {
-                        <button type="button" class="fb-act" (click)="resolveComment(item.node.id, !item.node.resolved)">
-                          {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
-                        </button>
-                      }
-                      @if (canModify(item.node)) {
-                        <button type="button" class="fb-act danger" (click)="deleteComment(item.node.id)">Xoá</button>
-                      }
-                    </div>
-                  </div>
-                </div>
-                @if (item.node.id === replyAnchorId(root.id)) {
-                  <!-- Reply box at the END of the target comment's scope. -->
-                  <div class="fb-comment fb-replybox" [style.margin-left.px]="replyBoxIndent(root.id)">
-                    <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
-                    <div class="reply-editor">
-                      <div #replyHost class="reply-mount"></div>
-                      <div class="reply-actions">
-                        <button type="button" (click)="submitInlineReply()">Gửi</button>
-                        <button type="button" (click)="closeInlineReply()">Huỷ</button>
-                      </div>
-                    </div>
-                  </div>
-                }
-              }
+              <ng-container [ngTemplateOutlet]="threadPost" [ngTemplateOutletContext]="{ $implicit: root.id }"></ng-container>
             </div>
           }
         </aside>
       }
     </div>
 
-    <!-- One comment card (a thread node), reused by panel / expand / popover.
-         Header carries the icon actions: ✓ resolve (root only) and ✕ delete. -->
-    <ng-template #threadCard let-item>
-      <div
-        class="comment"
-        [class.is-reply]="item.depth > 0"
-        [class.resolved]="item.node.resolved && item.depth === 0"
-        [style.margin-left.px]="replyIndent(item.depth)"
-      >
-        @if (item.depth > 4 && item.replyTo) {
-          <!-- Indent is capped this deep; name the parent so context isn't lost. -->
-          <div class="reply-to dim">↳ {{ item.replyTo }}</div>
-        }
-        <div class="comment-head">
-          <span class="comment-meta">
-            {{ item.node.user.name || 'Unknown' }}
-            <span class="dim" [title]="absoluteDate(item.node.date)">{{ formatDate(item.node.date) }}</span>
-          </span>
-          <span class="comment-icons">
-            @if (item.depth === 0) {
-              <button
-                type="button"
-                class="icon-btn"
-                [class.on]="item.node.resolved"
-                [title]="item.node.resolved ? 'Mở lại' : 'Resolve'"
-                (click)="resolveComment(item.node.id, !item.node.resolved)"
-              >✓</button>
-            }
-            @if (canModify(item.node)) {
-              <button type="button" class="icon-btn danger" title="Xoá" (click)="deleteComment(item.node.id)">✕</button>
-            }
-          </span>
+    <!-- The live reply editor (one #replyHost; instantiated at the active spot). -->
+    <ng-template #replyEditor>
+      <div class="reply-editor">
+        <div #replyHost class="reply-mount"></div>
+        <div class="reply-actions">
+          <button type="button" (click)="submitInlineReply()">Gửi</button>
+          <button type="button" (click)="closeInlineReply()">Huỷ</button>
         </div>
-        <div class="comment-text" [innerHTML]="commentBodyHtml(item.node.body)"></div>
-        @if (item.replies) {
-          <!-- Collapsed expand-card: reply count lives inside the card box. -->
-          <button type="button" class="reply-count" (click)="onCardFocus(item.node.id)">
-            {{ item.replies }} trả lời
-          </button>
-        }
       </div>
     </ng-template>
 
-    <!-- A whole thread: its cards followed by an inline "Reply …" box.
-         replyMode 'always' keeps the box visible; 'on-focus' reveals it only
-         while the enclosing thread has focus (see .reply-row.on-focus). -->
-    <ng-template #threadView let-rootId let-replyMode="replyMode">
-      @for (item of threadFor(rootId); track item.node.id) {
-        <ng-container [ngTemplateOutlet]="threadCard" [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
-      }
-      <div class="reply-row" [class.on-focus]="replyMode === 'on-focus'">
-        <span class="avatar">{{ initial(currentUser().name) }}</span>
-        @if (replyingTo() === rootId) {
-          <!-- Live PM editor (supports @mention). Enter sends, Esc/Huỷ cancels. -->
-          <div class="reply-editor">
-            <div #replyHost class="reply-mount"></div>
-            <div class="reply-actions">
-              <button type="button" (click)="submitInlineReply()">Gửi</button>
-              <button type="button" (click)="closeInlineReply()">Huỷ</button>
+    <!-- Shared post-style thread engine (panel / expand / popover): a root card
+         (header [avatar · name/time · ✓ ✕] + body + footer 💬 count); the footer
+         toggles the replies + reply box. -->
+    <ng-template #threadPost let-rootId>
+      @if (commentById(rootId); as root) {
+        <article class="cthread">
+          <header class="ct-head">
+            <span class="ct-av" [style.background]="avatarColor(root.user.name)">{{ initial(root.user.name) }}</span>
+            <span class="ct-who">
+              <span class="ct-name">{{ root.user.name || 'Unknown' }}</span>
+              <span class="ct-time" [title]="absoluteDate(root.date)">{{ formatDate(root.date) }}</span>
+            </span>
+            <span class="ct-actions">
+              <button
+                type="button"
+                class="icon-btn"
+                [class.on]="root.resolved"
+                [title]="root.resolved ? 'Mở lại' : 'Resolve'"
+                (click)="resolveComment(root.id, !root.resolved)"
+              >✓</button>
+              @if (canModify(root)) {
+                <button type="button" class="icon-btn danger" title="Xoá" (click)="deleteComment(root.id)">✕</button>
+              }
+            </span>
+          </header>
+          <div class="ct-body" [class.resolved]="root.resolved" [innerHTML]="commentBodyHtml(root.body)"></div>
+          <button type="button" class="ct-foot" [class.on]="isThreadExpanded(rootId)" (click)="toggleThread(rootId)">
+            <span class="ct-chat" aria-hidden="true">💬</span>
+            {{ replyCount(rootId) > 0 ? replyCount(rootId) + ' bình luận' : 'Bình luận' }}
+          </button>
+
+          @if (isThreadExpanded(rootId)) {
+            <div class="ct-replies">
+              @for (item of threadReplies(rootId); track item.node.id) {
+                <div class="fb-comment" [style.margin-left.px]="replyIndent(item.depth)">
+                  <span class="fb-av sm" [style.background]="avatarColor(item.node.user.name)">{{ initial(item.node.user.name) }}</span>
+                  <div class="fb-body">
+                    @if (item.depth > 4 && item.replyTo) {
+                      <div class="reply-to dim">↳ {{ item.replyTo }}</div>
+                    }
+                    <div class="fb-bubble">
+                      <span class="fb-name">{{ item.node.user.name || 'Unknown' }}</span>
+                      <span class="fb-text" [innerHTML]="commentBodyHtml(item.node.body)"></span>
+                    </div>
+                    <div class="fb-meta">
+                      <span class="fb-time" [title]="absoluteDate(item.node.date)">{{ formatDate(item.node.date) }}</span>
+                      <button type="button" class="fb-act" (click)="startInlineReply(item.node.id)">Trả lời</button>
+                      @if (canModify(item.node)) {
+                        <button type="button" class="fb-act danger" (click)="deleteComment(item.node.id)">Xoá</button>
+                      }
+                    </div>
+                  </div>
+                </div>
+                @if (replyingTo() !== rootId && item.node.id === replyAnchorId(rootId)) {
+                  <!-- Replying to a child: editor at the end of that child's scope. -->
+                  <div class="fb-comment fb-replybox" [style.margin-left.px]="replyBoxIndent(rootId)">
+                    <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
+                    <ng-container [ngTemplateOutlet]="replyEditor"></ng-container>
+                  </div>
+                }
+              }
+              <!-- Reply to the root (bottom of the thread). -->
+              <div class="fb-comment fb-replybox">
+                <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
+                @if (replyingTo() === rootId) {
+                  <ng-container [ngTemplateOutlet]="replyEditor"></ng-container>
+                } @else {
+                  <button type="button" class="reply-placeholder" (click)="startInlineReply(rootId)">Viết bình luận…</button>
+                }
+              </div>
             </div>
-          </div>
-        } @else {
-          <button type="button" class="reply-placeholder" (click)="startInlineReply(rootId)">Reply …</button>
-        }
-      </div>
+          }
+        </article>
+      }
     </ng-template>
   </section>
 

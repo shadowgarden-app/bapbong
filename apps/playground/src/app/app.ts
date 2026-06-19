@@ -549,7 +549,10 @@ export class App implements OnDestroy {
     this.closeInlineReply(); // its popover is being opened/closed → editor goes away
     this.openBubble.update((cur) => (cur === rootId ? null : rootId));
     // Highlight the range but DON'T scroll — the bubble is already in view.
-    if (this.openBubble() === rootId) this.onCommentClick(rootId, false);
+    if (this.openBubble() === rootId) {
+      this.expandThread(rootId); // the popover shows the full thread
+      this.onCommentClick(rootId, false);
+    }
     // Re-pack: the open bubble snaps to its true line, the rest flow around it
     // (or, on close, the stack settles back to the resting cascade).
     this.recomputeAnchors();
@@ -590,6 +593,7 @@ export class App implements OnDestroy {
     this.closeComposer(); // mutually exclusive with the "+ Bình luận" composer
     this.closeInlineReply();
     this.replyingTo.set(id);
+    this.expandThread(this.rootOf(id)); // reveal the thread so the editor shows
     afterNextRender(
       () => {
         const host = this.replyHost()?.nativeElement;
@@ -675,6 +679,36 @@ export class App implements OnDestroy {
     const target = this.replyingTo();
     const it = this.threadFor(rootId).find((i) => i.node.id === target);
     return this.replyIndent((it?.depth ?? 0) + 1);
+  }
+
+  // ── Shared post-card thread engine (panel / expand / popover) ───────
+  /** Threads whose replies + reply box are revealed (footer 💬 toggles this). */
+  protected readonly expandedThreads = signal<ReadonlySet<number>>(new Set());
+  protected isThreadExpanded(rootId: number): boolean {
+    return this.expandedThreads().has(rootId);
+  }
+  protected toggleThread(rootId: number): void {
+    const next = new Set(this.expandedThreads());
+    if (!next.delete(rootId)) next.add(rootId);
+    this.expandedThreads.set(next);
+    if (this.commentView() === 'expand') afterNextRender(() => this.packExpandCards(), { injector: this.injector });
+  }
+  private expandThread(rootId: number): void {
+    if (!this.isThreadExpanded(rootId)) this.expandedThreads.set(new Set(this.expandedThreads()).add(rootId));
+  }
+
+  protected commentById(id: number): CommentNode | undefined {
+    return this.comments().find((c) => c.id === id);
+  }
+  /** A thread's replies only (depth-first, excluding the root). */
+  protected threadReplies(rootId: number): { node: CommentNode; depth: number; replyTo: string | null }[] {
+    return this.threadFor(rootId).slice(1);
+  }
+  /** Root id of the thread containing `id` (walk parents up). */
+  private rootOf(id: number): number {
+    let cur = this.commentById(id);
+    while (cur && cur.parentId != null) cur = this.commentById(cur.parentId);
+    return cur?.id ?? id;
   }
 
   /** Relative comment timestamp (FB-style): "vừa xong" / "{n} phút" / "{n} giờ"

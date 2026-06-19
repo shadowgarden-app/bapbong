@@ -262,7 +262,7 @@ h2 {
 /* @mention — neither displayed bodies ([innerHTML]) nor the PM views carry the
    component scope attr, so pierce it. Displayed comments show a plain blue
    name (FB/Docs style); the composers show a subtle pill while editing. */
-.comment-text ::ng-deep .mention,
+.ct-body ::ng-deep .mention,
 .fb-text ::ng-deep .mention {
   color: #1f6feb;
   font-weight: 600;
@@ -642,4 +642,127 @@ h2 {
 }
 .fb-replybox {
   margin-top: 6px;
+}
+
+/* ── Shared post-style thread card (panel / expand / popover) ────────── */
+.cthread {
+  display: block;
+}
+.ct-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ct-av {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 50%;
+  background: #7b1fa2; /* per author via [style.background] */
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ct-who {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ct-name {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1c1c1e;
+}
+.ct-time {
+  display: block;
+  font-size: 0.72rem;
+  color: #8a8a90;
+  margin-top: 1px;
+}
+.ct-actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.ct-body {
+  font-size: 0.88rem;
+  color: #1c1c1e;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+.ct-body.resolved {
+  opacity: 0.55;
+}
+.ct-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 0 0;
+  border: none;
+  border-top: 0.5px solid #ececf0;
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b6b70;
+  cursor: pointer;
+}
+.ct-foot:hover {
+  color: #1c1c1e;
+}
+.ct-foot.on {
+  color: #1f6feb;
+}
+.ct-chat {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.ct-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+/* Header icons colour-reveal on card hover (always tappable for touch). */
+.cthread:hover .icon-btn:not(.danger) {
+  color: #2e7d32;
+  background: #e7f4e8;
+}
+.cthread:hover .icon-btn.danger {
+  color: #c0392b;
+  background: #fdecec;
+}
+/* Anchored expand card floats over the gutter → give it a card surface. */
+.expand-thread {
+  background: #fff;
+  border: 1px solid #e6e6ea;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+/* Panel post rows. */
+.post-thread {
+  padding: 10px 8px;
+  border-radius: 8px;
+  border-bottom: 1px solid #ececf0;
+  cursor: pointer;
+}
+.post-thread.active {
+  background: #eef4ff;
+}
+/* Touch devices have no hover → always show the reply/delete text actions. */
+@media (hover: none) {
+  .fb-act {
+    display: inline;
+  }
+}
+
+/* Root post body renders a <p> via innerHTML — kill its default margin. */
+.ct-body ::ng-deep p {
+  margin: 0;
 }
