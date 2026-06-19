@@ -145,17 +145,37 @@ h2 {
   left: 100%;
   margin-left: 8px;
   width: 280px;
-  max-height: 340px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  max-height: 360px;
+  overflow: hidden; /* the inner replies zone scrolls, not the whole popover */
   background: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   z-index: 5;
+}
+/* In the popover the card fills the box: header (.ct-top) and the main-thread
+   input (.ct-rootreply) stay pinned; only the replies (.ct-replies) scroll. */
+.comment-popover .cthread {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+}
+.comment-popover .ct-top {
+  flex: none;
+  padding: 10px 12px 0;
+}
+.comment-popover .ct-replies {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 12px;
+  margin: 0;
+}
+.comment-popover .ct-rootreply {
+  flex: none;
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 0.5px solid #ececf0;
 }
 .author-field {
   font-size: 0.75rem;
