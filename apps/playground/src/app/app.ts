@@ -672,6 +672,11 @@ export class App implements OnDestroy {
   protected isThreadExpanded(rootId: number): boolean {
     return this.expandedThreads().has(rootId);
   }
+  /** The selected thread — its root input box shows. Minimize uses the open
+   *  bubble; panel/expand use the active card. */
+  protected isActiveThread(rootId: number): boolean {
+    return this.commentView() === 'minimize' ? this.openBubble() === rootId : this.activeCard() === rootId;
+  }
   protected toggleThread(rootId: number): void {
     const next = new Set(this.expandedThreads());
     if (!next.delete(rootId)) next.add(rootId);

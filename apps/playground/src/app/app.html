@@ -231,7 +231,9 @@
                 }
               }
             </div>
-            <!-- Pinned footer: the main-thread input — a live editor (no button). -->
+          }
+          <!-- Main-thread input — only on the active thread (a live editor). -->
+          @if (isActiveThread(rootId)) {
             <div class="ct-rootreply fb-comment fb-replybox">
               <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
               <div
