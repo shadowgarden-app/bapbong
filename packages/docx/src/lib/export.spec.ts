@@ -251,3 +251,41 @@ describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
     expect(Object.keys(noCarry.headers)).toHaveLength(0);
   });
 });
+
+describe('exportDocx (sections + footnotes)', () => {
+  // The exported word/document.xml, for inspecting serialization directly.
+  async function docXml(doc: import('prosemirror-model').Node, opts?: Parameters<typeof exportDocx>[1]): Promise<string> {
+    const zip = await JSZip.loadAsync(await exportDocx(doc, opts));
+    return (await zip.file('word/document.xml')?.async('string')) ?? '';
+  }
+
+  it('serializes a section break (w:cols + w:type) into the first section', async () => {
+    const doc = schema.node(
+      'doc',
+      {
+        sections: [
+          { blockCount: 1, columns: { count: 2, gap: 24 }, newPage: true },
+          { blockCount: 1, columns: { count: 1, gap: 36 }, newPage: false },
+        ],
+      },
+      [
+        schema.node('paragraph', null, [schema.text('section one')]),
+        schema.node('paragraph', null, [schema.text('section two')]),
+      ],
+    );
+    const xml = await docXml(doc);
+    // Section 0's break sits in the first paragraph's pPr.
+    expect(xml).toContain('<w:sectPr><w:type w:val="nextPage"/><w:cols w:num="2" w:space="360"/></w:sectPr>');
+    // Only the non-last section is serialized inline (last → body sectPr).
+    expect(xml.match(/<w:sectPr>/g)?.length).toBe(1);
+  });
+
+  it('serializes a footnote reference for a footnote-marked run', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text('text'), schema.text('1', [schema.marks['footnote'].create({ num: 2 })])]),
+    ]);
+    const xml = await docXml(doc);
+    expect(xml).toContain('<w:footnoteReference w:id="2"/>');
+    expect(xml).not.toContain('>1</w:t>'); // the carrier number isn't emitted as text
+  });
+});

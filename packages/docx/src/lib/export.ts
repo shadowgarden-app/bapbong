@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { commentSchema } from '@shadow-garden/bapbong-model';
-import type { CommentNode } from '@shadow-garden/bapbong-contracts';
+import type { CommentNode, SectionConfig } from '@shadow-garden/bapbong-contracts';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -114,6 +114,8 @@ function inlineXml(node: PMNode, ctx: ExportCtx): string {
   if (node.type.name === 'hard_break') return '<w:r><w:br/></w:r>';
   if (node.type.name === 'image') return imageXml(node, ctx);
   if (node.isText) {
+    const fn = node.marks.find((m) => m.type.name === 'footnote');
+    if (fn) return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${fn.attrs['num']}"/></w:r>`;
     return `<w:r>${runProps(node.marks)}<w:t xml:space="preserve">${esc(node.text ?? '')}</w:t></w:r>`;
   }
   return '';
@@ -162,6 +164,18 @@ function inlineContent(node: PMNode, ctx: ExportCtx): string {
 
 // ── paragraphs ──────────────────────────────────────────────────────
 
+/** A section break's w:sectPr (column flow + break type). Page geometry is
+ *  inherited from the body sectPr, so it isn't repeated here. */
+function sectionSectPr(s: SectionConfig): string {
+  const type = `<w:type w:val="${s.newPage ? 'nextPage' : 'continuous'}"/>`;
+  const cols =
+    s.columns.count > 1
+      ? `<w:cols w:num="${s.columns.count}" w:space="${pxToTwips(s.columns.gap)}"/>`
+      : `<w:cols w:space="${pxToTwips(s.columns.gap)}"/>`;
+  return `<w:sectPr>${type}${cols}</w:sectPr>`;
+}
+
+/** A paragraph's w:pPr children (no wrapper). */
 function paraProps(node: PMNode): string {
   const a = node.attrs;
   const out: string[] = [];
@@ -191,11 +205,14 @@ function paraProps(node: PMNode): string {
   }
   const align = a['align'] as string | null;
   if (align) out.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`);
-  return out.length ? `<w:pPr>${out.join('')}</w:pPr>` : '';
+  return out.join('');
 }
 
-function paragraphXml(node: PMNode, ctx: ExportCtx): string {
-  return `<w:p>${paraProps(node)}${inlineContent(node, ctx)}</w:p>`;
+/** `sectPr` (a section break) appends inside this paragraph's pPr, last. */
+function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
+  const props = paraProps(node) + sectPr;
+  const pPr = props ? `<w:pPr>${props}</w:pPr>` : '';
+  return `<w:p>${pPr}${inlineContent(node, ctx)}</w:p>`;
 }
 
 // ── tables ──────────────────────────────────────────────────────────
@@ -264,11 +281,28 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
   return `<w:tbl><w:tblPr>${pr.join('')}</w:tblPr>${gridXml}${rows}</w:tbl>`;
 }
 
-/** A top-level block → its OOXML. */
-function blockXml(node: PMNode, ctx: ExportCtx): string {
-  if (node.type.name === 'paragraph') return paragraphXml(node, ctx);
-  if (node.type.name === 'table') return tableXml(node, ctx);
-  return '';
+/** A top-level block → its OOXML. A `sectPr` marks a section break ending at
+ *  this block: it goes inside a paragraph's pPr, or in a trailing empty
+ *  paragraph after a table. */
+function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
+  if (node.type.name === 'paragraph') return paragraphXml(node, ctx, sectPr);
+  let out = node.type.name === 'table' ? tableXml(node, ctx) : '';
+  if (sectPr) out += `<w:p><w:pPr>${sectPr}</w:pPr></w:p>`;
+  return out;
+}
+
+/** Block index → section-break sectPr, for every section but the last (whose
+ *  properties live in the body sectPr). */
+function sectionBoundaries(doc: PMNode): Map<number, string> {
+  const sections = doc.attrs['sections'] as SectionConfig[] | null;
+  const out = new Map<number, string>();
+  if (!sections || sections.length < 2) return out;
+  let acc = 0;
+  for (let i = 0; i < sections.length - 1; i++) {
+    acc += sections[i].blockCount;
+    out.set(acc - 1, sectionSectPr(sections[i])); // last block of section i
+  }
+  return out;
 }
 
 // ── packaging ───────────────────────────────────────────────────────
@@ -406,8 +440,9 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
     openComments: new Set(),
     runIdx: 0,
   };
+  const boundaries = sectionBoundaries(doc);
   let body = '';
-  doc.forEach((block) => (body += blockXml(block, ctx)));
+  doc.forEach((block, _offset, i) => (body += blockXml(block, ctx, boundaries.get(i))));
 
   const hasComments = comments.length > 0;
   if (hasComments) {
