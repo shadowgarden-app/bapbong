@@ -233,51 +233,10 @@ h2 {
   padding: 3px 10px;
   cursor: pointer;
 }
-.comment {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border: 1px solid #e0e0e0;
-  border-left: 3px solid #ffc107;
-  border-radius: 6px;
-  background: #fffdf5;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: box-shadow 0.15s ease;
-}
-.comment:hover {
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.14);
-}
-.comment.is-reply {
-  border-left-color: #c8c8c8;
-  background: #fafafa;
-}
-.comment.resolved {
-  opacity: 0.55;
-  border-left-color: #9ccc9c;
-}
-.comment-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 6px;
-}
-.comment-meta {
-  font-size: 0.8rem;
-  font-weight: 600;
-}
 /* Parent-author hint on deep replies whose indent has been capped. */
 .reply-to {
   font-size: 0.72rem;
   margin-bottom: 1px;
-}
-.comment-text {
-  font-size: 0.85rem;
-  color: #333;
-  white-space: pre-wrap;
-}
-.comment-text p {
-  margin: 0;
 }
 /* @mention — neither displayed bodies ([innerHTML]) nor the PM views carry the
    component scope attr, so pierce it. Displayed comments show a plain blue
@@ -327,11 +286,6 @@ h2 {
   color: #1f6feb;
 }
 /* Header icon actions (✓ resolve, ✕ delete). */
-.comment-icons {
-  display: flex;
-  gap: 2px;
-  flex: none;
-}
 .icon-btn {
   width: 22px;
   height: 22px;
@@ -350,77 +304,15 @@ h2 {
 .icon-btn:focus-visible {
   outline: none;
 }
-/* Icons stay muted until the user hovers the card or focuses its thread —
-   then ✓ turns green and ✕ turns red (no need to hit the tiny button). */
-.comment:hover .icon-btn:not(.danger),
-.comment:focus-within .icon-btn:not(.danger),
-.panel-thread:focus-within .icon-btn:not(.danger),
-.expand-thread:focus-within .icon-btn:not(.danger) {
-  color: #2e7d32;
-  background: #e7f4e8;
-}
-.comment:hover .icon-btn.danger,
-.comment:focus-within .icon-btn.danger,
-.panel-thread:focus-within .icon-btn.danger,
-.expand-thread:focus-within .icon-btn.danger {
-  color: #c0392b;
-  background: #fdecec;
-}
 /* Resolved root keeps the check lit green. */
 .icon-btn.on {
   color: #2e7d32;
   background: #e7f4e8;
 }
-/* Inline "Reply …" box at the bottom of a thread. */
-.reply-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 2px;
-}
-/* on-focus visibility: hidden until the enclosing thread holds focus. */
-.reply-row.on-focus {
-  display: none;
-}
-.panel-thread:focus-within .reply-row.on-focus,
-.expand-thread:focus-within .reply-row.on-focus {
-  display: flex;
-}
-/* The thread wrappers are focusable only so a click reveals the reply box;
-   suppress their own outline (the inner input keeps its focus ring). */
-.panel-thread:focus,
+/* The expand-card wrapper is focusable (click pins it) — drop its own outline,
+   the inner editor keeps a focus ring. */
 .expand-thread:focus {
   outline: none;
-}
-.avatar {
-  width: 26px;
-  height: 26px;
-  flex: none;
-  border-radius: 50%;
-  background: #7b1fa2;
-  color: #fff;
-  font-size: 0.72rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-/* Collapsed "Reply …" affordance; click turns it into the editor below. */
-.reply-placeholder {
-  flex: 1 1 auto;
-  min-width: 0;
-  text-align: left;
-  font: inherit;
-  font-size: 0.82rem;
-  color: #8a8a90;
-  padding: 6px 10px;
-  border: 1px solid #d8d8dc;
-  border-radius: 16px;
-  background: #fff;
-  cursor: text;
-}
-.reply-placeholder:hover {
-  border-color: #b8b8c0;
 }
 /* Live inline reply editor (ReplyEditorDirective mounts a PM view here). */
 .reply-mount {
@@ -446,47 +338,6 @@ h2 {
   float: left;
   height: 0;
   pointer-events: none;
-}
-.reply-actions {
-  display: flex;
-  gap: 6px;
-}
-.reply-actions button {
-  font: inherit;
-  font-size: 0.74rem;
-  padding: 2px 10px;
-  cursor: pointer;
-}
-/* Collapsed expand-card: the "N trả lời" affordance under the root comment. */
-.reply-count {
-  align-self: flex-start;
-  margin-top: 2px;
-  margin-left: 2px;
-  font: inherit;
-  font-size: 0.74rem;
-  color: #1f6feb;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  cursor: pointer;
-}
-.reply-count:hover {
-  text-decoration: underline;
-}
-/* Panel groups each root thread with a little separation. */
-.panel-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 6px 8px;
-  border-bottom: 1px solid #ececf0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-/* The selected thread (clicked here, or its text clicked in the doc). */
-.panel-thread.active {
-  background: #eef4ff;
-  box-shadow: inset 3px 0 0 #1f6feb;
 }
 .view-modes {
   display: flex;
@@ -576,15 +427,6 @@ h2 {
 }
 
 /* ── Facebook-style panel threads ───────────────────────────────────── */
-.fb-thread {
-  padding: 8px 6px;
-  border-radius: 8px;
-  border-bottom: 1px solid #ececf0;
-  cursor: pointer;
-}
-.fb-thread.active {
-  background: #eef4ff;
-}
 .fb-comment {
   display: flex;
   gap: 8px;
@@ -658,8 +500,7 @@ h2 {
   cursor: pointer;
 }
 .fb-comment:hover .fb-act,
-.fb-comment:focus-within .fb-act,
-.fb-thread.active .fb-act {
+.fb-comment:focus-within .fb-act {
   display: inline;
 }
 .fb-act:hover {
@@ -757,11 +598,13 @@ h2 {
   margin-top: 8px;
 }
 /* Header icons colour-reveal on card hover (always tappable for touch). */
-.cthread:hover .icon-btn:not(.danger) {
+.cthread:hover .icon-btn:not(.danger),
+.cthread:focus-within .icon-btn:not(.danger) {
   color: #2e7d32;
   background: #e7f4e8;
 }
-.cthread:hover .icon-btn.danger {
+.cthread:hover .icon-btn.danger,
+.cthread:focus-within .icon-btn.danger {
   color: #c0392b;
   background: #fdecec;
 }
