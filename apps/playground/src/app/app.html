@@ -183,7 +183,7 @@
                       <span class="fb-text" [innerHTML]="commentBodyHtml(item.node.body)"></span>
                     </div>
                     <div class="fb-meta">
-                      <span class="fb-time">{{ formatDate(item.node.date) }}</span>
+                      <span class="fb-time" [title]="absoluteDate(item.node.date)">{{ formatDate(item.node.date) }}</span>
                       <button type="button" class="fb-act" (click)="startInlineReply(item.node.id)">Trả lời</button>
                       @if (item.depth === 0) {
                         <button type="button" class="fb-act" (click)="resolveComment(item.node.id, !item.node.resolved)">
@@ -232,7 +232,7 @@
         <div class="comment-head">
           <span class="comment-meta">
             {{ item.node.user.name || 'Unknown' }}
-            <span class="dim">{{ formatDate(item.node.date) }}</span>
+            <span class="dim" [title]="absoluteDate(item.node.date)">{{ formatDate(item.node.date) }}</span>
           </span>
           <span class="comment-icons">
             @if (item.depth === 0) {

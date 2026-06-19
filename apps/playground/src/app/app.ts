@@ -677,22 +677,27 @@ export class App implements OnDestroy {
     return this.replyIndent((it?.depth ?? 0) + 1);
   }
 
-  /** Human-friendly comment timestamp: "Today hh:mm AM/PM" when it falls on
-   *  today, otherwise "DD/MM/YYYY hh:mm AM/PM". Falls back to the raw string if
-   *  it isn't a parseable date. */
+  /** Relative comment timestamp (FB-style): "vừa xong" / "{n} phút" / "{n} giờ"
+   *  / "{n} ngày". Falls back to the raw string if it isn't a parseable date. */
   protected formatDate(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+    if (sec < 60) return 'vừa xong';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} phút`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr} giờ`;
+    return `${Math.floor(hr / 24)} ngày`;
+  }
+
+  /** Absolute timestamp "DD/MM/YYYY hh:mm AM/PM" for the time tooltip. */
+  protected absoluteDate(iso: string): string {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
     const pad = (n: number) => String(n).padStart(2, '0');
     const ampm = d.getHours() < 12 ? 'AM' : 'PM';
-    const time = `${pad(d.getHours() % 12 || 12)}:${pad(d.getMinutes())} ${ampm}`;
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
-    if (sameDay) return `Today ${time}`;
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${time}`;
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours() % 12 || 12)}:${pad(d.getMinutes())} ${ampm}`;
   }
 
   /** Plain-text preview of a comment body (commentSchema doc JSON). */
