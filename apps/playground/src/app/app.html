@@ -157,22 +157,12 @@
       }
     </div>
 
-    <!-- The live reply editor (one #replyHost; instantiated at the active spot). -->
-    <ng-template #replyEditor>
-      <div class="reply-editor">
-        <div #replyHost class="reply-mount"></div>
-        <div class="reply-actions">
-          <button type="button" (click)="submitInlineReply()">Gửi</button>
-          <button type="button" (click)="closeInlineReply()">Huỷ</button>
-        </div>
-      </div>
-    </ng-template>
-
     <!-- Shared post-style thread engine (panel / expand / popover): a root card
          (header [avatar · name/time · ✓ ✕] + body + footer 💬 count); the footer
          toggles the replies + reply box. -->
     <ng-template #threadPost let-rootId>
       @if (commentById(rootId); as root) {
+        @let replyTarget = replyingTo();
         <article class="cthread">
           <div class="ct-top">
           <header class="ct-head">
@@ -224,23 +214,35 @@
                     </div>
                   </div>
                 </div>
-                @if (replyingTo() !== rootId && item.node.id === replyAnchorId(rootId)) {
-                  <!-- Replying to a child: editor at the end of that child's scope. -->
+                @if (replyTarget !== null && replyTarget !== rootId && item.node.id === replyAnchorId(rootId)) {
+                  <!-- Replying to a child: live editor at the end of its scope. -->
                   <div class="fb-comment fb-replybox" [style.margin-left.px]="replyBoxIndent(rootId)">
                     <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
-                    <ng-container [ngTemplateOutlet]="replyEditor"></ng-container>
+                    <div
+                      class="reply-mount"
+                      [appReplyEditor]="replyTarget"
+                      [mention]="mentionHandlers"
+                      placeholder="Trả lời…"
+                      (replySubmit)="onReplySubmit($event)"
+                      (replyCancel)="onReplyCancel($event)"
+                      (editorFocus)="setActiveEditor($event)"
+                    ></div>
                   </div>
                 }
               }
             </div>
-            <!-- Pinned footer: reply to the root (the main-thread input box). -->
+            <!-- Pinned footer: the main-thread input — a live editor (no button). -->
             <div class="ct-rootreply fb-comment fb-replybox">
               <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
-              @if (replyingTo() === rootId) {
-                <ng-container [ngTemplateOutlet]="replyEditor"></ng-container>
-              } @else {
-                <button type="button" class="reply-placeholder" (click)="startInlineReply(rootId)">Viết bình luận…</button>
-              }
+              <div
+                class="reply-mount"
+                [appReplyEditor]="rootId"
+                [mention]="mentionHandlers"
+                placeholder="Viết bình luận…"
+                (replySubmit)="onReplySubmit($event)"
+                (replyCancel)="onReplyCancel($event)"
+                (editorFocus)="setActiveEditor($event)"
+              ></div>
             </div>
           }
         </article>

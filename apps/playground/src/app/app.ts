@@ -1,5 +1,6 @@
 import { Component, ElementRef, Injector, OnDestroy, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
+import { ReplyEditorDirective } from './reply-editor.directive';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { commentSchema, schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from '@shadow-garden/bapbong-docx';
@@ -83,7 +84,7 @@ interface ComposerSpec {
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.css',
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, ReplyEditorDirective],
 })
 export class App implements OnDestroy {
   protected readonly fileName = signal<string | null>(null);
@@ -575,58 +576,42 @@ export class App implements OnDestroy {
     return this.comments().filter((c) => c.parentId == null && (showResolved || !c.resolved));
   });
 
-  /** The thread whose inline "Reply …" box is currently a live PM editor. */
+  /** A child comment whose per-node reply editor is shown (root box is always
+   *  live, so it doesn't need this). */
   protected readonly replyingTo = signal<number | null>(null);
-  private replyComposer: CommentComposer | null = null;
-  private readonly replyHost = viewChild<ElementRef<HTMLDivElement>>('replyHost');
-
-  /** Whichever composer the @mention popup is currently driving (only one is
-   *  open at a time — add OR an inline reply). */
-  private get activeComposer(): CommentComposer | null {
-    return this.replyComposer ?? this.composer;
+  /** The reply/composer the @mention popup currently drives (set on focus). */
+  private activeEditor: CommentComposer | null = null;
+  protected setActiveEditor(c: CommentComposer): void {
+    this.activeEditor = c;
   }
 
-  /** Open a live PM reply editor (supports @mention) targeting comment `id` —
-   *  any node, so replying to a child renders the box inside that child's scope. */
+  /** Reveal the per-node reply editor under comment `id` (root box is always on). */
   protected startInlineReply(id: number): void {
-    if (this.replyingTo() === id) return;
-    this.closeComposer(); // mutually exclusive with the "+ Bình luận" composer
-    this.closeInlineReply();
-    this.replyingTo.set(id);
     this.expandThread(this.rootOf(id)); // reveal the thread so the editor shows
-    afterNextRender(
-      () => {
-        const host = this.replyHost()?.nativeElement;
-        if (!host) return;
-        this.replyComposer = new CommentComposer(commentSchema, host, undefined, this.mentionHandlers, {
-          onEnter: () => this.submitInlineReply(),
-          onEscape: () => this.closeInlineReply(),
-        });
-        this.replyComposer.focus();
-        if (this.commentView() === 'expand') this.packExpandCards(); // height changed
-      },
-      { injector: this.injector },
-    );
+    this.replyingTo.set(id);
+    if (this.commentView() === 'expand') afterNextRender(() => this.packExpandCards(), { injector: this.injector });
   }
 
-  /** Commit the inline reply (Enter or the Gửi button) to the targeted comment. */
-  protected submitInlineReply(): void {
-    const target = this.replyingTo();
-    if (target != null && this.replyComposer && !this.replyComposer.isEmpty() && this.bridge) {
+  /** A reply editor (ReplyEditorDirective) committed its content. */
+  protected onReplySubmit(e: { target: number; body: unknown }): void {
+    if (this.bridge) {
       this.bridge.dispatch(
-        replyCommentTr(this.bridge.state, target, {
+        replyCommentTr(this.bridge.state, e.target, {
           user: this.currentUser(),
           date: new Date().toISOString(),
-          body: this.replyComposer.getJSON(),
+          body: e.body,
         }),
       );
     }
-    this.closeInlineReply();
+    this.replyingTo.set(null); // close the per-node editor (root box stays)
+  }
+
+  /** Esc in a reply editor → close its per-node box (no-op for the root box). */
+  protected onReplyCancel(target: number): void {
+    if (this.replyingTo() === target) this.replyingTo.set(null);
   }
 
   protected closeInlineReply(): void {
-    this.replyComposer?.destroy();
-    this.replyComposer = null;
     this.replyingTo.set(null);
     this.mentionState.set(null);
   }
@@ -774,8 +759,11 @@ export class App implements OnDestroy {
     this.composerFor.set(spec);
     const host = this.composerHost()?.nativeElement;
     if (host) {
-      this.composer = new CommentComposer(commentSchema, host, initialBody, this.mentionHandlers);
-      setTimeout(() => this.composer?.focus(), 0); // after the host un-hides
+      const composer = new CommentComposer(commentSchema, host, initialBody, this.mentionHandlers);
+      this.composer = composer;
+      // Route @mention picks here while this composer is focused.
+      composer.view.dom.addEventListener('focusin', () => this.setActiveEditor(composer));
+      setTimeout(() => composer.focus(), 0); // after the host un-hides
     }
   }
 
@@ -798,7 +786,7 @@ export class App implements OnDestroy {
     top: number;
   } | null>(null);
 
-  private readonly mentionHandlers: MentionHandlers = {
+  protected readonly mentionHandlers: MentionHandlers = {
     query: (s) => {
       if (!s) return this.mentionState.set(null);
       const q = s.query.toLowerCase();
@@ -821,9 +809,9 @@ export class App implements OnDestroy {
     },
   };
 
-  /** Insert the chosen user as a mention chip and close the popup. */
+  /** Insert the chosen user as a mention chip into the focused editor + close. */
   protected pickMention(user: MentionUser): void {
-    this.activeComposer?.applyMention(user);
+    this.activeEditor?.applyMention(user);
     this.mentionState.set(null);
   }
 

@@ -422,22 +422,30 @@ h2 {
 .reply-placeholder:hover {
   border-color: #b8b8c0;
 }
-/* Live inline reply editor (a CommentComposer mounts into .reply-mount). */
-.reply-editor {
+/* Live inline reply editor (ReplyEditorDirective mounts a PM view here). */
+.reply-mount {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 .reply-mount ::ng-deep .ProseMirror {
-  min-height: 20px;
+  min-height: 18px;
   outline: none;
-  border: 1px solid #1f6feb;
-  border-radius: 10px;
-  padding: 5px 10px;
+  border: 1px solid #d8d8dc;
+  border-radius: 16px;
+  padding: 6px 12px;
   background: #fff;
   font-size: 0.82rem;
+}
+.reply-mount ::ng-deep .ProseMirror:focus {
+  border-color: #1f6feb;
+}
+/* Empty-state placeholder (decoration adds .is-empty + data-placeholder). */
+.reply-mount ::ng-deep .ProseMirror .is-empty::before {
+  content: attr(data-placeholder);
+  color: #9a9aa0;
+  float: left;
+  height: 0;
+  pointer-events: none;
 }
 .reply-actions {
   display: flex;

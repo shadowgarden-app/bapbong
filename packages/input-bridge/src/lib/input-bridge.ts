@@ -4,7 +4,7 @@ import { keymap } from 'prosemirror-keymap';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { EditorState, Plugin, PluginKey, TextSelection, type Command, type Transaction } from 'prosemirror-state';
 import { canSplit } from 'prosemirror-transform';
-import { EditorView } from 'prosemirror-view';
+import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 
 // Re-exported so hosts type against ONE prosemirror-state identity (mixing
 // module resolutions across packages makes TS treat duplicates as unrelated).
@@ -323,6 +323,24 @@ const INACTIVE: MentionState = { active: false, from: 0, query: '' };
 // '@' at a word boundary, then Unicode letters/digits/_ (so Vietnamese works).
 const MENTION_RE = /(?:^|\s)@([\p{L}\p{N}_]*)$/u;
 
+/** Shows `text` as placeholder while the editor holds a single empty block. */
+function placeholderPlugin(text: string): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const doc = state.doc;
+        const first = doc.firstChild;
+        if (doc.childCount === 1 && first?.isTextblock && first.content.size === 0) {
+          return DecorationSet.create(doc, [
+            Decoration.node(0, first.nodeSize, { class: 'is-empty', 'data-placeholder': text }),
+          ]);
+        }
+        return null;
+      },
+    },
+  });
+}
+
 /** Detects a trailing "@query" before the caret and drives the host popup. */
 function mentionPlugin(handlers: MentionHandlers): Plugin<MentionState> {
   return new Plugin<MentionState>({
@@ -388,10 +406,11 @@ export class CommentComposer {
     mount: HTMLElement,
     initialDoc?: unknown,
     mention?: MentionHandlers,
-    opts?: { onEnter?: () => void; onEscape?: () => void },
+    opts?: { onEnter?: () => void; onEscape?: () => void; placeholder?: string },
   ) {
     const doc = initialDoc ? schema.nodeFromJSON(initialDoc) : undefined;
     const plugins = [history()];
+    if (opts?.placeholder) plugins.push(placeholderPlugin(opts.placeholder));
     if (mention && schema.nodes['mention']) plugins.push(mentionPlugin(mention));
     const keys: Record<string, Command> = {};
     if (opts?.onEnter) {
