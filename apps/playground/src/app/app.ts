@@ -3,7 +3,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { ReplyEditorDirective } from './reply-editor.directive';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { commentSchema, schema } from '@shadow-garden/bapbong-model';
-import { importDocx } from '@shadow-garden/bapbong-docx';
+import { importDocx, exportDocx, type DocxImport } from '@shadow-garden/bapbong-docx';
 import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
 import {
   createCanvasMeasurer,
@@ -144,6 +144,9 @@ export class App implements OnDestroy {
   private chromeEvenAndOdd = false;
   // Footnote bodies keyed by display number (laid out at the page bottom).
   private footnotes: Record<number, ProseMirrorNode> | undefined;
+  // The imported source package — passed to exportDocx({ carry }) so styles /
+  // numbering / headers / media survive a round-trip.
+  private importedRaw: DocxImport['raw'] | null = null;
   // Page geometry from the imported docx's sectPr (A4 until imported).
   private page: PageConfig = A4;
   private dragAnchor: number | null = null;
@@ -183,6 +186,26 @@ export class App implements OnDestroy {
     }
   }
 
+  /** Export the (edited) document back to a .docx and download it. Carries the
+   *  imported source package so unmodelled parts survive the round-trip. */
+  protected async downloadDocx(): Promise<void> {
+    if (!this.bridge) return;
+    try {
+      const bytes = await exportDocx(this.bridge.state.doc, this.importedRaw ? { carry: this.importedRaw } : undefined);
+      const blob = new Blob([bytes as BlobPart], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (this.fileName() ?? 'document').replace(/\.docx$/i, '') + '-export.docx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      this.error.set(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   private async load(name: string, bytes: ArrayBuffer): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
@@ -190,7 +213,8 @@ export class App implements OnDestroy {
     this.fileName.set(name);
 
     try {
-      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page } = await importDocx(bytes);
+      const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } = await importDocx(bytes);
+      this.importedRaw = raw; // carried on export so unmodelled parts survive
       this.headerKeys.set(Object.keys(headers));
       this.footerKeys.set(Object.keys(footers));
       this.chromeHeaders = headers;

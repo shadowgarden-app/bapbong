@@ -9,6 +9,7 @@
     </label>
     <button type="button" class="sample" (click)="loadSample()">Load sample</button>
     <button type="button" class="sample" (click)="loadSample('large_sample.docx')">Load large sample</button>
+    <button type="button" class="sample" [disabled]="!pageCount()" (click)="downloadDocx()">Tải .docx</button>
   </div>
 
   @if (loading()) {
