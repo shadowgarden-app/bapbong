@@ -232,12 +232,18 @@
       }
       <div class="reply-row" [class.on-focus]="replyMode === 'on-focus'">
         <span class="avatar">{{ initial(currentUser().name) }}</span>
-        <input
-          type="text"
-          class="reply-input"
-          placeholder="Reply …"
-          (keydown.enter)="submitReply(rootId, $event)"
-        />
+        @if (replyingTo() === rootId) {
+          <!-- Live PM editor (supports @mention). Enter sends, Esc/Huỷ cancels. -->
+          <div class="reply-editor">
+            <div #replyHost class="reply-mount"></div>
+            <div class="reply-actions">
+              <button type="button" (click)="submitInlineReply(rootId)">Gửi</button>
+              <button type="button" (click)="closeInlineReply()">Huỷ</button>
+            </div>
+          </div>
+        } @else {
+          <button type="button" class="reply-placeholder" (click)="startInlineReply(rootId)">Reply …</button>
+        }
       </div>
     </ng-template>
   </section>

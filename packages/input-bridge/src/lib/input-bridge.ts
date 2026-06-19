@@ -376,6 +376,9 @@ function mentionPlugin(handlers: MentionHandlers): Plugin<MentionState> {
  * passes the body schema (bapbong-model's commentSchema) so input-bridge stays
  * schema-agnostic; `getJSON()` returns the composed doc to store on the thread.
  * Pass `mention` handlers to enable @-mentions (the host renders the popup).
+ * `opts.onEnter` makes Enter submit (Shift-Enter newlines) — used by the inline
+ * reply box; `opts.onEscape` cancels. The mention plugin is ordered first so it
+ * gets Enter/Esc while its popup is open, before these keymaps.
  */
 export class CommentComposer {
   readonly view: EditorView;
@@ -385,10 +388,19 @@ export class CommentComposer {
     mount: HTMLElement,
     initialDoc?: unknown,
     mention?: MentionHandlers,
+    opts?: { onEnter?: () => void; onEscape?: () => void },
   ) {
     const doc = initialDoc ? schema.nodeFromJSON(initialDoc) : undefined;
-    const plugins = [history(), keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }), keymap(baseKeymap)];
+    const plugins = [history()];
     if (mention && schema.nodes['mention']) plugins.push(mentionPlugin(mention));
+    const keys: Record<string, Command> = {};
+    if (opts?.onEnter) {
+      keys['Enter'] = () => (opts.onEnter?.(), true);
+      keys['Shift-Enter'] = baseKeymap['Enter']; // newline within the reply
+    }
+    if (opts?.onEscape) keys['Escape'] = () => (opts.onEscape?.(), true);
+    if (Object.keys(keys).length) plugins.push(keymap(keys));
+    plugins.push(keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }), keymap(baseKeymap));
     this.view = new EditorView(mount, {
       state: EditorState.create({ ...(doc ? { doc } : { schema }), plugins }),
     });

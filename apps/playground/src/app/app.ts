@@ -536,6 +536,7 @@ export class App implements OnDestroy {
 
   /** Toggle the minimize-mode thread popover for a bubble (and locate it). */
   protected toggleBubble(rootId: number): void {
+    this.closeInlineReply(); // its popover is being opened/closed → editor goes away
     this.openBubble.update((cur) => (cur === rootId ? null : rootId));
     // Highlight the range but DON'T scroll — the bubble is already in view.
     if (this.openBubble() === rootId) this.onCommentClick(rootId, false);
@@ -549,6 +550,7 @@ export class App implements OnDestroy {
    *  change in the DOM — re-pack AFTER that render (afterNextRender), not now. */
   protected onCardFocus(id: number): void {
     if (this.activeCard() === id) return;
+    this.closeInlineReply(); // a reply editor in the previously-active card goes away
     this.activeCard.set(id);
     this.onCommentClick(id, false, false); // highlight the doc range (keep card focus)
     afterNextRender(() => this.packExpandCards(), { injector: this.injector });
@@ -560,22 +562,57 @@ export class App implements OnDestroy {
     return this.comments().filter((c) => c.parentId == null && (showResolved || !c.resolved));
   });
 
-  /** Inline reply: Enter in a thread's "Reply …" box appends a reply. */
-  protected submitReply(rootId: number, ev: Event): void {
-    const input = ev.target as HTMLInputElement;
-    const text = input.value.trim();
-    if (!text || !this.bridge) return;
-    const body = commentSchema
-      .node('doc', null, [commentSchema.node('paragraph', null, [commentSchema.text(text)])])
-      .toJSON();
-    this.bridge.dispatch(
-      replyCommentTr(this.bridge.state, rootId, {
-        user: this.currentUser(),
-        date: new Date().toISOString(),
-        body,
-      }),
+  /** The thread whose inline "Reply …" box is currently a live PM editor. */
+  protected readonly replyingTo = signal<number | null>(null);
+  private replyComposer: CommentComposer | null = null;
+  private readonly replyHost = viewChild<ElementRef<HTMLDivElement>>('replyHost');
+
+  /** Whichever composer the @mention popup is currently driving (only one is
+   *  open at a time — add OR an inline reply). */
+  private get activeComposer(): CommentComposer | null {
+    return this.replyComposer ?? this.composer;
+  }
+
+  /** Turn a thread's "Reply …" box into a live PM editor (supports @mention). */
+  protected startInlineReply(rootId: number): void {
+    if (this.replyingTo() === rootId) return;
+    this.closeComposer(); // mutually exclusive with the "+ Bình luận" composer
+    this.closeInlineReply();
+    this.replyingTo.set(rootId);
+    afterNextRender(
+      () => {
+        const host = this.replyHost()?.nativeElement;
+        if (!host) return;
+        this.replyComposer = new CommentComposer(commentSchema, host, undefined, this.mentionHandlers, {
+          onEnter: () => this.submitInlineReply(rootId),
+          onEscape: () => this.closeInlineReply(),
+        });
+        this.replyComposer.focus();
+        if (this.commentView() === 'expand') this.packExpandCards(); // height changed
+      },
+      { injector: this.injector },
     );
-    input.value = '';
+  }
+
+  /** Commit the inline reply (Enter or the Gửi button) and close the editor. */
+  protected submitInlineReply(rootId: number): void {
+    if (this.replyComposer && !this.replyComposer.isEmpty() && this.bridge) {
+      this.bridge.dispatch(
+        replyCommentTr(this.bridge.state, rootId, {
+          user: this.currentUser(),
+          date: new Date().toISOString(),
+          body: this.replyComposer.getJSON(),
+        }),
+      );
+    }
+    this.closeInlineReply();
+  }
+
+  protected closeInlineReply(): void {
+    this.replyComposer?.destroy();
+    this.replyComposer = null;
+    this.replyingTo.set(null);
+    this.mentionState.set(null);
   }
 
   /** A root's thread (the root + its reply subtree), flattened depth-first.
@@ -660,6 +697,7 @@ export class App implements OnDestroy {
 
   private openComposer(spec: ComposerSpec, initialBody?: unknown): void {
     this.closeComposer();
+    this.closeInlineReply(); // mutually exclusive with an inline reply editor
     this.composerFor.set(spec);
     const host = this.composerHost()?.nativeElement;
     if (host) {
@@ -712,7 +750,7 @@ export class App implements OnDestroy {
 
   /** Insert the chosen user as a mention chip and close the popup. */
   protected pickMention(user: MentionUser): void {
-    this.composer?.applyMention(user);
+    this.activeComposer?.applyMention(user);
     this.mentionState.set(null);
   }
 
@@ -758,6 +796,7 @@ export class App implements OnDestroy {
     if (this.commentView() === view) return;
     this.commentView.set(view);
     if (view !== 'panel') this.closeComposer();
+    this.closeInlineReply();
     this.openBubble.set(null);
     this.activeCard.set(null);
     this.repaintContent();
