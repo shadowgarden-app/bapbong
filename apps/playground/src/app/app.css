@@ -259,11 +259,16 @@ h2 {
 .comment-text p {
   margin: 0;
 }
-/* @mention chip — in the composer (PM toDOM) and rendered comment bodies
-   ([innerHTML]); neither carries the component scope attr, so pierce it. */
+/* @mention — neither displayed bodies ([innerHTML]) nor the PM views carry the
+   component scope attr, so pierce it. Displayed comments show a plain blue
+   name (FB/Docs style); the composers show a subtle pill while editing. */
 .comment-text ::ng-deep .mention,
-.fb-text ::ng-deep .mention,
-.composer-mount ::ng-deep .mention {
+.fb-text ::ng-deep .mention {
+  color: #1f6feb;
+  font-weight: 600;
+}
+.composer-mount ::ng-deep .mention,
+.reply-mount ::ng-deep .mention {
   color: #1f6feb;
   background: #eaf1ff;
   border-radius: 4px;
@@ -551,7 +556,6 @@ h2 {
 }
 .fb-thread.active {
   background: #eef4ff;
-  box-shadow: inset 3px 0 0 #1f6feb;
 }
 .fb-comment {
   display: flex;
@@ -563,22 +567,22 @@ h2 {
   margin-top: 0;
 }
 .fb-av {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex: none;
   border-radius: 50%;
-  background: #7b1fa2;
+  background: #7b1fa2; /* overridden per author via [style.background] */
   color: #fff;
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.74rem;
+  font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .fb-av.sm {
-  width: 24px;
-  height: 24px;
-  font-size: 0.68rem;
+  width: 26px;
+  height: 26px;
+  font-size: 0.7rem;
 }
 .fb-body {
   flex: 1 1 auto;
@@ -589,10 +593,10 @@ h2 {
   max-width: 100%;
   background: #f0f2f5;
   border-radius: 16px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font-size: 0.85rem;
   color: #1c1c1e;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 .fb-bubble.resolved {
   opacity: 0.55;

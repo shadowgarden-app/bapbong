@@ -59,6 +59,9 @@ const ANCHOR_GAP = 8;
 const INDENT_STEP = 14;
 const MAX_INDENT_DEPTH = 4;
 
+/** Avatar fills, picked per author so each person reads as a distinct colour. */
+const AVATAR_COLORS = ['#378ADD', '#7F77DD', '#1D9E75', '#D85A30', '#BA7517', '#D4537E'];
+
 /** Demo users the comment composer can @mention (beyond the doc's own authors). */
 const MENTION_SEED: { id: string; label: string }[] = [
   { id: 'alice', label: 'Alice Nguyễn' },
@@ -532,6 +535,13 @@ export class App implements OnDestroy {
   /** First letter of a name, for the minimize-mode avatar bubble. */
   protected initial(name: string): string {
     return (name || '?').trim().charAt(0).toUpperCase() || '?';
+  }
+
+  /** A stable avatar colour per author (hash the name into the palette). */
+  protected avatarColor(name: string): string {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return AVATAR_COLORS[h % AVATAR_COLORS.length];
   }
 
   /** Toggle the minimize-mode thread popover for a bubble (and locate it). */

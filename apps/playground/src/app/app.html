@@ -173,7 +173,7 @@
             >
               @for (item of threadFor(root.id); track item.node.id) {
                 <div class="fb-comment" [style.margin-left.px]="replyIndent(item.depth)">
-                  <span class="fb-av">{{ initial(item.node.user.name) }}</span>
+                  <span class="fb-av" [style.background]="avatarColor(item.node.user.name)">{{ initial(item.node.user.name) }}</span>
                   <div class="fb-body">
                     @if (item.depth > 4 && item.replyTo) {
                       <div class="reply-to dim">↳ {{ item.replyTo }}</div>
@@ -199,7 +199,7 @@
                 @if (item.node.id === replyAnchorId(root.id)) {
                   <!-- Reply box at the END of the target comment's scope. -->
                   <div class="fb-comment fb-replybox" [style.margin-left.px]="replyBoxIndent(root.id)">
-                    <span class="fb-av sm">{{ initial(currentUser().name) }}</span>
+                    <span class="fb-av sm" [style.background]="avatarColor(currentUser().name)">{{ initial(currentUser().name) }}</span>
                     <div class="reply-editor">
                       <div #replyHost class="reply-mount"></div>
                       <div class="reply-actions">
