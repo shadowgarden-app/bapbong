@@ -4,6 +4,8 @@ import { createNumberingCounter, type NumberingDefs } from '@shadow-garden/bapbo
 import { importDocx } from './docx';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
+const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
@@ -826,6 +828,36 @@ describe('importDocx', () => {
     expect(markMap(byText.get('commented') ?? []).comment.ids).toEqual([0]);
     expect(byText.get('Before ')?.some((m) => m.type.name === 'comment')).toBeFalsy();
     expect(byText.get(' after')?.some((m) => m.type.name === 'comment')).toBeFalsy();
+  });
+
+  it('imports threaded + resolved comments from commentsExtended.xml', async () => {
+    // Only the root (id 0) has a range in the body; the reply (id 1) lives only
+    // in comments.xml and is linked to id 0 by paraIdParent in commentsExtended.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:commentRangeStart w:id="0"/><w:r><w:t>here</w:t></w:r><w:commentRangeEnd w:id="0"/>
+        <w:r><w:commentReference w:id="0"/></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const commentsXml = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
+      <w:comment w:id="0" w:author="A" w:date="d0"><w:p w14:paraId="P0"><w:r><w:t>root</w:t></w:r></w:p></w:comment>
+      <w:comment w:id="1" w:author="B" w:date="d1"><w:p w14:paraId="P1"><w:r><w:t>reply</w:t></w:r></w:p></w:comment>
+    </w:comments>`;
+    const extXml = `<?xml version="1.0"?><w15:commentsEx xmlns:w15="${W15_NS}">
+      <w15:commentEx w15:paraId="P0" w15:done="1"/>
+      <w15:commentEx w15:paraId="P1" w15:paraIdParent="P0" w15:done="0"/>
+    </w15:commentsEx>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
+        'word/comments.xml': commentsXml,
+        'word/commentsExtended.xml': extXml,
+      }),
+    );
+    const nodes = doc.attrs['comments'] as { id: number; parentId: number | null; resolved: boolean }[];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    expect(nodes).toHaveLength(2); // reply included even though it has no body range
+    expect(byId.get(0)).toMatchObject({ parentId: null, resolved: true });
+    expect(byId.get(1)).toMatchObject({ parentId: 0, resolved: false });
   });
 
   it('leaves titlePg/evenAndOdd false when unset', async () => {

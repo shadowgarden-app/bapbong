@@ -101,9 +101,13 @@ interface NotesRegistry {
 
 /** Comment bodies (w:comment) + the live set covering the text being parsed.
  *  `active` toggles on w:commentRangeStart/End; `used` records referenced
- *  comments in first-appearance order. */
+ *  comments in first-appearance order. `paraToId` + `ext` carry the threaded-
+ *  comment data from word/commentsExtended.xml (w15): replies link by the
+ *  parent paragraph's w14:paraId, and `done` is the resolved flag. */
 interface CommentsRegistry {
-  defs: Map<number, { author: string; date: string; body: OoxmlNode }>;
+  defs: Map<number, { author: string; date: string; body: OoxmlNode; paraIds: string[] }>;
+  paraToId: Map<string, number>;
+  ext: Map<string, { parentParaId: string | null; done: boolean }>;
   active: Set<number>;
   used: number[];
 }
@@ -864,22 +868,44 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
   return reg;
 }
 
-/** Load comments.xml into a registry (bodies + author/date keyed by id). */
+/** Load comments.xml (+ commentsExtended.xml) into a registry: bodies/author/
+ *  date keyed by id, plus the paraId→id map and the w15 thread/resolved data. */
 async function buildCommentsRegistry(zip: JSZip): Promise<CommentsRegistry> {
-  const defs = new Map<number, { author: string; date: string; body: OoxmlNode }>();
+  const defs = new Map<number, { author: string; date: string; body: OoxmlNode; paraIds: string[] }>();
+  const paraToId = new Map<string, number>();
   const xml = await readPart(zip, 'word/comments.xml');
   if (xml) {
     for (const c of children(child(parseXml(xml), 'w:comments'), 'w:comment')) {
       const id = Number(attrOf(c, 'w:id'));
       if (Number.isNaN(id)) continue;
+      const paraIds = children(c, 'w:p')
+        .map((p) => attrOf(p, 'w14:paraId'))
+        .filter((v): v is string => !!v);
+      for (const pid of paraIds) paraToId.set(pid, id);
       defs.set(id, {
         author: attrOf(c, 'w:author') ?? '',
         date: attrOf(c, 'w:date') ?? '',
         body: c,
+        paraIds,
       });
     }
   }
-  return { defs, active: new Set(), used: [] };
+  // Threaded comments (Word 2013+): commentsExtended.xml links replies by the
+  // parent paragraph's paraId and carries the resolved flag (w15:done).
+  const ext = new Map<string, { parentParaId: string | null; done: boolean }>();
+  const extXml = await readPart(zip, 'word/commentsExtended.xml');
+  if (extXml) {
+    for (const ex of children(child(parseXml(extXml), 'w15:commentsEx'), 'w15:commentEx')) {
+      const paraId = attrOf(ex, 'w15:paraId');
+      if (!paraId) continue;
+      const done = attrOf(ex, 'w15:done');
+      ext.set(paraId, {
+        parentParaId: attrOf(ex, 'w15:paraIdParent') ?? null,
+        done: done === '1' || done === 'true',
+      });
+    }
+  }
+  return { defs, paraToId, ext, active: new Set(), used: [] };
 }
 
 /** All w:t text under a node, concatenated (no side effects). */
@@ -907,16 +933,44 @@ function commentBodyJSON(comment: OoxmlNode): unknown {
   return commentSchema.node('doc', null, paras.length ? paras : [commentSchema.node('paragraph')]).toJSON();
 }
 
-/** Referenced comments as authoring thread roots for doc.attrs.comments. OOXML
- *  comments carry only an author name, so the user id is the name itself. */
+/** Referenced comments as authoring thread nodes for doc.attrs.comments. OOXML
+ *  comments carry only an author name, so the user id is the name itself.
+ *  Thread parent + resolved come from commentsExtended.xml (w15) when present;
+ *  without it (plain OOXML) every comment is a flat, unresolved root. */
 function buildCommentNodes(ctx: Ctx): CommentNode[] {
+  const { defs, paraToId, ext, used } = ctx.comments;
+  const usedSet = new Set(used);
+  // Resolve each comment's parent + resolved flag from the w15 thread data.
+  const parentOf = new Map<number, number | null>();
+  const resolvedOf = new Map<number, boolean>();
+  for (const [id, def] of defs) {
+    const exEntry = def.paraIds.map((p) => ext.get(p)).find(Boolean);
+    const pid = exEntry?.parentParaId != null ? paraToId.get(exEntry.parentParaId) ?? null : null;
+    parentOf.set(id, pid === id ? null : pid); // guard self-parent
+    resolvedOf.set(id, exEntry?.done ?? false);
+  }
+  // Replies aren't referenced in the body (only the root's range is), so include
+  // any comment whose thread root is referenced — walk up the parent chain.
+  const referenced = (id: number): boolean => {
+    for (let cur: number | null = id, n = 0; cur != null && n < 100; cur = parentOf.get(cur) ?? null, n++)
+      if (usedSet.has(cur)) return true;
+    return false;
+  };
+  // Roots in body-appearance order, then the remaining replies in id order.
+  const ids = [...used.filter((id) => defs.has(id)), ...[...defs.keys()].filter((id) => !usedSet.has(id))];
   const out: CommentNode[] = [];
-  for (const id of ctx.comments.used) {
-    const def = ctx.comments.defs.get(id);
-    if (def) {
-      const user: IUser = { id: def.author || 'unknown', name: def.author || 'Unknown' };
-      out.push({ id, parentId: null, user, date: def.date, body: commentBodyJSON(def.body), resolved: false });
-    }
+  for (const id of ids) {
+    const def = defs.get(id);
+    if (!def || !referenced(id)) continue;
+    const user: IUser = { id: def.author || 'unknown', name: def.author || 'Unknown' };
+    out.push({
+      id,
+      parentId: parentOf.get(id) ?? null,
+      user,
+      date: def.date,
+      body: commentBodyJSON(def.body),
+      resolved: resolvedOf.get(id) ?? false,
+    });
   }
   return out;
 }

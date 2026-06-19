@@ -22,6 +22,8 @@ const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
+const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
 
 // 1x1 PNGs; drawn at their wp:extent size (px × 9525 EMU).
 const PNG_RED =
@@ -400,13 +402,28 @@ const SETTINGS_XML = `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:even
 // on nearby lines — a ready-made case for the comment collision-avoidance /
 // active-snap behaviour (minimize bubbles + expand cards). id 1 sits far away
 // (multi-column section) as the non-colliding control.
-const COMMENTS_XML = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}">
-  <w:comment w:id="0" w:author="Phương Minh" w:date="2026-06-17T09:00:00Z" w:initials="PM"><w:p><w:r><w:t>Cụm "màu đỏ" được tô comment — bấm vào đây để chọn vùng tương ứng trên canvas.</w:t></w:r></w:p></w:comment>
-  <w:comment w:id="1" w:author="Reviewer" w:date="2026-06-17T10:30:00Z" w:initials="RV"><w:p><w:r><w:t>Comment vắt qua nhiều run trong phần bố cục nhiều cột.</w:t></w:r></w:p></w:comment>
-  <w:comment w:id="2" w:author="Minh Lê" w:date="2026-06-17T09:05:00Z" w:initials="ML"><w:p><w:r><w:t>Comment trên "đậm nghiêng" — neo sát các comment kế bên để test chống đè.</w:t></w:r></w:p></w:comment>
-  <w:comment w:id="3" w:author="Reviewer" w:date="2026-06-17T09:10:00Z" w:initials="RV"><w:p><w:r><w:t>Comment trên "màu xanh" cùng dòng.</w:t></w:r></w:p></w:comment>
-  <w:comment w:id="4" w:author="Phương Minh" w:date="2026-06-17T09:15:00Z" w:initials="PM"><w:p><w:r><w:t>Comment trên "gạch chân" — cụm này dùng để kiểm tra active-snap khi chọn từng card/bong bóng.</w:t></w:r></w:p></w:comment>
+// Each comment paragraph carries a w14:paraId; commentsExtended.xml (below)
+// links replies by the parent's paraId and flags resolved (w15:done). id 5 is
+// a REPLY to id 0 (no body range, Word-style); id 2 is marked resolved.
+const COMMENTS_XML = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
+  <w:comment w:id="0" w:author="Phương Minh" w:date="2026-06-17T09:00:00Z" w:initials="PM"><w:p w14:paraId="0A000000"><w:r><w:t>Cụm "màu đỏ" được tô comment — bấm vào đây để chọn vùng tương ứng trên canvas.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="1" w:author="Reviewer" w:date="2026-06-17T10:30:00Z" w:initials="RV"><w:p w14:paraId="0A000001"><w:r><w:t>Comment vắt qua nhiều run trong phần bố cục nhiều cột.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="2" w:author="Minh Lê" w:date="2026-06-17T09:05:00Z" w:initials="ML"><w:p w14:paraId="0A000002"><w:r><w:t>Comment trên "đậm nghiêng" — đã giải quyết (resolved) để test w15:done.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="3" w:author="Reviewer" w:date="2026-06-17T09:10:00Z" w:initials="RV"><w:p w14:paraId="0A000003"><w:r><w:t>Comment trên "màu xanh" cùng dòng.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="4" w:author="Phương Minh" w:date="2026-06-17T09:15:00Z" w:initials="PM"><w:p w14:paraId="0A000004"><w:r><w:t>Comment trên "gạch chân" — cụm này dùng để kiểm tra active-snap khi chọn từng card/bong bóng.</w:t></w:r></w:p></w:comment>
+  <w:comment w:id="5" w:author="Reviewer" w:date="2026-06-17T09:20:00Z" w:initials="RV"><w:p w14:paraId="0A000005"><w:r><w:t>Reply (thread thật từ commentsExtended) cho comment "màu đỏ".</w:t></w:r></w:p></w:comment>
 </w:comments>`;
+
+// Threaded-comment metadata (Word 2013+): id 5 replies to id 0 (paraIdParent),
+// id 2 is resolved (w15:done="1").
+const COMMENTS_EXTENDED_XML = `<?xml version="1.0"?><w15:commentsEx xmlns:w15="${W15_NS}">
+  <w15:commentEx w15:paraId="0A000000" w15:done="0"/>
+  <w15:commentEx w15:paraId="0A000001" w15:done="0"/>
+  <w15:commentEx w15:paraId="0A000002" w15:done="1"/>
+  <w15:commentEx w15:paraId="0A000003" w15:done="0"/>
+  <w15:commentEx w15:paraId="0A000004" w15:done="0"/>
+  <w15:commentEx w15:paraId="0A000005" w15:paraIdParent="0A000000" w15:done="0"/>
+</w15:commentsEx>`;
 
 const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/>
@@ -419,13 +436,14 @@ const RELS_XML = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
   <Relationship Id="rId24" Type="${R_NS}/header" Target="header3.xml"/>
   <Relationship Id="rId25" Type="${R_NS}/settings" Target="settings.xml"/>
   <Relationship Id="rId26" Type="${R_NS}/comments" Target="comments.xml"/>
+  <Relationship Id="rId27" Type="${R_NS}/commentsExtended" Target="commentsExtended.xml"/>
 </Relationships>`;
 
 async function main() {
   const zip = new JSZip();
   zip.file(
     '[Content_Types].xml',
-    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>`,
+    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/><Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/></Types>`,
   );
   zip.file(
     '_rels/.rels',
@@ -442,6 +460,7 @@ async function main() {
   zip.file('word/footnotes.xml', FOOTNOTES_XML);
   zip.file('word/settings.xml', SETTINGS_XML);
   zip.file('word/comments.xml', COMMENTS_XML);
+  zip.file('word/commentsExtended.xml', COMMENTS_EXTENDED_XML);
   zip.file('word/media/image1.png', PNG_RED, { base64: true });
   zip.file('word/media/image2.png', PNG_BLUE, { base64: true });
 
