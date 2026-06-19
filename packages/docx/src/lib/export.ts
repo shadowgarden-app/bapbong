@@ -1,5 +1,7 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
+import { commentSchema } from '@shadow-garden/bapbong-model';
+import type { CommentNode } from '@shadow-garden/bapbong-contracts';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -14,8 +16,13 @@ const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationship
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
+const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
 const CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
 const PR_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+
+/** Deterministic 8-hex w14:paraId for a comment id (links replies in w15). */
+const paraId = (id: number) => (0x10000000 + id).toString(16).toUpperCase();
 
 /** px → twips (1px @96dpi = 15 twips); inverse of the importer's twipsToPx. */
 const pxToTwips = (px: number) => Math.round(px * 15);
@@ -28,7 +35,20 @@ interface ExportCtx {
   media: { path: string; base64: string }[];
   exts: Set<string>; // image extensions → content-type defaults
   nextId: number; // shared rId / media / drawing counter
+  // Comment ranges (E3): the doc's known comment ids, the last inline-node index
+  // each id covers (so we can close the range), the currently-open ids, and a
+  // running inline-node index aligned with the precompute.
+  knownComments: Set<number>;
+  lastRun: Map<number, number>;
+  openComments: Set<number>;
+  runIdx: number;
 }
+
+const commentIdsOf = (node: PMNode): number[] =>
+  (node.marks.find((m) => m.type.name === 'comment')?.attrs['ids'] as number[] | undefined) ?? [];
+
+/** Is this an inline leaf the comment-range index counts (text / image / break)? */
+const isInlineLeaf = (node: PMNode): boolean => node.isText || node.type.name === 'image' || node.type.name === 'hard_break';
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
@@ -104,28 +124,39 @@ const linkHref = (node: PMNode): string | null =>
 
 /** Inline content of a paragraph/cell, grouping consecutive link runs into one
  *  w:hyperlink (external → rel + r:id; "#anchor" → w:anchor). */
+/** A single inline node wrapped in its hyperlink, if it carries a link mark. */
+function inlineUnit(node: PMNode, ctx: ExportCtx): string {
+  const inner = inlineXml(node, ctx);
+  const href = linkHref(node);
+  if (!href || !inner) return inner;
+  if (href.startsWith('#')) return `<w:hyperlink w:anchor="${esc(href.slice(1))}">${inner}</w:hyperlink>`;
+  const n = ctx.nextId++;
+  ctx.rels.push(`<Relationship Id="rId${n}" Type="${R_NS}/hyperlink" Target="${esc(href)}" TargetMode="External"/>`);
+  return `<w:hyperlink r:id="rId${n}">${inner}</w:hyperlink>`;
+}
+
+/** Inline content with comment-range markers (w:commentRangeStart/End +
+ *  w:commentReference) emitted as runs transition across comment ids. */
 function inlineContent(node: PMNode, ctx: ExportCtx): string {
-  const kids: PMNode[] = [];
-  node.forEach((c) => kids.push(c));
   let out = '';
-  for (let i = 0; i < kids.length; ) {
-    const href = linkHref(kids[i]);
-    if (href) {
-      let j = i;
-      let inner = '';
-      while (j < kids.length && linkHref(kids[j]) === href) inner += inlineXml(kids[j++], ctx);
-      if (href.startsWith('#')) {
-        out += `<w:hyperlink w:anchor="${esc(href.slice(1))}">${inner}</w:hyperlink>`;
-      } else {
-        const n = ctx.nextId++;
-        ctx.rels.push(`<Relationship Id="rId${n}" Type="${R_NS}/hyperlink" Target="${esc(href)}" TargetMode="External"/>`);
-        out += `<w:hyperlink r:id="rId${n}">${inner}</w:hyperlink>`;
+  node.forEach((child) => {
+    if (!isInlineLeaf(child)) return;
+    const ids = commentIdsOf(child).filter((id) => ctx.knownComments.has(id));
+    for (const id of ids) {
+      if (!ctx.openComments.has(id)) {
+        out += `<w:commentRangeStart w:id="${id}"/>`;
+        ctx.openComments.add(id);
       }
-      i = j;
-    } else {
-      out += inlineXml(kids[i++], ctx);
     }
-  }
+    out += inlineUnit(child, ctx);
+    const here = ctx.runIdx++;
+    for (const id of [...ctx.openComments]) {
+      if (ctx.lastRun.get(id) === here) {
+        out += `<w:commentRangeEnd w:id="${id}"/><w:r><w:commentReference w:id="${id}"/></w:r>`;
+        ctx.openComments.delete(id);
+      }
+    }
+  });
   return out;
 }
 
@@ -242,23 +273,108 @@ function blockXml(node: PMNode, ctx: ExportCtx): string {
 
 // ── packaging ───────────────────────────────────────────────────────
 
+// ── comments (E3) ───────────────────────────────────────────────────
+
+/** A comment body (commentSchema doc JSON) → w:p runs; the first paragraph
+ *  carries `firstParaId`. Mentions serialize as plain "@label" text. */
+function commentBodyXml(body: unknown, firstParaId: string): string {
+  let doc: PMNode | null = null;
+  try {
+    doc = commentSchema.nodeFromJSON(body);
+  } catch {
+    doc = null;
+  }
+  if (!doc) return `<w:p w14:paraId="${firstParaId}"/>`;
+  const ps: string[] = [];
+  doc.forEach((p, _o, i) => {
+    let runs = '';
+    p.forEach((inline) => {
+      if (inline.isText) runs += `<w:r><w:t xml:space="preserve">${esc(inline.text ?? '')}</w:t></w:r>`;
+      else if (inline.type.name === 'mention') runs += `<w:r><w:t xml:space="preserve">@${esc(String(inline.attrs['label'] ?? ''))}</w:t></w:r>`;
+    });
+    ps.push(`<w:p${i === 0 ? ` w14:paraId="${firstParaId}"` : ''}>${runs}</w:p>`);
+  });
+  return ps.join('') || `<w:p w14:paraId="${firstParaId}"/>`;
+}
+
+const initialsOf = (name: string): string =>
+  name.trim().split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 3).toUpperCase();
+
+function commentsXml(comments: CommentNode[]): string {
+  const body = comments
+    .map(
+      (c) =>
+        `<w:comment w:id="${c.id}" w:author="${esc(c.user.name)}" w:date="${esc(c.date)}" w:initials="${esc(initialsOf(c.user.name))}">` +
+        `${commentBodyXml(c.body, paraId(c.id))}</w:comment>`,
+    )
+    .join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:comments xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">${body}</w:comments>`;
+}
+
+function commentsExtendedXml(comments: CommentNode[]): string {
+  const body = comments
+    .map((c) => {
+      const parent = c.parentId != null ? ` w15:paraIdParent="${paraId(c.parentId)}"` : '';
+      return `<w15:commentEx w15:paraId="${paraId(c.id)}"${parent} w15:done="${c.resolved ? 1 : 0}"/>`;
+    })
+    .join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w15:commentsEx xmlns:w15="${W15_NS}">${body}</w15:commentsEx>`;
+}
+
+// ── packaging ───────────────────────────────────────────────────────
+
 const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`;
 
-function contentTypes(exts: Set<string>): string {
-  const defaults = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>', '<Default Extension="xml" ContentType="application/xml"/>'];
-  for (const ext of exts) defaults.push(`<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`);
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="${CT_NS}">${defaults.join('')}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+function contentTypes(exts: Set<string>, hasComments: boolean): string {
+  const parts = [
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+  ];
+  for (const ext of exts) parts.push(`<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`);
+  parts.push('<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>');
+  if (hasComments) {
+    parts.push('<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>');
+    parts.push('<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>');
+  }
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="${CT_NS}">${parts.join('')}</Types>`;
 }
 
 /**
- * Serialise a bapbong document back to `.docx` bytes (E1 + E2). Comments and the
- * original imported parts are added in later phases.
+ * Serialise a bapbong document back to `.docx` bytes (E1–E3). Carrying the
+ * original imported parts (styles/numbering/headers/media) is E4.
  */
 export async function exportDocx(doc: PMNode): Promise<Uint8Array> {
-  const ctx: ExportCtx = { rels: [], media: [], exts: new Set(), nextId: 100 };
+  const comments = (doc.attrs['comments'] as CommentNode[] | null) ?? [];
+  // Precompute the last inline-leaf index each comment id covers, in document
+  // order, so inlineContent can close the range at the right run.
+  const knownComments = new Set(comments.map((c) => c.id));
+  const lastRun = new Map<number, number>();
+  let idx = 0;
+  doc.descendants((n) => {
+    if (!isInlineLeaf(n)) return;
+    for (const id of commentIdsOf(n)) if (knownComments.has(id)) lastRun.set(id, idx);
+    idx++;
+  });
+
+  const ctx: ExportCtx = {
+    rels: [],
+    media: [],
+    exts: new Set(),
+    nextId: 100,
+    knownComments,
+    lastRun,
+    openComments: new Set(),
+    runIdx: 0,
+  };
   let body = '';
   doc.forEach((block) => (body += blockXml(block, ctx)));
+
+  const hasComments = comments.length > 0;
+  if (hasComments) {
+    ctx.rels.push(`<Relationship Id="rIdComments" Type="${R_NS}/comments" Target="comments.xml"/>`);
+    ctx.rels.push(`<Relationship Id="rIdCommentsExt" Type="${R_NS}/commentsExtended" Target="commentsExtended.xml"/>`);
+  }
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
@@ -266,7 +382,7 @@ export async function exportDocx(doc: PMNode): Promise<Uint8Array> {
     `<w:body>${body}</w:body></w:document>`;
 
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', contentTypes(ctx.exts));
+  zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
   zip.file('_rels/.rels', ROOT_RELS);
   zip.file('word/document.xml', documentXml);
   if (ctx.rels.length) {
@@ -274,6 +390,10 @@ export async function exportDocx(doc: PMNode): Promise<Uint8Array> {
       'word/_rels/document.xml.rels',
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`,
     );
+  }
+  if (hasComments) {
+    zip.file('word/comments.xml', commentsXml(comments));
+    zip.file('word/commentsExtended.xml', commentsExtendedXml(comments));
   }
   for (const { path, base64 } of ctx.media) zip.file(path, base64, { base64: true });
   return zip.generateAsync({ type: 'uint8array' });

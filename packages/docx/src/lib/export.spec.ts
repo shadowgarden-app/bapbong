@@ -134,3 +134,45 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(linked?.marks.find((m) => m.type.name === 'link')?.attrs['href']).toBe('https://prosemirror.net/');
   });
 });
+
+describe('exportDocx (E3: comments round-trip)', () => {
+  const body = (text: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+  // Plain text from a commentSchema body JSON (no DOM/model import needed).
+  const bodyText = (b: unknown): string =>
+    ((b as { content?: { content?: { text?: string }[] }[] } | undefined)?.content ?? [])
+      .map((p) => (p.content ?? []).map((r) => r.text ?? '').join(''))
+      .join('\n');
+
+  it('round-trips comment ranges + thread + resolved + a mention in the body', async () => {
+    const mark = (id: number) => schema.marks['comment'].create({ ids: [id] });
+    const comments = [
+      { id: 1, parentId: null, user: { id: 'a', name: 'Alice Nguyễn' }, date: '2026-06-17T09:00:00Z', body: body('root note'), resolved: false },
+      { id: 2, parentId: 1, user: { id: 'b', name: 'Bob' }, date: '2026-06-17T09:05:00Z', body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'cảm ơn ' }, { type: 'mention', attrs: { id: 'x', label: 'Xuân' } }] }] }, resolved: false },
+      { id: 3, parentId: null, user: { id: 'c', name: 'Carol Lee' }, date: '2026-06-17T09:10:00Z', body: body('done thread'), resolved: true },
+    ];
+    const doc = schema.node('doc', { comments }, [
+      schema.node('paragraph', null, [schema.text('before '), schema.text('commented', [mark(1)]), schema.text(' after')]),
+      schema.node('paragraph', null, [schema.text('a ', [mark(3)]), schema.text('span', [mark(3)])]),
+    ]);
+
+    const { doc: back } = await importDocx(await exportDocx(doc));
+
+    // thread + resolved survive
+    const nodes = back.attrs['comments'] as { id: number; parentId: number | null; resolved: boolean }[];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    expect(nodes).toHaveLength(3);
+    expect(byId.get(1)).toMatchObject({ parentId: null, resolved: false });
+    expect(byId.get(2)).toMatchObject({ parentId: 1, resolved: false });
+    expect(byId.get(3)).toMatchObject({ parentId: null, resolved: true });
+
+    // the range marks land on the right runs (and only those)
+    const p0 = [...range(back.child(0))];
+    expect(p0.find((n) => n.text === 'commented')?.marks.find((m) => m.type.name === 'comment')?.attrs['ids']).toEqual([1]);
+    expect(p0.find((n) => n.text === 'before ')?.marks.some((m) => m.type.name === 'comment')).toBeFalsy();
+    expect(back.child(1).textContent).toBe('a span'); // both runs carry comment 3
+
+    // mention in the reply body serialized as "@Xuân" text
+    const reply = (back.attrs['comments'] as { id: number; body: unknown }[]).find((c) => c.id === 2);
+    expect(bodyText(reply?.body)).toContain('@Xuân');
+  });
+});

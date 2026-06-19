@@ -173,6 +173,9 @@ importers:
 
   packages/docx:
     dependencies:
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
       '@shadow-garden/bapbong-model':
         specifier: workspace:^
         version: link:../model

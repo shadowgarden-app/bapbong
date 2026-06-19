@@ -43,6 +43,7 @@
     }
   },
   "dependencies": {
+    "@shadow-garden/bapbong-contracts": "workspace:^",
     "@shadow-garden/bapbong-model": "workspace:^",
     "fast-xml-parser": "^5.8.0",
     "jszip": "^3.10.1",
