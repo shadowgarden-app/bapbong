@@ -1,11 +1,27 @@
-# model
+# @shadow-garden/bapbong-model
 
-This library was generated with [Nx](https://nx.dev).
+The ProseMirror **document schema** for bapbong, plus list-numbering helpers.
+This is the canonical in-memory document — `importDocx` produces it, the layout
+engine consumes it, and the hidden editor edits it.
 
-## Building
+- **Scope:** `scope:model`
+- **Depends on:** `prosemirror-model`
 
-Run `nx build model` to build the library.
+## What it provides
 
-## Running unit tests
+- **`schema`** — the main document `Schema`: `doc` (with undoable `attrs`
+  `numbering` / `sections` / `comments`), `paragraph`, `text`, `image`, `table`,
+  `hardBreak`, …; marks `strong`, `em`, `underline`, `strike`, `link`, `color`,
+  `highlight`, `vertAlign`, `footnote { num }`, `comment { ids }`.
+- **`commentSchema`** — a tiny schema for comment bodies: `doc` / `paragraph` /
+  `text` + an inline **`mention`** atom (`{ id, label }`) with `leafText`/`toDOM`.
+- **`createNumberingCounter(defs)`** — resolves live list markers (decimal,
+  bullet, multilevel) from `doc.attrs.numbering`.
+- Types: `BapbongSchema`, `CommentSchema`, `Align`.
 
-Run `nx test model` to execute the unit tests via [Vitest](https://vitest.dev/).
+## Build / test
+
+```sh
+pnpm nx build @shadow-garden/bapbong-model
+pnpm nx test  @shadow-garden/bapbong-model
+```

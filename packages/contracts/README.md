@@ -1,11 +1,28 @@
-# contracts
+# @shadow-garden/bapbong-contracts
 
-This library was generated with [Nx](https://nx.dev).
+Shared **types only** for the bapbong pipeline — the vocabulary every other
+package speaks. No runtime code.
 
-## Building
+- **Scope:** `scope:pure` (leaf — may not import any other workspace package)
+- **Depends on:** nothing
 
-Run `nx build contracts` to build the library.
+## What it defines
 
-## Running unit tests
+- **Flow model** (layout input): `FlowParagraph`, `FlowTable` /
+  `FlowTableRow` / `FlowTableCell`, `FlowFloat`, and inlines
+  `InlineRun` / `InlineImage` / `InlineBreak` / `InlineField`.
+- **Resolved layout** (paint-ready engine output): `ResolvedLayout`,
+  `ResolvedPage`, `LayoutLine`, `LayoutSegment`, `LayoutImageSegment`,
+  `ResolvedCell`, `ResolvedFloat`, `ResolvedFootnotes`, `ResolvedChrome`.
+- **Geometry & config:** `PageConfig`, `LayoutConfig`, `ColumnConfig`,
+  `ParagraphSpacing`, `ParagraphIndent`, `CellPadding`, `CaretRect`,
+  `PagePoint`, `SelectionRect`.
+- **Fonts / measurement:** `FontSpec`, `FontMetrics`, `MeasureText`, `MeasureMetrics`.
+- **Comments:** `IUser`, `CommentNode`, `CommentData`.
 
-Run `nx test contracts` to execute the unit tests via [Vitest](https://vitest.dev/).
+## Build / test
+
+```sh
+pnpm nx build @shadow-garden/bapbong-contracts
+pnpm nx test  @shadow-garden/bapbong-contracts
+```

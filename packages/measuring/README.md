@@ -1,11 +1,25 @@
-# measuring
+# @shadow-garden/bapbong-measuring
 
-This library was generated with [Nx](https://nx.dev).
+Text measurement + font-metrics, behind a small injectable interface. The layout
+engine and selection math never touch the canvas directly — they call a
+`MeasureText` / `MeasureMetrics` provided by this package, so they stay testable
+in a headless (no-DOM) environment.
 
-## Building
+- **Scope:** `scope:measuring`
+- **Depends on:** `@shadow-garden/bapbong-contracts`
 
-Run `nx build measuring` to build the library.
+## What it provides
 
-## Running unit tests
+- **`createCanvasMeasurer()` / `createCanvasMetrics()`** — real measurement via a
+  shared offscreen `CanvasRenderingContext2D` (`ctx.measureText`,
+  ascent/descent), with a per-font cache.
+- **`createApproxMeasurer()` / `createApproxMetrics()`** — DOM-free approximations
+  (average advance widths) for unit tests and SSR.
+- **`fontToCss(spec)`** — `FontSpec` → CSS `font` shorthand.
 
-Run `nx test measuring` to execute the unit tests via [Vitest](https://vitest.dev/).
+## Build / test
+
+```sh
+pnpm nx build @shadow-garden/bapbong-measuring
+pnpm nx test  @shadow-garden/bapbong-measuring
+```

@@ -1,12 +1,19 @@
 # @shadow-garden/bapbong-editor
 
-Canvas-rendered DOCX editor for the browser — part of the **bapbong** monorepo.
-Generated with [Nx](https://nx.dev).
+Umbrella entry point for bapbong — the package a host app installs to get the
+canvas-rendered DOCX editor. It wires the pipeline together (import → model →
+layout → paint → input/selection) behind one public API.
 
-## Building
+- **Scope:** `scope:app` (may depend on every other package)
+- **Depends on:** the bapbong packages (`docx`, `model`, `layout-engine`, `measuring`, `painter-canvas`, `selection`, `input-bridge`, `contracts`)
 
-Run `nx build @shadow-garden/bapbong-editor` to build the library.
+> **Status:** thin scaffold. The full assembled API is still being extracted from
+> the reference implementation in [`apps/playground`](../../apps/playground),
+> which currently drives the whole pipeline directly.
 
-## Running unit tests
+## Build / test
 
-Run `nx test @shadow-garden/bapbong-editor` to execute the unit tests via [Vitest](https://vitest.dev/).
+```sh
+pnpm nx build @shadow-garden/bapbong-editor
+pnpm nx test  @shadow-garden/bapbong-editor
+```
