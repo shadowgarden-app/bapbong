@@ -355,6 +355,15 @@ function mergeContentTypes(xml: string, exts: Set<string>, hasComments: boolean)
   return out;
 }
 
+/** The body-level w:sectPr from the original document.xml (page geometry +
+ *  header/footer references). It's the last sectPr in the file (after every
+ *  paragraph + any section-break sectPr), so re-attaching it keeps page setup
+ *  and headers/footers — whose parts + rels are carried — wired up. */
+function extractBodySectPr(xml: string): string {
+  const all = xml.match(/<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g);
+  return all ? all[all.length - 1] : '';
+}
+
 /** Original document rels minus any comment(sExtended) rels (regenerated),
  *  plus the freshly-emitted rels (E4 merge). */
 function mergeRels(xml: string | undefined, newRels: string[]): string {
@@ -406,12 +415,8 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
     ctx.rels.push(`<Relationship Id="rIdCommentsExt" Type="${R_NS}/commentsExtended" Target="commentsExtended.xml"/>`);
   }
 
-  const documentXml =
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}">` +
-    `<w:body>${body}</w:body></w:document>`;
-
   const zip = new JSZip();
+  let sectPr = ''; // re-attached from the original (carry) for page setup + headers
   if (opts?.carry) {
     // E4: start from the original package so unmodelled parts survive.
     const carry = opts.carry;
@@ -422,6 +427,8 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
     zip.file('[Content_Types].xml', ct ? mergeContentTypes(ct, ctx.exts, hasComments) : contentTypes(ctx.exts, hasComments));
     const rels = await carry.file('word/_rels/document.xml.rels')?.async('string');
     zip.file('word/_rels/document.xml.rels', mergeRels(rels, ctx.rels));
+    const origDoc = await carry.file('word/document.xml')?.async('string');
+    if (origDoc) sectPr = extractBodySectPr(origDoc);
   } else {
     zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
     zip.file('_rels/.rels', ROOT_RELS);
@@ -429,6 +436,11 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
       zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`);
     }
   }
+
+  const documentXml =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}">` +
+    `<w:body>${body}${sectPr}</w:body></w:document>`;
   zip.file('word/document.xml', documentXml);
   if (hasComments) {
     zip.file('word/comments.xml', commentsXml(comments));

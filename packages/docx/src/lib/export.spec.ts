@@ -4,6 +4,8 @@ import { importDocx } from './docx';
 import { exportDocx } from './export';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const PR_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 
 /** Build a schema doc from paragraphs of `{ text, marks }` runs. */
 function makeDoc(paras: { text: string; marks?: string[]; attrs?: Record<string, unknown> }[][], pAttrs: Record<string, unknown>[] = []) {
@@ -214,5 +216,38 @@ describe('exportDocx (E4: carry original parts)', () => {
     const fromScratch = await importDocx(await exportDocx(doc));
     expect(fromScratch.doc.child(0).attrs['list']).toEqual({ numId: '1', level: 0 });
     expect(fromScratch.doc.attrs['numbering']).toBeNull();
+  });
+});
+
+describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
+  async function sourceWithHeader(): Promise<Uint8Array> {
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>`,
+    );
+    zip.file('_rels/.rels', `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`);
+    zip.file('word/_rels/document.xml.rels', `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rIdH" Type="${R_NS}/header" Target="header1.xml"/></Relationships>`);
+    zip.file('word/header1.xml', `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>MY HEADER</w:t></w:r></w:p></w:hdr>`);
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body><w:p><w:r><w:t>body text</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`,
+    );
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  it('re-attaches sectPr so headers + page geometry survive (carry)', async () => {
+    const { doc, headers, page, raw } = await importDocx(await sourceWithHeader());
+    expect(headers['default']?.textContent).toBe('MY HEADER');
+    expect(page.width).toBe(Math.round(11906 / 15));
+
+    const back = await importDocx(await exportDocx(doc, { carry: raw }));
+    expect(back.headers['default']?.textContent).toBe('MY HEADER'); // ref resolved
+    expect(back.page.width).toBe(Math.round(11906 / 15)); // pgSz preserved
+    expect(back.doc.child(0).textContent).toBe('body text');
+
+    // Without carry there's no sectPr → no header.
+    const noCarry = await importDocx(await exportDocx(doc));
+    expect(Object.keys(noCarry.headers)).toHaveLength(0);
   });
 });
