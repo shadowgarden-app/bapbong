@@ -645,6 +645,28 @@ export class App implements OnDestroy {
     return this.threadFor(rootId).length - 1;
   }
 
+  /** Where the inline reply box goes within `rootId`'s thread: the id of the
+   *  LAST node in the reply-target's subtree (so the box sits at the end of that
+   *  comment's scope, where the new reply will land), or null if the target
+   *  isn't in this thread. */
+  protected replyAnchorId(rootId: number): number | null {
+    const target = this.replyingTo();
+    if (target == null) return null;
+    const thread = this.threadFor(rootId);
+    const i = thread.findIndex((it) => it.node.id === target);
+    if (i < 0) return null;
+    let last = i;
+    for (let j = i + 1; j < thread.length && thread[j].depth > thread[i].depth; j++) last = j;
+    return thread[last].node.id;
+  }
+
+  /** Indent (px) for the inline reply box = one level under the reply target. */
+  protected replyBoxIndent(rootId: number): number {
+    const target = this.replyingTo();
+    const it = this.threadFor(rootId).find((i) => i.node.id === target);
+    return this.replyIndent((it?.depth ?? 0) + 1);
+  }
+
   /** Human-friendly comment timestamp: "Today hh:mm AM/PM" when it falls on
    *  today, otherwise "DD/MM/YYYY hh:mm AM/PM". Falls back to the raw string if
    *  it isn't a parseable date. */

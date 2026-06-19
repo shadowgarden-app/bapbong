@@ -196,8 +196,9 @@
                     </div>
                   </div>
                 </div>
-                @if (replyingTo() === item.node.id) {
-                  <div class="fb-comment fb-replybox" [style.margin-left.px]="replyIndent(item.depth + 1)">
+                @if (item.node.id === replyAnchorId(root.id)) {
+                  <!-- Reply box at the END of the target comment's scope. -->
+                  <div class="fb-comment fb-replybox" [style.margin-left.px]="replyBoxIndent(root.id)">
                     <span class="fb-av sm">{{ initial(currentUser().name) }}</span>
                     <div class="reply-editor">
                       <div #replyHost class="reply-mount"></div>
