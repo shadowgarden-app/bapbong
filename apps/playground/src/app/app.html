@@ -156,24 +156,59 @@
       </div>
 
       @if (commentView() === 'panel') {
-        <!-- Panel: fixed list of every thread (nested replies + resolved). -->
-        <aside class="comments panel">
+        <!-- Panel: Facebook-style threads — bubble per comment, actions on hover,
+             per-node "Trả lời" whose editor mounts inside that comment's scope. -->
+        <aside class="comments panel fb">
           @if (!comments().length) {
             <p class="dim">Chưa có bình luận. Chọn văn bản rồi bấm "+ Bình luận".</p>
           }
           @for (root of rootComments(); track root.id) {
             <div
-              class="panel-thread"
+              class="fb-thread"
               tabindex="0"
               [attr.data-id]="root.id"
               [class.active]="activeCard() === root.id"
               (click)="onPanelCardClick(root.id, $event)"
               (keydown.enter)="onPanelCardClick(root.id, $event)"
             >
-              <ng-container
-                [ngTemplateOutlet]="threadView"
-                [ngTemplateOutletContext]="{ $implicit: root.id, replyMode: 'on-focus' }"
-              ></ng-container>
+              @for (item of threadFor(root.id); track item.node.id) {
+                <div class="fb-comment" [style.margin-left.px]="replyIndent(item.depth)">
+                  <span class="fb-av">{{ initial(item.node.user.name) }}</span>
+                  <div class="fb-body">
+                    @if (item.depth > 4 && item.replyTo) {
+                      <div class="reply-to dim">↳ {{ item.replyTo }}</div>
+                    }
+                    <div class="fb-bubble" [class.resolved]="item.node.resolved && item.depth === 0">
+                      <span class="fb-name">{{ item.node.user.name || 'Unknown' }}</span>
+                      <span class="fb-text" [innerHTML]="commentBodyHtml(item.node.body)"></span>
+                    </div>
+                    <div class="fb-meta">
+                      <span class="fb-time">{{ formatDate(item.node.date) }}</span>
+                      <button type="button" class="fb-act" (click)="startInlineReply(item.node.id)">Trả lời</button>
+                      @if (item.depth === 0) {
+                        <button type="button" class="fb-act" (click)="resolveComment(item.node.id, !item.node.resolved)">
+                          {{ item.node.resolved ? 'Mở lại' : 'Resolve' }}
+                        </button>
+                      }
+                      @if (canModify(item.node)) {
+                        <button type="button" class="fb-act danger" (click)="deleteComment(item.node.id)">Xoá</button>
+                      }
+                    </div>
+                  </div>
+                </div>
+                @if (replyingTo() === item.node.id) {
+                  <div class="fb-comment fb-replybox" [style.margin-left.px]="replyIndent(item.depth + 1)">
+                    <span class="fb-av sm">{{ initial(currentUser().name) }}</span>
+                    <div class="reply-editor">
+                      <div #replyHost class="reply-mount"></div>
+                      <div class="reply-actions">
+                        <button type="button" (click)="submitInlineReply()">Gửi</button>
+                        <button type="button" (click)="closeInlineReply()">Huỷ</button>
+                      </div>
+                    </div>
+                  </div>
+                }
+              }
             </div>
           }
         </aside>
@@ -237,7 +272,7 @@
           <div class="reply-editor">
             <div #replyHost class="reply-mount"></div>
             <div class="reply-actions">
-              <button type="button" (click)="submitInlineReply(rootId)">Gửi</button>
+              <button type="button" (click)="submitInlineReply()">Gửi</button>
               <button type="button" (click)="closeInlineReply()">Huỷ</button>
             </div>
           </div>

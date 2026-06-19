@@ -573,18 +573,19 @@ export class App implements OnDestroy {
     return this.replyComposer ?? this.composer;
   }
 
-  /** Turn a thread's "Reply …" box into a live PM editor (supports @mention). */
-  protected startInlineReply(rootId: number): void {
-    if (this.replyingTo() === rootId) return;
+  /** Open a live PM reply editor (supports @mention) targeting comment `id` —
+   *  any node, so replying to a child renders the box inside that child's scope. */
+  protected startInlineReply(id: number): void {
+    if (this.replyingTo() === id) return;
     this.closeComposer(); // mutually exclusive with the "+ Bình luận" composer
     this.closeInlineReply();
-    this.replyingTo.set(rootId);
+    this.replyingTo.set(id);
     afterNextRender(
       () => {
         const host = this.replyHost()?.nativeElement;
         if (!host) return;
         this.replyComposer = new CommentComposer(commentSchema, host, undefined, this.mentionHandlers, {
-          onEnter: () => this.submitInlineReply(rootId),
+          onEnter: () => this.submitInlineReply(),
           onEscape: () => this.closeInlineReply(),
         });
         this.replyComposer.focus();
@@ -594,11 +595,12 @@ export class App implements OnDestroy {
     );
   }
 
-  /** Commit the inline reply (Enter or the Gửi button) and close the editor. */
-  protected submitInlineReply(rootId: number): void {
-    if (this.replyComposer && !this.replyComposer.isEmpty() && this.bridge) {
+  /** Commit the inline reply (Enter or the Gửi button) to the targeted comment. */
+  protected submitInlineReply(): void {
+    const target = this.replyingTo();
+    if (target != null && this.replyComposer && !this.replyComposer.isEmpty() && this.bridge) {
       this.bridge.dispatch(
-        replyCommentTr(this.bridge.state, rootId, {
+        replyCommentTr(this.bridge.state, target, {
           user: this.currentUser(),
           date: new Date().toISOString(),
           body: this.replyComposer.getJSON(),
