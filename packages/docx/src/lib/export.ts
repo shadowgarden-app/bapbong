@@ -340,11 +340,41 @@ function contentTypes(exts: Set<string>, hasComments: boolean): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="${CT_NS}">${parts.join('')}</Types>`;
 }
 
+/** Ensure image content-type defaults + comment overrides exist in an original
+ *  [Content_Types].xml (E4 merge). */
+function mergeContentTypes(xml: string, exts: Set<string>, hasComments: boolean): string {
+  let out = xml;
+  const add = (frag: string, key: string) => {
+    if (!out.includes(`"${key}"`)) out = out.replace('</Types>', `${frag}</Types>`);
+  };
+  for (const ext of exts) add(`<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`, ext);
+  if (hasComments) {
+    add('<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>', '/word/comments.xml');
+    add('<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>', '/word/commentsExtended.xml');
+  }
+  return out;
+}
+
+/** Original document rels minus any comment(sExtended) rels (regenerated),
+ *  plus the freshly-emitted rels (E4 merge). */
+function mergeRels(xml: string | undefined, newRels: string[]): string {
+  const base = (xml ?? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}"></Relationships>`).replace(
+    /<Relationship\b[^>]*Target="comments(?:Extended)?\.xml"[^>]*\/>/g,
+    '',
+  );
+  return base.replace('</Relationships>', `${newRels.join('')}</Relationships>`);
+}
+
 /**
- * Serialise a bapbong document back to `.docx` bytes (E1–E3). Carrying the
- * original imported parts (styles/numbering/headers/media) is E4.
+ * Serialise a bapbong document back to `.docx` bytes.
+ *
+ * With `opts.carry` (the source package from `importDocx().raw`) the original
+ * parts bapbong doesn't model yet — styles, numbering, headers/footers,
+ * footnotes, settings, theme, media — are preserved; only document.xml and the
+ * comment parts are regenerated. Without it, a minimal package is built from
+ * scratch (E1–E3 content only).
  */
-export async function exportDocx(doc: PMNode): Promise<Uint8Array> {
+export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise<Uint8Array> {
   const comments = (doc.attrs['comments'] as CommentNode[] | null) ?? [];
   // Precompute the last inline-leaf index each comment id covers, in document
   // order, so inlineContent can close the range at the right run.
@@ -382,15 +412,24 @@ export async function exportDocx(doc: PMNode): Promise<Uint8Array> {
     `<w:body>${body}</w:body></w:document>`;
 
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
-  zip.file('_rels/.rels', ROOT_RELS);
-  zip.file('word/document.xml', documentXml);
-  if (ctx.rels.length) {
-    zip.file(
-      'word/_rels/document.xml.rels',
-      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`,
-    );
+  if (opts?.carry) {
+    // E4: start from the original package so unmodelled parts survive.
+    const carry = opts.carry;
+    for (const [path, f] of Object.entries(carry.files)) {
+      if (!f.dir) zip.file(path, await f.async('uint8array'));
+    }
+    const ct = await carry.file('[Content_Types].xml')?.async('string');
+    zip.file('[Content_Types].xml', ct ? mergeContentTypes(ct, ctx.exts, hasComments) : contentTypes(ctx.exts, hasComments));
+    const rels = await carry.file('word/_rels/document.xml.rels')?.async('string');
+    zip.file('word/_rels/document.xml.rels', mergeRels(rels, ctx.rels));
+  } else {
+    zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
+    zip.file('_rels/.rels', ROOT_RELS);
+    if (ctx.rels.length) {
+      zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`);
+    }
   }
+  zip.file('word/document.xml', documentXml);
   if (hasComments) {
     zip.file('word/comments.xml', commentsXml(comments));
     zip.file('word/commentsExtended.xml', commentsExtendedXml(comments));

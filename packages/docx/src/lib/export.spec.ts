@@ -1,6 +1,9 @@
+import JSZip from 'jszip';
 import { schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
 import { exportDocx } from './export';
+
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
 /** Build a schema doc from paragraphs of `{ text, marks }` runs. */
 function makeDoc(paras: { text: string; marks?: string[]; attrs?: Record<string, unknown> }[][], pAttrs: Record<string, unknown>[] = []) {
@@ -174,5 +177,42 @@ describe('exportDocx (E3: comments round-trip)', () => {
     // mention in the reply body serialized as "@Xuân" text
     const reply = (back.attrs['comments'] as { id: number; body: unknown }[]).find((c) => c.id === 2);
     expect(bodyText(reply?.body)).toContain('@Xuân');
+  });
+});
+
+describe('exportDocx (E4: carry original parts)', () => {
+  // Minimal source .docx with a numbered list paragraph + numbering.xml.
+  async function sourceBytes(): Promise<Uint8Array> {
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/></Types>`,
+    );
+    zip.file('_rels/.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>item one</w:t></w:r></w:p></w:body></w:document>`,
+    );
+    zip.file(
+      'word/numbering.xml',
+      `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}"><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>`,
+    );
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  it('preserves numbering.xml with carry (and drops it without)', async () => {
+    const { doc, raw } = await importDocx(await sourceBytes());
+    expect(doc.attrs['numbering']).toBeTruthy(); // imported defs
+    expect(doc.child(0).attrs['list']).toEqual({ numId: '1', level: 0 });
+
+    // With carry: numbering.xml survives the round-trip.
+    const withCarry = await importDocx(await exportDocx(doc, { carry: raw }));
+    expect(withCarry.doc.attrs['numbering']).toBeTruthy();
+    expect(withCarry.doc.child(0).attrs['list']).toEqual({ numId: '1', level: 0 });
+
+    // Without carry: the list paragraph still round-trips, but the defs are gone.
+    const fromScratch = await importDocx(await exportDocx(doc));
+    expect(fromScratch.doc.child(0).attrs['list']).toEqual({ numId: '1', level: 0 });
+    expect(fromScratch.doc.attrs['numbering']).toBeNull();
   });
 });

@@ -86,6 +86,10 @@ export interface DocxImport {
   comments: CommentData[];
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
   page: PageConfig;
+  /** The loaded source package — pass to `exportDocx(doc, { carry })` so the
+   *  parts bapbong doesn't model yet (styles, numbering, headers/footers, …)
+   *  survive the round-trip instead of being dropped. */
+  raw: JSZip;
 }
 
 /** Footnote/endnote bodies + a counter that numbers references in document
@@ -1153,6 +1157,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     evenAndOdd,
     comments: buildCommentsList(ctx),
     page: parsePageGeometry(sectPr),
+    raw: zip,
   };
 }
 
