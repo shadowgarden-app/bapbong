@@ -246,6 +246,11 @@ h2 {
   font-size: 0.8rem;
   font-weight: 600;
 }
+/* Parent-author hint on deep replies whose indent has been capped. */
+.reply-to {
+  font-size: 0.72rem;
+  margin-bottom: 1px;
+}
 .comment-text {
   font-size: 0.85rem;
   color: #333;

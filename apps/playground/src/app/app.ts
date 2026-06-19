@@ -54,6 +54,11 @@ const PANEL_SYNC_MS = 250;
 const BUBBLE_SIZE = 34;
 const ANCHOR_GAP = 8;
 
+/** Reply indent step (px) and the depth past which indent stops growing — keeps
+ *  deeply-nested threads from overflowing the narrow anchored cards. */
+const INDENT_STEP = 14;
+const MAX_INDENT_DEPTH = 4;
+
 /** Demo users the comment composer can @mention (beyond the doc's own authors). */
 const MENTION_SEED: { id: string; label: string }[] = [
   { id: 'alice', label: 'Alice Nguyễn' },
@@ -573,18 +578,27 @@ export class App implements OnDestroy {
     input.value = '';
   }
 
-  /** A root's thread (the root + its reply subtree), flattened depth-first. */
-  protected threadFor(rootId: number): { node: CommentNode; depth: number }[] {
+  /** A root's thread (the root + its reply subtree), flattened depth-first.
+   *  `replyTo` is the parent author's name (null for the root) so deep replies
+   *  whose indent is capped can still show who they answer. */
+  protected threadFor(rootId: number): { node: CommentNode; depth: number; replyTo: string | null }[] {
     const all = this.comments();
-    const out: { node: CommentNode; depth: number }[] = [];
-    const walk = (id: number, depth: number) => {
+    const out: { node: CommentNode; depth: number; replyTo: string | null }[] = [];
+    const walk = (id: number, depth: number, replyTo: string | null) => {
       const node = all.find((c) => c.id === id);
       if (!node) return;
-      out.push({ node, depth });
-      for (const c of all) if (c.parentId === id) walk(c.id, depth + 1);
+      out.push({ node, depth, replyTo });
+      for (const c of all) if (c.parentId === id) walk(c.id, depth + 1, node.user.name);
     };
-    walk(rootId, 0);
+    walk(rootId, 0, null);
     return out;
+  }
+
+  /** Reply indentation in px, capped so deep threads don't overflow narrow
+   *  anchored cards / popovers (beyond the cap, the "↳ parent" hint carries
+   *  the context instead of more indent). */
+  protected replyIndent(depth: number): number {
+    return Math.min(depth, MAX_INDENT_DEPTH) * INDENT_STEP;
   }
 
   /** Number of replies under a root (the thread minus the root itself). */

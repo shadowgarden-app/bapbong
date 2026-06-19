@@ -187,8 +187,12 @@
         class="comment"
         [class.is-reply]="item.depth > 0"
         [class.resolved]="item.node.resolved && item.depth === 0"
-        [style.margin-left.px]="item.depth * 14"
+        [style.margin-left.px]="replyIndent(item.depth)"
       >
+        @if (item.depth > 4 && item.replyTo) {
+          <!-- Indent is capped this deep; name the parent so context isn't lost. -->
+          <div class="reply-to dim">↳ {{ item.replyTo }}</div>
+        }
         <div class="comment-head">
           <span class="comment-meta">
             {{ item.node.user.name || 'Unknown' }}
