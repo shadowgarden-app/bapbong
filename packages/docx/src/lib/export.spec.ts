@@ -1,7 +1,16 @@
 import JSZip from 'jszip';
+import { Schema } from 'prosemirror-model';
 import { schema } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
 import { exportDocx } from './export';
+
+// The comment mark now lives in the comment plugin, not the base schema. Tests
+// that round-trip comments compose a schema carrying it (a minimal local spec,
+// to avoid a docx→plugin dependency) and import against it.
+const withComments = new Schema({
+  nodes: schema.spec.nodes,
+  marks: schema.spec.marks.append({ comment: { attrs: { ids: {} } } }),
+});
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -149,18 +158,18 @@ describe('exportDocx (E3: comments round-trip)', () => {
       .join('\n');
 
   it('round-trips comment ranges + thread + resolved + a mention in the body', async () => {
-    const mark = (id: number) => schema.marks['comment'].create({ ids: [id] });
+    const mark = (id: number) => withComments.marks['comment'].create({ ids: [id] });
     const comments = [
       { id: 1, parentId: null, user: { id: 'a', name: 'Alice Nguyễn' }, date: '2026-06-17T09:00:00Z', body: body('root note'), resolved: false },
       { id: 2, parentId: 1, user: { id: 'b', name: 'Bob' }, date: '2026-06-17T09:05:00Z', body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'cảm ơn ' }, { type: 'mention', attrs: { id: 'x', label: 'Xuân' } }] }] }, resolved: false },
       { id: 3, parentId: null, user: { id: 'c', name: 'Carol Lee' }, date: '2026-06-17T09:10:00Z', body: body('done thread'), resolved: true },
     ];
-    const doc = schema.node('doc', { comments }, [
-      schema.node('paragraph', null, [schema.text('before '), schema.text('commented', [mark(1)]), schema.text(' after')]),
-      schema.node('paragraph', null, [schema.text('a ', [mark(3)]), schema.text('span', [mark(3)])]),
+    const doc = withComments.node('doc', { comments }, [
+      withComments.node('paragraph', null, [withComments.text('before '), withComments.text('commented', [mark(1)]), withComments.text(' after')]),
+      withComments.node('paragraph', null, [withComments.text('a ', [mark(3)]), withComments.text('span', [mark(3)])]),
     ]);
 
-    const { doc: back } = await importDocx(await exportDocx(doc));
+    const { doc: back } = await importDocx(await exportDocx(doc), { schema: withComments });
 
     // thread + resolved survive
     const nodes = back.attrs['comments'] as { id: number; parentId: number | null; resolved: boolean }[];

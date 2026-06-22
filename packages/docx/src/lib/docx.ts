@@ -1120,12 +1120,15 @@ export async function importDocx(
   }
   // Only ride the sections attr when it changes layout (>1 section, or columns).
   const multiSection = sections.length > 1 || sections.some((s) => s.columns.count > 1);
+  // Comment threads only ride the doc when the schema carries the comment mark
+  // (the comment plugin is present); otherwise comment values are filtered out.
+  const hasComments = !!ctx.schema.marks['comment'];
   const doc = storyDoc(
     ctx,
     [...parsed.blocks, ...endnoteBlocks],
     ctx.numbering.defs,
     multiSection ? sections : null,
-    buildCommentNodes(ctx),
+    hasComments ? buildCommentNodes(ctx) : null,
   );
 
   // Headers/footers referenced by the section properties.
@@ -1166,7 +1169,7 @@ export async function importDocx(
     footnotes,
     titlePg,
     evenAndOdd,
-    comments: buildCommentsList(ctx),
+    comments: hasComments ? buildCommentsList(ctx) : [],
     page: parsePageGeometry(sectPr),
     raw: zip,
   };

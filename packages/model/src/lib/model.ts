@@ -264,26 +264,11 @@ export const schema = new Schema({
         return ['sup', { 'data-footnote': String(mark.attrs['num'] as number) }, 0];
       },
     },
-    // w:commentRangeStart/End — the ids of comments covering this text. The
-    // commented span is the extent of this mark; the sidebar locates it by id.
-    comment: {
-      attrs: { ids: {} }, // number[]
-      inclusive: false,
-      parseDOM: [
-        {
-          tag: 'span[data-comment]',
-          getAttrs: (el) => ({
-            ids: String((el as { getAttribute(n: string): string | null }).getAttribute('data-comment') ?? '')
-              .split(',')
-              .map(Number)
-              .filter((n) => !Number.isNaN(n)),
-          }),
-        },
-      ],
-      toDOM(mark) {
-        return ['span', { 'data-comment': (mark.attrs['ids'] as number[]).join(',') }, 0];
-      },
-    },
+    // The `comment` mark (w:commentRangeStart/End) is contributed by the comment
+    // plugin (@shadow-garden/bapbong-comments) via the editor's schema
+    // composition — it is NOT part of the base document schema, so a build
+    // without comments stays free of comment marks. The `comments` doc attr
+    // above is inert storage the plugin populates when present.
   },
 });
 

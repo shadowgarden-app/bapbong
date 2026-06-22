@@ -3,7 +3,6 @@ import { NgTemplateOutlet } from '@angular/common';
 import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
-import { schema } from '@shadow-garden/bapbong-model';
 import { BapbongEditor, type EditorChange } from '@shadow-garden/bapbong-editor';
 
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
@@ -43,7 +42,6 @@ export class App implements OnDestroy {
   // Comment-UI hosts the store reaches into (anchored layer + composer mount).
   private readonly anchorLayer = viewChild<ElementRef<HTMLDivElement>>('anchorLayer');
   private readonly composerHost = viewChild<ElementRef<HTMLDivElement>>('composerHost');
-  private readonly serializer = DOMSerializer.fromSchema(schema);
 
   /** The framework-agnostic render/edit core (lazily created on first load). */
   private editor: BapbongEditor | null = null;
@@ -142,11 +140,13 @@ export class App implements OnDestroy {
     }, PANEL_SYNC_MS);
   }
 
-  /** Render the document with the schema's own toDOM rules. */
+  /** Render the document with its own schema's toDOM rules (the doc carries the
+   *  composed schema, so plugin marks like `comment` serialize correctly). */
   private renderPreview(doc: ProseMirrorNode): void {
     const host = this.previewHost()?.nativeElement;
     if (!host) return;
-    host.replaceChildren(this.serializer.serializeFragment(doc.content, { document }));
+    const serializer = DOMSerializer.fromSchema(doc.type.schema);
+    host.replaceChildren(serializer.serializeFragment(doc.content, { document }));
   }
 
   ngOnDestroy(): void {

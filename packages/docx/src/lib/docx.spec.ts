@@ -1,7 +1,15 @@
 import JSZip from 'jszip';
-import { Mark } from 'prosemirror-model';
-import { createNumberingCounter, type NumberingDefs } from '@shadow-garden/bapbong-model';
+import { Mark, Schema } from 'prosemirror-model';
+import { createNumberingCounter, schema, type NumberingDefs } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
+
+// The comment mark lives in the comment plugin, not the base schema. Comment
+// import tests compose a schema carrying it (minimal local spec — no docx→plugin
+// dependency) and import against it; otherwise comment values are filtered out.
+const withComments = new Schema({
+  nodes: schema.spec.nodes,
+  marks: schema.spec.marks.append({ comment: { attrs: { ids: {} } } }),
+});
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
@@ -819,6 +827,7 @@ describe('importDocx', () => {
       await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
         'word/comments.xml': commentsXml,
       }),
+      { schema: withComments },
     );
     expect(comments).toEqual([{ id: 0, author: 'Reviewer', date: '2026-01-02', text: 'Note body' }]);
     // Only the "commented" run carries the comment mark.
@@ -852,6 +861,7 @@ describe('importDocx', () => {
         'word/comments.xml': commentsXml,
         'word/commentsExtended.xml': extXml,
       }),
+      { schema: withComments },
     );
     const nodes = doc.attrs['comments'] as { id: number; parentId: number | null; resolved: boolean }[];
     const byId = new Map(nodes.map((n) => [n.id, n]));
