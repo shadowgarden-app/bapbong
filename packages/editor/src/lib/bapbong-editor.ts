@@ -441,8 +441,14 @@ export class BapbongEditor {
     ev.preventDefault(); // keep focus on the hidden editor
     this.dragAnchor = pos;
     this.dragHead = pos;
-    // Keep receiving moves when the pointer leaves the canvas mid-drag.
-    (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
+    // Keep receiving moves when the pointer leaves the canvas mid-drag. Guarded:
+    // setPointerCapture throws if no active pointer matches the id (rare in real
+    // use; also synthetic events) — it must not abort the caret placement below.
+    try {
+      (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
+    } catch {
+      // pointer capture is a nicety, not required for selection
+    }
     this.bridge.setSelection(pos); // caret placement (cheap, anchors the IME)
     this.bridge.focus();
     for (const cb of this.caretPickListeners) cb(pos);
