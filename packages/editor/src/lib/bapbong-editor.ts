@@ -32,6 +32,7 @@ import type {
   MeasureMetrics,
   MeasureText,
   PageConfig,
+  PaintDecoration,
   PluginContext,
   ResolvedLayout,
   SelectionRect,
@@ -390,7 +391,24 @@ export class BapbongEditor {
       viewport: this.currentViewport(),
       // Ids the host marks tint-suppressed (resolved comments, or all when hidden).
       resolvedComments: this.suppressedComments,
+      decorations: this.collectDecorations(),
     });
+  }
+
+  /** Gather each plugin's decorations (doc ranges) and resolve them to
+   *  page-local rects the painter can fill directly. */
+  private collectDecorations(): PaintDecoration[] {
+    if (!this.resolved || this.plugins.length === 0) return [];
+    const out: PaintDecoration[] = [];
+    for (const p of this.plugins) {
+      const decos = p.decorations?.(this.pluginCtx);
+      if (!decos) continue;
+      for (const d of decos) {
+        const rects = selectionRects(this.resolved, d.from, d.to, this.measureText);
+        if (rects.length) out.push({ rects, kind: d.kind, color: d.color });
+      }
+    }
+    return out;
   }
 
   /** The viewport's window onto the page stack, in container CSS px. */

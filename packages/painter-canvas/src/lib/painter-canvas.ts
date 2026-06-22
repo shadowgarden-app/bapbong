@@ -3,6 +3,7 @@ import type {
   FontSpec,
   LayoutLine,
   PagePoint,
+  PaintDecoration,
   ResolvedChrome,
   ResolvedLayout,
   ResolvedPage,
@@ -32,6 +33,9 @@ export interface PaintOptions {
   commentColor?: string;
   /** Resolved comment ids — segments commented ONLY by these get no tint. */
   resolvedComments?: number[];
+  /** Plugin-contributed decorations, pre-resolved to page-local rects. Background
+   *  kinds paint behind the text; underline/strike paint over it. */
+  decorations?: PaintDecoration[];
   /** Visible region in container CSS px (the scroll window onto the stack).
    *  Only pages intersecting it (plus a margin) get a canvas + content; the
    *  rest are unmounted to keep memory bounded. Omit to render every page. */
@@ -73,6 +77,7 @@ const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   selectionColor: 'rgba(59, 130, 246, 0.30)',
   commentColor: 'rgba(255, 193, 7, 0.28)',
   resolvedComments: [],
+  decorations: [],
 };
 
 /** CSS font shorthand. Duplicated from bapbong-measuring: the painter may only
@@ -297,8 +302,29 @@ export class CanvasPainter {
       if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
     }
 
+    // Plugin background decorations (comment tint, find highlight…) behind text.
+    for (const d of o.decorations) {
+      if (d.kind !== 'background') continue;
+      ctx.fillStyle = d.color;
+      for (const r of d.rects) {
+        if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+      }
+    }
+
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
     for (const table of page.tables ?? []) this.paintTable(table, yOffset, o, pageInfo);
+
+    // Plugin underline/strike decorations over the text.
+    for (const d of o.decorations) {
+      if (d.kind === 'background') continue;
+      ctx.fillStyle = d.color;
+      for (const r of d.rects) {
+        if (r.pageIndex !== page.index) continue;
+        const thickness = Math.max(1, r.height * 0.06);
+        const y = d.kind === 'underline' ? yOffset + r.y + r.height - thickness : yOffset + r.y + r.height / 2;
+        ctx.fillRect(r.x, y, r.width, thickness);
+      }
+    }
 
     // Footnotes at the page bottom: a short separator rule above the bodies.
     if (page.footnotes) {

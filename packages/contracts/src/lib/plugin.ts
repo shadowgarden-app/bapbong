@@ -1,5 +1,23 @@
 import type { EditorState, Transaction } from 'prosemirror-state';
-import type { CaretRect } from './contracts.js';
+import type { CaretRect, SelectionRect } from './contracts.js';
+
+/** A decoration a plugin paints over a document range (comment tint, find
+ *  highlight, track-change underline…). Doc positions; the editor resolves them
+ *  to page geometry before painting. */
+export interface RangeDecoration {
+  from: number;
+  to: number;
+  kind: 'background' | 'underline' | 'strike';
+  color: string;
+}
+
+/** A {@link RangeDecoration} resolved to page-local rects — what the painter
+ *  consumes (it never maps doc positions itself). */
+export interface PaintDecoration {
+  rects: SelectionRect[];
+  kind: 'background' | 'underline' | 'strike';
+  color: string;
+}
 
 /**
  * Emitted after every editor layout/paint cycle so a host (any framework) and
@@ -57,4 +75,7 @@ export interface EditorPlugin {
   onChange?(change: EditorChange): void;
   /** Called when a pointerdown places the caret at doc position `pos`. */
   onCaretPick?(pos: number): void;
+  /** Decorations to paint this content frame (collected on every content
+   *  repaint; call `ctx.requestPaint()` when they change). */
+  decorations?(ctx: PluginContext): RangeDecoration[];
 }
