@@ -1,7 +1,8 @@
-import baseConfig from '../../eslint.config.mjs';
+import baseConfig, { isomorphicGuard } from '../../eslint.config.mjs';
 
 export default [
   ...baseConfig,
+  isomorphicGuard, // shipped source must stay DOM-free (Node/server-runnable)
   {
     files: ['**/*.json'],
     rules: {

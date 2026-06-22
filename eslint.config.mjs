@@ -1,5 +1,34 @@
 import nx from '@nx/eslint-plugin';
 
+/** DOM globals forbidden in the isomorphic layer (contracts / model / docx) so
+ *  its shipped source runs on Node/server too. Spread into those packages' own
+ *  eslint.config.mjs — nx lints each project with the project root as the base
+ *  path, so this lives there (project-relative globs), not in the root config.
+ *  Tests are exempt (they may use jsdom). */
+export const isomorphicGuard = {
+  files: ['**/*.ts'],
+  ignores: ['**/*.spec.ts', '**/*.test.ts'],
+  rules: {
+    'no-restricted-globals': [
+      'error',
+      ...[
+        'document',
+        'window',
+        'navigator',
+        'getComputedStyle',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'DOMParser',
+        'XMLSerializer',
+        'Image',
+      ].map((name) => ({
+        name,
+        message: 'Lớp shared phải isomorphic (chạy được trên Node/server) — không chạm DOM.',
+      })),
+    ],
+  },
+};
+
 export default [
   ...nx.configs['flat/base'],
   ...nx.configs['flat/typescript'],
