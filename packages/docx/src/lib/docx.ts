@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { Node as PMNode, Mark } from 'prosemirror-model';
+import { Node as PMNode, Mark, Schema } from 'prosemirror-model';
 import {
   commentSchema,
   schema,
@@ -124,6 +124,9 @@ interface Ctx {
   resolveTheme: ThemeResolver;
   notes: NotesRegistry;
   comments: CommentsRegistry;
+  /** Schema the doc nodes/marks are created with (model's by default; the editor
+   *  may inject a composed schema so plugin-contributed marks are imported). */
+  schema: Schema;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -158,17 +161,17 @@ function mimeOf(path: string): string {
 }
 
 /** Turn resolved run properties into ProseMirror marks. */
-function propsToMarks(p: RunProps): Mark[] {
+function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   const marks: Mark[] = [];
-  if (p.bold) marks.push(schema.marks.strong.create());
-  if (p.italic) marks.push(schema.marks.em.create());
-  if (p.underline) marks.push(schema.marks.underline.create());
-  if (p.strike) marks.push(schema.marks.strike.create());
-  if (p.color) marks.push(schema.marks.textColor.create({ color: p.color }));
-  if (p.sizePt !== undefined) marks.push(schema.marks.fontSize.create({ size: p.sizePt }));
-  if (p.fontFamily) marks.push(schema.marks.fontFamily.create({ family: p.fontFamily }));
-  if (p.highlight) marks.push(schema.marks.highlight.create({ color: p.highlight }));
-  if (p.vertAlign) marks.push(schema.marks.vertAlign.create({ value: p.vertAlign }));
+  if (p.bold) marks.push(ctx.schema.marks["strong"].create());
+  if (p.italic) marks.push(ctx.schema.marks["em"].create());
+  if (p.underline) marks.push(ctx.schema.marks["underline"].create());
+  if (p.strike) marks.push(ctx.schema.marks["strike"].create());
+  if (p.color) marks.push(ctx.schema.marks["textColor"].create({ color: p.color }));
+  if (p.sizePt !== undefined) marks.push(ctx.schema.marks["fontSize"].create({ size: p.sizePt }));
+  if (p.fontFamily) marks.push(ctx.schema.marks["fontFamily"].create({ family: p.fontFamily }));
+  if (p.highlight) marks.push(ctx.schema.marks["highlight"].create({ color: p.highlight }));
+  if (p.vertAlign) marks.push(ctx.schema.marks["vertAlign"].create({ value: p.vertAlign }));
   return marks;
 }
 
@@ -216,7 +219,7 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   const out: PMNode[] = [];
   let buf = '';
   const flush = () => {
-    if (buf.length > 0) out.push(schema.text(buf, marks));
+    if (buf.length > 0) out.push(ctx.schema.text(buf, marks));
     buf = '';
   };
   for (const node of run.children) {
@@ -229,17 +232,17 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
       if (id && ctx.notes.bodies[kind].has(id)) {
         flush();
         const num = ctx.notes.ref(kind, id);
-        const refMarks = [...marks, schema.marks.vertAlign.create({ value: 'super' })];
+        const refMarks = [...marks, ctx.schema.marks["vertAlign"].create({ value: 'super' })];
         // Footnotes carry a `footnote` mark so the layout engine can match the
         // reference to its page-bottom body; endnotes stay plain superscripts
         // (their bodies are appended at the document end).
-        if (kind === 'footnote') refMarks.push(schema.marks.footnote.create({ num }));
-        out.push(schema.text(String(num), refMarks));
+        if (kind === 'footnote') refMarks.push(ctx.schema.marks["footnote"].create({ num }));
+        out.push(ctx.schema.text(String(num), refMarks));
       }
     }
     else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
       flush();
-      out.push(schema.nodes.hard_break.create());
+      out.push(ctx.schema.nodes["hard_break"].create());
     }
   }
   flush();
@@ -305,7 +308,7 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const extent = findDescendant(drawing, 'wp:extent');
   const docPr = findDescendant(drawing, 'wp:docPr');
   const float = parseAnchorFloat(drawing);
-  return schema.nodes.image.create({
+  return ctx.schema.nodes["image"].create({
     src,
     width: emuToPx(attrOf(extent, 'cx')),
     height: emuToPx(attrOf(extent, 'cy')),
@@ -323,12 +326,14 @@ function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href
     ctx.styles.resolveStyle(rStyleId),
     parseRunProps(rPr, ctx.resolveTheme),
   ].reduce(mergeRunProps, {} as RunProps);
-  const marks = propsToMarks(effective);
-  if (href) marks.push(schema.marks.link.create({ href }));
-  // Comments active over this run (w:commentRangeStart/End) become a comment mark.
-  if (ctx.comments.active.size > 0) {
+  const marks = propsToMarks(effective, ctx);
+  if (href) marks.push(ctx.schema.marks["link"].create({ href }));
+  // Comments active over this run (w:commentRangeStart/End) become a comment
+  // mark — only when the schema in use actually has it (the comment plugin
+  // contributed it; otherwise comment ranges are silently skipped).
+  if (ctx.comments.active.size > 0 && ctx.schema.marks['comment']) {
     const ids = [...ctx.comments.active].sort((a, b) => a - b);
-    marks.push(schema.marks.comment.create({ ids }));
+    marks.push(ctx.schema.marks['comment'].create({ ids }));
   }
   return marks;
 }
@@ -355,7 +360,7 @@ function pageFieldNode(
   paraBase: RunProps,
   ctx: Ctx,
 ): PMNode {
-  return schema.nodes.page_field.create({ kind }).mark(runMarks(formatRun, paraBase, ctx, null));
+  return ctx.schema.nodes["page_field"].create({ kind }).mark(runMarks(formatRun, paraBase, ctx, null));
 }
 
 /** State for a complex field (w:fldChar begin … instrText … separate … end). */
@@ -461,7 +466,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
   if (pageBreak) attrs.pageBreakBefore = true;
-  return schema.nodes.paragraph.create(attrs, inline);
+  return ctx.schema.nodes["paragraph"].create(attrs, inline);
 }
 
 /** Custom tab stops from the cascade: the most-derived w:tabs list wins
@@ -606,8 +611,8 @@ interface LogicalCell {
   content: PMNode[];
 }
 
-function emptyCell(): PMNode {
-  return schema.nodes.table_cell.create(null, [schema.nodes.paragraph.create()]);
+function emptyCell(ctx: Ctx): PMNode {
+  return ctx.schema.nodes["table_cell"].create(null, [ctx.schema.nodes["paragraph"].create()]);
 }
 
 /** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults.
@@ -689,7 +694,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       const vAlign = vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
       const borders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
       const content = parseBlocks(tc, ctx);
-      if (content.length === 0) content.push(schema.nodes.paragraph.create());
+      if (content.length === 0) content.push(ctx.schema.nodes["paragraph"].create());
       cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, vAlign, borders, content });
       col += colspan;
     }
@@ -723,7 +728,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         else break;
       }
       emitted.push(
-        schema.nodes.table_cell.create(
+        ctx.schema.nodes["table_cell"].create(
           {
             colspan: cell.colspan,
             rowspan,
@@ -740,9 +745,9 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     const rowAttrs: Record<string, unknown> = {};
     if (rp.header) rowAttrs['header'] = true;
     if (rp.height) rowAttrs['height'] = rp.height;
-    return schema.nodes.table_row.create(
+    return ctx.schema.nodes["table_row"].create(
       Object.keys(rowAttrs).length > 0 ? rowAttrs : null,
-      emitted.length > 0 ? emitted : [emptyCell()],
+      emitted.length > 0 ? emitted : [emptyCell(ctx)],
     );
   });
 
@@ -753,9 +758,9 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   if (cellPadding) attrs['cellPadding'] = cellPadding;
   if (borders) attrs['borders'] = borders;
   if (jc === 'center' || jc === 'right' || jc === 'end') attrs['align'] = jc === 'end' ? 'right' : jc;
-  return schema.nodes.table.create(
+  return ctx.schema.nodes["table"].create(
     Object.keys(attrs).length > 0 ? attrs : null,
-    rows.length > 0 ? rows : [schema.nodes.table_row.create(null, [emptyCell()])],
+    rows.length > 0 ? rows : [ctx.schema.nodes["table_row"].create(null, [emptyCell(ctx)])],
   );
 }
 
@@ -984,14 +989,14 @@ function buildCommentNodes(ctx: Ctx): CommentNode[] {
  *  endnote section and the page-bottom footnote map. */
 function noteBlocks(note: OoxmlNode, num: number, ctx: Ctx): PMNode[] {
   const blocks = parseBlocks(note, ctx);
-  const marker = schema.text(`${num}. `, [schema.marks.vertAlign.create({ value: 'super' })]);
+  const marker = ctx.schema.text(`${num}. `, [ctx.schema.marks["vertAlign"].create({ value: 'super' })]);
   const first = blocks[0];
   if (first && first.type.name === 'paragraph') {
     const kids: PMNode[] = [marker];
     first.forEach((k) => kids.push(k));
-    blocks[0] = schema.nodes.paragraph.create(first.attrs, kids);
+    blocks[0] = ctx.schema.nodes["paragraph"].create(first.attrs, kids);
   } else {
-    blocks.unshift(schema.nodes.paragraph.create(null, [marker]));
+    blocks.unshift(ctx.schema.nodes["paragraph"].create(null, [marker]));
   }
   return blocks;
 }
@@ -1004,7 +1009,7 @@ function buildFootnotesMap(ctx: Ctx): Record<number, PMNode> {
   for (const { kind, id, num } of ctx.notes.refs) {
     if (kind !== 'footnote') continue;
     const note = ctx.notes.bodies.footnote.get(id);
-    if (note) out[num] = storyDoc(noteBlocks(note, num, ctx), null);
+    if (note) out[num] = storyDoc(ctx, noteBlocks(note, num, ctx), null);
   }
   return out;
 }
@@ -1016,8 +1021,8 @@ function buildNotesSection(ctx: Ctx): PMNode[] {
   const endnotes = ctx.notes.refs.filter((r) => r.kind === 'endnote');
   if (endnotes.length === 0) return [];
   const out: PMNode[] = [
-    schema.nodes.paragraph.create({ spacing: { before: 12 } }, [
-      schema.text('Ghi chú cuối', [schema.marks.strong.create()]),
+    ctx.schema.nodes["paragraph"].create({ spacing: { before: 12 } }, [
+      ctx.schema.text('Ghi chú cuối', [ctx.schema.marks["strong"].create()]),
     ]),
   ];
   for (const { id, num } of endnotes) {
@@ -1028,6 +1033,7 @@ function buildNotesSection(ctx: Ctx): PMNode[] {
 }
 
 function storyDoc(
+  ctx: Ctx,
   blocks: PMNode[],
   numbering: NumberingDefs | null,
   sections: SectionConfig[] | null = null,
@@ -1040,9 +1046,9 @@ function storyDoc(
   if (numbering) attrs['numbering'] = numbering;
   if (sections) attrs['sections'] = sections;
   if (comments && comments.length > 0) attrs['comments'] = comments;
-  return schema.nodes.doc.create(
+  return ctx.schema.nodes["doc"].create(
     Object.keys(attrs).length > 0 ? attrs : null,
-    blocks.length > 0 ? blocks : [schema.nodes.paragraph.create()],
+    blocks.length > 0 ? blocks : [ctx.schema.nodes["paragraph"].create()],
   );
 }
 
@@ -1066,7 +1072,10 @@ async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
  * and inline images (data-URL). Headers/footers, theme colors, and export are
  * later milestones; unmodeled XML is preserved on `rawDocumentXml`.
  */
-export async function importDocx(input: DocxInput): Promise<DocxImport> {
+export async function importDocx(
+  input: DocxInput,
+  opts?: { schema?: Schema },
+): Promise<DocxImport> {
   const zip = await JSZip.loadAsync(input);
 
   const rawDocumentXml = await readPart(zip, 'word/document.xml');
@@ -1093,6 +1102,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
     resolveTheme,
     notes,
     comments,
+    schema: opts?.schema ?? schema,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
@@ -1111,6 +1121,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
   // Only ride the sections attr when it changes layout (>1 section, or columns).
   const multiSection = sections.length > 1 || sections.some((s) => s.columns.count > 1);
   const doc = storyDoc(
+    ctx,
     [...parsed.blocks, ...endnoteBlocks],
     ctx.numbering.defs,
     multiSection ? sections : null,
@@ -1133,7 +1144,7 @@ export async function importDocx(input: DocxInput): Promise<DocxImport> {
         if (!xml) continue;
         const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
         const el = child(parseXml(xml), root);
-        store[type] = storyDoc(el ? parseBlocks(el, partCtx) : [], ctx.numbering.defs);
+        store[type] = storyDoc(partCtx, el ? parseBlocks(el, partCtx) : [], ctx.numbering.defs);
       }
     };
     await collect('w:headerReference', headers, 'w:hdr');
