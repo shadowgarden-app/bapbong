@@ -110,10 +110,6 @@ export class BapbongEditor {
   // Scroll repaint throttle (page virtualization).
   private scrollRaf: number | null = null;
 
-  // Comment ids painted WITHOUT a tint (resolved, or all when hidden). The host
-  // owns the comment view policy and pushes the set here via setSuppressedComments.
-  private suppressedComments: number[] = [];
-
   private readonly changeListeners = new Set<(c: EditorChange) => void>();
   private readonly caretPickListeners = new Set<(pos: number) => void>();
 
@@ -260,12 +256,6 @@ export class BapbongEditor {
     if (pt && this.viewport) this.viewport.scrollTop = Math.max(0, pt.y - topMargin);
   }
 
-  /** Comment ids to paint WITHOUT a tint (resolved, or all when hidden). The
-   *  host owns the view policy; this repaints with the new set. */
-  setSuppressedComments(ids: number[]): void {
-    this.suppressedComments = ids;
-    this.repaintContent();
-  }
 
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
@@ -389,8 +379,6 @@ export class BapbongEditor {
       caret: this.caretVisible ? this.lastCaret : null,
       selection: this.lastSelection,
       viewport: this.currentViewport(),
-      // Ids the host marks tint-suppressed (resolved comments, or all when hidden).
-      resolvedComments: this.suppressedComments,
       decorations: this.collectDecorations(),
     });
   }

@@ -111,7 +111,10 @@ export class App implements OnDestroy {
     if (this.editor) return this.editor;
     const stack = this.stackHost()?.nativeElement;
     if (!stack) return null;
-    const editor = new BapbongEditor(stack, { viewport: this.wrapHost()?.nativeElement });
+    const editor = new BapbongEditor(stack, {
+      viewport: this.wrapHost()?.nativeElement,
+      plugins: [this.cs.tintPlugin], // comment tint via the decoration pipeline
+    });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).

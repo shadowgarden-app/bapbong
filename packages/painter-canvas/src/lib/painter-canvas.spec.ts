@@ -186,23 +186,24 @@ describe('CanvasPainter', () => {
     expect(ctx.calls.indexOf(hlFill as never)).toBeLessThan(ctx.calls.findIndex((c) => c.method === 'fillText'));
   });
 
-  it('tints commented text behind the glyphs', () => {
+  it('fills a background decoration behind the glyphs', () => {
+    // Comment tint / find-highlight etc. arrive as generic plugin decorations,
+    // pre-resolved to page-local rects (the painter no longer knows "comments").
     const { painter, container } = setup();
-    const commented = { ...helloLine, segments: [{ x: 20, text: 'Hi', font: font(), commentIds: [0], width: 30 }] };
-    painter.paint({ pages: [page([commented])] }, { devicePixelRatio: 1 });
+    painter.paint(
+      { pages: [page([helloLine])] },
+      {
+        devicePixelRatio: 1,
+        decorations: [
+          { rects: [{ pageIndex: 0, x: 20, y: 20, width: 30, height: 16 }], kind: 'background', color: 'rgba(255, 193, 7, 0.28)' },
+        ],
+      },
+    );
     const ctx = ctxAt(container, 0);
     const tint = ctx.of('fillRect').find((c) => c.fillStyle.startsWith('rgba(255'));
-    expect(tint?.args).toEqual([20, 20, 30, 16]); // over the line box
+    expect(tint?.args).toEqual([20, 20, 30, 16]);
     // painted before the glyph
     expect(ctx.calls.indexOf(tint as never)).toBeLessThan(ctx.calls.findIndex((c) => c.method === 'fillText'));
-  });
-
-  it('skips the comment tint when every covering comment is resolved', () => {
-    const { painter, container } = setup();
-    const commented = { ...helloLine, segments: [{ x: 20, text: 'Hi', font: font(), commentIds: [0], width: 30 }] };
-    painter.paint({ pages: [page([commented])] }, { devicePixelRatio: 1, resolvedComments: [0] });
-    const tint = ctxAt(container, 0).of('fillRect').find((c) => c.fillStyle.startsWith('rgba(255'));
-    expect(tint).toBeUndefined();
   });
 
   it('draws underline and strike from layout-measured widths', () => {
