@@ -27,12 +27,20 @@ import {
 } from '@shadow-garden/bapbong-selection';
 import type {
   CaretRect,
+  EditorChange,
+  EditorPlugin,
   MeasureMetrics,
   MeasureText,
   PageConfig,
+  PluginContext,
   ResolvedLayout,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
+
+// The plugin contract's canonical home is `contracts`; re-export it here so a
+// plugin author can `import { EditorPlugin, PluginContext, EditorChange } from
+// '@shadow-garden/bapbong-editor'`.
+export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/bapbong-contracts';
 
 /** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
 const A4: PageConfig = {
@@ -43,22 +51,13 @@ const A4: PageConfig = {
 
 const CARET_BLINK_MS = 530;
 
-/** Fired after every layout/paint cycle so a host (any framework) can mirror
- *  document state — page count, comment threads (on doc.attrs), selection. */
-export interface EditorChange {
-  /** The current editor state (doc + selection). */
-  state: EditorState;
-  /** Number of laid-out pages. */
-  pageCount: number;
-  /** Whether the doc changed this cycle (false = selection-only). Hosts use it
-   *  to skip rebuilding doc-derived UI (comment sidebars, JSON panels). */
-  docChanged: boolean;
-}
-
 export interface BapbongEditorOptions {
   /** The scroll viewport the page stack lives in (used for virtualization and
    *  scroll-into-view). Defaults to `stack.closest('.canvas-wrap')`. */
   viewport?: HTMLElement;
+  /** Editor plugins. Their lifecycle/event hooks are invoked by the core; they
+   *  reach back through the PluginContext handed to `setup`. */
+  plugins?: EditorPlugin[];
 }
 
 /**
@@ -117,6 +116,10 @@ export class BapbongEditor {
   private readonly changeListeners = new Set<(c: EditorChange) => void>();
   private readonly caretPickListeners = new Set<(pos: number) => void>();
 
+  private readonly plugins: EditorPlugin[];
+  private readonly pluginTeardowns: Array<() => void> = [];
+  private readonly pluginCtx: PluginContext;
+
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
     this.viewport =
@@ -133,6 +136,31 @@ export class BapbongEditor {
     this.viewport?.addEventListener('scroll', this.onScroll);
     // Fonts that finish loading later invalidate every measurement.
     document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
+
+    // Plugins: build their context and run setup (teardowns collected for destroy).
+    this.plugins = opts.plugins ?? [];
+    this.pluginCtx = this.makePluginContext();
+    for (const p of this.plugins) {
+      const teardown = p.setup?.(this.pluginCtx);
+      if (teardown) this.pluginTeardowns.push(teardown);
+    }
+  }
+
+  /** The controlled surface handed to each plugin (live state + geometry). */
+  private makePluginContext(): PluginContext {
+    // Arrow methods capture `this` lexically (no this-alias).
+    const ctx = {
+      dispatch: (tr: Transaction) => this.dispatch(tr),
+      caretRect: (pos: number) => this.caretRect(pos),
+      pageToCanvas: (p: { pageIndex: number; x: number; y: number }) => this.pageToCanvas(p),
+      setSelection: (from: number, to?: number) => this.setSelection(from, to),
+      scrollToPos: (pos: number, topMargin?: number) => this.scrollToPos(pos, topMargin),
+      requestPaint: () => this.repaintContent(),
+    };
+    // `state` is live (read on each access); an arrow getter keeps it current
+    // without throwing at construction (the doc loads later).
+    Object.defineProperty(ctx, 'state', { enumerable: true, get: () => this.state });
+    return ctx as PluginContext;
   }
 
   // ── Public API ──────────────────────────────────────────────────────
@@ -244,6 +272,8 @@ export class BapbongEditor {
   }
 
   destroy(): void {
+    for (const t of this.pluginTeardowns) t();
+    this.pluginTeardowns.length = 0;
     this.stopBlink();
     if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
     this.stack.removeEventListener('pointerdown', this.onPointerDown);
@@ -338,6 +368,7 @@ export class BapbongEditor {
 
   private emitChange(c: EditorChange): void {
     for (const cb of this.changeListeners) cb(c);
+    for (const p of this.plugins) p.onChange?.(c);
   }
 
   /** Redraw caret/selection in the current blink phase (only the affected
@@ -415,6 +446,7 @@ export class BapbongEditor {
     this.bridge.setSelection(pos); // caret placement (cheap, anchors the IME)
     this.bridge.focus();
     for (const cb of this.caretPickListeners) cb(pos);
+    for (const p of this.plugins) p.onCaretPick?.(pos);
   };
 
   private onPointerMove = (ev: PointerEvent): void => {

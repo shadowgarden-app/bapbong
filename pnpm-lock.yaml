@@ -169,7 +169,11 @@ importers:
         specifier: ~4.1.0
         version: 4.1.8(@types/node@20.19.9)(@vitest/coverage-v8@4.1.8)(vite@8.0.16(@types/node@20.19.9)(esbuild@0.28.0)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))
 
-  packages/contracts: {}
+  packages/contracts:
+    dependencies:
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
 
   packages/docx:
     dependencies:
