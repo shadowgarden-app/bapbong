@@ -1,4 +1,5 @@
-import { Node as ProseMirrorNode } from 'prosemirror-model';
+import { Node as ProseMirrorNode, Schema } from 'prosemirror-model';
+import { schema as baseSchema } from '@shadow-garden/bapbong-model';
 import {
   importDocx,
   exportDocx,
@@ -91,6 +92,8 @@ export class BapbongEditor {
   // The imported source package — passed to exportDocx({ carry }) so styles /
   // numbering / headers / media survive a round-trip.
   private importedRaw: DocxImport['raw'] | null = null;
+  // The document schema: model's base, extended with plugin schema contributions.
+  private docSchema: Schema = baseSchema;
   // Page geometry from the imported docx's sectPr (A4 until imported).
   private page: PageConfig = A4;
 
@@ -173,14 +176,24 @@ export class BapbongEditor {
     return this.resolved?.pages.length ?? 0;
   }
 
+  /** The document schema in use (model's base + plugin schema contributions).
+   *  Hosts serialize/parse comment bodies, previews, etc. against this. */
+  get schema(): Schema {
+    return this.docSchema;
+  }
+
   /** Import a .docx, lay it out, and paint the first frame. Resolves with the
    *  imported page-chrome keys (the rest of the import rides on the doc model
    *  exposed via `state`). */
   async loadDocx(
     bytes: ArrayBuffer,
   ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
+    // Compose the doc schema from model's base + any plugin schema
+    // contributions, and import against it (so plugin-owned marks/nodes parse).
+    const composed = composeSchema(baseSchema, this.plugins);
+    this.docSchema = composed ?? baseSchema;
     const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } =
-      await importDocx(bytes);
+      await importDocx(bytes, composed ? { schema: composed } : undefined);
     this.importedRaw = raw; // carried on export so unmodelled parts survive
     this.chromeHeaders = headers;
     this.chromeFooters = footers;
@@ -529,6 +542,29 @@ export class BapbongEditor {
     this.layoutCache = createLayoutCache();
     if (this.bridge) this.refresh(this.bridge.state);
   };
+}
+
+/**
+ * Compose the document schema from a base plus each plugin's `schema`
+ * contribution (extra marks/nodes appended). Returns `null` when no plugin
+ * contributes anything, so callers can keep using the base schema unchanged.
+ */
+export function composeSchema(base: Schema, plugins: EditorPlugin[]): Schema | null {
+  let nodes = base.spec.nodes;
+  let marks = base.spec.marks;
+  let changed = false;
+  for (const p of plugins) {
+    if (!p.schema) continue;
+    if (p.schema.nodes) {
+      nodes = nodes.append(p.schema.nodes);
+      changed = true;
+    }
+    if (p.schema.marks) {
+      marks = marks.append(p.schema.marks);
+      changed = true;
+    }
+  }
+  return changed ? new Schema({ nodes, marks }) : null;
 }
 
 /** Every fontFamily mark in the given documents, plus the engine default. */

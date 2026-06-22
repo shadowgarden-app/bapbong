@@ -1,4 +1,28 @@
-import { BapbongEditor, type EditorPlugin } from './bapbong-editor';
+import { Schema } from 'prosemirror-model';
+import { BapbongEditor, composeSchema, type EditorPlugin } from './bapbong-editor';
+
+const baseSchema = new Schema({
+  nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*' }, text: {} },
+  marks: { em: {} },
+});
+
+describe('composeSchema', () => {
+  it('returns null when no plugin contributes schema', () => {
+    expect(composeSchema(baseSchema, [{ name: 'noop' }])).toBeNull();
+  });
+
+  it('appends plugin marks/nodes to the base schema', () => {
+    const plugin: EditorPlugin = {
+      name: 'comments',
+      schema: { marks: { comment: { attrs: { ids: {} } } } },
+    };
+    const composed = composeSchema(baseSchema, [plugin]);
+    expect(composed).not.toBeNull();
+    expect(composed?.marks['comment']).toBeDefined(); // contributed
+    expect(composed?.marks['em']).toBeDefined(); // base preserved
+    expect(composed?.nodes['paragraph']).toBeDefined();
+  });
+});
 
 describe('BapbongEditor', () => {
   it('is a constructable class', () => {

@@ -1,4 +1,5 @@
 import type { EditorState, Transaction } from 'prosemirror-state';
+import type { MarkSpec, NodeSpec } from 'prosemirror-model';
 import type { CaretRect, SelectionRect } from './contracts.js';
 
 /** A decoration a plugin paints over a document range (comment tint, find
@@ -69,6 +70,9 @@ export interface PluginContext {
 export interface EditorPlugin {
   /** Stable identifier (also used for diagnostics). */
   readonly name: string;
+  /** Schema contributions merged into the editor's document schema, so a plugin
+   *  can own its marks/nodes. Composed once when a document loads. */
+  schema?: { marks?: Record<string, MarkSpec>; nodes?: Record<string, NodeSpec> };
   /** Called once when the editor is constructed; may return a teardown fn. */
   setup?(ctx: PluginContext): void | (() => void);
   /** Called after every editor layout/paint cycle. */

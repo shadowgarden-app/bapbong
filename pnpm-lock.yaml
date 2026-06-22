@@ -174,15 +174,15 @@ importers:
       '@shadow-garden/bapbong-contracts':
         specifier: workspace:^
         version: link:../contracts
-      prosemirror-model:
-        specifier: ^1.25.7
-        version: 1.25.8
       prosemirror-state:
         specifier: ^1.4.4
         version: 1.4.4
 
   packages/contracts:
     dependencies:
+      prosemirror-model:
+        specifier: ^1.25.7
+        version: 1.25.8
       prosemirror-state:
         specifier: ^1.4.4
         version: 1.4.4
@@ -222,6 +222,9 @@ importers:
       '@shadow-garden/bapbong-measuring':
         specifier: workspace:^
         version: link:../measuring
+      '@shadow-garden/bapbong-model':
+        specifier: workspace:^
+        version: link:../model
       '@shadow-garden/bapbong-painter-canvas':
         specifier: workspace:^
         version: link:../painter-canvas

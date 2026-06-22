@@ -18,6 +18,7 @@
     { "path": "../input-bridge/tsconfig.lib.json" },
     { "path": "../layout-engine/tsconfig.lib.json" },
     { "path": "../measuring/tsconfig.lib.json" },
+    { "path": "../model/tsconfig.lib.json" },
     { "path": "../painter-canvas/tsconfig.lib.json" },
     { "path": "../selection/tsconfig.lib.json" }
   ],
