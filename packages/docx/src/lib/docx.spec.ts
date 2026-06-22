@@ -870,6 +870,32 @@ describe('importDocx', () => {
     expect(byId.get(1)).toMatchObject({ parentId: 0, resolved: false });
   });
 
+  it('filters comments out when the schema lacks the comment mark (no plugin)', async () => {
+    // Same comment-bearing docx, but imported with the DEFAULT (base) schema —
+    // i.e. the comment plugin is absent. No comment mark + no threads survive.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:commentRangeStart w:id="0"/><w:r><w:t>commented</w:t></w:r><w:commentRangeEnd w:id="0"/>
+        <w:r><w:commentReference w:id="0"/></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const commentsXml = `<?xml version="1.0"?><w:comments xmlns:w="${W_NS}">
+      <w:comment w:id="0" w:author="Reviewer" w:date="2026-01-02"><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:comment>
+    </w:comments>`;
+    const { doc, comments } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
+        'word/comments.xml': commentsXml,
+      }),
+    ); // ← no { schema } → base schema has no comment mark
+    expect(comments).toEqual([]); // flat list filtered
+    expect(doc.attrs['comments']).toBeNull(); // no thread data on the doc
+    let anyCommentMark = false;
+    doc.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === 'comment')) anyCommentMark = true;
+    });
+    expect(anyCommentMark).toBe(false); // text carries no comment mark
+  });
+
   it('leaves titlePg/evenAndOdd false when unset', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:t>body</w:t></w:r></w:p>
