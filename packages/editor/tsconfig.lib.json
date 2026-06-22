@@ -8,10 +8,19 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [],
+  "references": [
+    { "path": "../contracts/tsconfig.lib.json" },
+    { "path": "../docx/tsconfig.lib.json" },
+    { "path": "../input-bridge/tsconfig.lib.json" },
+    { "path": "../layout-engine/tsconfig.lib.json" },
+    { "path": "../measuring/tsconfig.lib.json" },
+    { "path": "../painter-canvas/tsconfig.lib.json" },
+    { "path": "../selection/tsconfig.lib.json" }
+  ],
   "exclude": [
     "vite.config.ts",
     "vite.config.mts",
