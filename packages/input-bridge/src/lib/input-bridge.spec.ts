@@ -2,16 +2,10 @@ import { Schema } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { undo } from 'prosemirror-history';
 import {
-  addCommentTr,
   createEditingState,
-  deleteCommentTr,
-  editCommentTr,
   moveCaretCommand,
-  replyCommentTr,
-  resolveCommentTr,
   splitListItem,
   wordRangeAt,
-  type CommentNode,
 } from './input-bridge.js';
 
 // EditorView needs a real DOM, so the headless tests cover the state side:
@@ -104,71 +98,6 @@ describe('splitListItem', () => {
       listSchema.node('doc', null, [listSchema.node('paragraph', null, [listSchema.text('x')])]),
     );
     expect(splitListItem(plain, () => undefined)).toBe(false); // base keymap's turn
-  });
-});
-
-describe('comment authoring commands', () => {
-  const cSchema = new Schema({
-    nodes: {
-      doc: { content: 'block+', attrs: { comments: { default: null } } },
-      paragraph: { group: 'block', content: 'inline*' },
-      text: { group: 'inline' },
-    },
-    marks: { comment: { attrs: { ids: {} } } },
-  });
-  const make = () =>
-    createEditingState(cSchema.node('doc', null, [cSchema.node('paragraph', null, [cSchema.text('hello world')])]));
-  const getComments = (state: { doc: { attrs: Record<string, unknown> } }) =>
-    (state.doc.attrs['comments'] as CommentNode[] | null) ?? [];
-  const body = (t: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
-  const userA = { id: 'a', name: 'A' };
-  const userB = { id: 'b', name: 'B' };
-  const markedIds = (state: { doc: { descendants: (f: (n: { isText: boolean; marks: readonly { type: { name: string }; attrs: Record<string, unknown> }[] }) => void) => void } }) => {
-    const ids: number[][] = [];
-    state.doc.descendants((n) => {
-      if (!n.isText) return;
-      const m = n.marks.find((mk) => mk.type.name === 'comment');
-      if (m) ids.push(m.attrs['ids'] as number[]);
-    });
-    return ids;
-  };
-
-  it('add tags the range and appends a thread root', () => {
-    let state = make();
-    // "world" spans pos 7..12.
-    state = state.apply(addCommentTr(state, { from: 7, to: 12 }, { user: userA, date: 'd1', body: body('note') }));
-    expect(getComments(state)).toHaveLength(1);
-    expect(getComments(state)[0]).toMatchObject({ id: 1, parentId: null, user: userA, resolved: false });
-    expect(markedIds(state)).toEqual([[1]]); // only "world" carries the mark
-  });
-
-  it('reply / resolve / edit update the thread', () => {
-    let state = make();
-    state = state.apply(addCommentTr(state, { from: 7, to: 12 }, { user: userA, date: 'd1', body: body('note') }));
-    state = state.apply(replyCommentTr(state, 1, { user: userB, date: 'd2', body: body('reply') }));
-    expect(getComments(state)[1]).toMatchObject({ id: 2, parentId: 1, user: userB });
-    state = state.apply(resolveCommentTr(state, 1, true));
-    expect(getComments(state)[0].resolved).toBe(true);
-    state = state.apply(editCommentTr(state, 1, body('edited')));
-    expect(getComments(state)[0].body).toEqual(body('edited'));
-  });
-
-  it('delete removes the subtree and strips the mark', () => {
-    let state = make();
-    state = state.apply(addCommentTr(state, { from: 7, to: 12 }, { user: userA, date: 'd1', body: body('note') }));
-    state = state.apply(replyCommentTr(state, 1, { user: userB, date: 'd2', body: body('reply') }));
-    state = state.apply(deleteCommentTr(state, 1));
-    expect(getComments(state)).toHaveLength(0); // root + reply gone
-    expect(markedIds(state)).toEqual([]); // mark stripped
-  });
-
-  it('add is undoable (mark + thread revert together)', () => {
-    let state = make();
-    state = state.apply(addCommentTr(state, { from: 7, to: 12 }, { user: userA, date: 'd1', body: body('note') }));
-    const ok = undo(state, (tr) => (state = state.apply(tr)));
-    expect(ok).toBe(true);
-    expect(getComments(state)).toHaveLength(0);
-    expect(markedIds(state)).toEqual([]);
   });
 });
 

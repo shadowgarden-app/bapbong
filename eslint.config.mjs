@@ -86,6 +86,10 @@ export default [
               onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'],
             },
             {
+              sourceTag: 'scope:plugin',
+              onlyDependOnLibsWithTags: ['scope:pure'],
+            },
+            {
               sourceTag: 'scope:adapter',
               onlyDependOnLibsWithTags: ['scope:app'],
             },
