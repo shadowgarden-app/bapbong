@@ -1,24 +1,30 @@
 /** Property names of T whose value can serve as a key (string | number | symbol). */
 type IdKeysOf<T> = { [K in keyof T]: T[K] extends PropertyKey ? K : never }[keyof T];
 
+/** Default key property: `id` when T has one, otherwise any valid id property. */
+type DefaultIdKey<T> = 'id' extends IdKeysOf<T> ? 'id' : IdKeysOf<T>;
+
 /**
- * A key-property-keyed, insertion-ordered collection. The id property name is
- * supplied at construction — `new Collection('name', items)` keys each item by
- * its `name`, but any primitive-valued property works. Lookups/removals accept
- * either the key or the item itself; iterating yields the items in insertion
- * order.
+ * A key-property-keyed, insertion-ordered collection. Items are keyed by a
+ * property whose value is a primitive (`string | number | symbol`); it defaults
+ * to `id`, or pass `{ idProperty }` to key by another (e.g. plugins by `name`).
+ * Lookups/removals accept either the key or the item; iterating yields the
+ * items in insertion order.
  *
  * Dependency-free + isomorphic. Used by the editor as its plugin registry
- * (`new Collection<EditorPlugin>('name', …)`), but generic over anything with a
- * primitive id property.
+ * (`new Collection<EditorPlugin>([], { idProperty: 'name' })`), but generic.
+ *
+ * Note: if T has no `id` property you must pass `{ idProperty }` — otherwise
+ * items would key by an absent property at runtime.
  */
-export class Collection<T extends object, IdKey extends IdKeysOf<T> = IdKeysOf<T>>
+export class Collection<T extends object, IdKey extends IdKeysOf<T> = DefaultIdKey<T>>
   implements Iterable<T>
 {
   private readonly items = new Map<T[IdKey], T>();
+  private readonly idProperty: IdKey;
 
-  /** @param idProperty the property whose value is each item's unique key. */
-  constructor(private readonly idProperty: IdKey, initial: Iterable<T> = []) {
+  constructor(initial: T[] = [], options?: { idProperty?: IdKey }) {
+    this.idProperty = (options?.idProperty ?? 'id') as IdKey;
     for (const it of initial) this.add(it);
   }
 
