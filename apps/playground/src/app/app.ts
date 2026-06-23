@@ -2,6 +2,7 @@ import { Component, ElementRef, OnDestroy, inject, signal, viewChild } from '@an
 import { NgTemplateOutlet } from '@angular/common';
 import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
+import { findPlugin, type FindState } from './find-plugin';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type EditorChange } from '@shadow-garden/bapbong-editor';
 
@@ -47,6 +48,11 @@ export class App implements OnDestroy {
   private editor: BapbongEditor | null = null;
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Find-and-replace plugin + its bar state (count/active mirrored from onState).
+  protected readonly find = findPlugin();
+  protected readonly findState = signal<FindState>({ query: '', count: 0, active: 0 });
+  protected readonly replaceText = signal('');
 
   protected async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -111,10 +117,12 @@ export class App implements OnDestroy {
     if (!stack) return null;
     const editor = new BapbongEditor(stack, {
       viewport: this.wrapHost()?.nativeElement,
-      plugins: [this.cs.tintPlugin], // comment tint via the decoration pipeline
+      // Two plugins via the same contract: comment tint + find/replace highlight.
+      plugins: [this.cs.tintPlugin, this.find],
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
+    this.find.onState((s) => this.findState.set(s)); // mirror count/active into the bar
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
     this.cs.attachViews({
       anchorLayer: () => this.anchorLayer()?.nativeElement ?? null,
@@ -147,6 +155,23 @@ export class App implements OnDestroy {
     if (!host) return;
     const serializer = DOMSerializer.fromSchema(doc.type.schema);
     host.replaceChildren(serializer.serializeFragment(doc.content, { document }));
+  }
+
+  // ── Find / replace (delegates to the find plugin) ───────────────────
+  protected onFindInput(value: string): void {
+    this.find.setQuery(value);
+  }
+  protected findNext(): void {
+    this.find.next();
+  }
+  protected findPrev(): void {
+    this.find.prev();
+  }
+  protected replaceOne(): void {
+    this.find.replaceCurrent(this.replaceText());
+  }
+  protected replaceAll(): void {
+    this.find.replaceAll(this.replaceText());
   }
 
   ngOnDestroy(): void {

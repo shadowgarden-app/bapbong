@@ -57,6 +57,29 @@
       }
     </div>
 
+    <!-- Find &amp; replace bar (driven by the find plugin via decorations). -->
+    <div class="find-bar">
+      <input
+        type="text"
+        class="find-input"
+        placeholder="Tìm…"
+        (input)="onFindInput($any($event.target).value)"
+        (keydown.enter)="findNext()"
+      />
+      <span class="find-count dim">{{ findState().count ? findState().active + '/' + findState().count : '0' }}</span>
+      <button type="button" [disabled]="!findState().count" (click)="findPrev()" title="Trước">◀</button>
+      <button type="button" [disabled]="!findState().count" (click)="findNext()" title="Sau">▶</button>
+      <input
+        type="text"
+        class="find-input"
+        placeholder="Thay bằng…"
+        [value]="replaceText()"
+        (input)="replaceText.set($any($event.target).value)"
+      />
+      <button type="button" [disabled]="!findState().count" (click)="replaceOne()">Thay</button>
+      <button type="button" [disabled]="!findState().count" (click)="replaceAll()">Thay tất cả</button>
+    </div>
+
     <!-- Shared composer (mounts a small ProseMirror editor on demand). -->
     <div class="composer" [hidden]="!cs.composerFor()">
       <div class="dim">{{ cs.composerFor()?.label }} · gõ &commat; để nhắc người dùng</div>
