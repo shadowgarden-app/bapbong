@@ -1,23 +1,17 @@
-import { findPlugin, type FindPlugin } from './find-plugin';
+import type { EditorPlugin } from '@shadow-garden/bapbong-contracts';
+import { findPlugin } from './find-plugin';
 
 /**
  * Built-in ("internal") plugins — shipped with the editor, no install needed
- * (unlike external `@shadow-garden/bapbong-*` plugins the host passes in via
- * `{ plugins }`). The editor instantiates these per construction, registers
- * them ahead of the host's plugins, and exposes each as a typed handle
+ * (unlike external `@shadow-garden/bapbong-*` plugins the host passes via
+ * `{ plugins }`). The editor registers these (keyed by `name`) ahead of the
+ * host's plugins and exposes the ones with a richer API as typed handles
  * (e.g. `editor.find`).
  *
- * Add a new internal plugin by importing its factory, adding a field to
- * {@link Builtins} + {@link createBuiltins}, and exposing a getter on
- * `BapbongEditor`. This is a FACTORY, not a shared array: each plugin holds
- * per-editor state, so every editor needs its own fresh instances.
+ * Add a new internal plugin by importing its factory and returning it here.
+ * This is a FACTORY, not a shared array: each plugin holds per-editor state, so
+ * every editor needs its own fresh instances.
  */
-export interface Builtins {
-  find: FindPlugin;
-}
-
-export function createBuiltins(): Builtins {
-  return {
-    find: findPlugin(),
-  };
+export function createBuiltins(): EditorPlugin[] {
+  return [findPlugin()];
 }

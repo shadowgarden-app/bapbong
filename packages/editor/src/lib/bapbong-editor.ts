@@ -45,7 +45,9 @@ import type {
 export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/bapbong-contracts';
 // Built-in ("internal") plugins ship with the editor (see built-in-plugins.ts)
 // and are exposed as typed handles (e.g. editor.find) — no install needed.
-import { createBuiltins, type Builtins } from './built-in-plugins';
+import { createBuiltins } from './built-in-plugins';
+import { Collection } from './collection';
+import type { FindPlugin } from './find-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
 
 /** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
@@ -120,9 +122,8 @@ export class BapbongEditor {
   private readonly changeListeners = new Set<(c: EditorChange) => void>();
   private readonly caretPickListeners = new Set<(pos: number) => void>();
 
-  // Built-in ("internal") plugins, instantiated fresh per editor.
-  private readonly builtins: Builtins = createBuiltins();
-  private readonly plugins: EditorPlugin[];
+  /** Plugin registry keyed by name — built-ins (internal) + host (external). */
+  private readonly plugins: Collection<EditorPlugin>;
   private readonly pluginTeardowns: Array<() => void> = [];
   private readonly pluginCtx: PluginContext;
 
@@ -145,7 +146,7 @@ export class BapbongEditor {
 
     // Plugins: build their context and run setup (teardowns collected for destroy).
     // Internal (built-in) plugins first, then external/host-provided plugins.
-    this.plugins = [...Object.values(this.builtins), ...(opts.plugins ?? [])];
+    this.plugins = new Collection<EditorPlugin>([...createBuiltins(), ...(opts.plugins ?? [])]);
     this.pluginCtx = this.makePluginContext();
     for (const p of this.plugins) {
       const teardown = p.setup?.(this.pluginCtx);
@@ -189,9 +190,10 @@ export class BapbongEditor {
     return this.docSchema;
   }
 
-  /** Built-in find-and-replace (always registered; the host renders the bar). */
-  get find(): Builtins['find'] {
-    return this.builtins.find;
+  /** Built-in find-and-replace (always registered; the host renders the bar).
+   *  Cast is safe by construction — createBuiltins() always registers it. */
+  get find(): FindPlugin {
+    return this.plugins.get('find') as FindPlugin;
   }
 
   /** Import a .docx, lay it out, and paint the first frame. Resolves with the
@@ -411,7 +413,7 @@ export class BapbongEditor {
   /** Gather each plugin's decorations (doc ranges) and resolve them to
    *  page-local rects the painter can fill directly. */
   private collectDecorations(): PaintDecoration[] {
-    if (!this.resolved || this.plugins.length === 0) return [];
+    if (!this.resolved) return [];
     const out: PaintDecoration[] = [];
     for (const p of this.plugins) {
       const decos = p.decorations?.(this.pluginCtx);
@@ -561,7 +563,7 @@ export class BapbongEditor {
  * contribution (extra marks/nodes appended). Returns `null` when no plugin
  * contributes anything, so callers can keep using the base schema unchanged.
  */
-export function composeSchema(base: Schema, plugins: EditorPlugin[]): Schema | null {
+export function composeSchema(base: Schema, plugins: Iterable<EditorPlugin>): Schema | null {
   let nodes = base.spec.nodes;
   let marks = base.spec.marks;
   let changed = false;
