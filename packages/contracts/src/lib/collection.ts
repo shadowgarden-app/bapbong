@@ -1,40 +1,50 @@
+/** Property names of T whose value can serve as a key (string | number | symbol). */
+type IdKeysOf<T> = { [K in keyof T]: T[K] extends PropertyKey ? K : never }[keyof T];
+
 /**
- * A small name-keyed, insertion-ordered collection. Items must carry a unique
- * `name`; that name is the key, so lookups/removals accept either the name or
- * the item itself. Iterating yields the items (values) in insertion order.
+ * A key-property-keyed, insertion-ordered collection. The id property name is
+ * supplied at construction — `new Collection('name', items)` keys each item by
+ * its `name`, but any primitive-valued property works. Lookups/removals accept
+ * either the key or the item itself; iterating yields the items in insertion
+ * order.
  *
  * Dependency-free + isomorphic. Used by the editor as its plugin registry
- * (built-in + host plugins keyed by `EditorPlugin.name`), but generic over
- * anything with a `name`.
+ * (`new Collection<EditorPlugin>('name', …)`), but generic over anything with a
+ * primitive id property.
  */
-export class Collection<T extends { readonly name: string }> implements Iterable<T> {
-  private readonly items = new Map<string, T>();
+export class Collection<T extends object, IdKey extends IdKeysOf<T> = IdKeysOf<T>>
+  implements Iterable<T>
+{
+  private readonly items = new Map<T[IdKey], T>();
 
-  constructor(initial: Iterable<T> = []) {
+  /** @param idProperty the property whose value is each item's unique key. */
+  constructor(private readonly idProperty: IdKey, initial: Iterable<T> = []) {
     for (const it of initial) this.add(it);
   }
 
-  private keyOf(keyOrValue: string | T): string {
-    return typeof keyOrValue === 'string' ? keyOrValue : keyOrValue.name;
+  private keyOf(keyOrValue: T[IdKey] | T): T[IdKey] {
+    return typeof keyOrValue === 'object' && keyOrValue !== null
+      ? (keyOrValue as T)[this.idProperty]
+      : (keyOrValue as T[IdKey]);
   }
 
-  /** The item named `key` (or matching the given item), or undefined. */
-  get(keyOrValue: string | T): T | undefined {
+  /** The item with `key` (or matching the given item), or undefined. */
+  get(keyOrValue: T[IdKey] | T): T | undefined {
     return this.items.get(this.keyOf(keyOrValue));
   }
 
-  /** Add (or replace, by name) an item. Returns this for chaining. */
+  /** Add (or replace, by key) an item. Returns this for chaining. */
   add(value: T): this {
-    this.items.set(value.name, value);
+    this.items.set(value[this.idProperty], value);
     return this;
   }
 
-  /** Remove by name (or by item). Returns whether something was removed. */
-  remove(keyOrValue: string | T): boolean {
+  /** Remove by key (or by item). Returns whether something was removed. */
+  remove(keyOrValue: T[IdKey] | T): boolean {
     return this.items.delete(this.keyOf(keyOrValue));
   }
 
-  has(keyOrValue: string | T): boolean {
+  has(keyOrValue: T[IdKey] | T): boolean {
     return this.items.has(this.keyOf(keyOrValue));
   }
 
@@ -42,8 +52,8 @@ export class Collection<T extends { readonly name: string }> implements Iterable
     return this.items.size;
   }
 
-  /** [name, item] pairs, in insertion order. */
-  entries(): [string, T][] {
+  /** [key, item] pairs, in insertion order. */
+  entries(): [T[IdKey], T][] {
     return [...this.items.entries()];
   }
 

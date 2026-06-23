@@ -146,7 +146,7 @@ export class BapbongEditor {
 
     // Plugins: build their context and run setup (teardowns collected for destroy).
     // Internal (built-in) plugins first, then external/host-provided plugins.
-    this.plugins = new Collection<EditorPlugin>([...createBuiltins(), ...(opts.plugins ?? [])]);
+    this.plugins = new Collection<EditorPlugin>('name', [...createBuiltins(), ...(opts.plugins ?? [])]);
     this.pluginCtx = this.makePluginContext();
     for (const p of this.plugins) {
       const teardown = p.setup?.(this.pluginCtx);
