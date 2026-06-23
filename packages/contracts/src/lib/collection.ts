@@ -3,8 +3,9 @@
  * `name`; that name is the key, so lookups/removals accept either the name or
  * the item itself. Iterating yields the items (values) in insertion order.
  *
- * Used by the editor as its plugin registry (built-in + host plugins keyed by
- * `EditorPlugin.name`), but generic over anything with a `name`.
+ * Dependency-free + isomorphic. Used by the editor as its plugin registry
+ * (built-in + host plugins keyed by `EditorPlugin.name`), but generic over
+ * anything with a `name`.
  */
 export class Collection<T extends { readonly name: string }> implements Iterable<T> {
   private readonly items = new Map<string, T>();

@@ -46,7 +46,7 @@ export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/b
 // Built-in ("internal") plugins ship with the editor (see built-in-plugins.ts)
 // and are exposed as typed handles (e.g. editor.find) — no install needed.
 import { createBuiltins } from './built-in-plugins';
-import { Collection } from './collection';
+import { Collection } from '@shadow-garden/bapbong-contracts';
 import type { FindPlugin } from './find-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
 
