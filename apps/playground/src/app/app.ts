@@ -2,9 +2,8 @@ import { Component, ElementRef, OnDestroy, inject, signal, viewChild } from '@an
 import { NgTemplateOutlet } from '@angular/common';
 import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
-import { findPlugin, type FindState } from './find-plugin';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
-import { BapbongEditor, type EditorChange } from '@shadow-garden/bapbong-editor';
+import { BapbongEditor, type EditorChange, type FindState } from '@shadow-garden/bapbong-editor';
 
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
@@ -49,8 +48,8 @@ export class App implements OnDestroy {
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Find-and-replace plugin + its bar state (count/active mirrored from onState).
-  protected readonly find = findPlugin();
+  // Find-and-replace is a built-in editor plugin (editor.find); the bar mirrors
+  // its count/active via onState.
   protected readonly findState = signal<FindState>({ query: '', count: 0, active: 0 });
   protected readonly replaceText = signal('');
 
@@ -117,12 +116,12 @@ export class App implements OnDestroy {
     if (!stack) return null;
     const editor = new BapbongEditor(stack, {
       viewport: this.wrapHost()?.nativeElement,
-      // Two plugins via the same contract: comment tint + find/replace highlight.
-      plugins: [this.cs.tintPlugin, this.find],
+      // External plugin: comment tint. (Find/replace is built into the editor.)
+      plugins: [this.cs.tintPlugin],
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
-    this.find.onState((s) => this.findState.set(s)); // mirror count/active into the bar
+    editor.find.onState((s) => this.findState.set(s)); // mirror count/active into the bar
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
     this.cs.attachViews({
       anchorLayer: () => this.anchorLayer()?.nativeElement ?? null,
@@ -157,21 +156,21 @@ export class App implements OnDestroy {
     host.replaceChildren(serializer.serializeFragment(doc.content, { document }));
   }
 
-  // ── Find / replace (delegates to the find plugin) ───────────────────
+  // ── Find / replace (delegates to the built-in editor.find plugin) ───
   protected onFindInput(value: string): void {
-    this.find.setQuery(value);
+    this.editor?.find.setQuery(value);
   }
   protected findNext(): void {
-    this.find.next();
+    this.editor?.find.next();
   }
   protected findPrev(): void {
-    this.find.prev();
+    this.editor?.find.prev();
   }
   protected replaceOne(): void {
-    this.find.replaceCurrent(this.replaceText());
+    this.editor?.find.replaceCurrent(this.replaceText());
   }
   protected replaceAll(): void {
-    this.find.replaceAll(this.replaceText());
+    this.editor?.find.replaceAll(this.replaceText());
   }
 
   ngOnDestroy(): void {

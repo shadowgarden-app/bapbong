@@ -43,6 +43,10 @@ import type {
 // plugin author can `import { EditorPlugin, PluginContext, EditorChange } from
 // '@shadow-garden/bapbong-editor'`.
 export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/bapbong-contracts';
+// Built-in ("internal") plugins ship with the editor and are exposed as handles
+// (e.g. editor.find) — no install needed, unlike external plugins.
+import { findPlugin, type FindPlugin } from './find-plugin';
+export type { FindPlugin, FindState } from './find-plugin';
 
 /** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
 const A4: PageConfig = {
@@ -116,6 +120,8 @@ export class BapbongEditor {
   private readonly changeListeners = new Set<(c: EditorChange) => void>();
   private readonly caretPickListeners = new Set<(pos: number) => void>();
 
+  /** Built-in find-and-replace (always registered; the host renders the UI). */
+  readonly find: FindPlugin = findPlugin();
   private readonly plugins: EditorPlugin[];
   private readonly pluginTeardowns: Array<() => void> = [];
   private readonly pluginCtx: PluginContext;
@@ -138,7 +144,8 @@ export class BapbongEditor {
     document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
 
     // Plugins: build their context and run setup (teardowns collected for destroy).
-    this.plugins = opts.plugins ?? [];
+    // Internal plugins (find) first, then external/host-provided plugins.
+    this.plugins = [this.find, ...(opts.plugins ?? [])];
     this.pluginCtx = this.makePluginContext();
     for (const p of this.plugins) {
       const teardown = p.setup?.(this.pluginCtx);

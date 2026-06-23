@@ -31,7 +31,8 @@ export interface FindPlugin extends EditorPlugin {
 }
 
 /**
- * A framework-agnostic find-and-replace plugin. Highlighting rides the editor's
+ * Find-and-replace as a built-in ("internal") editor plugin: the editor
+ * instantiates it and exposes it as `editor.find`. Highlighting rides the
  * decoration pipeline (read side); replace dispatches transactions (write side)
  * — exercising both halves of the plugin contract. Matches are recomputed only
  * when the query or the doc changes (cached for cheap per-scroll repaints).
