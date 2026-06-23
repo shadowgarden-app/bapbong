@@ -30,6 +30,13 @@ describe('Collection', () => {
     expect(c.remove('missing')).toBe(false);
   });
 
+  it('throws when an item lacks the key property (default id, item has none)', () => {
+    // Plugin has no `id`; with no { idProperty } it defaults to "id" → throws.
+    expect(() => new Collection<Plugin>([{ name: 'x', v: 1 }])).toThrow(/no "id" key/);
+    // Passing the right idProperty is fine.
+    expect(() => new Collection<Plugin>([{ name: 'x', v: 1 }], { idProperty: 'name' })).not.toThrow();
+  });
+
   it('add replaces by key and keeps insertion order; iterates values', () => {
     const c = new Collection<Plugin>([], { idProperty: 'name' });
     c.add({ name: 'x', v: 1 }).add({ name: 'y', v: 2 }).add({ name: 'x', v: 9 }); // replaces x

@@ -22,8 +22,10 @@ export class Collection<T extends object, IdKey extends IdKeysOf<T> = DefaultIdK
 {
   private readonly items = new Map<T[IdKey], T>();
   private readonly idProperty: IdKey;
+  private readonly defaulted: boolean;
 
   constructor(initial: T[] = [], options?: { idProperty?: IdKey }) {
+    this.defaulted = options?.idProperty === undefined;
     this.idProperty = (options?.idProperty ?? 'id') as IdKey;
     for (const it of initial) this.add(it);
   }
@@ -39,9 +41,17 @@ export class Collection<T extends object, IdKey extends IdKeysOf<T> = DefaultIdK
     return this.items.get(this.keyOf(keyOrValue));
   }
 
-  /** Add (or replace, by key) an item. Returns this for chaining. */
+  /** Add (or replace, by key) an item. Throws if the item lacks its key
+   *  property (e.g. defaulting to `id` on items that have none). */
   add(value: T): this {
-    this.items.set(value[this.idProperty], value);
+    const key = value[this.idProperty];
+    if ((key as unknown) === undefined || (key as unknown) === null) {
+      throw new Error(
+        `Collection: item has no "${String(this.idProperty)}" key` +
+          (this.defaulted ? ' — pass { idProperty } to key by another property.' : '.'),
+      );
+    }
+    this.items.set(key, value);
     return this;
   }
 
