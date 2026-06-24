@@ -44,6 +44,7 @@
   "dependencies": {
     "@shadow-garden/bapbong-contracts": "workspace:^",
     "prosemirror-commands": "^1.7.1",
+    "prosemirror-history": "^1.4.1",
     "prosemirror-model": "^1.25.7",
     "prosemirror-state": "^1.4.4"
   }

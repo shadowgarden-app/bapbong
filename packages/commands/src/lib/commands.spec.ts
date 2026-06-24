@@ -4,6 +4,7 @@ import type { Command } from '@shadow-garden/bapbong-contracts';
 import { toggleMarkCommand, isMarkActive } from './marks.js';
 import { setAlign, activeAlign } from './paragraph.js';
 import { cellAt, setCellBackground } from './table.js';
+import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { defaultCommands } from './registry.js';
 
 // A minimal schema standing in for the real document schema — the commands key
@@ -16,10 +17,11 @@ const schema = new Schema({
     paragraph: {
       group: 'block',
       content: 'inline*',
-      attrs: { align: { default: null } },
+      attrs: { align: { default: null }, pageBreakBefore: { default: false } },
       toDOM: () => ['p', 0],
     },
     text: { group: 'inline' },
+    image: { inline: true, group: 'inline', attrs: { src: {}, alt: { default: '' } }, toDOM: () => ['img'] },
     table: { group: 'block', content: 'table_row+', toDOM: () => ['table', ['tbody', 0]] },
     table_row: { content: 'table_cell+', toDOM: () => ['tr', 0] },
     table_cell: {
@@ -38,6 +40,8 @@ const schema = new Schema({
     em: { toDOM: () => ['em', 0] },
     underline: { toDOM: () => ['u', 0] },
     strike: { toDOM: () => ['s', 0] },
+    vertAlign: { attrs: { value: {} }, toDOM: () => ['sup', 0] },
+    link: { attrs: { href: {} }, inclusive: false, toDOM: () => ['a', 0] },
   },
 });
 
@@ -51,6 +55,15 @@ function apply(state: EditorState, cmd: Command): EditorState {
     next = state.apply(tr);
   });
   return next;
+}
+
+/** First node of the given type in the doc, or null. */
+function findNode(state: EditorState, typeName: string) {
+  let found: ReturnType<typeof state.doc.nodeAt> = null;
+  state.doc.descendants((node) => {
+    if (!found && node.type.name === typeName) found = node;
+  });
+  return found;
 }
 
 /** A doc of one paragraph "hello", selection covering the whole word. */
@@ -128,5 +141,51 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     if (!bold) throw new Error('expected a "bold" command in the registry');
     const after = apply(paraState(), bold);
     expect(after.doc.rangeHasMark(1, 6, schema.marks['strong'])).toBe(true);
+  });
+
+  it('superscript toggles vertAlign with its attr; sub/super are exclusive', () => {
+    const sup = toggleMarkCommand('superscript', 'vertAlign', { value: 'super' });
+    const sub = toggleMarkCommand('subscript', 'vertAlign', { value: 'sub' });
+    const after = apply(paraState(), sup);
+    expect(sup.isActive?.(after)).toBe(true);
+    expect(sub.isActive?.(after)).toBe(false); // same mark type → mutually exclusive
+    expect(isMarkActive(after, 'vertAlign', { value: 'super' })).toBe(true);
+  });
+
+  it('pageBreakCommand toggles pageBreakBefore on the paragraph', () => {
+    const cmd = pageBreakCommand();
+    const before = paraState();
+    expect(cmd.isActive?.(before)).toBe(false);
+    const after = apply(before, cmd);
+    expect(after.doc.firstChild?.attrs['pageBreakBefore']).toBe(true);
+    expect(cmd.isActive?.(after)).toBe(true);
+  });
+
+  it('insertTable inserts a rows×cols grid of cells', () => {
+    const after = apply(paraState(), insertTable(2, 3));
+    const table = findNode(after, 'table');
+    if (!table) throw new Error('expected an inserted table');
+    expect(table.childCount).toBe(2); // rows
+    expect(table.firstChild?.childCount).toBe(3); // cells in the first row
+  });
+
+  it('insertImage inserts an inline image; setLink needs a range', () => {
+    const img = findNode(apply(paraState(), insertImage('data:img', 'pic')), 'image');
+    expect(img?.attrs['src']).toBe('data:img');
+
+    const linked = apply(paraState(), setLink('https://x.test'));
+    expect(linked.doc.rangeHasMark(1, 6, schema.marks['link'])).toBe(true);
+
+    // empty selection → link disabled
+    const ps = paraState();
+    const caret = ps.apply(ps.tr.setSelection(TextSelection.create(ps.doc, 1)));
+    expect(setLink('https://x.test').isEnabled?.(caret)).toBe(false);
+  });
+
+  it('registry includes the new static commands', () => {
+    const commands = defaultCommands();
+    for (const name of ['superscript', 'subscript', 'undo', 'redo', 'page-break']) {
+      expect(commands.has(name)).toBe(true);
+    }
   });
 });
