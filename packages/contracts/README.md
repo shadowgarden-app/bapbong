@@ -25,6 +25,10 @@ types; the only runtime code is `Collection`.
 - **Plugin contract** (the stable surface the editor + plugins share, so neither
   imports the other): `EditorPlugin`, `PluginContext`, `EditorChange`,
   `RangeDecoration`, `PaintDecoration`.
+- **Command contract**: `Command` (`{ name, run, isActive?, isEnabled? }`) +
+  `Dispatch` — the headless editor-operation surface the toolbar/menubar,
+  plugins and a backend share. Implementations live in
+  `@shadow-garden/bapbong-commands`.
 - **`Collection<T>`** — a name/id-keyed, insertion-ordered collection
   (`get`/`add`/`remove`/`has`/`entries` + iterable). Keys by `id` by default, or
   `new Collection(items, { idProperty })`; throws if an item lacks its key.
