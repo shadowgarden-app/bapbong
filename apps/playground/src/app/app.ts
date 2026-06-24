@@ -3,13 +3,17 @@ import { NgTemplateOutlet } from '@angular/common';
 import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
-import { BapbongEditor, type EditorChange, type FindState } from '@shadow-garden/bapbong-editor';
+import { BapbongEditor, type EditorChange } from '@shadow-garden/bapbong-editor';
 import { insertImage, insertTable, setLink } from '@shadow-garden/bapbong-commands';
 import type { Command } from '@shadow-garden/bapbong-contracts';
 import {
+  createFindDialog,
+  Dialog,
   mountMenubar,
   mountToolbar,
+  promptDialog,
   tableGridPicker,
+  type FindDialogHandle,
   type Menu,
   type MenubarHandle,
   type ToolbarHandle,
@@ -52,21 +56,18 @@ export class App implements OnDestroy {
   // Comment-UI hosts the store reaches into (anchored layer + composer mount).
   private readonly anchorLayer = viewChild<ElementRef<HTMLDivElement>>('anchorLayer');
   private readonly composerHost = viewChild<ElementRef<HTMLDivElement>>('composerHost');
-  // Menubar + formatting toolbar hosts — bapbong-ui renders + wires them.
+  // Menubar / toolbar hosts — bapbong-ui renders + wires them. The find panel
+  // is a body-level dialog (no host slot), opened from Edit ▸ Find and replace.
   private readonly editorMenubar = viewChild<ElementRef<HTMLDivElement>>('editorMenubar');
   private readonly editorToolbar = viewChild<ElementRef<HTMLDivElement>>('editorToolbar');
   private menubar: MenubarHandle | null = null;
   private toolbar: ToolbarHandle | null = null;
+  private findDialog: FindDialogHandle | null = null;
 
   /** The framework-agnostic render/edit core (lazily created on first load). */
   private editor: BapbongEditor | null = null;
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Find-and-replace is a built-in editor plugin (editor.find); the bar mirrors
-  // its count/active via onState.
-  protected readonly findState = signal<FindState>({ query: '', count: 0, active: 0 });
-  protected readonly replaceText = signal('');
 
   protected async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -136,11 +137,11 @@ export class App implements OnDestroy {
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
-    editor.find.onState((s) => this.findState.set(s)); // mirror count/active into the bar
-    // Menubar + formatting toolbar: hand bapbong-ui the host elements + the
-    // editor; it renders from editor.commands and wires everything itself. The
-    // menubar tree mixes registry commands with host actions (open file, comment
-    // view, find, shortcuts) and a table-size widget — see buildMenus().
+    // Menubar / toolbar / find-bar: hand bapbong-ui the host elements + the
+    // editor; it renders from editor.commands / editor.find and wires everything
+    // itself. The menubar tree mixes registry commands with host actions (open
+    // file, comment view, find, shortcuts) and a table-size widget — see
+    // buildMenus().
     const menubarHost = this.editorMenubar()?.nativeElement;
     if (menubarHost) this.menubar = mountMenubar(menubarHost, editor, { menus: this.buildMenus() });
     const toolbarHost = this.editorToolbar()?.nativeElement;
@@ -151,6 +152,18 @@ export class App implements OnDestroy {
           ['align-left', 'align-center', 'align-right', 'align-justify'],
         ],
       });
+    // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace.
+    this.findDialog = createFindDialog(editor.find, {
+      labels: {
+        title: 'Tìm và thay thế',
+        find: 'Tìm…',
+        replace: 'Thay bằng…',
+        prev: 'Trước',
+        next: 'Sau',
+        replaceOne: 'Thay',
+        replaceAll: 'Thay tất cả',
+      },
+    });
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
     this.cs.attachViews({
       anchorLayer: () => this.anchorLayer()?.nativeElement ?? null,
@@ -185,23 +198,6 @@ export class App implements OnDestroy {
     host.replaceChildren(serializer.serializeFragment(doc.content, { document }));
   }
 
-  // ── Find / replace (delegates to the built-in editor.find plugin) ───
-  protected onFindInput(value: string): void {
-    this.editor?.find.setQuery(value);
-  }
-  protected findNext(): void {
-    this.editor?.find.next();
-  }
-  protected findPrev(): void {
-    this.editor?.find.prev();
-  }
-  protected replaceOne(): void {
-    this.editor?.find.replaceCurrent(this.replaceText());
-  }
-  protected replaceAll(): void {
-    this.editor?.find.replaceAll(this.replaceText());
-  }
-
   // ── Menubar config ───────────────────────────────────────────────
   /** The full menu tree handed to bapbong-ui. Registry commands are referenced
    *  by name; everything else (open file, comment view, find, image/link/table,
@@ -221,7 +217,7 @@ export class App implements OnDestroy {
           { command: 'undo', label: 'Undo' },
           { command: 'redo', label: 'Redo' },
           'separator',
-          { label: 'Find and replace', run: () => this.focusFindBar() },
+          { label: 'Find and replace', run: () => this.findDialog?.open() },
         ],
       },
       {
@@ -245,7 +241,10 @@ export class App implements OnDestroy {
             label: 'Image',
             submenu: [
               { label: 'Upload…', run: () => this.openFilePicker('image/*', (f) => this.insertImageFile(f)) },
-              { label: 'From URL…', run: () => this.execPrompt('Image URL:', (url) => insertImage(url)) },
+              {
+                label: 'From URL…',
+                run: () => this.execPrompt('Chèn ảnh từ URL', 'https://…', (url) => insertImage(url)),
+              },
             ],
           },
           {
@@ -258,7 +257,7 @@ export class App implements OnDestroy {
                 },
               }),
           },
-          { label: 'Link…', run: () => this.execPrompt('Link URL:', (href) => setLink(href)) },
+          { label: 'Link…', run: () => this.execPrompt('Chèn liên kết', 'https://…', (href) => setLink(href)) },
           { label: 'Break', submenu: [{ command: 'page-break', label: 'Page break' }] },
         ],
       },
@@ -298,9 +297,9 @@ export class App implements OnDestroy {
     this.editor.focus();
   }
 
-  /** Prompt for a value, then run the command it builds (skip if cancelled). */
-  private execPrompt(message: string, build: (value: string) => Command): void {
-    const value = window.prompt(message)?.trim();
+  /** Ask for a value via a bapbong-ui dialog, then run the command it builds. */
+  private async execPrompt(title: string, placeholder: string, build: (value: string) => Command): Promise<void> {
+    const value = await promptDialog({ title, placeholder });
     if (value) this.exec(build(value));
   }
 
@@ -326,29 +325,26 @@ export class App implements OnDestroy {
     reader.readAsDataURL(file);
   }
 
-  private focusFindBar(): void {
-    document.querySelector<HTMLInputElement>('.find-input')?.focus();
-  }
-
-  /** A minimal native-dialog list of the editor's keyboard shortcuts. */
+  /** A keyboard-shortcuts list shown in a bapbong-ui Dialog. */
   private showShortcuts(): void {
-    const dlg = document.createElement('dialog');
-    dlg.style.cssText = 'padding:16px 20px;border:1px solid #ddd;border-radius:10px;max-width:320px;font:13px system-ui';
-    dlg.innerHTML =
-      '<h3 style="margin:0 0 8px">Keyboard shortcuts</h3>' +
-      '<ul style="margin:0 0 12px;padding-left:18px;line-height:1.7">' +
-      '<li><b>⌘Z</b> / <b>⇧⌘Z</b> — Undo / Redo</li>' +
-      '<li>Type to edit · arrows + ⇧ to select</li>' +
-      '<li>⌘C / ⌘V — copy / paste</li>' +
-      '<li>Use the Find bar to search &amp; replace</li>' +
-      '</ul><form method="dialog"><button>Close</button></form>';
-    document.body.appendChild(dlg);
-    dlg.addEventListener('close', () => dlg.remove());
-    dlg.showModal();
+    const content = document.createElement('div');
+    content.style.cssText = 'font:13px system-ui;line-height:1.7';
+    content.innerHTML =
+      '<ul style="margin:0;padding-left:18px">' +
+      '<li><b>⌘Z</b> / <b>⇧⌘Z</b> — Hoàn tác / Làm lại</li>' +
+      '<li>Gõ để soạn · phím mũi tên + ⇧ để chọn</li>' +
+      '<li><b>⌘C</b> / <b>⌘V</b> — sao chép / dán</li>' +
+      '<li>Edit ▸ Tìm và thay thế để tìm kiếm</li>' +
+      '</ul>';
+    const dialog = new Dialog({ title: 'Phím tắt', modal: true });
+    dialog.setContent(content);
+    dialog.onClose(() => dialog.destroy());
+    dialog.open();
   }
 
   ngOnDestroy(): void {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
+    this.findDialog?.destroy();
     this.menubar?.destroy();
     this.toolbar?.destroy();
     this.editor?.destroy();

@@ -52,6 +52,37 @@ handle.destroy();
 - `tableGridPicker({ maxRows, maxCols, onPick })` — a Word/Docs-style size grid
   to drop into a `widget` entry (Insert > Table).
 
+## Dialog
+
+A generic overlay primitive (built on the native `<dialog>` — modal mode gets
+focus-trap / `Esc` / backdrop for free). Reused by find, prompts, shortcuts, and
+the cell-properties dialog — one primitive, not N bespoke widgets.
+
+```ts
+import { Dialog, promptDialog } from '@shadow-garden/bapbong-ui';
+
+const dlg = new Dialog({ title: 'Cell properties', modal: true });
+dlg.setContent(myFormElement);
+dlg.open();                                  // open() / close() / onClose() / destroy()
+
+const url = await promptDialog({ title: 'Insert link', placeholder: 'https://…' });
+```
+
+## Find dialog
+
+```ts
+import { createFindDialog } from '@shadow-garden/bapbong-ui';
+
+const find = createFindDialog(editor.find);  // bound to the find plugin
+find.open();   // e.g. from an Edit ▸ Find menu item / Ctrl+F
+find.destroy();
+```
+
+- Find/replace inside a (non-modal) `Dialog`, bound to a structural `FindHandle`
+  (the editor's `find` plugin satisfies it), so the package never imports the
+  editor. Query input, match count, prev/next, replace + replace-all; closing
+  clears the search. i18n via `{ labels }`.
+
 ## Build / test
 
 ```sh

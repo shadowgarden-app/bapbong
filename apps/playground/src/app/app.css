@@ -85,36 +85,6 @@ h2 {
   gap: 8px;
   margin: 4px 0 8px;
 }
-/* Find & replace bar. */
-.find-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-}
-.find-input {
-  padding: 3px 7px;
-  border: 1px solid #c8c8c8;
-  border-radius: 4px;
-  font: inherit;
-}
-.find-count {
-  min-width: 40px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.find-bar button {
-  padding: 3px 9px;
-  border: 1px solid #c8c8c8;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-}
-.find-bar button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 /* Panel mode: fixed scrollable list of every thread. */
 .comments.panel {
   flex: 0 0 280px;
