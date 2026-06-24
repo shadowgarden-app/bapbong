@@ -40,12 +40,17 @@ const handle = mountMenubar(hostEl, editor);   // top-level titles → dropdowns
 handle.destroy();
 ```
 
-- Top-level titles open dropdowns of command rows; active toggles show a check.
-- Click-outside / Escape close; arrow keys move within an open menu; hovering
-  another title switches menus.
-- Customise with `{ menus, labels }` — `menus` is a declarative tree of
-  `{ label, entries }` where entries reference command names (or `'separator'`).
-  Default is a "Format" menu (marks, separator, alignments) from the registry.
+- Top-level titles open dropdowns; active toggles show a check. Click-outside /
+  Escape close; hovering another title switches; submenus open on hover.
+- Entries are a declarative tree (`{ menus, labels }`). A `MenuEntry` is one of:
+  - `'separator'`
+  - `{ command, label? }` — runs a registry command (active check + enabled).
+  - `{ label, run, isActive?, isEnabled?, shortcut? }` — a **host action**
+    (File > Open, View > comment mode, Help…).
+  - `{ label, submenu: MenuEntry[] }` — a nested dropdown.
+  - `{ label, widget: (close) => HTMLElement }` — custom flyout content.
+- `tableGridPicker({ maxRows, maxCols, onPick })` — a Word/Docs-style size grid
+  to drop into a `widget` entry (Insert > Table).
 
 ## Build / test
 

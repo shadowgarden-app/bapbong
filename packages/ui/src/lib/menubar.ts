@@ -1,13 +1,30 @@
 import type { Collection, Command } from '@shadow-garden/bapbong-contracts';
 import { type EditorHandle, type EditorStateOf, injectStyle } from './internal.js';
 
-/** A row in a dropdown: run `command` (and read its active state), or a rule. */
-export interface MenuItem {
+/** Run a registry command (and read its active/enabled state). */
+export interface CommandEntry {
   command: string;
-  /** Row label; defaults to a built-in title or the command name. */
   label?: string;
 }
-export type MenuEntry = MenuItem | 'separator';
+/** Run a host-supplied action (File ▸ Open, View ▸ comment mode, Help…). */
+export interface ActionEntry {
+  label: string;
+  run: () => void;
+  isActive?: () => boolean;
+  isEnabled?: () => boolean;
+  shortcut?: string;
+}
+/** A nested dropdown. */
+export interface SubmenuEntry {
+  label: string;
+  submenu: MenuEntry[];
+}
+/** Custom flyout content (e.g. a table size grid). `close` dismisses the menu. */
+export interface WidgetEntry {
+  label: string;
+  widget: (close: () => void) => HTMLElement;
+}
+export type MenuEntry = 'separator' | CommandEntry | ActionEntry | SubmenuEntry | WidgetEntry;
 
 /** A top-level menu (its title + dropdown entries). */
 export interface Menu {
@@ -16,8 +33,7 @@ export interface Menu {
 }
 
 export interface MenubarOptions {
-  /** Menus to render. Default: a single "Format" menu (marks, then a separator,
-   *  then alignments) derived from the registry. */
+  /** Menus to render. Default: a single "Format" menu derived from the registry. */
   menus?: Menu[];
   /** Command-name → row label override, merged over the built-in labels. */
   labels?: Record<string, string>;
@@ -32,10 +48,15 @@ const DEFAULT_LABELS: Record<string, string> = {
   italic: 'Italic',
   underline: 'Underline',
   strike: 'Strikethrough',
+  superscript: 'Superscript',
+  subscript: 'Subscript',
   'align-left': 'Align left',
   'align-center': 'Center',
   'align-right': 'Align right',
   'align-justify': 'Justify',
+  undo: 'Undo',
+  redo: 'Redo',
+  'page-break': 'Page break',
 };
 
 const STYLE = `
@@ -44,11 +65,19 @@ const STYLE = `
 .bb-menubar-menu{position:relative}
 .bb-menubar-title{height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-menubar-title:hover,.bb-menubar-title[aria-expanded="true"]{background:var(--bb-ui-hover,#f1efe8)}
-.bb-menu{position:absolute;top:100%;left:0;min-width:184px;margin-top:3px;padding:4px;background:var(--bb-ui-menu-bg,#fff);border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.14);z-index:1000}
+.bb-menu{position:absolute;top:100%;left:0;min-width:200px;margin-top:3px;padding:4px;background:var(--bb-ui-menu-bg,#fff);border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.14);z-index:1000}
 .bb-menu[hidden]{display:none}
-.bb-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 12px 0 6px;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;font-size:13px;text-align:left;white-space:nowrap;cursor:pointer}
+.bb-menu-sub{position:relative}
+.bb-submenu{top:-5px;left:100%;margin-left:2px;display:none}
+.bb-menu-sub:hover>.bb-submenu,.bb-menu-sub:focus-within>.bb-submenu{display:block}
+.bb-submenu-widget{padding:8px;min-width:0}
+.bb-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 10px 0 6px;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;font-size:13px;text-align:left;white-space:nowrap;cursor:pointer}
 .bb-menu-item:hover,.bb-menu-item:focus{background:var(--bb-ui-hover,#f1efe8);outline:none}
+.bb-menu-item:disabled{opacity:.4;cursor:default}
 .bb-menu-check{width:14px;flex:none;display:inline-flex;justify-content:center;color:var(--bb-ui-active-fg,#0c447c)}
+.bb-menu-label{flex:1 1 auto}
+.bb-menu-shortcut{flex:none;opacity:.5;font-size:12px;padding-left:24px}
+.bb-menu-arrow{flex:none;opacity:.55;padding-left:12px}
 .bb-menu-sep{height:1px;margin:4px 6px;background:var(--bb-ui-border,#e3e3e0)}
 `;
 
@@ -68,9 +97,10 @@ export function defaultMenus(commands: Collection<Command>): Menu[] {
 
 /**
  * Render a menubar into `host` and wire it to `editor`. Top-level titles open
- * dropdowns of command rows (with a check for active toggles). The lib owns the
- * DOM, styling, open/close, keyboard nav and active state; the host framework
- * only supplies the element + the editor handle, then calls `destroy()`.
+ * dropdowns; entries can be registry commands (with an active check), host
+ * actions, nested submenus, or custom widgets. The lib owns the DOM, styling,
+ * open/close and active state; the host framework only supplies the element +
+ * the editor handle, then calls `destroy()`.
  */
 export function mountMenubar(
   host: HTMLElement,
@@ -85,15 +115,12 @@ export function mountMenubar(
   root.className = 'bb-menubar';
   root.setAttribute('role', 'menubar');
 
-  // Every command row across all menus, for active-state refresh.
-  const rows: Array<{ name: string; checkEl: HTMLElement }> = [];
-  // Each menu's title + dropdown, for open/close coordination.
   const panels: Array<{ title: HTMLButtonElement; dropdown: HTMLElement }> = [];
+  // Rows whose check / disabled state tracks editor state (any nesting depth).
+  const checks: Array<{ el: HTMLElement; active: (s: EditorStateOf) => boolean }> = [];
+  const enables: Array<{ el: HTMLButtonElement; enabled: (s: EditorStateOf) => boolean }> = [];
   let openIdx = -1;
   let latest: EditorStateOf | null = null;
-
-  const itemsOf = (dd: HTMLElement) =>
-    Array.from(dd.querySelectorAll<HTMLButtonElement>('.bb-menu-item'));
 
   const close = (refocusTitle = false): void => {
     if (openIdx < 0) return;
@@ -103,7 +130,6 @@ export function mountMenubar(
     if (refocusTitle) p.title.focus();
     openIdx = -1;
   };
-
   const open = (idx: number, focusFirst = false): void => {
     if (openIdx === idx) return;
     close();
@@ -112,7 +138,84 @@ export function mountMenubar(
     p.title.setAttribute('aria-expanded', 'true');
     openIdx = idx;
     if (latest) refresh(latest);
-    if (focusFirst) itemsOf(p.dropdown)[0]?.focus();
+    if (focusFirst) p.dropdown.querySelector<HTMLButtonElement>('.bb-menu-item')?.focus();
+  };
+
+  const makeRow = (label: string, opts: { shortcut?: string; hasSub?: boolean }) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'bb-menu-item' + (opts.hasSub ? ' bb-has-sub' : '');
+    item.addEventListener('mousedown', (e) => e.preventDefault()); // keep editor selection
+    const check = document.createElement('span');
+    check.className = 'bb-menu-check';
+    const text = document.createElement('span');
+    text.className = 'bb-menu-label';
+    text.textContent = label;
+    item.append(check, text);
+    if (opts.shortcut) {
+      const sc = document.createElement('span');
+      sc.className = 'bb-menu-shortcut';
+      sc.textContent = opts.shortcut;
+      item.appendChild(sc);
+    }
+    if (opts.hasSub) {
+      const arrow = document.createElement('span');
+      arrow.className = 'bb-menu-arrow';
+      arrow.textContent = '›';
+      item.appendChild(arrow);
+    }
+    return { item, check };
+  };
+
+  const buildEntries = (entries: MenuEntry[], container: HTMLElement): void => {
+    for (const entry of entries) {
+      if (entry === 'separator') {
+        const sep = document.createElement('div');
+        sep.className = 'bb-menu-sep';
+        sep.setAttribute('role', 'separator');
+        container.appendChild(sep);
+      } else if ('submenu' in entry || 'widget' in entry) {
+        const wrap = document.createElement('div');
+        wrap.className = 'bb-menu-sub';
+        const { item } = makeRow(entry.label, { hasSub: true });
+        item.setAttribute('aria-haspopup', 'true');
+        const flyout = document.createElement('div');
+        flyout.className = 'bb-menu bb-submenu';
+        flyout.setAttribute('role', 'menu');
+        if ('widget' in entry) {
+          flyout.classList.add('bb-submenu-widget');
+          flyout.appendChild(entry.widget(() => close()));
+        } else {
+          buildEntries(entry.submenu, flyout);
+        }
+        wrap.append(item, flyout);
+        container.appendChild(wrap);
+      } else if ('command' in entry) {
+        const cmd = editor.commands.get(entry.command);
+        if (!cmd) continue; // skip commands the schema/registry doesn't provide
+        const { item, check } = makeRow(entry.label ?? labels[entry.command] ?? entry.command, {});
+        item.setAttribute('role', 'menuitemcheckbox');
+        item.addEventListener('click', () => {
+          if (latest) editor.commands.get(entry.command)?.run(latest, (tr) => editor.dispatch(tr));
+          close();
+          editor.focus();
+        });
+        checks.push({ el: check, active: (s) => cmd.isActive?.(s) ?? false });
+        if (cmd.isEnabled) enables.push({ el: item, enabled: (s) => cmd.isEnabled!(s) });
+        container.appendChild(item);
+      } else {
+        // ActionEntry
+        const { item, check } = makeRow(entry.label, { shortcut: entry.shortcut });
+        item.setAttribute('role', entry.isActive ? 'menuitemcheckbox' : 'menuitem');
+        item.addEventListener('click', () => {
+          entry.run();
+          close();
+        });
+        if (entry.isActive) checks.push({ el: check, active: () => entry.isActive!() });
+        if (entry.isEnabled) enables.push({ el: item, enabled: () => entry.isEnabled!() });
+        container.appendChild(item);
+      }
+    }
   };
 
   menus.forEach((menu, idx) => {
@@ -132,9 +235,8 @@ export function mountMenubar(
     dropdown.setAttribute('role', 'menu');
     dropdown.hidden = true;
 
-    title.addEventListener('mousedown', (e) => e.preventDefault()); // keep editor selection
+    title.addEventListener('mousedown', (e) => e.preventDefault());
     title.addEventListener('click', () => (openIdx === idx ? close() : open(idx)));
-    // Hovering another title while a menu is open switches to it.
     title.addEventListener('mouseenter', () => {
       if (openIdx >= 0 && openIdx !== idx) open(idx);
     });
@@ -145,71 +247,31 @@ export function mountMenubar(
       }
     });
 
-    for (const entry of menu.entries) {
-      if (entry === 'separator') {
-        const sep = document.createElement('div');
-        sep.className = 'bb-menu-sep';
-        sep.setAttribute('role', 'separator');
-        dropdown.appendChild(sep);
-        continue;
-      }
-      const cmd = editor.commands.get(entry.command);
-      if (!cmd) continue; // skip commands the schema/registry doesn't provide
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'bb-menu-item';
-      item.setAttribute('role', 'menuitemcheckbox');
-      const check = document.createElement('span');
-      check.className = 'bb-menu-check';
-      const text = document.createElement('span');
-      text.textContent = entry.label ?? labels[entry.command] ?? entry.command;
-      item.append(check, text);
-      item.addEventListener('mousedown', (e) => e.preventDefault());
-      item.addEventListener('click', () => {
-        if (latest) editor.commands.get(entry.command)?.run(latest, (tr) => editor.dispatch(tr));
-        close();
-        editor.focus();
-      });
-      item.addEventListener('keydown', (e) => onItemKey(e, dropdown));
-      dropdown.appendChild(item);
-      rows.push({ name: entry.command, checkEl: check });
-    }
-
+    buildEntries(menu.entries, dropdown);
     wrap.append(title, dropdown);
     root.appendChild(wrap);
     panels.push({ title, dropdown });
   });
 
-  function onItemKey(e: KeyboardEvent, dd: HTMLElement): void {
-    const items = itemsOf(dd);
-    const i = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      items[(i + 1) % items.length]?.focus();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      items[(i - 1 + items.length) % items.length]?.focus();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      close(true);
-    }
-  }
-
   host.appendChild(root);
 
-  // Close when focus/click leaves the menubar.
   const onDocPointer = (e: Event): void => {
     if (openIdx >= 0 && !root.contains(e.target as Node)) close();
   };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape' && openIdx >= 0) {
+      e.preventDefault();
+      close(true);
+    }
+  };
   document.addEventListener('pointerdown', onDocPointer);
+  document.addEventListener('keydown', onKey);
 
   function refresh(state: EditorStateOf): void {
     latest = state;
-    if (openIdx < 0) return; // checks only matter while a menu is visible
-    for (const { name, checkEl } of rows) {
-      const active = editor.commands.get(name)?.isActive?.(state) ?? false;
-      checkEl.textContent = active ? '✓' : '';
-    }
+    if (openIdx < 0) return; // only matters while a menu is visible
+    for (const c of checks) c.el.textContent = c.active(state) ? '✓' : '';
+    for (const e of enables) e.el.disabled = !e.enabled(state);
   }
 
   const off = editor.onChange((c) => refresh(c.state));
@@ -223,6 +285,7 @@ export function mountMenubar(
     destroy() {
       off();
       document.removeEventListener('pointerdown', onDocPointer);
+      document.removeEventListener('keydown', onKey);
       root.remove();
     },
   };
