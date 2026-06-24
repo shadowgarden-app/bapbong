@@ -153,18 +153,10 @@ export class App implements OnDestroy {
         ],
       });
     // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace,
-    // pinned to the canvas viewport's top-right (like Google Docs).
+    // pinned to the canvas viewport's top-right (like Google Docs). Uses the
+    // lib's English defaults.
     this.findDialog = createFindDialog(editor.find, {
       anchor: () => this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
-      labels: {
-        title: 'Tìm và thay thế',
-        find: 'Tìm…',
-        replace: 'Thay bằng…',
-        prev: 'Trước',
-        next: 'Sau',
-        replaceOne: 'Thay',
-        replaceAll: 'Thay tất cả',
-      },
     });
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
     this.cs.attachViews({
@@ -245,7 +237,7 @@ export class App implements OnDestroy {
               { label: 'Upload…', run: () => this.openFilePicker('image/*', (f) => this.insertImageFile(f)) },
               {
                 label: 'From URL…',
-                run: () => this.execPrompt('Chèn ảnh từ URL', 'https://…', (url) => insertImage(url)),
+                run: () => this.execPrompt('Insert image from URL', 'https://…', (url) => insertImage(url)),
               },
             ],
           },
@@ -259,7 +251,7 @@ export class App implements OnDestroy {
                 },
               }),
           },
-          { label: 'Link…', run: () => this.execPrompt('Chèn liên kết', 'https://…', (href) => setLink(href)) },
+          { label: 'Link…', run: () => this.execPrompt('Insert link', 'https://…', (href) => setLink(href)) },
           { label: 'Break', submenu: [{ command: 'page-break', label: 'Page break' }] },
         ],
       },
@@ -333,12 +325,12 @@ export class App implements OnDestroy {
     content.style.cssText = 'font:13px system-ui;line-height:1.7';
     content.innerHTML =
       '<ul style="margin:0;padding-left:18px">' +
-      '<li><b>⌘Z</b> / <b>⇧⌘Z</b> — Hoàn tác / Làm lại</li>' +
-      '<li>Gõ để soạn · phím mũi tên + ⇧ để chọn</li>' +
-      '<li><b>⌘C</b> / <b>⌘V</b> — sao chép / dán</li>' +
-      '<li>Edit ▸ Tìm và thay thế để tìm kiếm</li>' +
+      '<li><b>⌘Z</b> / <b>⇧⌘Z</b> — Undo / Redo</li>' +
+      '<li>Type to edit · arrows + ⇧ to select</li>' +
+      '<li><b>⌘C</b> / <b>⌘V</b> — copy / paste</li>' +
+      '<li>Find &amp; replace from Edit ▸ Find and replace</li>' +
       '</ul>';
-    const dialog = new Dialog({ title: 'Phím tắt', modal: true });
+    const dialog = new Dialog({ title: 'Keyboard shortcuts', modal: true });
     dialog.setContent(content);
     dialog.onClose(() => dialog.destroy());
     dialog.open();
