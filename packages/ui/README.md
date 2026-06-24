@@ -68,6 +68,10 @@ dlg.open();                                  // open() / close() / onClose() / d
 const url = await promptDialog({ title: 'Insert link', placeholder: 'https://…' });
 ```
 
+Pass `{ anchor: () => el.getBoundingClientRect() }` to pin a non-modal dialog's
+top-right just inside a rect (e.g. the canvas viewport) instead of the screen
+corner; it re-positions on scroll/resize.
+
 ## Find dialog
 
 ```ts

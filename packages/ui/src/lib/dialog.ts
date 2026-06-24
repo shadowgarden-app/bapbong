@@ -6,10 +6,16 @@ export interface DialogOptions {
   modal?: boolean;
   /** Extra class on the `<dialog>` element. */
   className?: string;
+  /**
+   * Pin a non-modal dialog's top-right corner just inside this rect (e.g. the
+   * editor's canvas viewport) instead of the screen corner. Re-evaluated on
+   * open + scroll/resize. Return null to fall back to the default position.
+   */
+  anchor?: () => DOMRect | null;
 }
 
 const STYLE = `
-.bb-dialog{position:fixed;inset:auto;margin:0;padding:0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:10px;background:var(--bb-ui-menu-bg,#fff);color:var(--bb-ui-fg,#2c2c2a);box-shadow:0 12px 40px rgba(0,0,0,.18);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);min-width:280px;max-width:min(92vw,440px)}
+.bb-dialog{position:fixed;inset:auto;z-index:1100;margin:0;padding:0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:10px;background:var(--bb-ui-menu-bg,#fff);color:var(--bb-ui-fg,#2c2c2a);box-shadow:0 12px 40px rgba(0,0,0,.18);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);min-width:280px;max-width:min(92vw,440px)}
 .bb-dialog *{box-sizing:border-box}
 .bb-dialog::backdrop{background:rgba(0,0,0,.28)}
 .bb-dialog-modal{top:50%;left:50%;transform:translate(-50%,-50%)}
@@ -40,11 +46,21 @@ export class Dialog {
   readonly body: HTMLElement;
   private readonly title: HTMLElement;
   private readonly modal: boolean;
+  private readonly anchor?: () => DOMRect | null;
   private readonly closeListeners = new Set<() => void>();
+  private readonly reposition = (): void => {
+    if (this.modal || !this.anchor) return;
+    const r = this.anchor();
+    if (!r) return;
+    this.el.style.top = `${Math.max(8, r.top + 8)}px`;
+    this.el.style.left = 'auto';
+    this.el.style.right = `${Math.max(8, window.innerWidth - r.right + 8)}px`;
+  };
 
   constructor(options: DialogOptions = {}) {
     injectStyle('bb-ui-dialog-styles', STYLE);
     this.modal = options.modal ?? false;
+    this.anchor = options.anchor;
 
     const el = document.createElement('dialog');
     // Position via an explicit modifier class (avoids relying on the :modal
@@ -71,7 +87,10 @@ export class Dialog {
     el.append(header, this.body);
     document.body.appendChild(el);
 
-    el.addEventListener('close', () => this.closeListeners.forEach((cb) => cb()));
+    el.addEventListener('close', () => {
+      this.detachReposition();
+      this.closeListeners.forEach((cb) => cb());
+    });
     // Modal dialogs close on Esc natively; add it for non-modal panels too.
     if (!this.modal) {
       el.addEventListener('keydown', (e) => {
@@ -80,6 +99,15 @@ export class Dialog {
     }
 
     this.el = el;
+  }
+
+  private attachReposition(): void {
+    window.addEventListener('scroll', this.reposition, true); // capture: catch inner scrolls
+    window.addEventListener('resize', this.reposition);
+  }
+  private detachReposition(): void {
+    window.removeEventListener('scroll', this.reposition, true);
+    window.removeEventListener('resize', this.reposition);
   }
 
   setTitle(text: string): void {
@@ -95,6 +123,10 @@ export class Dialog {
     if (this.el.open) return;
     if (this.modal) this.el.showModal();
     else this.el.show();
+    if (!this.modal && this.anchor) {
+      this.reposition();
+      this.attachReposition();
+    }
   }
 
   close(): void {
@@ -112,6 +144,7 @@ export class Dialog {
   }
 
   destroy(): void {
+    this.detachReposition();
     this.closeListeners.clear();
     this.el.remove();
   }

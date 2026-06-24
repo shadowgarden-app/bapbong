@@ -152,8 +152,10 @@ export class App implements OnDestroy {
           ['align-left', 'align-center', 'align-right', 'align-justify'],
         ],
       });
-    // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace.
+    // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace,
+    // pinned to the canvas viewport's top-right (like Google Docs).
     this.findDialog = createFindDialog(editor.find, {
+      anchor: () => this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
       labels: {
         title: 'Tìm và thay thế',
         find: 'Tìm…',

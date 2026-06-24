@@ -28,6 +28,8 @@ export interface FindHandle {
 export interface FindDialogOptions {
   /** Modal vs non-modal (default false — keeps the document editable). */
   modal?: boolean;
+  /** Pin the panel's top-right inside this rect (e.g. the canvas viewport). */
+  anchor?: () => DOMRect | null;
   /** Override the (English) default labels for i18n. */
   labels?: Partial<{
     title: string;
@@ -137,7 +139,12 @@ export function createFindDialog(find: FindHandle, options: FindDialogOptions = 
   });
   for (const b of matchButtons) b.disabled = true;
 
-  const dialog = new Dialog({ title: labels.title, modal: options.modal ?? false, className: 'bb-find-dialog' });
+  const dialog = new Dialog({
+    title: labels.title,
+    modal: options.modal ?? false,
+    anchor: options.anchor,
+    className: 'bb-find-dialog',
+  });
   dialog.setContent(root);
   // Closing the panel clears the search so highlights/decorations disappear.
   dialog.onClose(() => {
