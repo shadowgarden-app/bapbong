@@ -4,9 +4,13 @@ import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type EditorChange, type FindState } from '@shadow-garden/bapbong-editor';
+import { insertImage, insertTable, setLink } from '@shadow-garden/bapbong-commands';
+import type { Command } from '@shadow-garden/bapbong-contracts';
 import {
   mountMenubar,
   mountToolbar,
+  tableGridPicker,
+  type Menu,
   type MenubarHandle,
   type ToolbarHandle,
 } from '@shadow-garden/bapbong-ui';
@@ -134,11 +138,19 @@ export class App implements OnDestroy {
     editor.onChange((c) => this.onEditorChange(c));
     editor.find.onState((s) => this.findState.set(s)); // mirror count/active into the bar
     // Menubar + formatting toolbar: hand bapbong-ui the host elements + the
-    // editor; it renders from editor.commands and wires everything itself.
+    // editor; it renders from editor.commands and wires everything itself. The
+    // menubar tree mixes registry commands with host actions (open file, comment
+    // view, find, shortcuts) and a table-size widget — see buildMenus().
     const menubarHost = this.editorMenubar()?.nativeElement;
-    if (menubarHost) this.menubar = mountMenubar(menubarHost, editor);
+    if (menubarHost) this.menubar = mountMenubar(menubarHost, editor, { menus: this.buildMenus() });
     const toolbarHost = this.editorToolbar()?.nativeElement;
-    if (toolbarHost) this.toolbar = mountToolbar(toolbarHost, editor);
+    if (toolbarHost)
+      this.toolbar = mountToolbar(toolbarHost, editor, {
+        groups: [
+          ['bold', 'italic', 'underline', 'strike'],
+          ['align-left', 'align-center', 'align-right', 'align-justify'],
+        ],
+      });
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
     this.cs.attachViews({
       anchorLayer: () => this.anchorLayer()?.nativeElement ?? null,
@@ -188,6 +200,151 @@ export class App implements OnDestroy {
   }
   protected replaceAll(): void {
     this.editor?.find.replaceAll(this.replaceText());
+  }
+
+  // ── Menubar config ───────────────────────────────────────────────
+  /** The full menu tree handed to bapbong-ui. Registry commands are referenced
+   *  by name; everything else (open file, comment view, find, image/link/table,
+   *  shortcuts) is a host action the shell owns. */
+  private buildMenus(): Menu[] {
+    const cs = this.cs;
+    const commentView = (label: string, mode: 'hide' | 'minimize' | 'expand' | 'panel') => ({
+      label,
+      run: () => cs.setCommentView(mode),
+      isActive: () => cs.commentView() === mode,
+    });
+    return [
+      { label: 'File', entries: [{ label: 'Open…', run: () => this.openFilePicker('.docx', (f) => this.loadFile(f)) }] },
+      {
+        label: 'Edit',
+        entries: [
+          { command: 'undo', label: 'Undo' },
+          { command: 'redo', label: 'Redo' },
+          'separator',
+          { label: 'Find and replace', run: () => this.focusFindBar() },
+        ],
+      },
+      {
+        label: 'View',
+        entries: [
+          {
+            label: 'Comments',
+            submenu: [
+              commentView('Hide comments', 'hide'),
+              commentView('Minimize comments', 'minimize'),
+              commentView('Expand comments', 'expand'),
+              commentView('Show all comments', 'panel'),
+            ],
+          },
+        ],
+      },
+      {
+        label: 'Insert',
+        entries: [
+          {
+            label: 'Image',
+            submenu: [
+              { label: 'Upload…', run: () => this.openFilePicker('image/*', (f) => this.insertImageFile(f)) },
+              { label: 'From URL…', run: () => this.execPrompt('Image URL:', (url) => insertImage(url)) },
+            ],
+          },
+          {
+            label: 'Table',
+            widget: (close) =>
+              tableGridPicker({
+                onPick: (rows, cols) => {
+                  this.exec(insertTable(rows, cols));
+                  close();
+                },
+              }),
+          },
+          { label: 'Link…', run: () => this.execPrompt('Link URL:', (href) => setLink(href)) },
+          { label: 'Break', submenu: [{ command: 'page-break', label: 'Page break' }] },
+        ],
+      },
+      {
+        label: 'Format',
+        entries: [
+          {
+            label: 'Text',
+            submenu: [
+              { command: 'bold' },
+              { command: 'italic' },
+              { command: 'underline' },
+              { command: 'strike' },
+              { command: 'superscript' },
+              { command: 'subscript' },
+            ],
+          },
+          {
+            label: 'Align',
+            submenu: [
+              { command: 'align-left' },
+              { command: 'align-center' },
+              { command: 'align-right' },
+              { command: 'align-justify' },
+            ],
+          },
+        ],
+      },
+      { label: 'Help', entries: [{ label: 'Keyboard shortcuts', run: () => this.showShortcuts() }] },
+    ];
+  }
+
+  /** Run a parameterized command against the live editor. */
+  private exec(cmd: Command): void {
+    if (!this.editor) return;
+    cmd.run(this.editor.state, (tr) => this.editor?.dispatch(tr));
+    this.editor.focus();
+  }
+
+  /** Prompt for a value, then run the command it builds (skip if cancelled). */
+  private execPrompt(message: string, build: (value: string) => Command): void {
+    const value = window.prompt(message)?.trim();
+    if (value) this.exec(build(value));
+  }
+
+  /** Open a transient file picker and hand the chosen file to `onFile`. */
+  private openFilePicker(accept: string, onFile: (file: File) => void): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file) onFile(file);
+    });
+    input.click();
+  }
+
+  private async loadFile(file: File): Promise<void> {
+    await this.load(file.name, await file.arrayBuffer());
+  }
+
+  private insertImageFile(file: File): void {
+    const reader = new FileReader();
+    reader.onload = () => this.exec(insertImage(String(reader.result)));
+    reader.readAsDataURL(file);
+  }
+
+  private focusFindBar(): void {
+    document.querySelector<HTMLInputElement>('.find-input')?.focus();
+  }
+
+  /** A minimal native-dialog list of the editor's keyboard shortcuts. */
+  private showShortcuts(): void {
+    const dlg = document.createElement('dialog');
+    dlg.style.cssText = 'padding:16px 20px;border:1px solid #ddd;border-radius:10px;max-width:320px;font:13px system-ui';
+    dlg.innerHTML =
+      '<h3 style="margin:0 0 8px">Keyboard shortcuts</h3>' +
+      '<ul style="margin:0 0 12px;padding-left:18px;line-height:1.7">' +
+      '<li><b>⌘Z</b> / <b>⇧⌘Z</b> — Undo / Redo</li>' +
+      '<li>Type to edit · arrows + ⇧ to select</li>' +
+      '<li>⌘C / ⌘V — copy / paste</li>' +
+      '<li>Use the Find bar to search &amp; replace</li>' +
+      '</ul><form method="dialog"><button>Close</button></form>';
+    document.body.appendChild(dlg);
+    dlg.addEventListener('close', () => dlg.remove());
+    dlg.showModal();
   }
 
   ngOnDestroy(): void {
