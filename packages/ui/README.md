@@ -31,6 +31,22 @@ handle.destroy();                              // removes DOM + listeners
 - Theme via CSS variables: `--bb-ui-bg`, `--bb-ui-fg`, `--bb-ui-border`,
   `--bb-ui-hover`, `--bb-ui-active-bg`, `--bb-ui-active-fg`.
 
+## Menubar
+
+```ts
+import { mountMenubar } from '@shadow-garden/bapbong-ui';
+
+const handle = mountMenubar(hostEl, editor);   // top-level titles → dropdowns
+handle.destroy();
+```
+
+- Top-level titles open dropdowns of command rows; active toggles show a check.
+- Click-outside / Escape close; arrow keys move within an open menu; hovering
+  another title switches menus.
+- Customise with `{ menus, labels }` — `menus` is a declarative tree of
+  `{ label, entries }` where entries reference command names (or `'separator'`).
+  Default is a "Format" menu (marks, separator, alignments) from the registry.
+
 ## Build / test
 
 ```sh

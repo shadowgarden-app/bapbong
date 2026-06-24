@@ -29,8 +29,9 @@
   <section [hidden]="!pageCount()">
     <h2>Canvas <span class="dim">(editable — click to place the caret, type, undo with ⌘Z · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
 
-    <!-- Formatting toolbar: bapbong-ui fills this host element; the shell only
-         provides the <div> and mounts/destroys it (see app.ts). -->
+    <!-- Menubar + formatting toolbar: bapbong-ui fills these host elements; the
+         shell only provides the <div>s and mounts/destroys them (see app.ts). -->
+    <div #editorMenubar class="editor-menubar-host"></div>
     <div #editorToolbar class="editor-toolbar-host"></div>
 
     <!-- Comment view-mode toolbar (Google-Docs style). -->

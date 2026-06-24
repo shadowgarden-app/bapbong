@@ -1,27 +1,5 @@
-import type { Collection, Command, Dispatch, EditorChange } from '@shadow-garden/bapbong-contracts';
-
-/** The editor `run` state type, derived from the {@link Command} contract so
- *  this package needs no direct ProseMirror dependency. */
-type EditorStateOf = Parameters<Command['run']>[0];
-
-/**
- * The minimal editor surface the UI binds to. `BapbongEditor` satisfies it
- * structurally, so this package never imports the editor — both just speak the
- * `contracts` vocabulary (the same decoupling as the plugin contract). A host
- * framework only supplies the element + this handle.
- */
-export interface EditorHandle {
-  /** Named command registry the toolbar renders + dispatches against. */
-  readonly commands: Collection<Command>;
-  /** Current document + selection (throws before a document is loaded). */
-  readonly state: EditorStateOf;
-  /** Apply a transaction. */
-  dispatch: Dispatch;
-  /** Return focus to the editor (after a button takes a click). */
-  focus(): void;
-  /** Subscribe to editor cycles; returns an unsubscribe. Drives active state. */
-  onChange(cb: (c: EditorChange) => void): () => void;
-}
+import type { Collection, Command } from '@shadow-garden/bapbong-contracts';
+import { type EditorHandle, type EditorStateOf, injectStyle } from './internal.js';
 
 /** Presentation for one toolbar button — the headless {@link Command} carries
  *  no UI, so labels/icons live here. */
@@ -79,19 +57,6 @@ const STYLE = `
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
 `;
 
-let stylesInjected = false;
-function injectStyles(): void {
-  if (stylesInjected || document.getElementById('bb-ui-toolbar-styles')) {
-    stylesInjected = true;
-    return;
-  }
-  const el = document.createElement('style');
-  el.id = 'bb-ui-toolbar-styles';
-  el.textContent = STYLE;
-  document.head.appendChild(el);
-  stylesInjected = true;
-}
-
 /**
  * Default grouping: every non-`align-*` command, then the `align-*` commands —
  * derived from the registry so new commands appear without config.
@@ -113,7 +78,7 @@ export function mountToolbar(
   editor: EditorHandle,
   options: ToolbarOptions = {},
 ): ToolbarHandle {
-  injectStyles();
+  injectStyle('bb-ui-toolbar-styles', STYLE);
   const items = { ...DEFAULT_ITEMS, ...(options.items ?? {}) };
   const groups = options.groups ?? defaultToolbarGroups(editor.commands);
 
