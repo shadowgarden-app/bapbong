@@ -316,6 +316,12 @@ importers:
         specifier: workspace:^
         version: link:../contracts
 
+  packages/ui:
+    dependencies:
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
+
 packages:
 
   '@algolia/abtesting@1.14.1':

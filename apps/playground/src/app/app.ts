@@ -4,6 +4,7 @@ import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type EditorChange, type FindState } from '@shadow-garden/bapbong-editor';
+import { mountToolbar, type ToolbarHandle } from '@shadow-garden/bapbong-ui';
 
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
@@ -42,6 +43,9 @@ export class App implements OnDestroy {
   // Comment-UI hosts the store reaches into (anchored layer + composer mount).
   private readonly anchorLayer = viewChild<ElementRef<HTMLDivElement>>('anchorLayer');
   private readonly composerHost = viewChild<ElementRef<HTMLDivElement>>('composerHost');
+  // Formatting toolbar host — bapbong-ui renders + wires it (see ensureEditor).
+  private readonly editorToolbar = viewChild<ElementRef<HTMLDivElement>>('editorToolbar');
+  private toolbar: ToolbarHandle | null = null;
 
   /** The framework-agnostic render/edit core (lazily created on first load). */
   private editor: BapbongEditor | null = null;
@@ -122,6 +126,10 @@ export class App implements OnDestroy {
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
     editor.find.onState((s) => this.findState.set(s)); // mirror count/active into the bar
+    // Formatting toolbar: hand bapbong-ui the host element + the editor; it
+    // renders the buttons from editor.commands and wires them itself.
+    const toolbarHost = this.editorToolbar()?.nativeElement;
+    if (toolbarHost) this.toolbar = mountToolbar(toolbarHost, editor);
     // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
     this.cs.attachViews({
       anchorLayer: () => this.anchorLayer()?.nativeElement ?? null,
@@ -175,6 +183,7 @@ export class App implements OnDestroy {
 
   ngOnDestroy(): void {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
+    this.toolbar?.destroy();
     this.editor?.destroy();
   }
 }
