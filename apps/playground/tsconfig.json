@@ -12,6 +12,7 @@
     "emitDeclarationOnly": false,
     "paths": {
       "@shadow-garden/bapbong-comments": ["../../packages/comments/src/index.ts"],
+      "@shadow-garden/bapbong-commands": ["../../packages/commands/src/index.ts"],
       "@shadow-garden/bapbong-editor": ["../../packages/editor/src/index.ts"],
       "@shadow-garden/bapbong-model": ["../../packages/model/src/index.ts"],
       "@shadow-garden/bapbong-docx": ["../../packages/docx/src/index.ts"],

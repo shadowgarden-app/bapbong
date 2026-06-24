@@ -28,6 +28,9 @@ import {
 } from '@shadow-garden/bapbong-selection';
 import type {
   CaretRect,
+  // `Command` here is the headless registry command ({ name, run, isActive… });
+  // aliased because input-bridge re-exports ProseMirror's own `Command` type.
+  Command as EditorCommand,
   EditorChange,
   EditorPlugin,
   MeasureMetrics,
@@ -47,6 +50,7 @@ export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/b
 // and are exposed as typed handles (e.g. editor.find) — no install needed.
 import { createBuiltins } from './built-in-plugins';
 import { Collection } from '@shadow-garden/bapbong-contracts';
+import { defaultCommands } from '@shadow-garden/bapbong-commands';
 import type { FindPlugin } from './find-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
 
@@ -126,6 +130,12 @@ export class BapbongEditor {
   private readonly plugins: Collection<EditorPlugin>;
   private readonly pluginTeardowns: Array<() => void> = [];
   private readonly pluginCtx: PluginContext;
+
+  /** Headless editor commands keyed by name — the surface a toolbar/menubar
+   *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
+   *  Built from the shared command layer; the same ops run on a backend.
+   *  (Plugin-contributed commands are an additive follow-up.) */
+  readonly commands: Collection<EditorCommand> = defaultCommands();
 
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;

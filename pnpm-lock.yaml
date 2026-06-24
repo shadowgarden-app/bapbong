@@ -225,6 +225,9 @@ importers:
 
   packages/editor:
     dependencies:
+      '@shadow-garden/bapbong-commands':
+        specifier: workspace:^
+        version: link:../commands
       '@shadow-garden/bapbong-contracts':
         specifier: workspace:^
         version: link:../contracts

@@ -11,6 +11,9 @@
       "path": "../../packages/comments/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/commands/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/editor/tsconfig.lib.json"
     },
     {

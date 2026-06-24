@@ -42,6 +42,7 @@
     }
   },
   "dependencies": {
+    "@shadow-garden/bapbong-commands": "workspace:^",
     "@shadow-garden/bapbong-contracts": "workspace:^",
     "@shadow-garden/bapbong-docx": "workspace:^",
     "@shadow-garden/bapbong-input-bridge": "workspace:^",
