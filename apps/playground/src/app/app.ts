@@ -211,7 +211,7 @@ export class App implements OnDestroy {
           { command: 'undo', label: 'Undo' },
           { command: 'redo', label: 'Redo' },
           'separator',
-          { label: 'Find and replace', run: () => this.findDialog?.open() },
+          { label: 'Find and replace', run: () => this.findDialog?.open(), shortcut: '⌘F' },
         ],
       },
       {

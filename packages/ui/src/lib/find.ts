@@ -30,6 +30,8 @@ export interface FindDialogOptions {
   modal?: boolean;
   /** Pin the panel's top-right inside this rect (e.g. the canvas viewport). */
   anchor?: () => DOMRect | null;
+  /** Open on Ctrl/Cmd+F (pre-empting the browser's native find). Default true. */
+  shortcut?: boolean;
   /** Override the (English) default labels for i18n. */
   labels?: Partial<{
     title: string;
@@ -152,16 +154,28 @@ export function createFindDialog(find: FindHandle, options: FindDialogOptions = 
     findInput.value = '';
   });
 
+  const openPanel = () => {
+    dialog.open();
+    findInput.focus();
+    findInput.select();
+  };
+
+  // Ctrl/Cmd+F opens the panel and pre-empts the browser's native find.
+  const onHotkey = (e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      openPanel();
+    }
+  };
+  if (options.shortcut !== false) document.addEventListener('keydown', onHotkey);
+
   return {
-    open() {
-      dialog.open();
-      findInput.focus();
-      findInput.select();
-    },
+    open: openPanel,
     close() {
       dialog.close();
     },
     destroy() {
+      document.removeEventListener('keydown', onHotkey);
       off();
       dialog.destroy();
     },

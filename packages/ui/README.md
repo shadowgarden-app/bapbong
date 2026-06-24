@@ -86,6 +86,8 @@ find.destroy();
   (the editor's `find` plugin satisfies it), so the package never imports the
   editor. Query input, match count, prev/next, replace + replace-all; closing
   clears the search. i18n via `{ labels }`.
+- Opens on **Ctrl/Cmd+F** (pre-empting the browser's native find); disable with
+  `{ shortcut: false }`. Pin it with `{ anchor }` (see Dialog).
 
 ## Build / test
 
