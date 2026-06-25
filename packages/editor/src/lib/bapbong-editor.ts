@@ -57,7 +57,7 @@ import { Collection } from '@shadow-garden/bapbong-contracts';
 import { defaultCommands } from '@shadow-garden/bapbong-commands';
 import type { FindPlugin } from './find-plugin';
 import type { TableSelectionPlugin } from './table-selection-plugin';
-export type { TableSelectionPlugin } from './table-selection-plugin';
+export type { TableSelectionPlugin, CellBlock, SelectedCell } from './table-selection-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
 
 /** A4 at 96 dpi with 1in margins — fallback until a document is imported. */

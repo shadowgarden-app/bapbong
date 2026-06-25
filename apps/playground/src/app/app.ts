@@ -3,7 +3,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
-import { BapbongEditor, type EditorChange } from '@shadow-garden/bapbong-editor';
+import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } from '@shadow-garden/bapbong-editor';
 import {
   cellAt,
   deleteSelectionCommand,
@@ -11,10 +11,9 @@ import {
   insertImage,
   insertRow,
   insertTable,
-  setCellsAttrs,
   setLink,
 } from '@shadow-garden/bapbong-commands';
-import type { Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
+import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
 import {
   createFindDialog,
   Dialog,
@@ -24,7 +23,7 @@ import {
   promptDialog,
   showContextMenu,
   tableGridPicker,
-  type CellProps,
+  type BorderPreset,
   type ContextMenuEntry,
   type FindDialogHandle,
   type Menu,
@@ -34,6 +33,43 @@ import {
 
 /** The JSON / DOM-preview panels are inspection aids — sync them lazily. */
 const PANEL_SYNC_MS = 250;
+
+/** Resolve a border preset to one cell's four sides given its position in the
+ *  block — Outside/Inside depend on which edge the cell sits on. */
+function borderSidesFor(
+  preset: BorderPreset,
+  cell: SelectedCell,
+  block: CellBlock,
+  on: BorderSide,
+): { top: BorderSide | false; right: BorderSide | false; bottom: BorderSide | false; left: BorderSide | false } {
+  const off = false as const;
+  const topRow = cell.row === 0;
+  const bottomRow = cell.row === block.rows - 1;
+  const leftCol = cell.col === 0;
+  const rightCol = cell.col === block.cols - 1;
+  switch (preset) {
+    case 'all':
+      return { top: on, right: on, bottom: on, left: on };
+    case 'none':
+      return { top: off, right: off, bottom: off, left: off };
+    case 'outside':
+      return { top: topRow ? on : off, right: rightCol ? on : off, bottom: bottomRow ? on : off, left: leftCol ? on : off };
+    case 'inside':
+      return { top: topRow ? off : on, right: rightCol ? off : on, bottom: bottomRow ? off : on, left: leftCol ? off : on };
+    case 'top':
+      return { top: topRow ? on : off, right: off, bottom: off, left: off };
+    case 'bottom':
+      return { top: off, right: off, bottom: bottomRow ? on : off, left: off };
+    case 'left':
+      return { top: off, right: off, bottom: off, left: leftCol ? on : off };
+    case 'right':
+      return { top: off, right: rightCol ? on : off, bottom: off, left: off };
+    case 'insideH':
+      return { top: topRow ? off : on, right: off, bottom: bottomRow ? off : on, left: off };
+    case 'insideV':
+      return { top: off, right: rightCol ? off : on, bottom: off, left: leftCol ? off : on };
+  }
+}
 
 /**
  * The playground is a thin shell: {@link BapbongEditor} owns the canvas
@@ -161,8 +197,8 @@ export class App implements OnDestroy {
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
-    // Cell-block action icon → cell-properties dialog (applied to all selected cells).
-    editor.tableSelection.onAction((cells) => this.openCellPropsFor(cells));
+    // Cell-block action icon → cell-properties dialog (applied to the block).
+    editor.tableSelection.onAction((block) => this.openCellPropsForBlock(block));
     // Menubar / toolbar / find-bar: hand bapbong-ui the host elements + the
     // editor; it renders from editor.commands / editor.find and wires everything
     // itself. The menubar tree mixes registry commands with host actions (open
@@ -329,12 +365,11 @@ export class App implements OnDestroy {
     ];
     const cell = cellAt(ed.state);
     if (cell) {
-      // Act on the selected block if there is one, else the clicked cell.
-      const block = ed.tableSelection.cells();
-      const target = block.length ? block : [cell.pos];
+      // Act on the selected block if there is one, else the clicked cell (1×1).
+      const block = ed.tableSelection.block() ?? { cells: [{ pos: cell.pos, row: 0, col: 0 }], rows: 1, cols: 1 };
       entries.push(
         'separator',
-        { label: 'Cell properties…', run: () => this.openCellPropsFor(target) },
+        { label: 'Cell properties…', run: () => this.openCellPropsForBlock(block) },
         { label: 'Insert row above', run: () => this.exec(insertRow(false)) },
         { label: 'Insert row below', run: () => this.exec(insertRow(true)) },
         { label: 'Insert column left', run: () => this.exec(insertColumn(false)) },
@@ -344,37 +379,36 @@ export class App implements OnDestroy {
     showContextMenu(entries, { x: ev.clientX, y: ev.clientY });
   }
 
-  /** Open the cell-properties dialog for `cells`, pre-filled from the first one,
-   *  applying the result to all of them (one undoable step). */
-  private openCellPropsFor(cells: number[]): void {
+  /** Open the cell-properties dialog for a selected block, pre-filled from its
+   *  first cell. Fill + vAlign apply uniformly; a chosen border preset is
+   *  resolved per cell (Outside/Inside depend on block position) — all in one
+   *  undoable transaction. */
+  private openCellPropsForBlock(block: CellBlock): void {
     const ed = this.editor;
-    if (!ed || cells.length === 0) return;
-    const first = ed.state.doc.nodeAt(cells[0]);
-    const b = first?.attrs['borders'] as Partial<CellProps['borders']> | null;
+    if (!ed || block.cells.length === 0) return;
+    const first = ed.state.doc.nodeAt(block.cells[0].pos);
     const va = first?.attrs['vAlign'];
-    const initial: CellProps = {
-      background: (first?.attrs['background'] as string | null) ?? null,
-      vAlign: va === 'center' || va === 'bottom' ? va : 'top',
-      borders: { top: !!b?.top, right: !!b?.right, bottom: !!b?.bottom, left: !!b?.left },
-    };
-    // Bridge the (still boolean) borders UI onto the new BorderSide model;
-    // Increment 2 replaces this with width/style/colour controls.
-    const side = (on: boolean) => (on ? { width: 1, style: 'solid' as const, color: '#b0b0b0' } : false);
     openCellProperties({
-      initial,
-      onApply: (props) => {
-        this.exec(
-          setCellsAttrs(cells, {
-            background: props.background,
-            vAlign: props.vAlign === 'top' ? null : props.vAlign,
-            borders: {
-              top: side(props.borders.top),
-              right: side(props.borders.right),
-              bottom: side(props.borders.bottom),
-              left: side(props.borders.left),
-            },
-          }),
-        );
+      initial: {
+        background: (first?.attrs['background'] as string | null) ?? null,
+        vAlign: va === 'center' || va === 'bottom' ? va : 'top',
+      },
+      singleCell: block.rows === 1 && block.cols === 1,
+      onApply: (result) => {
+        const on: BorderSide | null = result.border
+          ? { width: result.border.width, style: result.border.style, color: result.border.color }
+          : null;
+        let tr = ed.state.tr;
+        for (const cell of block.cells) {
+          if (ed.state.doc.nodeAt(cell.pos)?.type.name !== 'table_cell') continue;
+          tr = tr
+            .setNodeAttribute(cell.pos, 'background', result.background)
+            .setNodeAttribute(cell.pos, 'vAlign', result.vAlign === 'top' ? null : result.vAlign);
+          if (result.border && on) {
+            tr = tr.setNodeAttribute(cell.pos, 'borders', borderSidesFor(result.border.preset, cell, block, on));
+          }
+        }
+        if (tr.docChanged) ed.dispatch(tr);
         ed.tableSelection.clear();
       },
     });

@@ -12,13 +12,26 @@ import type {
 /** The editor state type, from the plugin context (no direct PM dep). */
 type State = PluginContext['state'];
 
+/** A selected cell + its position within the block grid (0-based). */
+export interface SelectedCell {
+  pos: number;
+  row: number;
+  col: number;
+}
+/** The selected rectangular cell block as a grid. */
+export interface CellBlock {
+  cells: SelectedCell[];
+  rows: number;
+  cols: number;
+}
+
 /** Richer handle the editor exposes as `editor.tableSelection`. */
 export interface TableSelectionPlugin extends EditorPlugin {
   /** Subscribe to the action trigger (icon tap / menu); receives the selected
-   *  `table_cell` doc positions. Returns an unsubscribe. */
-  onAction(cb: (cells: number[]) => void): () => void;
-  /** The currently selected `table_cell` doc positions (empty when none). */
-  cells(): number[];
+   *  block (cells + grid size). Returns an unsubscribe. */
+  onAction(cb: (block: CellBlock) => void): () => void;
+  /** The current selected block, or null when there's no selection. */
+  block(): CellBlock | null;
   /** Clear the block selection + its overlay. */
   clear(): void;
 }
@@ -73,7 +86,7 @@ function cellDocPos(state: State, cell: ResolvedCell): number | null {
  * same table claims the drag, collapses the text selection, paints the block as
  * a translucent highlight, and (on release) shows a small action button at the
  * block's top-right — a touch-friendly trigger to open cell properties. The
- * host subscribes via `onAction` and reads the selected cells via `cells()`.
+ * host subscribes via `onAction` and reads the selected block via `block()`.
  *
  * Pointer-event based (mouse/touch/pen). The selection is editor overlay state
  * (bapbong's table schema has no ProseMirror CellSelection).
@@ -84,15 +97,15 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
   let lastHead: PagePoint | null = null; // latest drag point
   let selecting = false;
   let collapsed = false;
-  let selected: number[] = []; // selected table_cell doc positions
-  const listeners = new Set<(cells: number[]) => void>();
+  let current: CellBlock | null = null; // the finalized block
+  const listeners = new Set<(block: CellBlock) => void>();
 
   const reset = (c: PluginContext) => {
     anchor = null;
     lastHead = null;
     selecting = false;
     collapsed = false;
-    selected = [];
+    current = null;
     c.setHighlight(null);
     c.setActionButton(null);
   };
@@ -102,13 +115,22 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
     const h = lastHead && cellAtPoint(c.layout, lastHead);
     if (!a || !h || a.table !== h.table) return;
     const cells = blockCells(a.table, a.cell, h.cell);
-    selected = cells.map((cell) => cellDocPos(c.state, cell)).filter((p): p is number => p != null);
+    // Grid position from distinct cell tops/lefts.
+    const ys = [...new Set(cells.map((cell) => Math.round(cell.y)))].sort((p, q) => p - q);
+    const xs = [...new Set(cells.map((cell) => Math.round(cell.x)))].sort((p, q) => p - q);
+    const sel: SelectedCell[] = [];
+    for (const cell of cells) {
+      const pos = cellDocPos(c.state, cell);
+      if (pos != null) sel.push({ pos, row: ys.indexOf(Math.round(cell.y)), col: xs.indexOf(Math.round(cell.x)) });
+    }
+    if (sel.length === 0) return;
+    current = { cells: sel, rows: ys.length, cols: xs.length };
     const topRight: PagePoint = {
       pageIndex: anchor!.pageIndex,
       x: Math.max(...cells.map((cell) => cell.x + cell.width)),
       y: Math.min(...cells.map((cell) => cell.y)),
     };
-    c.setActionButton(topRight, () => listeners.forEach((cb) => cb([...selected])));
+    c.setActionButton(topRight, () => current && listeners.forEach((cb) => cb(current!)));
   };
 
   return {
@@ -168,8 +190,8 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
-    cells() {
-      return [...selected];
+    block() {
+      return current;
     },
     clear() {
       if (ctx) reset(ctx);
