@@ -55,6 +55,15 @@ export interface EditorPointerEvent {
   buttons: number;
 }
 
+/** A transient vertical guide line shown during a drag (page-local geometry) —
+ *  e.g. a column-resize preview. The editor positions it on the canvas. */
+export interface OverlayGuide {
+  pageIndex: number;
+  x: number;
+  y: number;
+  height: number;
+}
+
 /**
  * The controlled surface an {@link EditorPlugin} gets onto the editor core:
  * read/dispatch document state plus the geometry + paint helpers it needs to
@@ -80,6 +89,9 @@ export interface PluginContext {
   readonly layout: ResolvedLayout | null;
   /** Set the canvas cursor (e.g. `'col-resize'`); null restores the default. */
   setCursor(cursor: string | null): void;
+  /** Show a transient vertical guide (e.g. a column-resize preview), or null to
+   *  clear it. Page-local geometry; the editor positions it on the canvas. */
+  setGuide(guide: OverlayGuide | null): void;
 }
 
 /**

@@ -13,27 +13,40 @@ type State = PluginContext['state'];
 const EDGE_TOL = 5; // px proximity to a column border to start a resize
 const MIN_WIDTH = 24; // px minimum column width
 
-/**
- * Find a column border (a cell's right edge) within {@link EDGE_TOL} of `point`,
- * and the colspan-1 cells of that column (those sharing the right edge). Their
- * shared left edge `leftX` anchors the new width during a drag.
- */
-function columnBorderAt(
-  layout: ResolvedLayout | null,
-  point: PagePoint,
-): { cells: ResolvedCell[]; leftX: number } | null {
+/** An interior column border (shared by a left column and a right column). The
+ *  table's outer edges have no neighbour, so they aren't resizable — dragging
+ *  redistributes width between the two adjacent columns, keeping the table (and
+ *  its alignment) a fixed total width. */
+interface BorderHit {
+  pageIndex: number;
+  borderX: number; // current border x (page-local)
+  leftX: number; // left column's left edge
+  rightX: number; // right column's right edge
+  leftCells: ResolvedCell[];
+  rightCells: ResolvedCell[];
+  tableY: number;
+  tableHeight: number;
+}
+
+const near = (a: number, b: number) => Math.abs(a - b) < 1;
+
+function borderAt(layout: ResolvedLayout | null, point: PagePoint): BorderHit | null {
   const page = layout?.pages[point.pageIndex];
   if (!page?.tables) return null;
   for (const table of page.tables) {
     if (point.y < table.y || point.y > table.y + table.height) continue;
     if (point.x < table.x - EDGE_TOL || point.x > table.x + table.width + EDGE_TOL) continue;
-    for (const cell of table.cells) {
-      if (cell.colspan !== 1 || point.y < cell.y || point.y > cell.y + cell.height) continue;
+    const simple = table.cells.filter((c) => c.colspan === 1);
+    for (const cell of simple) {
+      if (point.y < cell.y || point.y > cell.y + cell.height) continue;
       const rightEdge = cell.x + cell.width;
-      if (Math.abs(point.x - rightEdge) <= EDGE_TOL) {
-        const cells = table.cells.filter((c) => c.colspan === 1 && Math.abs(c.x + c.width - rightEdge) < 1);
-        return { cells, leftX: cell.x };
-      }
+      if (Math.abs(point.x - rightEdge) > EDGE_TOL) continue;
+      const leftCells = simple.filter((c) => near(c.x + c.width, rightEdge));
+      const rightCells = simple.filter((c) => near(c.x, rightEdge));
+      if (rightCells.length === 0) return null; // outer-right edge → not resizable
+      const leftX = Math.min(...leftCells.map((c) => c.x));
+      const rightX = Math.max(...rightCells.map((c) => c.x + c.width));
+      return { pageIndex: point.pageIndex, borderX: rightEdge, leftX, rightX, leftCells, rightCells, tableY: table.y, tableHeight: table.height };
     }
   }
   return null;
@@ -52,35 +65,42 @@ function cellDocPos(state: State, cell: ResolvedCell): number | null {
 }
 
 interface DragState {
-  positions: number[]; // table_cell doc positions of the column being resized
-  leftX: number; // page-local left edge of the column (stable during drag)
-  lastWidth: number | null;
+  hit: BorderHit;
+  borderX: number; // current (clamped) border position
 }
 
 /**
- * Internal plugin: drag a table column's right border to resize it. Hovering a
- * border shows a `col-resize` cursor; a drag rewrites the column cells'
- * `colwidth` attr live (the layout engine sizes columns from it). Consecutive
- * drag transactions coalesce into one undo step via history time-grouping.
+ * Internal plugin: drag a table column's interior border to resize it. Hovering
+ * a border shows a `col-resize` cursor; during the drag only a vertical guide
+ * follows the cursor (no re-layout); on drop it rewrites just the two adjacent
+ * columns' `colwidth` (left +Δ, right −Δ) in one transaction — so the table's
+ * total width stays fixed and the change is a single undo step.
  *
- * Built on the editor's pointer hook + `ctx.layout`/`ctx.setCursor` — no UI,
- * no schema; purely geometry + transactions.
+ * Built on the editor's pointer hook + `ctx.layout`/`setCursor`/`setGuide` — no
+ * UI, no schema; geometry + one transaction.
  */
 export function tableResizePlugin(): EditorPlugin {
   let ctx: PluginContext | null = null;
   let drag: DragState | null = null;
 
-  const applyWidth = (c: PluginContext, pointX: number): void => {
-    if (!drag) return;
-    const width = Math.max(MIN_WIDTH, Math.round(pointX - drag.leftX));
-    if (width === drag.lastWidth) return;
-    drag.lastWidth = width;
-    let tr = c.state.tr;
-    for (const pos of drag.positions) {
-      if (c.state.doc.nodeAt(pos)?.type.name === 'table_cell') {
+  const showGuide = (c: PluginContext, hit: BorderHit, x: number): void =>
+    c.setGuide({ pageIndex: hit.pageIndex, x, y: hit.tableY, height: hit.tableHeight });
+
+  const commit = (c: PluginContext, d: DragState): void => {
+    const { hit, borderX } = d;
+    if (near(borderX, hit.borderX)) return; // no move → nothing to commit
+    const leftWidth = Math.round(borderX - hit.leftX);
+    const rightWidth = Math.round(hit.rightX - borderX);
+    const state = c.state;
+    let tr = state.tr;
+    const setCol = (cell: ResolvedCell, width: number) => {
+      const pos = cellDocPos(state, cell);
+      if (pos != null && state.doc.nodeAt(pos)?.type.name === 'table_cell') {
         tr = tr.setNodeAttribute(pos, 'colwidth', [width]);
       }
-    }
+    };
+    for (const cell of hit.leftCells) setCol(cell, leftWidth);
+    for (const cell of hit.rightCells) setCol(cell, rightWidth);
     if (tr.docChanged) c.dispatch(tr);
   };
 
@@ -95,33 +115,39 @@ export function tableResizePlugin(): EditorPlugin {
 
       if (ev.type === 'move') {
         if (drag) {
-          if (ev.point) applyWidth(c, ev.point.x);
+          if (ev.point) {
+            // clamp so neither column goes below MIN_WIDTH
+            const lo = drag.hit.leftX + MIN_WIDTH;
+            const hi = drag.hit.rightX - MIN_WIDTH;
+            drag.borderX = Math.max(lo, Math.min(hi, ev.point.x));
+            showGuide(c, drag.hit, drag.borderX);
+          }
           return true; // claim: suppress the editor's selection drag
         }
         if (ev.buttons === 0) {
-          const onBorder = ev.point ? columnBorderAt(c.layout, ev.point) : null;
+          const onBorder = ev.point ? borderAt(c.layout, ev.point) : null;
           c.setCursor(onBorder ? 'col-resize' : null);
         }
-        return false; // hover only sets the cursor; don't claim
+        return false;
       }
 
       if (ev.type === 'down') {
         if (ev.buttons !== 1 || !ev.point) return false;
-        const border = columnBorderAt(c.layout, ev.point);
-        if (!border) return false;
-        const positions = border.cells
-          .map((cell) => cellDocPos(c.state, cell))
-          .filter((p): p is number => p != null);
-        if (positions.length === 0) return false;
-        drag = { positions, leftX: border.leftX, lastWidth: null };
+        const hit = borderAt(c.layout, ev.point);
+        if (!hit) return false;
+        drag = { hit, borderX: hit.borderX };
         c.setCursor('col-resize');
+        showGuide(c, hit, hit.borderX);
         return true; // claim → the editor captures the pointer for us
       }
 
       if (ev.type === 'up') {
         if (!drag) return false;
+        const d = drag;
         drag = null;
+        c.setGuide(null);
         c.setCursor(null);
+        commit(c, d);
         return true;
       }
 

@@ -34,6 +34,7 @@ import type {
   EditorChange,
   EditorPlugin,
   EditorPointerEvent,
+  OverlayGuide,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -133,6 +134,8 @@ export class BapbongEditor {
   private readonly pluginCtx: PluginContext;
   // Whether any plugin wants pointer events (gates the per-move offer).
   private pointerPlugins = false;
+  // Transient drag guide (e.g. column-resize preview); lazily created.
+  private guideEl: HTMLDivElement | null = null;
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -184,6 +187,7 @@ export class BapbongEditor {
       setCursor: (cursor: string | null) => {
         this.stack.style.cursor = cursor ?? '';
       },
+      setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
     };
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
@@ -321,6 +325,8 @@ export class BapbongEditor {
     this.stack.removeEventListener('pointercancel', this.onPointerUp);
     this.stack.removeEventListener('dblclick', this.onDblClick);
     this.stack.removeEventListener('contextmenu', this.onContextMenu);
+    this.guideEl?.remove();
+    this.guideEl = null;
     this.viewport?.removeEventListener('scroll', this.onScroll);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.bridge?.destroy();
@@ -586,6 +592,31 @@ export class BapbongEditor {
       if (p.onPointer?.(pev)) return true;
     }
     return false;
+  }
+
+  /** Position (or hide, with null) the transient vertical drag guide. Lives in
+   *  the canvas stack so it scrolls/zooms with the pages. */
+  private setGuide(guide: OverlayGuide | null): void {
+    if (!guide) {
+      if (this.guideEl) this.guideEl.style.display = 'none';
+      return;
+    }
+    if (!this.guideEl) {
+      this.guideEl = document.createElement('div');
+      this.guideEl.style.cssText =
+        'position:absolute;width:0;border-left:2px dashed #378add;pointer-events:none;z-index:5;';
+      this.stack.appendChild(this.guideEl);
+    }
+    const top = this.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y });
+    const bottom = this.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y + guide.height });
+    if (!top || !bottom) {
+      this.guideEl.style.display = 'none';
+      return;
+    }
+    this.guideEl.style.display = 'block';
+    this.guideEl.style.left = `${top.x}px`;
+    this.guideEl.style.top = `${top.y}px`;
+    this.guideEl.style.height = `${bottom.y - top.y}px`;
   }
 
   private onDblClick = (ev: MouseEvent): void => {
