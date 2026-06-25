@@ -21,6 +21,7 @@ import {
   parseXml,
   RunProps,
 } from './ooxml';
+import type { BorderSide, BorderStyle, TableBorders } from '@shadow-garden/bapbong-contracts';
 import { buildStyleRegistry, StyleRegistry } from './styles';
 import { buildNumbering, NumberingResolver } from './numbering';
 import { buildRels, Relationship } from './rels';
@@ -607,7 +608,7 @@ interface LogicalCell {
   colwidth: number[] | null;
   background: string | null;
   vAlign: string | null;
-  borders: Record<string, boolean> | null;
+  borders: TableBorders | null;
   content: PMNode[];
 }
 
@@ -641,16 +642,40 @@ function parseCellMargins(
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** Per-side visibility from a w:tblBorders / w:tcBorders node. A side's val of
- *  none/nil records `false` (explicitly hidden), any other value `true`. */
-function parseBordersEl(bordersEl: OoxmlNode | undefined, sides: readonly string[]): Record<string, boolean> | null {
+/** OOXML w:val border styles → our {@link BorderStyle} (unknowns → solid). */
+const BORDER_STYLE_IN: Record<string, BorderStyle> = {
+  single: 'solid',
+  thick: 'solid',
+  dashed: 'dashed',
+  dashSmallGap: 'dashed',
+  dotted: 'dotted',
+  dotDash: 'dashed',
+  dotDotDash: 'dashed',
+  double: 'double',
+};
+
+/** A side element (w:top/bottom/…) → its appearance, or `false` when hidden.
+ *  w:sz is eighths of a point; w:color "auto"/absent keeps the default grey. */
+function parseBorderSide(el: OoxmlNode): BorderSide | false {
+  const val = attrOf(el, 'w:val');
+  if (val === 'none' || val === 'nil') return false;
+  const sz = Number(attrOf(el, 'w:sz') ?? '4');
+  const width = Math.max(0.75, (sz / 8) * (96 / 72));
+  const style = BORDER_STYLE_IN[val ?? 'single'] ?? 'solid';
+  const colorAttr = attrOf(el, 'w:color');
+  const color = colorAttr && colorAttr !== 'auto' ? normalizeHex(colorAttr) ?? '#b0b0b0' : '#b0b0b0';
+  return { width, style, color };
+}
+
+/** Per-side border appearance from a w:tblBorders / w:tcBorders node. An absent
+ *  side is omitted (inherits); a present side is a {@link BorderSide} or false. */
+function parseBordersEl(bordersEl: OoxmlNode | undefined, sides: readonly string[]): TableBorders | null {
   if (!bordersEl) return null;
-  const out: Record<string, boolean> = {};
+  const out: TableBorders = {};
   for (const side of sides) {
     const el = child(bordersEl, `w:${side}`);
     if (!el) continue;
-    const val = attrOf(el, 'w:val');
-    out[side] = val !== undefined && val !== 'none' && val !== 'nil';
+    out[side as keyof TableBorders] = parseBorderSide(el);
   }
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -660,7 +685,7 @@ const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
 
 /** Border visibility from a w:tblBorders node (direct tblPr or table style).
  *  OOXML tables are borderless unless declared; val none/nil hides a side. */
-function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): Record<string, boolean> | null {
+function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): TableBorders | null {
   const tblPr = child(tbl, 'w:tblPr');
   const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
   const bordersEl = child(tblPr, 'w:tblBorders') ?? ctx.styles.resolveTableBorders(styleId);

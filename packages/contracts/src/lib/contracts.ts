@@ -236,13 +236,30 @@ export interface FlowTableRow {
 
 /** Which table borders are visible (w:tblBorders). OOXML tables have NO
  *  borders unless declared — absence of this object means draw nothing. */
+/** Stroke style of a visible border edge (maps to/from w:val). */
+export type BorderStyle = 'solid' | 'dashed' | 'dotted' | 'double';
+
+/** Appearance of one visible border edge. */
+export interface BorderSide {
+  /** Stroke width in CSS px. */
+  width: number;
+  style: BorderStyle;
+  /** Hex colour, e.g. "#000000". */
+  color: string;
+}
+
+/**
+ * Per-side border appearance. A side holding a {@link BorderSide} is visible
+ * with that width/style/colour; `false` is an explicit "no border"; an absent
+ * side inherits (a cell falls back to the table's outer/inside border).
+ */
 export interface TableBorders {
-  top?: boolean;
-  bottom?: boolean;
-  left?: boolean;
-  right?: boolean;
-  insideH?: boolean;
-  insideV?: boolean;
+  top?: BorderSide | false;
+  bottom?: BorderSide | false;
+  left?: BorderSide | false;
+  right?: BorderSide | false;
+  insideH?: BorderSide | false;
+  insideV?: BorderSide | false;
 }
 
 /** Cell padding overrides (px) from w:tblCellMar; unset sides use defaults. */

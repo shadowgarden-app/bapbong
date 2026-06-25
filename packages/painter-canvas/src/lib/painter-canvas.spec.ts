@@ -28,6 +28,7 @@ class RecordingCtx {
   moveTo(...args: unknown[]) { this.record('moveTo', args); }
   lineTo(...args: unknown[]) { this.record('lineTo', args); }
   stroke(...args: unknown[]) { this.record('stroke', args); }
+  setLineDash(...args: unknown[]) { this.record('setLineDash', args); }
 
   of(method: string): Call[] {
     return this.calls.filter((c) => c.method === method);
@@ -225,12 +226,13 @@ describe('CanvasPainter', () => {
 
   it('draws declared table borders and paints cell content', () => {
     const { painter, container } = setup();
+    const s = { width: 1, style: 'solid' as const, color: '#000' };
     const p = {
       ...page([]),
       tables: [
         {
           x: 20, y: 20, width: 100, height: 16,
-          borders: { top: true, bottom: true, left: true, right: true, insideH: true, insideV: true },
+          borders: { top: s, bottom: s, left: s, right: s, insideH: s, insideV: s },
           cells: [{ x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, lines: [helloLine] }],
         },
       ],
@@ -250,7 +252,7 @@ describe('CanvasPainter', () => {
       tables: [
         {
           x: 20, y: 20, width: 100, height: 16,
-          cells: [{ x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, borders: { bottom: true }, lines: [] }],
+          cells: [{ x: 20, y: 20, width: 100, height: 16, colspan: 1, rowspan: 1, borders: { bottom: { width: 1, style: 'solid' as const, color: '#000' } }, lines: [] }],
         },
       ],
     };

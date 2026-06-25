@@ -106,8 +106,9 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
   it('round-trips a table with borders + colspan', async () => {
     const cell = (text: string, attrs?: Record<string, unknown>) =>
       schema.node('table_cell', attrs ?? null, [schema.node('paragraph', null, [schema.text(text)])]);
+    const s = { width: 1.5, style: 'solid' as const, color: '#000000' };
     const doc = schema.node('doc', null, [
-      schema.node('table', { borders: { top: true, bottom: true, left: true, right: true, insideH: true, insideV: true } }, [
+      schema.node('table', { borders: { top: s, bottom: s, left: s, right: s, insideH: s, insideV: s } }, [
         schema.node('table_row', null, [cell('A1', { colwidth: [100] }), cell('B1', { colwidth: [120] })]),
         schema.node('table_row', null, [cell('wide', { colspan: 2, colwidth: [100, 120] })]),
       ]),
@@ -115,7 +116,8 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     const { doc: back } = await importDocx(await exportDocx(doc));
     const tbl = back.child(0);
     expect(tbl.type.name).toBe('table');
-    expect(tbl.attrs['borders']).toBeTruthy();
+    // width/style/colour survive the round-trip (1.5px → w:sz 9 → 1.5px).
+    expect(tbl.attrs['borders'].top).toEqual({ width: 1.5, style: 'solid', color: '#000000' });
     expect(tbl.childCount).toBe(2); // two rows
     expect(tbl.child(0).childCount).toBe(2); // two cells
     expect(tbl.child(0).child(0).textContent).toBe('A1');

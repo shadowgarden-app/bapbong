@@ -1,4 +1,5 @@
 import type {
+  BorderSide,
   CaretRect,
   FontSpec,
   LayoutLine,
@@ -409,13 +410,6 @@ export class CanvasPainter {
     // A cell's own w:tcBorders override its four edges.
     const b = table.borders;
     if (b || table.cells.some((c) => c.borders)) {
-      ctx.strokeStyle = o.tableBorder;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      const edge = (x1: number, y1: number, x2: number, y2: number) => {
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-      };
       const eps = 0.5;
       for (const cell of table.cells) {
         const cb = cell.borders;
@@ -427,18 +421,56 @@ export class CanvasPainter {
         const bottomOuter = Math.abs(cell.y + cell.height - (table.y + table.height)) < eps;
         const leftOuter = Math.abs(cell.x - table.x) < eps;
         const rightOuter = Math.abs(cell.x + cell.width - (table.x + table.width)) < eps;
-        // Cell border wins; else the table's outer/inside edge.
-        if (cb?.top ?? (topOuter ? b?.top : b?.insideH)) edge(x0, y0, x1, y0);
-        if (cb?.bottom ?? (bottomOuter ? b?.bottom : b?.insideH)) edge(x0, y1, x1, y1);
-        if (cb?.left ?? (leftOuter ? b?.left : b?.insideV)) edge(x0, y0, x0, y1);
-        if (cb?.right ?? (rightOuter ? b?.right : b?.insideV)) edge(x1, y0, x1, y1);
+        // Cell border wins; else the table's outer/inside edge. A BorderSide is
+        // visible, `false` is explicit-none, absent inherits.
+        const top = cb?.top ?? (topOuter ? b?.top : b?.insideH);
+        const bottom = cb?.bottom ?? (bottomOuter ? b?.bottom : b?.insideH);
+        const left = cb?.left ?? (leftOuter ? b?.left : b?.insideV);
+        const right = cb?.right ?? (rightOuter ? b?.right : b?.insideV);
+        if (top) this.strokeBorder(top, x0, y0, x1, y0);
+        if (bottom) this.strokeBorder(bottom, x0, y1, x1, y1);
+        if (left) this.strokeBorder(left, x0, y0, x0, y1);
+        if (right) this.strokeBorder(right, x1, y0, x1, y1);
       }
-      ctx.stroke();
+      ctx.setLineDash([]);
     }
     for (const cell of table.cells) {
       for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
       for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
     }
+  }
+
+  /** Stroke one border edge with its width / style / colour. The edge is always
+   *  horizontal or vertical (table grid lines). */
+  private strokeBorder(side: BorderSide, x1: number, y1: number, x2: number, y2: number): void {
+    const ctx = this.ctx;
+    ctx.strokeStyle = side.color;
+    if (side.style === 'double') {
+      // Two thin parallel lines straddling the edge.
+      ctx.setLineDash([]);
+      ctx.lineWidth = Math.max(0.75, side.width / 3);
+      const gap = Math.max(2, side.width) / 2;
+      const horiz = y1 === y2;
+      ctx.beginPath();
+      ctx.moveTo(x1 + (horiz ? 0 : -gap), y1 + (horiz ? -gap : 0));
+      ctx.lineTo(x2 + (horiz ? 0 : -gap), y2 + (horiz ? -gap : 0));
+      ctx.moveTo(x1 + (horiz ? 0 : gap), y1 + (horiz ? gap : 0));
+      ctx.lineTo(x2 + (horiz ? 0 : gap), y2 + (horiz ? gap : 0));
+      ctx.stroke();
+      return;
+    }
+    ctx.lineWidth = side.width;
+    ctx.setLineDash(
+      side.style === 'dashed'
+        ? [side.width * 3, side.width * 2]
+        : side.style === 'dotted'
+          ? [side.width, side.width * 1.6]
+          : [],
+    );
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
   }
 
   /** Container CSS-px point → page-local point. Points in the gap between pages

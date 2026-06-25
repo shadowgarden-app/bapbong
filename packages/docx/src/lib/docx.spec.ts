@@ -516,14 +516,16 @@ describe('importDocx', () => {
       </w:tbl>
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
-    expect(doc.child(0).attrs.borders).toEqual({ top: true, insideH: false });
+    // w:val=single, no sz/color → 0.5pt clamped to 0.75px, solid, auto→grey.
+    const single = { width: 0.75, style: 'solid', color: '#b0b0b0' };
+    expect(doc.child(0).attrs.borders).toEqual({ top: single, insideH: false });
     expect(doc.child(1).attrs.borders).toEqual({
-      top: true,
-      bottom: true,
-      left: true,
-      right: true,
-      insideH: true,
-      insideV: true,
+      top: single,
+      bottom: single,
+      left: single,
+      right: single,
+      insideH: single,
+      insideV: single,
     });
     expect(doc.child(2).attrs.borders).toBeNull(); // borderless by default
   });
@@ -634,7 +636,10 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml));
     expect(doc.child(0).textContent).toBe('• item'); // F0B7 → bullet
-    expect(doc.child(1).child(0).child(0).attrs.borders).toEqual({ bottom: true, top: false });
+    expect(doc.child(1).child(0).child(0).attrs.borders).toEqual({
+      bottom: { width: 0.75, style: 'solid', color: '#b0b0b0' },
+      top: false,
+    });
   });
 
   it('parses table alignment, row height and cell vAlign', async () => {

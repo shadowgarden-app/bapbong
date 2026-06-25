@@ -357,6 +357,9 @@ export class App implements OnDestroy {
       vAlign: va === 'center' || va === 'bottom' ? va : 'top',
       borders: { top: !!b?.top, right: !!b?.right, bottom: !!b?.bottom, left: !!b?.left },
     };
+    // Bridge the (still boolean) borders UI onto the new BorderSide model;
+    // Increment 2 replaces this with width/style/colour controls.
+    const side = (on: boolean) => (on ? { width: 1, style: 'solid' as const, color: '#b0b0b0' } : false);
     openCellProperties({
       initial,
       onApply: (props) => {
@@ -364,7 +367,12 @@ export class App implements OnDestroy {
           setCellsAttrs(cells, {
             background: props.background,
             vAlign: props.vAlign === 'top' ? null : props.vAlign,
-            borders: { ...props.borders },
+            borders: {
+              top: side(props.borders.top),
+              right: side(props.borders.right),
+              bottom: side(props.borders.bottom),
+              left: side(props.borders.left),
+            },
           }),
         );
         ed.tableSelection.clear();

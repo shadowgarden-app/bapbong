@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { commentSchema } from '@shadow-garden/bapbong-model';
-import type { CommentNode, SectionConfig } from '@shadow-garden/bapbong-contracts';
+import type { BorderStyle, CommentNode, SectionConfig, TableBorders } from '@shadow-garden/bapbong-contracts';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -220,10 +220,23 @@ function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
 const TABLE_SIDES = ['top', 'bottom', 'left', 'right', 'insideH', 'insideV'] as const;
 const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
 
-function bordersXml(tag: string, borders: Record<string, boolean>, sides: readonly string[]): string {
+const BORDER_STYLE_OUT: Record<BorderStyle, string> = {
+  solid: 'single',
+  dashed: 'dashed',
+  dotted: 'dotted',
+  double: 'double',
+};
+
+function bordersXml(tag: string, borders: TableBorders, sides: readonly string[]): string {
   const inner = sides
     .filter((s) => s in borders)
-    .map((s) => (borders[s] ? `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="auto"/>` : `<w:${s} w:val="nil"/>`))
+    .map((s) => {
+      const side = borders[s as keyof TableBorders];
+      if (!side) return `<w:${s} w:val="nil"/>`;
+      const sz = Math.max(2, Math.round(side.width * 6)); // px → eighths of a point
+      const color = side.color === '#b0b0b0' ? 'auto' : side.color.replace(/^#/, '');
+      return `<w:${s} w:val="${BORDER_STYLE_OUT[side.style] ?? 'single'}" w:sz="${sz}" w:space="0" w:color="${color}"/>`;
+    })
     .join('');
   return inner ? `<${tag}>${inner}</${tag}>` : '';
 }
@@ -234,7 +247,7 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
   const colwidth = a['colwidth'] as number[] | null;
   if (colwidth?.length) pr.push(`<w:tcW w:w="${pxToTwips(colwidth.reduce((x, y) => x + y, 0))}" w:type="dxa"/>`);
   if ((a['colspan'] as number) > 1) pr.push(`<w:gridSpan w:val="${a['colspan']}"/>`);
-  const borders = a['borders'] as Record<string, boolean> | null;
+  const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tcBorders', borders, CELL_SIDES));
   const bg = a['background'] as string | null;
   if (bg) pr.push(`<w:shd w:val="clear" w:color="auto" w:fill="${bg.replace(/^#/, '')}"/>`);
@@ -261,7 +274,7 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
   const a = node.attrs;
   const pr: string[] = [];
   if (a['align']) pr.push(`<w:jc w:val="${a['align']}"/>`);
-  const borders = a['borders'] as Record<string, boolean> | null;
+  const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tblBorders', borders, TABLE_SIDES));
   const pad = a['cellPadding'] as { left?: number; right?: number; top?: number; bottom?: number } | null;
   if (pad) {
