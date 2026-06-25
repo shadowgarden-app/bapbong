@@ -52,6 +52,22 @@ handle.destroy();
 - `tableGridPicker({ maxRows, maxCols, onPick })` — a Word/Docs-style size grid
   to drop into a `widget` entry (Insert > Table).
 
+## Context menu
+
+```ts
+import { showContextMenu } from '@shadow-garden/bapbong-ui';
+
+showContextMenu(
+  [{ label: 'Cut', run, shortcut: '⌘X' }, 'separator', { label: 'Delete', run, enabled: false }],
+  { x: ev.clientX, y: ev.clientY },
+);
+```
+
+- A floating menu at a viewport point (one-shot rows + separators). Viewport-
+  clamped; closes on select / outside click / Escape / scroll; only one open at
+  a time. The host builds the entries from the editor's `contextmenu` pointer
+  event (position + target).
+
 ## Dialog
 
 A generic overlay primitive (built on the native `<dialog>` — modal mode gets
