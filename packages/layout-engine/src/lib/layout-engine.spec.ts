@@ -318,6 +318,29 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[0]).toMatchObject({ x: 20, width: 200, colspan: 2 });
   });
 
+  it('reserves a rowspan cell’s column so the row below shifts right', () => {
+    // 3 cols (80/60/60). A rowspan-2 cell holds col 0 of rows 1-2, so the
+    // 2-cell third row must land in cols 1 and 2 — not overlap col 0.
+    const t = table([
+      [cell('a', { colwidth: [80] }), cell('b', { colwidth: [60] }), cell('c', { colwidth: [60] })],
+      [cell('M', { rowspan: 2, colwidth: [80] }), cell('b1'), cell('c1')],
+      [cell('b2'), cell('c2')],
+    ]);
+    const { pages } = layoutBlocks([t], config());
+    const cells = pages[0].tables?.[0].cells ?? [];
+    expect(cells).toHaveLength(8); // 3 + 3 + 2
+    // colX = [20, 100, 160, 220]; the merged cell holds col 0 (x=20).
+    expect(cells[3]).toMatchObject({ x: 20, rowspan: 2 });
+    // third row: b2 → col 1 (x=100), c2 → col 2 (x=160). (Before the fix these
+    // were x=20 / x=100, overlapping the merge and leaving col 2 empty.)
+    const b2 = cells[6];
+    const c2 = cells[7];
+    expect(b2).toMatchObject({ x: 100 });
+    expect(b2.lines[0].segments[0].text).toBe('b2');
+    expect(c2).toMatchObject({ x: 160 });
+    expect(c2.lines[0].segments[0].text).toBe('c2');
+  });
+
   it('splits an overflowing table at the row boundary (Word-like)', () => {
     // page height 80 → content 20..60 (40px). One line (16) + table.
     const cfg = config({ height: 80 });

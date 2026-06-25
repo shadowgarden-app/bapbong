@@ -809,6 +809,31 @@ function layoutFlow(
   return { lines, tables, height: y };
 }
 
+/**
+ * Walk every cell assigning its starting column, honoring rowspan occupancy
+ * from the rows above: a vertically-merged (rowspan>1) cell reserves its
+ * column(s) in the rows it spans, so cells below it shift right instead of
+ * overlapping it. Without this, a row beneath a vertical merge is laid out one
+ * column too far left and the last column comes out empty.
+ */
+function eachCell(
+  rows: FlowTableRow[],
+  ncols: number,
+  visit: (rowIndex: number, cell: FlowTableCell, startCol: number) => void,
+): void {
+  const spanned = new Array<number>(ncols).fill(0); // rows still covered per column
+  for (let r = 0; r < rows.length; r++) {
+    let col = 0;
+    for (const cell of rows[r].cells) {
+      while (col < ncols && spanned[col] > 0) col++; // skip columns held by a rowspan above
+      visit(r, cell, col);
+      for (let k = 0; k < cell.colspan && col + k < ncols; k++) spanned[col + k] = cell.rowspan;
+      col += cell.colspan;
+    }
+    for (let i = 0; i < ncols; i++) if (spanned[i] > 0) spanned[i]--; // one row consumed
+  }
+}
+
 /** Lay out a table within [contentLeft, contentRight], relative to y = 0.
  *  Columns come from cell `colwidth` (unknowns split the remaining width).
  *  Row heights are the max cell content height; rowspan cells grow the last
@@ -828,17 +853,13 @@ function layoutTable(
 
   // Column widths: take known widths from cells, split the rest equally.
   const colWidths = new Array<number>(ncols).fill(0);
-  for (const row of table.rows) {
-    let col = 0;
-    for (const cell of row.cells) {
-      if (cell.colwidth && cell.colwidth.length === cell.colspan) {
-        for (let k = 0; k < cell.colspan && col + k < ncols; k++) {
-          if (colWidths[col + k] === 0) colWidths[col + k] = cell.colwidth[k];
-        }
+  eachCell(table.rows, ncols, (_r, cell, startCol) => {
+    if (cell.colwidth && cell.colwidth.length === cell.colspan) {
+      for (let k = 0; k < cell.colspan && startCol + k < ncols; k++) {
+        if (colWidths[startCol + k] === 0) colWidths[startCol + k] = cell.colwidth[k];
       }
-      col += cell.colspan;
     }
-  }
+  });
   const known = colWidths.reduce((s, w) => s + w, 0);
   const unknown = colWidths.filter((w) => w === 0).length;
   if (unknown > 0) {
@@ -880,30 +901,26 @@ function layoutTable(
   };
 
   const cellDrafts: CellDraft[] = [];
-  for (let r = 0; r < nrows; r++) {
-    let col = 0;
-    for (const cell of table.rows[r].cells) {
-      let cellWidth = 0;
-      for (let k = 0; k < cell.colspan && col + k < ncols; k++) cellWidth += colWidths[col + k];
-      const cellLeft = colX[col];
-      const flow = layoutFlow(cell.content, cellLeft + pad.left, cellLeft + cellWidth - pad.right, ctx);
-      cellDrafts.push({
-        startRow: r,
-        startCol: col,
-        colspan: cell.colspan,
-        rowspan: cell.rowspan,
-        cellLeft,
-        cellWidth,
-        lines: flow.lines,
-        tables: flow.tables,
-        contentHeight: flow.height,
-        background: cell.background,
-        vAlign: cell.vAlign,
-        borders: cell.borders,
-      });
-      col += cell.colspan;
-    }
-  }
+  eachCell(table.rows, ncols, (r, cell, col) => {
+    let cellWidth = 0;
+    for (let k = 0; k < cell.colspan && col + k < ncols; k++) cellWidth += colWidths[col + k];
+    const cellLeft = colX[col];
+    const flow = layoutFlow(cell.content, cellLeft + pad.left, cellLeft + cellWidth - pad.right, ctx);
+    cellDrafts.push({
+      startRow: r,
+      startCol: col,
+      colspan: cell.colspan,
+      rowspan: cell.rowspan,
+      cellLeft,
+      cellWidth,
+      lines: flow.lines,
+      tables: flow.tables,
+      contentHeight: flow.height,
+      background: cell.background,
+      vAlign: cell.vAlign,
+      borders: cell.borders,
+    });
+  });
 
   // Row heights: single-row cells set the base; multi-row cells grow the last
   // spanned row if their content needs more than the rows already provide.
