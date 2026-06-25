@@ -1,5 +1,6 @@
 import type { EditorPlugin } from '@shadow-garden/bapbong-contracts';
 import { findPlugin } from './find-plugin';
+import { tableResizePlugin } from './table-resize-plugin';
 
 /**
  * Built-in ("internal") plugins — shipped with the editor, no install needed
@@ -13,5 +14,5 @@ import { findPlugin } from './find-plugin';
  * every editor needs its own fresh instances.
  */
 export function createBuiltins(): EditorPlugin[] {
-  return [findPlugin()];
+  return [findPlugin(), tableResizePlugin()];
 }

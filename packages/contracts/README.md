@@ -24,7 +24,8 @@ types; the only runtime code is `Collection`.
 - **Comments:** `IUser`, `CommentNode`, `CommentData`.
 - **Plugin contract** (the stable surface the editor + plugins share, so neither
   imports the other): `EditorPlugin`, `PluginContext`, `EditorChange`,
-  `RangeDecoration`, `PaintDecoration`.
+  `RangeDecoration`, `PaintDecoration`, `EditorPointerEvent` (the pointer hook +
+  `ctx.layout`/`ctx.setCursor` let plugins hit-test tables, e.g. column resize).
 - **Command contract**: `Command` (`{ name, run, isActive?, isEnabled? }`) +
   `Dispatch` — the headless editor-operation surface the toolbar/menubar,
   plugins and a backend share. Implementations live in

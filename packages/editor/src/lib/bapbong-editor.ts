@@ -33,6 +33,7 @@ import type {
   Command as EditorCommand,
   EditorChange,
   EditorPlugin,
+  EditorPointerEvent,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -130,6 +131,8 @@ export class BapbongEditor {
   private readonly plugins: Collection<EditorPlugin>;
   private readonly pluginTeardowns: Array<() => void> = [];
   private readonly pluginCtx: PluginContext;
+  // Whether any plugin wants pointer events (gates the per-move offer).
+  private pointerPlugins = false;
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -150,6 +153,7 @@ export class BapbongEditor {
     stack.addEventListener('pointerup', this.onPointerUp);
     stack.addEventListener('pointercancel', this.onPointerUp);
     stack.addEventListener('dblclick', this.onDblClick);
+    stack.addEventListener('contextmenu', this.onContextMenu);
     this.viewport?.addEventListener('scroll', this.onScroll);
     // Fonts that finish loading later invalidate every measurement.
     document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
@@ -159,6 +163,7 @@ export class BapbongEditor {
     this.plugins = new Collection<EditorPlugin>([...createBuiltins(), ...(opts.plugins ?? [])], {
       idProperty: 'name',
     });
+    this.pointerPlugins = [...this.plugins].some((p) => p.onPointer);
     this.pluginCtx = this.makePluginContext();
     for (const p of this.plugins) {
       const teardown = p.setup?.(this.pluginCtx);
@@ -176,10 +181,14 @@ export class BapbongEditor {
       setSelection: (from: number, to?: number) => this.setSelection(from, to),
       scrollToPos: (pos: number, topMargin?: number) => this.scrollToPos(pos, topMargin),
       requestPaint: () => this.repaintContent(),
+      setCursor: (cursor: string | null) => {
+        this.stack.style.cursor = cursor ?? '';
+      },
     };
-    // `state` is live (read on each access); an arrow getter keeps it current
-    // without throwing at construction (the doc loads later).
+    // `state` + `layout` are live (read on each access); arrow getters keep them
+    // current without throwing at construction (the doc loads later).
     Object.defineProperty(ctx, 'state', { enumerable: true, get: () => this.state });
+    Object.defineProperty(ctx, 'layout', { enumerable: true, get: () => this.resolved ?? null });
     return ctx as PluginContext;
   }
 
@@ -311,6 +320,7 @@ export class BapbongEditor {
     this.stack.removeEventListener('pointerup', this.onPointerUp);
     this.stack.removeEventListener('pointercancel', this.onPointerUp);
     this.stack.removeEventListener('dblclick', this.onDblClick);
+    this.stack.removeEventListener('contextmenu', this.onContextMenu);
     this.viewport?.removeEventListener('scroll', this.onScroll);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.bridge?.destroy();
@@ -481,6 +491,17 @@ export class BapbongEditor {
   // ── Pointer / scroll ────────────────────────────────────────────────
 
   private onPointerDown = (ev: PointerEvent): void => {
+    // A pointer plugin (e.g. table-column resize) may claim the press; if so,
+    // preventDefault + capture the pointer for it and skip caret placement.
+    if (this.offerPointer('down', ev)) {
+      ev.preventDefault();
+      try {
+        (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
+      } catch {
+        // capture is a nicety
+      }
+      return;
+    }
     const pos = this.posAtEvent(ev);
     if (pos == null || !this.bridge) return;
     ev.preventDefault(); // keep focus on the hidden editor
@@ -501,6 +522,9 @@ export class BapbongEditor {
   };
 
   private onPointerMove = (ev: PointerEvent): void => {
+    // Offer every move (incl. hover) to pointer plugins for cursor/drag; a claim
+    // suppresses the editor's own selection drag.
+    if (this.offerPointer('move', ev)) return;
     if (this.dragAnchor == null || !(ev.buttons & 1)) return;
     // Freshest coalesced point; the overlay paints SYNCHRONOUSLY in this very
     // frame — no rAF deferral, no PM transaction (the model follows on
@@ -524,7 +548,12 @@ export class BapbongEditor {
     this.painter.paintOverlay({ caret: this.lastCaret, selection: this.lastSelection });
   }
 
-  private onPointerUp = (): void => {
+  private onPointerUp = (ev: PointerEvent): void => {
+    if (this.offerPointer('up', ev)) {
+      this.dragAnchor = null;
+      this.dragHead = null;
+      return;
+    }
     // Commit the dragged selection to the model exactly once.
     if (this.dragAnchor != null && this.dragHead != null && this.dragHead !== this.dragAnchor) {
       this.bridge?.setSelection(this.dragAnchor, this.dragHead);
@@ -533,6 +562,31 @@ export class BapbongEditor {
     this.dragHead = null;
     if (this.bridge) this.restartBlink(); // back to idle blinking
   };
+
+  private onContextMenu = (ev: MouseEvent): void => {
+    if (this.offerPointer('contextmenu', ev)) ev.preventDefault();
+  };
+
+  /** Offer a pointer event to plugins; returns true if one claimed it. `pos` is
+   *  resolved for down/up/contextmenu only (move fires on every hover). */
+  private offerPointer(type: EditorPointerEvent['type'], ev: PointerEvent | MouseEvent): boolean {
+    if (!this.pointerPlugins || !this.resolved) return false;
+    const rect = this.stack.getBoundingClientRect();
+    const point = this.painter.canvasToPage(ev.clientX - rect.left, ev.clientY - rect.top);
+    const pos = type === 'move' || !point ? null : hitTest(this.resolved, point, this.measureText);
+    const pev: EditorPointerEvent = {
+      type,
+      point,
+      pos,
+      clientX: ev.clientX,
+      clientY: ev.clientY,
+      buttons: ev.buttons ?? 0,
+    };
+    for (const p of this.plugins) {
+      if (p.onPointer?.(pev)) return true;
+    }
+    return false;
+  }
 
   private onDblClick = (ev: MouseEvent): void => {
     const pos = this.posAtEvent(ev);

@@ -1,6 +1,6 @@
 import type { EditorState, Transaction } from 'prosemirror-state';
 import type { MarkSpec, NodeSpec } from 'prosemirror-model';
-import type { CaretRect, SelectionRect } from './contracts.js';
+import type { CaretRect, PagePoint, ResolvedLayout, SelectionRect } from './contracts.js';
 
 /** A decoration a plugin paints over a document range (comment tint, find
  *  highlight, track-change underline…). Doc positions; the editor resolves them
@@ -36,6 +36,26 @@ export interface EditorChange {
 }
 
 /**
+ * A pointer event on the canvas, offered to plugins (via
+ * {@link EditorPlugin.onPointer}) before the editor's own caret/selection
+ * handling. `point` is page-local geometry; `pos` is the document position under
+ * it (computed for `down`/`up`/`contextmenu` — null for `move`, which fires on
+ * every hover, to keep hover cheap). A plugin returns true to claim the event.
+ */
+export interface EditorPointerEvent {
+  type: 'down' | 'move' | 'up' | 'contextmenu';
+  /** Page-local point under the pointer, or null if outside any page. */
+  point: PagePoint | null;
+  /** Document position under the point (null for `move`). */
+  pos: number | null;
+  /** Viewport coordinates (for positioning UI like a context menu). */
+  clientX: number;
+  clientY: number;
+  /** Mouse buttons bitmask. */
+  buttons: number;
+}
+
+/**
  * The controlled surface an {@link EditorPlugin} gets onto the editor core:
  * read/dispatch document state plus the geometry + paint helpers it needs to
  * anchor UI. The editor hands one of these to each plugin's `setup`.
@@ -55,6 +75,11 @@ export interface PluginContext {
   scrollToPos(pos: number, topMargin?: number): void;
   /** Force a content repaint (e.g. after a plugin's decorations change). */
   requestPaint(): void;
+  /** The current paint-ready layout (page/table/cell geometry), or null before
+   *  a document loads. Lets pointer plugins hit-test tables/columns. */
+  readonly layout: ResolvedLayout | null;
+  /** Set the canvas cursor (e.g. `'col-resize'`); null restores the default. */
+  setCursor(cursor: string | null): void;
 }
 
 /**
@@ -82,4 +107,9 @@ export interface EditorPlugin {
   /** Decorations to paint this content frame (collected on every content
    *  repaint; call `ctx.requestPaint()` when they change). */
   decorations?(ctx: PluginContext): RangeDecoration[];
+  /** Pointer activity on the canvas, offered before the editor's own
+   *  caret/selection handling. Return true to claim the event (the editor then
+   *  preventDefaults it, captures the pointer on `down`, and skips its default).
+   *  `move` fires on every hover (for cursor feedback / drag). */
+  onPointer?(ev: EditorPointerEvent): boolean;
 }
