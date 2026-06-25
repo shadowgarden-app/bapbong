@@ -5,6 +5,8 @@ import { toggleMarkCommand, isMarkActive } from './marks.js';
 import { setAlign, activeAlign } from './paragraph.js';
 import { cellAt, setCellBackground } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
+import { deleteSelectionCommand } from './edit.js';
+import { insertColumn, insertRow } from './table-structure.js';
 import { defaultCommands } from './registry.js';
 
 // A minimal schema standing in for the real document schema — the commands key
@@ -64,6 +66,15 @@ function findNode(state: EditorState, typeName: string) {
     if (!found && node.type.name === typeName) found = node;
   });
   return found;
+}
+
+/** A 2×2 table doc with the caret in the top-left cell (pos 4). */
+function gridState(): EditorState {
+  const cell = (t: string) => n('table_cell', null, n('paragraph', null, schema.text(t)));
+  const row = (a: string, b: string) => n('table_row', null, [cell(a), cell(b)]);
+  const doc = n('doc', null, n('table', null, [row('a', 'b'), row('c', 'd')]));
+  const state = EditorState.create({ schema, doc });
+  return state.apply(state.tr.setSelection(TextSelection.create(doc, 4)));
 }
 
 /** A doc of one paragraph "hello", selection covering the whole word. */
@@ -180,6 +191,31 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const ps = paraState();
     const caret = ps.apply(ps.tr.setSelection(TextSelection.create(ps.doc, 1)));
     expect(setLink('https://x.test').isEnabled?.(caret)).toBe(false);
+  });
+
+  it('insertRow adds a row; insertColumn adds a cell to every row', () => {
+    const table0 = findNode(gridState(), 'table');
+    expect(table0?.childCount).toBe(2);
+
+    const rowsAfter = findNode(apply(gridState(), insertRow(true)), 'table');
+    expect(rowsAfter?.childCount).toBe(3); // 2 → 3 rows
+
+    const colsAfter = findNode(apply(gridState(), insertColumn(true)), 'table');
+    expect(colsAfter?.childCount).toBe(2); // still 2 rows
+    expect(colsAfter?.firstChild?.childCount).toBe(3); // 2 → 3 cells per row
+    expect(colsAfter?.lastChild?.childCount).toBe(3);
+  });
+
+  it('insert row/column are disabled outside a table', () => {
+    expect(insertRow(true).isEnabled?.(paraState())).toBe(false);
+    expect(insertColumn(true).isEnabled?.(gridState())).toBe(true);
+  });
+
+  it('deleteSelectionCommand removes the selected text', () => {
+    const cmd = deleteSelectionCommand();
+    expect(cmd.isEnabled?.(paraState())).toBe(true);
+    const after = apply(paraState(), cmd);
+    expect(after.doc.textContent).not.toContain('hello');
   });
 
   it('registry includes the new static commands', () => {
