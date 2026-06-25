@@ -35,6 +35,7 @@ import type {
   EditorPlugin,
   EditorPointerEvent,
   OverlayGuide,
+  OverlayRect,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -136,6 +137,8 @@ export class BapbongEditor {
   private pointerPlugins = false;
   // Transient drag guide (e.g. column-resize preview); lazily created.
   private guideEl: HTMLDivElement | null = null;
+  // Pool of translucent highlight divs (e.g. selected table-cell block).
+  private readonly highlightEls: HTMLDivElement[] = [];
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -188,6 +191,7 @@ export class BapbongEditor {
         this.stack.style.cursor = cursor ?? '';
       },
       setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
+      setHighlight: (rects: OverlayRect[] | null) => this.setHighlight(rects),
     };
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
@@ -381,6 +385,8 @@ export class BapbongEditor {
     this.stack.removeEventListener('contextmenu', this.onContextMenu);
     this.guideEl?.remove();
     this.guideEl = null;
+    for (const el of this.highlightEls) el.remove();
+    this.highlightEls.length = 0;
     this.viewport?.removeEventListener('scroll', this.onScroll);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.bridge?.destroy();
@@ -675,6 +681,33 @@ export class BapbongEditor {
     this.guideEl.style.left = `${top.x}px`;
     this.guideEl.style.top = `${top.y}px`;
     this.guideEl.style.height = `${bottom.y - top.y}px`;
+  }
+
+  /** Fill (or clear, with null) translucent highlight rects — e.g. a selected
+   *  table-cell block. Reuses a pool of divs in the canvas stack. */
+  private setHighlight(rects: OverlayRect[] | null): void {
+    const list = rects ?? [];
+    while (this.highlightEls.length < list.length) {
+      const el = document.createElement('div');
+      el.style.cssText =
+        'position:absolute;background:rgba(55,138,221,0.20);pointer-events:none;z-index:4;';
+      this.stack.appendChild(el);
+      this.highlightEls.push(el);
+    }
+    this.highlightEls.forEach((el, i) => {
+      const r = list[i];
+      const tl = r && this.pageToCanvas({ pageIndex: r.pageIndex, x: r.x, y: r.y });
+      const br = r && this.pageToCanvas({ pageIndex: r.pageIndex, x: r.x + r.width, y: r.y + r.height });
+      if (!tl || !br) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = 'block';
+      el.style.left = `${tl.x}px`;
+      el.style.top = `${tl.y}px`;
+      el.style.width = `${br.x - tl.x}px`;
+      el.style.height = `${br.y - tl.y}px`;
+    });
   }
 
   private onDblClick = (ev: MouseEvent): void => {

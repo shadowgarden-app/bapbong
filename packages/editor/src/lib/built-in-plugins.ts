@@ -1,6 +1,7 @@
 import type { EditorPlugin } from '@shadow-garden/bapbong-contracts';
 import { findPlugin } from './find-plugin';
 import { tableResizePlugin } from './table-resize-plugin';
+import { tableSelectionPlugin } from './table-selection-plugin';
 
 /**
  * Built-in ("internal") plugins — shipped with the editor, no install needed
@@ -14,5 +15,6 @@ import { tableResizePlugin } from './table-resize-plugin';
  * every editor needs its own fresh instances.
  */
 export function createBuiltins(): EditorPlugin[] {
-  return [findPlugin(), tableResizePlugin()];
+  // Order matters for the pointer hook: resize claims borders before selection.
+  return [findPlugin(), tableResizePlugin(), tableSelectionPlugin()];
 }

@@ -64,6 +64,16 @@ export interface OverlayGuide {
   height: number;
 }
 
+/** A page-local rect the editor fills as a translucent highlight (e.g. a
+ *  selected table-cell block). */
+export interface OverlayRect {
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
  * The controlled surface an {@link EditorPlugin} gets onto the editor core:
  * read/dispatch document state plus the geometry + paint helpers it needs to
@@ -92,6 +102,9 @@ export interface PluginContext {
   /** Show a transient vertical guide (e.g. a column-resize preview), or null to
    *  clear it. Page-local geometry; the editor positions it on the canvas. */
   setGuide(guide: OverlayGuide | null): void;
+  /** Fill these page-local rects as a translucent highlight (e.g. a selected
+   *  table-cell block), or null to clear. The editor renders them on the canvas. */
+  setHighlight(rects: OverlayRect[] | null): void;
 }
 
 /**
