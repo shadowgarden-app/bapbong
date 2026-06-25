@@ -1,4 +1,4 @@
-import { Node as ProseMirrorNode, Schema } from 'prosemirror-model';
+import { DOMParser as PMDOMParser, Node as ProseMirrorNode, Schema } from 'prosemirror-model';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
 import {
   importDocx,
@@ -312,6 +312,60 @@ export class BapbongEditor {
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
     this.bridge?.focus();
+  }
+
+  // ── Clipboard ───────────────────────────────────────────────────────
+  // These need the hidden ProseMirror view (selection serialization +
+  // clipboard), so they live here, not in the headless command layer. They are
+  // browser-gated: copy/cut run via execCommand on the focused view (a user
+  // gesture); paste reads the async Clipboard API (permission-gated).
+
+  /** Copy the selection to the clipboard (PM serializes the slice). */
+  copy(): boolean {
+    if (!this.bridge) return false;
+    this.bridge.focus();
+    return document.execCommand('copy');
+  }
+
+  /** Cut the selection to the clipboard. */
+  cut(): boolean {
+    if (!this.bridge) return false;
+    this.bridge.focus();
+    return document.execCommand('cut');
+  }
+
+  /** Paste clipboard content (HTML → parsed by the schema, else plain text). */
+  async paste(): Promise<void> {
+    const view = this.bridge?.view;
+    if (!view) return;
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (item.types.includes('text/html')) {
+          const html = await (await item.getType('text/html')).text();
+          const dom = document.createElement('div');
+          dom.innerHTML = html;
+          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          return;
+        }
+      }
+      await this.pasteText();
+    } catch {
+      /* clipboard unavailable (permission / sandbox) */
+    }
+  }
+
+  /** Paste clipboard text as plain text (no formatting). */
+  async pasteText(): Promise<void> {
+    const view = this.bridge?.view;
+    if (!view) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+    } catch {
+      /* clipboard unavailable */
+    }
   }
 
   destroy(): void {

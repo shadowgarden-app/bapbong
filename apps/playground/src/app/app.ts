@@ -4,15 +4,25 @@ import { ReplyEditorDirective } from './reply-editor.directive';
 import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type EditorChange } from '@shadow-garden/bapbong-editor';
-import { insertImage, insertTable, setLink } from '@shadow-garden/bapbong-commands';
-import type { Command } from '@shadow-garden/bapbong-contracts';
+import {
+  cellAt,
+  deleteSelectionCommand,
+  insertColumn,
+  insertImage,
+  insertRow,
+  insertTable,
+  setLink,
+} from '@shadow-garden/bapbong-commands';
+import type { Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
 import {
   createFindDialog,
   Dialog,
   mountMenubar,
   mountToolbar,
   promptDialog,
+  showContextMenu,
   tableGridPicker,
+  type ContextMenuEntry,
   type FindDialogHandle,
   type Menu,
   type MenubarHandle,
@@ -132,8 +142,19 @@ export class App implements OnDestroy {
     if (!stack) return null;
     const editor = new BapbongEditor(stack, {
       viewport: this.wrapHost()?.nativeElement,
-      // External plugin: comment tint. (Find/replace is built into the editor.)
-      plugins: [this.cs.tintPlugin],
+      // External plugins: comment tint + a right-click context menu (find/replace
+      // and table-resize are built into the editor).
+      plugins: [
+        this.cs.tintPlugin,
+        {
+          name: 'context-menu',
+          onPointer: (ev) => {
+            if (ev.type !== 'contextmenu') return false;
+            this.openContextMenu(ev);
+            return true; // claim → the editor suppresses the native menu
+          },
+        },
+      ],
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
@@ -282,6 +303,35 @@ export class App implements OnDestroy {
       },
       { label: 'Help', entries: [{ label: 'Keyboard shortcuts', run: () => this.showShortcuts() }] },
     ];
+  }
+
+  /** Right-click menu: 5 edit defaults + table ops when in a cell. The selection
+   *  moves to the click unless it lands inside an existing selection. */
+  private openContextMenu(ev: EditorPointerEvent): void {
+    const ed = this.editor;
+    if (!ed) return;
+    const sel = ed.state.selection;
+    const insideSel = !sel.empty && ev.pos != null && ev.pos >= sel.from && ev.pos <= sel.to;
+    if (ev.pos != null && !insideSel) ed.setSelection(ev.pos);
+
+    const hasSelection = !ed.state.selection.empty;
+    const entries: ContextMenuEntry[] = [
+      { label: 'Cut', shortcut: '⌘X', enabled: hasSelection, run: () => ed.cut() },
+      { label: 'Copy', shortcut: '⌘C', enabled: hasSelection, run: () => ed.copy() },
+      { label: 'Paste', shortcut: '⌘V', run: () => void ed.paste() },
+      { label: 'Paste without formatting', shortcut: '⇧⌘V', run: () => void ed.pasteText() },
+      { label: 'Delete', enabled: hasSelection, run: () => this.exec(deleteSelectionCommand()) },
+    ];
+    if (cellAt(ed.state)) {
+      entries.push(
+        'separator',
+        { label: 'Insert row above', run: () => this.exec(insertRow(false)) },
+        { label: 'Insert row below', run: () => this.exec(insertRow(true)) },
+        { label: 'Insert column left', run: () => this.exec(insertColumn(false)) },
+        { label: 'Insert column right', run: () => this.exec(insertColumn(true)) },
+      );
+    }
+    showContextMenu(entries, { x: ev.clientX, y: ev.clientY });
   }
 
   /** Run a parameterized command against the live editor. */
