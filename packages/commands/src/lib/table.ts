@@ -47,6 +47,26 @@ export function setCellAttrs(pos: number, attrs: Partial<CellAttrs>): Command {
   };
 }
 
+/** Set the same attrs on several cells (by doc position) in one transaction —
+ *  the cell-properties dialog applied across a selected block. */
+export function setCellsAttrs(positions: number[], attrs: Partial<CellAttrs>): Command {
+  return {
+    name: 'cells-attrs',
+    run(state, dispatch) {
+      const cells = positions.filter((pos) => state.doc.nodeAt(pos)?.type.name === 'table_cell');
+      if (cells.length === 0) return false;
+      if (dispatch) {
+        const tr = state.tr;
+        for (const pos of cells) {
+          for (const [key, value] of Object.entries(attrs)) tr.setNodeAttribute(pos, key, value);
+        }
+        dispatch(tr);
+      }
+      return true;
+    },
+  };
+}
+
 /** Set the current cell's background fill (`null` clears it). */
 export function setCellBackground(color: string | null): Command {
   return {

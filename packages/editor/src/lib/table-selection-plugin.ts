@@ -121,8 +121,11 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
       if (!c) return false;
 
       if (ev.type === 'down') {
-        reset(c); // a fresh press clears any prior block selection
-        anchor = ev.buttons === 1 ? ev.point : null;
+        // Ignore right/middle clicks — keep the block so the context menu (and
+        // its Cell properties item) can act on it. A primary press clears it.
+        if (ev.buttons !== 1) return false;
+        reset(c);
+        anchor = ev.point;
         return false; // let the editor start an in-cell text drag
       }
 

@@ -3,7 +3,7 @@ import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command } from '@shadow-garden/bapbong-contracts';
 import { toggleMarkCommand, isMarkActive } from './marks.js';
 import { setAlign, activeAlign } from './paragraph.js';
-import { cellAt, setCellBackground } from './table.js';
+import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
 import { insertColumn, insertRow } from './table-structure.js';
@@ -204,6 +204,21 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(colsAfter?.childCount).toBe(2); // still 2 rows
     expect(colsAfter?.firstChild?.childCount).toBe(3); // 2 → 3 cells per row
     expect(colsAfter?.lastChild?.childCount).toBe(3);
+  });
+
+  it('setCellsAttrs sets the same attrs on every given cell in one tr', () => {
+    const state = gridState();
+    const positions: number[] = [];
+    state.doc.descendants((node, pos) => {
+      if (node.type.name === 'table_cell') positions.push(pos);
+    });
+    expect(positions.length).toBe(4);
+    const after = apply(state, setCellsAttrs(positions, { background: '#abcdef' }));
+    const bgs: Array<string | null> = [];
+    after.doc.descendants((node) => {
+      if (node.type.name === 'table_cell') bgs.push(node.attrs['background'] as string | null);
+    });
+    expect(bgs.every((b) => b === '#abcdef')).toBe(true);
   });
 
   it('insert row/column are disabled outside a table', () => {

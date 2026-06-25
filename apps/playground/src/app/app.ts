@@ -11,6 +11,7 @@ import {
   insertImage,
   insertRow,
   insertTable,
+  setCellsAttrs,
   setLink,
 } from '@shadow-garden/bapbong-commands';
 import type { Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
@@ -19,9 +20,11 @@ import {
   Dialog,
   mountMenubar,
   mountToolbar,
+  openCellProperties,
   promptDialog,
   showContextMenu,
   tableGridPicker,
+  type CellProps,
   type ContextMenuEntry,
   type FindDialogHandle,
   type Menu,
@@ -158,6 +161,8 @@ export class App implements OnDestroy {
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
+    // Cell-block action icon → cell-properties dialog (applied to all selected cells).
+    editor.tableSelection.onAction((cells) => this.openCellPropsFor(cells));
     // Menubar / toolbar / find-bar: hand bapbong-ui the host elements + the
     // editor; it renders from editor.commands / editor.find and wires everything
     // itself. The menubar tree mixes registry commands with host actions (open
@@ -322,9 +327,14 @@ export class App implements OnDestroy {
       { label: 'Paste without formatting', shortcut: '⇧⌘V', run: () => void ed.pasteText() },
       { label: 'Delete', enabled: hasSelection, run: () => this.exec(deleteSelectionCommand()) },
     ];
-    if (cellAt(ed.state)) {
+    const cell = cellAt(ed.state);
+    if (cell) {
+      // Act on the selected block if there is one, else the clicked cell.
+      const block = ed.tableSelection.cells();
+      const target = block.length ? block : [cell.pos];
       entries.push(
         'separator',
+        { label: 'Cell properties…', run: () => this.openCellPropsFor(target) },
         { label: 'Insert row above', run: () => this.exec(insertRow(false)) },
         { label: 'Insert row below', run: () => this.exec(insertRow(true)) },
         { label: 'Insert column left', run: () => this.exec(insertColumn(false)) },
@@ -332,6 +342,34 @@ export class App implements OnDestroy {
       );
     }
     showContextMenu(entries, { x: ev.clientX, y: ev.clientY });
+  }
+
+  /** Open the cell-properties dialog for `cells`, pre-filled from the first one,
+   *  applying the result to all of them (one undoable step). */
+  private openCellPropsFor(cells: number[]): void {
+    const ed = this.editor;
+    if (!ed || cells.length === 0) return;
+    const first = ed.state.doc.nodeAt(cells[0]);
+    const b = first?.attrs['borders'] as Partial<CellProps['borders']> | null;
+    const va = first?.attrs['vAlign'];
+    const initial: CellProps = {
+      background: (first?.attrs['background'] as string | null) ?? null,
+      vAlign: va === 'center' || va === 'bottom' ? va : 'top',
+      borders: { top: !!b?.top, right: !!b?.right, bottom: !!b?.bottom, left: !!b?.left },
+    };
+    openCellProperties({
+      initial,
+      onApply: (props) => {
+        this.exec(
+          setCellsAttrs(cells, {
+            background: props.background,
+            vAlign: props.vAlign === 'top' ? null : props.vAlign,
+            borders: { ...props.borders },
+          }),
+        );
+        ed.tableSelection.clear();
+      },
+    });
   }
 
   /** Run a parameterized command against the live editor. */
