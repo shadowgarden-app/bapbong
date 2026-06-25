@@ -39,6 +39,7 @@ import type {
   MeasureMetrics,
   MeasureText,
   PageConfig,
+  PagePoint,
   PaintDecoration,
   PluginContext,
   ResolvedLayout,
@@ -55,6 +56,8 @@ import { createBuiltins } from './built-in-plugins';
 import { Collection } from '@shadow-garden/bapbong-contracts';
 import { defaultCommands } from '@shadow-garden/bapbong-commands';
 import type { FindPlugin } from './find-plugin';
+import type { TableSelectionPlugin } from './table-selection-plugin';
+export type { TableSelectionPlugin } from './table-selection-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
 
 /** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
@@ -139,6 +142,9 @@ export class BapbongEditor {
   private guideEl: HTMLDivElement | null = null;
   // Pool of translucent highlight divs (e.g. selected table-cell block).
   private readonly highlightEls: HTMLDivElement[] = [];
+  // Floating action button (e.g. the cell-block properties trigger).
+  private actionEl: HTMLButtonElement | null = null;
+  private actionHandler: (() => void) | null = null;
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -192,6 +198,7 @@ export class BapbongEditor {
       },
       setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
       setHighlight: (rects: OverlayRect[] | null) => this.setHighlight(rects),
+      setActionButton: (at: PagePoint | null, onActivate?: () => void) => this.setActionButton(at, onActivate),
     };
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
@@ -223,6 +230,12 @@ export class BapbongEditor {
    *  Cast is safe by construction — createBuiltins() always registers it. */
   get find(): FindPlugin {
     return this.plugins.get('find') as FindPlugin;
+  }
+
+  /** Built-in table cell-range selection (drag across cells). The host opens
+   *  cell properties from its action icon / right-click via `onAction`. */
+  get tableSelection(): TableSelectionPlugin {
+    return this.plugins.get('table-selection') as TableSelectionPlugin;
   }
 
   /** Import a .docx, lay it out, and paint the first frame. Resolves with the
@@ -387,6 +400,8 @@ export class BapbongEditor {
     this.guideEl = null;
     for (const el of this.highlightEls) el.remove();
     this.highlightEls.length = 0;
+    this.actionEl?.remove();
+    this.actionEl = null;
     this.viewport?.removeEventListener('scroll', this.onScroll);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.bridge?.destroy();
@@ -708,6 +723,42 @@ export class BapbongEditor {
       el.style.width = `${br.x - tl.x}px`;
       el.style.height = `${br.y - tl.y}px`;
     });
+  }
+
+  /** Show (or hide, with null `at`) a small action button straddling a page
+   *  point — a touch-friendly trigger. Stops pointer propagation so clicking it
+   *  doesn't reset the selection underneath. */
+  private setActionButton(at: PagePoint | null, onActivate?: () => void): void {
+    this.actionHandler = onActivate ?? null;
+    if (!at) {
+      if (this.actionEl) this.actionEl.style.display = 'none';
+      return;
+    }
+    if (!this.actionEl) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', 'Cell actions');
+      btn.style.cssText =
+        'position:absolute;z-index:6;width:24px;height:24px;display:flex;align-items:center;justify-content:center;padding:0;border:0.5px solid #b5d4f4;border-radius:6px;background:#fff;color:#0c447c;box-shadow:0 1px 4px rgba(0,0,0,.18);cursor:pointer;';
+      btn.innerHTML =
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h8M16 7h4M4 17h4M12 17h8"/><circle cx="14" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>';
+      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      btn.addEventListener('mousedown', (e) => e.stopPropagation());
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.actionHandler?.();
+      });
+      this.stack.appendChild(btn);
+      this.actionEl = btn;
+    }
+    const p = this.pageToCanvas(at);
+    if (!p) {
+      this.actionEl.style.display = 'none';
+      return;
+    }
+    this.actionEl.style.display = 'flex';
+    this.actionEl.style.left = `${p.x - 12}px`;
+    this.actionEl.style.top = `${p.y - 12}px`;
   }
 
   private onDblClick = (ev: MouseEvent): void => {

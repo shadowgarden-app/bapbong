@@ -9,6 +9,20 @@ import type {
   ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
 
+/** The editor state type, from the plugin context (no direct PM dep). */
+type State = PluginContext['state'];
+
+/** Richer handle the editor exposes as `editor.tableSelection`. */
+export interface TableSelectionPlugin extends EditorPlugin {
+  /** Subscribe to the action trigger (icon tap / menu); receives the selected
+   *  `table_cell` doc positions. Returns an unsubscribe. */
+  onAction(cb: (cells: number[]) => void): () => void;
+  /** The currently selected `table_cell` doc positions (empty when none). */
+  cells(): number[];
+  /** Clear the block selection + its overlay. */
+  clear(): void;
+}
+
 interface CellHit {
   table: ResolvedTable;
   cell: ResolvedCell;
@@ -30,8 +44,7 @@ function cellAtPoint(layout: ResolvedLayout | null, point: PagePoint): CellHit |
   return null;
 }
 
-/** Cells of `table` overlapping the bounding box of cells `a` and `b` — the
- *  rectangular block spanned by the drag. */
+/** Cells of `table` overlapping the bounding box of cells `a` and `b`. */
 function blockCells(table: ResolvedTable, a: ResolvedCell, b: ResolvedCell): ResolvedCell[] {
   const left = Math.min(a.x, b.x);
   const top = Math.min(a.y, b.y);
@@ -43,28 +56,59 @@ function blockCells(table: ResolvedTable, a: ResolvedCell, b: ResolvedCell): Res
   );
 }
 
+/** The `table_cell` doc position for a resolved cell (via its first line). */
+function cellDocPos(state: State, cell: ResolvedCell): number | null {
+  const from = cell.lines[0]?.from;
+  if (from == null) return null;
+  const $pos = state.doc.resolve(from);
+  for (let d = $pos.depth; d > 0; d--) {
+    if ($pos.node(d).type.name === 'table_cell') return $pos.before(d);
+  }
+  return null;
+}
+
 /**
  * Internal plugin: drag across table cells to select a rectangular block. A
- * drag *within* one cell stays text selection; once it crosses into another
- * cell of the same table the plugin claims the drag, collapses the text
- * selection, and paints the block as a translucent highlight. Pointer-event
- * based, so mouse / touch / pen all work.
+ * drag within one cell stays text selection; crossing into another cell of the
+ * same table claims the drag, collapses the text selection, paints the block as
+ * a translucent highlight, and (on release) shows a small action button at the
+ * block's top-right — a touch-friendly trigger to open cell properties. The
+ * host subscribes via `onAction` and reads the selected cells via `cells()`.
  *
- * The selection is editor overlay state (bapbong's table schema has no
- * ProseMirror CellSelection); it drives the cell highlight and (next) the
- * floating action icon + cell-properties dialog.
+ * Pointer-event based (mouse/touch/pen). The selection is editor overlay state
+ * (bapbong's table schema has no ProseMirror CellSelection).
  */
-export function tableSelectionPlugin(): EditorPlugin {
+export function tableSelectionPlugin(): TableSelectionPlugin {
   let ctx: PluginContext | null = null;
-  let anchor: PagePoint | null = null; // where the press began (page-local)
-  let selecting = false; // crossed into another cell → block selection active
-  let collapsed = false; // collapsed the text selection once
+  let anchor: PagePoint | null = null; // press origin (page-local)
+  let lastHead: PagePoint | null = null; // latest drag point
+  let selecting = false;
+  let collapsed = false;
+  let selected: number[] = []; // selected table_cell doc positions
+  const listeners = new Set<(cells: number[]) => void>();
 
   const reset = (c: PluginContext) => {
     anchor = null;
+    lastHead = null;
     selecting = false;
     collapsed = false;
+    selected = [];
     c.setHighlight(null);
+    c.setActionButton(null);
+  };
+
+  const finalize = (c: PluginContext): void => {
+    const a = anchor && cellAtPoint(c.layout, anchor);
+    const h = lastHead && cellAtPoint(c.layout, lastHead);
+    if (!a || !h || a.table !== h.table) return;
+    const cells = blockCells(a.table, a.cell, h.cell);
+    selected = cells.map((cell) => cellDocPos(c.state, cell)).filter((p): p is number => p != null);
+    const topRight: PagePoint = {
+      pageIndex: anchor!.pageIndex,
+      x: Math.max(...cells.map((cell) => cell.x + cell.width)),
+      y: Math.min(...cells.map((cell) => cell.y)),
+    };
+    c.setActionButton(topRight, () => listeners.forEach((cb) => cb([...selected])));
   };
 
   return {
@@ -86,13 +130,12 @@ export function tableSelectionPlugin(): EditorPlugin {
         if (!anchor || !(ev.buttons & 1) || !ev.point) return false;
         const a = cellAtPoint(c.layout, anchor);
         const h = cellAtPoint(c.layout, ev.point);
-        if (!a || !h || a.table !== h.table) return selecting; // outside/other table
+        if (!a || !h || a.table !== h.table) return selecting;
         if (a.cell === h.cell && !selecting) return false; // same cell → text drag
         selecting = true;
+        lastHead = ev.point;
         if (!collapsed) {
-          // Collapse the text selection so its overlay doesn't compete. A
-          // selection-only change keeps the layout geometry valid.
-          c.setSelection(c.state.selection.from);
+          c.setSelection(c.state.selection.from); // collapse text selection (layout unchanged)
           collapsed = true;
         }
         const rects: OverlayRect[] = blockCells(a.table, a.cell, h.cell).map((cell) => ({
@@ -107,12 +150,26 @@ export function tableSelectionPlugin(): EditorPlugin {
       }
 
       if (ev.type === 'up') {
-        if (selecting) return true; // keep the block highlight; suppress text-selection commit
+        if (selecting) {
+          finalize(c);
+          return true; // keep the block + button; suppress text-selection commit
+        }
         anchor = null;
         return false;
       }
 
       return false;
+    },
+
+    onAction(cb) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    cells() {
+      return [...selected];
+    },
+    clear() {
+      if (ctx) reset(ctx);
     },
   };
 }

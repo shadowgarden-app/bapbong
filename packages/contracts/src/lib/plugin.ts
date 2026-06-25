@@ -105,6 +105,10 @@ export interface PluginContext {
   /** Fill these page-local rects as a translucent highlight (e.g. a selected
    *  table-cell block), or null to clear. The editor renders them on the canvas. */
   setHighlight(rects: OverlayRect[] | null): void;
+  /** Show a small action button straddling a page-local point (e.g. a selected
+   *  cell block's top-right), invoking `onActivate` on click/tap; null clears it.
+   *  A touch-friendly trigger where hover/right-click aren't available. */
+  setActionButton(at: PagePoint | null, onActivate?: () => void): void;
 }
 
 /**
