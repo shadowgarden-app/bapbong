@@ -562,6 +562,10 @@ export class BapbongEditor {
       }
       return;
     }
+    // Only the primary (left) button places the caret / starts a selection drag.
+    // A right-click fires pointerdown (button 2) before `contextmenu`; collapsing
+    // the selection here would lose it before the context menu opens.
+    if (ev.button !== 0) return;
     const pos = this.posAtEvent(ev);
     if (pos == null || !this.bridge) return;
     ev.preventDefault(); // keep focus on the hidden editor
