@@ -1,0 +1,201 @@
+.preview {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #1c1c1e;
+}
+
+/* Top bar (rendered state): filename · pages · zoom */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px 12px;
+}
+.bar .name {
+  font-weight: 500;
+  font-size: 15px;
+}
+.bar .pages {
+  font-size: 13px;
+  color: #9a9aa0;
+}
+.bar .spacer {
+  flex: 1;
+}
+.zoom {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d3d3d8;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.zoom button {
+  border: 0;
+  background: #fff;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  padding: 5px 11px;
+  cursor: pointer;
+  color: #444;
+}
+.zoom button:hover {
+  background: #f4f4f6;
+}
+.zoom .zoom-val {
+  min-width: 46px;
+  text-align: center;
+  font-size: 13px;
+  border-left: 1px solid #e3e3e6;
+  border-right: 1px solid #e3e3e6;
+  padding: 5px 0;
+}
+
+.stage {
+  position: relative;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Read-only viewer mount — light neutral backdrop, white pages on top. */
+.viewer-host {
+  flex: 1 1 auto;
+  position: relative;
+  background: #f5f5f7;
+  border: 1px solid #e3e3e6;
+  border-radius: 10px;
+  padding: 22px;
+  overflow: auto;
+  max-height: 78vh;
+  display: flex;
+  justify-content: safe center;
+}
+.viewer-host.hidden {
+  display: none;
+}
+
+/* Upload drop-zone (idle state) */
+.dropzone {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  min-height: 360px;
+  padding: 2rem;
+  border: 2px dashed #c2c2cb;
+  border-radius: 12px;
+  background: #fafafb;
+  transition: border-color 0.12s, background 0.12s;
+}
+.dropzone.over {
+  border-color: #378add;
+  background: #e6f1fb;
+}
+.dz-icon {
+  font-size: 40px;
+  line-height: 1;
+  color: #378add;
+}
+.dz-title {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+.dz-or {
+  margin: 2px 0;
+  font-size: 13px;
+  color: #9a9aa0;
+}
+.dz-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 16px;
+  border: 1px solid #b8b8c0;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+}
+.dz-btn:hover {
+  background: #f4f4f6;
+}
+.dz-tip {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: #9a9aa0;
+}
+
+/* Loading / error states */
+.status {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+  min-height: 360px;
+  padding: 2rem;
+}
+.st-title {
+  margin: 10px 0 2px;
+  font-size: 16px;
+  font-weight: 500;
+}
+.st-sub {
+  margin: 0;
+  font-size: 13px;
+  color: #6b6b70;
+}
+.st-msg {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #6b6b70;
+  max-width: 420px;
+}
+.err-icon {
+  font-size: 34px;
+  line-height: 1;
+  color: #c0392b;
+}
+.again {
+  margin-top: 14px;
+  padding: 9px 16px;
+  border: 1px solid #b8b8c0;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.again:hover {
+  background: #f4f4f6;
+}
+
+.spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid #d8d8de;
+  border-top-color: #378add;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: #f1f1f4;
+  padding: 1px 5px;
+  border-radius: 5px;
+}

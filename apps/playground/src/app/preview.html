@@ -1,0 +1,59 @@
+<div class="preview">
+  @if (state() === 'rendered') {
+    <div class="bar">
+      <span class="name">{{ fileName() }}</span>
+      <span class="pages">{{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }}</span>
+      <span class="spacer"></span>
+      <span class="zoom" role="group" aria-label="Zoom">
+        <button type="button" (click)="zoomOut()" aria-label="Zoom out">−</button>
+        <span class="zoom-val">{{ zoomPct() }}%</span>
+        <button type="button" (click)="zoomIn()" aria-label="Zoom in">+</button>
+      </span>
+    </div>
+  }
+
+  <div class="stage">
+    <!-- The viewer mounts here; kept in the DOM (hidden until rendered) so it
+         has a stable host element + real dimensions when it measures. -->
+    <div #host class="viewer-host" [class.hidden]="state() !== 'rendered'"></div>
+
+    @if (state() === 'idle') {
+      <div
+        class="dropzone"
+        [class.over]="dragOver()"
+        (dragover)="onDragOver($event)"
+        (dragleave)="onDragLeave()"
+        (drop)="onDrop($event)"
+      >
+        <div class="dz-icon" aria-hidden="true">⬆</div>
+        <p class="dz-title">Drag &amp; drop a <code>.docx</code> here</p>
+        <p class="dz-or">or</p>
+        <label class="dz-btn">
+          <input type="file" accept=".docx" (change)="onFileInput($event)" hidden />
+          <span>Choose a file</span>
+        </label>
+        <p class="dz-tip">
+          Tip: open <code>/preview?link=&lt;url&gt;</code> to load a document automatically.
+        </p>
+      </div>
+    } @else if (state() === 'loading') {
+      <div class="status">
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="st-title">Loading {{ fileName() }}…</p>
+        @if (source(); as s) {
+          <p class="st-sub">Fetching from {{ s }}</p>
+        }
+      </div>
+    } @else if (state() === 'error') {
+      <div class="status">
+        <div class="err-icon" aria-hidden="true">⚠</div>
+        <p class="st-title">Can't preview this file</p>
+        @if (fileName(); as n) {
+          <p class="st-sub"><code>{{ n }}</code></p>
+        }
+        <p class="st-msg">{{ errorMsg() }}</p>
+        <button type="button" class="again" (click)="reset()">Choose another file</button>
+      </div>
+    }
+  </div>
+</div>
