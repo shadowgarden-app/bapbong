@@ -234,27 +234,15 @@ importers:
       '@shadow-garden/bapbong-contracts':
         specifier: workspace:^
         version: link:../contracts
-      '@shadow-garden/bapbong-docx':
-        specifier: workspace:^
-        version: link:../docx
       '@shadow-garden/bapbong-input-bridge':
         specifier: workspace:^
         version: link:../input-bridge
-      '@shadow-garden/bapbong-layout-engine':
-        specifier: workspace:^
-        version: link:../layout-engine
-      '@shadow-garden/bapbong-measuring':
-        specifier: workspace:^
-        version: link:../measuring
       '@shadow-garden/bapbong-model':
         specifier: workspace:^
         version: link:../model
-      '@shadow-garden/bapbong-painter-canvas':
+      '@shadow-garden/bapbong-view':
         specifier: workspace:^
-        version: link:../painter-canvas
-      '@shadow-garden/bapbong-selection':
-        specifier: workspace:^
-        version: link:../selection
+        version: link:../view
       prosemirror-model:
         specifier: ^1.25.7
         version: 1.25.8
@@ -343,6 +331,33 @@ importers:
       '@shadow-garden/bapbong-contracts':
         specifier: workspace:^
         version: link:../contracts
+
+  packages/view:
+    dependencies:
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
+      '@shadow-garden/bapbong-docx':
+        specifier: workspace:^
+        version: link:../docx
+      '@shadow-garden/bapbong-layout-engine':
+        specifier: workspace:^
+        version: link:../layout-engine
+      '@shadow-garden/bapbong-measuring':
+        specifier: workspace:^
+        version: link:../measuring
+      '@shadow-garden/bapbong-model':
+        specifier: workspace:^
+        version: link:../model
+      '@shadow-garden/bapbong-painter-canvas':
+        specifier: workspace:^
+        version: link:../painter-canvas
+      '@shadow-garden/bapbong-selection':
+        specifier: workspace:^
+        version: link:../selection
+      prosemirror-model:
+        specifier: ^1.25.7
+        version: 1.25.8
 
 packages:
 

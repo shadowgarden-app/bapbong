@@ -98,6 +98,23 @@ export default [
               ],
             },
             {
+              // Render tier: load → layout → paint → scroll/zoom/virtualize +
+              // geometry (RenderCore) and the read-only viewer. Touches the DOM
+              // (canvas) but NOT the input-bridge (scope:input) — so the preview
+              // bundle stays free of the ProseMirror editing surface.
+              sourceTag: 'scope:view',
+              onlyDependOnLibsWithTags: [
+                'scope:pure',
+                'scope:model',
+                'scope:io',
+                'scope:measuring',
+                'scope:engine',
+                'scope:painter',
+                'scope:selection',
+                'scope:view',
+              ],
+            },
+            {
               sourceTag: 'scope:plugin',
               onlyDependOnLibsWithTags: ['scope:pure'],
             },

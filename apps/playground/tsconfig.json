@@ -22,6 +22,7 @@
       "@shadow-garden/bapbong-painter-canvas": ["../../packages/painter-canvas/src/index.ts"],
       "@shadow-garden/bapbong-selection": ["../../packages/selection/src/index.ts"],
       "@shadow-garden/bapbong-input-bridge": ["../../packages/input-bridge/src/index.ts"],
+      "@shadow-garden/bapbong-view": ["../../packages/view/src/index.ts"],
       "@shadow-garden/bapbong-ui": ["../../packages/ui/src/index.ts"]
     }
   },

@@ -1,17 +1,6 @@
 import { DOMParser as PMDOMParser, Node as ProseMirrorNode, Schema } from 'prosemirror-model';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
-import {
-  importDocx,
-  exportDocx,
-  type DocxImport,
-} from '@shadow-garden/bapbong-docx';
-import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
-import {
-  createCanvasMeasurer,
-  createCanvasMetrics,
-  ensureFontsLoaded,
-} from '@shadow-garden/bapbong-measuring';
-import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
+import { RenderCore } from '@shadow-garden/bapbong-view';
 import {
   InputBridge,
   moveCaretCommand,
@@ -20,12 +9,6 @@ import {
   type EditorState,
   type Transaction,
 } from '@shadow-garden/bapbong-input-bridge';
-import {
-  caretRect,
-  hitTest,
-  selectionRects,
-  verticalCaret,
-} from '@shadow-garden/bapbong-selection';
 import type {
   CaretRect,
   // `Command` here is the headless registry command ({ name, run, isActive… });
@@ -36,13 +19,9 @@ import type {
   EditorPointerEvent,
   OverlayGuide,
   OverlayRect,
-  MeasureMetrics,
-  MeasureText,
-  PageConfig,
   PagePoint,
-  PaintDecoration,
   PluginContext,
-  ResolvedLayout,
+  RangeDecoration,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
@@ -50,6 +29,9 @@ import type {
 // plugin author can `import { EditorPlugin, PluginContext, EditorChange } from
 // '@shadow-garden/bapbong-editor'`.
 export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/bapbong-contracts';
+// The render core is shared with the read-only viewer; re-export so a host can
+// reach it (and `BapbongView`) without a separate import.
+export { RenderCore } from '@shadow-garden/bapbong-view';
 // Built-in ("internal") plugins ship with the editor (see built-in-plugins.ts)
 // and are exposed as typed handles (e.g. editor.find) — no install needed.
 import { createBuiltins } from './built-in-plugins';
@@ -59,13 +41,6 @@ import type { FindPlugin } from './find-plugin';
 import type { TableSelectionPlugin } from './table-selection-plugin';
 export type { TableSelectionPlugin, CellBlock, SelectedCell } from './table-selection-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
-
-/** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
-const A4: PageConfig = {
-  width: 794,
-  height: 1123,
-  margin: { top: 96, right: 96, bottom: 96, left: 96 },
-};
 
 const CARET_BLINK_MS = 530;
 
@@ -84,38 +59,16 @@ export interface BapbongEditorOptions {
  * canvas stack, with no UI chrome of its own. A host wires comment UI / toolbars
  * around it via `onChange`, `caretRect`, `pageToCanvas`, `dispatch`, etc.
  *
- * The editor renders into a caller-supplied `stack` element (it appends one
- * `<canvas>` per page, virtualized to the viewport) and mounts a hidden
- * ProseMirror editor there as the IME / keyboard sink.
+ * The render half (layout/paint/scroll/zoom/geometry) lives in a shared
+ * {@link RenderCore} (the same one the read-only `BapbongView` uses); this class
+ * adds the editing half — a hidden ProseMirror editor as the IME / keyboard
+ * sink, pointer-driven caret/selection, plugins, commands and clipboard — and
+ * pushes a fresh doc + caret overlay to the core on every transaction.
  */
 export class BapbongEditor {
   private readonly stack: HTMLElement;
-  private readonly viewport: HTMLElement | null;
-
-  private readonly painter: CanvasPainter;
-  private readonly measureText: MeasureText;
-  private readonly measureMetrics: MeasureMetrics;
+  private readonly core: RenderCore;
   private bridge: InputBridge | null = null;
-  private resolved: ResolvedLayout | null = null;
-
-  // Page chrome from the imported docx, keyed by w:type (default/first/even).
-  private chromeHeaders: Record<string, ProseMirrorNode> = {};
-  private chromeFooters: Record<string, ProseMirrorNode> = {};
-  private chromeTitlePg = false;
-  private chromeEvenAndOdd = false;
-  // Footnote bodies keyed by display number (laid out at the page bottom).
-  private footnotes: Record<number, ProseMirrorNode> | undefined;
-  // The imported source package — passed to exportDocx({ carry }) so styles /
-  // numbering / headers / media survive a round-trip.
-  private importedRaw: DocxImport['raw'] | null = null;
-  // The document schema: model's base, extended with plugin schema contributions.
-  private docSchema: Schema = baseSchema;
-  // Page geometry from the imported docx's sectPr (A4 until imported).
-  private page: PageConfig = A4;
-
-  // Incremental re-layout: unchanged paragraphs skip measuring on each keystroke.
-  // Replaced wholesale when late-loading fonts invalidate every measurement.
-  private layoutCache = createLayoutCache();
 
   // Caret blink state (solid on every interaction, toggling while idle).
   private lastCaret: CaretRect | null = null;
@@ -126,8 +79,6 @@ export class BapbongEditor {
   // hit-testing, same frame); the PM model commits once on pointerup.
   private dragAnchor: number | null = null;
   private dragHead: number | null = null;
-  // Scroll repaint throttle (page virtualization).
-  private scrollRaf: number | null = null;
 
   private readonly changeListeners = new Set<(c: EditorChange) => void>();
   private readonly caretPickListeners = new Set<(pos: number) => void>();
@@ -138,6 +89,8 @@ export class BapbongEditor {
   private readonly pluginCtx: PluginContext;
   // Whether any plugin wants pointer events (gates the per-move offer).
   private pointerPlugins = false;
+  // Unsubscribe from the core's late-font relayout signal.
+  private readonly offFonts: () => void;
   // Transient drag guide (e.g. column-resize preview); lazily created.
   private guideEl: HTMLDivElement | null = null;
   // Pool of translucent highlight divs (e.g. selected table-cell block).
@@ -154,11 +107,14 @@ export class BapbongEditor {
 
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
-    this.viewport =
-      opts.viewport ?? (stack.closest('.canvas-wrap') as HTMLElement | null);
-    this.painter = new CanvasPainter(stack);
-    this.measureText = createCanvasMeasurer();
-    this.measureMetrics = createCanvasMetrics();
+    this.core = new RenderCore(stack, { viewport: opts.viewport });
+    // The core resolves plugin decorations to page rects at paint time.
+    this.core.setDecorationProvider(() => this.pluginDecorations());
+    // After a late-font relayout the core repaints content; recompute the caret
+    // overlay (rects moved) and re-anchor the IME against the new layout.
+    this.offFonts = this.core.onFontsReloaded(() => {
+      if (this.bridge) this.render(this.bridge.state, false);
+    });
 
     stack.addEventListener('pointerdown', this.onPointerDown);
     stack.addEventListener('pointermove', this.onPointerMove);
@@ -166,9 +122,6 @@ export class BapbongEditor {
     stack.addEventListener('pointercancel', this.onPointerUp);
     stack.addEventListener('dblclick', this.onDblClick);
     stack.addEventListener('contextmenu', this.onContextMenu);
-    this.viewport?.addEventListener('scroll', this.onScroll);
-    // Fonts that finish loading later invalidate every measurement.
-    document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
 
     // Plugins: build their context and run setup (teardowns collected for destroy).
     // Internal (built-in) plugins first, then external/host-provided plugins.
@@ -188,11 +141,11 @@ export class BapbongEditor {
     // Arrow methods capture `this` lexically (no this-alias).
     const ctx = {
       dispatch: (tr: Transaction) => this.dispatch(tr),
-      caretRect: (pos: number) => this.caretRect(pos),
-      pageToCanvas: (p: { pageIndex: number; x: number; y: number }) => this.pageToCanvas(p),
+      caretRect: (pos: number) => this.core.caretRect(pos),
+      pageToCanvas: (p: PagePoint) => this.core.pageToCanvas(p),
       setSelection: (from: number, to?: number) => this.setSelection(from, to),
-      scrollToPos: (pos: number, topMargin?: number) => this.scrollToPos(pos, topMargin),
-      requestPaint: () => this.repaintContent(),
+      scrollToPos: (pos: number, topMargin?: number) => this.core.scrollToPos(pos, topMargin),
+      requestPaint: () => this.core.paintContent(this.currentOverlay()),
       setCursor: (cursor: string | null) => {
         this.stack.style.cursor = cursor ?? '';
       },
@@ -203,7 +156,7 @@ export class BapbongEditor {
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
     Object.defineProperty(ctx, 'state', { enumerable: true, get: () => this.state });
-    Object.defineProperty(ctx, 'layout', { enumerable: true, get: () => this.resolved ?? null });
+    Object.defineProperty(ctx, 'layout', { enumerable: true, get: () => this.core.layout });
     return ctx as PluginContext;
   }
 
@@ -217,13 +170,13 @@ export class BapbongEditor {
 
   /** Number of laid-out pages (0 before the first document). */
   get pageCount(): number {
-    return this.resolved?.pages.length ?? 0;
+    return this.core.pageCount;
   }
 
   /** The document schema in use (model's base + plugin schema contributions).
    *  Hosts serialize/parse comment bodies, previews, etc. against this. */
   get schema(): Schema {
-    return this.docSchema;
+    return this.core.schema;
   }
 
   /** Built-in find-and-replace (always registered; the host renders the bar).
@@ -241,38 +194,23 @@ export class BapbongEditor {
   /** Import a .docx, lay it out, and paint the first frame. Resolves with the
    *  imported page-chrome keys (the rest of the import rides on the doc model
    *  exposed via `state`). */
-  async loadDocx(
-    bytes: ArrayBuffer,
-  ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
+  async loadDocx(bytes: ArrayBuffer): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
     // Compose the doc schema from model's base + any plugin schema
     // contributions, and import against it (so plugin-owned marks/nodes parse).
     const composed = composeSchema(baseSchema, this.plugins);
-    this.docSchema = composed ?? baseSchema;
-    const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } =
-      await importDocx(bytes, composed ? { schema: composed } : undefined);
-    this.importedRaw = raw; // carried on export so unmodelled parts survive
-    this.chromeHeaders = headers;
-    this.chromeFooters = footers;
-    this.chromeTitlePg = titlePg;
-    this.chromeEvenAndOdd = evenAndOdd;
-    this.footnotes = footnotes;
-    this.page = page;
-    // Measure with the real fonts, not their fallbacks.
-    await ensureFontsLoaded(
-      collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers)),
+    const { doc, headerKeys, footerKeys } = await this.core.loadDocx(
+      bytes,
+      // Skip the core's initial paint — `mount` paints with a caret overlay.
+      { schema: composed ?? undefined, paint: false },
     );
     this.mount(doc);
-    return { headerKeys: Object.keys(headers), footerKeys: Object.keys(footers) };
+    return { headerKeys, footerKeys };
   }
 
   /** Export the (edited) document back to .docx bytes, carrying the imported
    *  source package so unmodelled parts survive the round-trip. */
-  async exportDocx(): Promise<Uint8Array> {
-    if (!this.bridge) throw new Error('BapbongEditor: no document loaded');
-    return exportDocx(
-      this.bridge.state.doc,
-      this.importedRaw ? { carry: this.importedRaw } : undefined,
-    );
+  exportDocx(): Promise<Uint8Array> {
+    return this.core.exportDocx();
   }
 
   /** Apply a transaction (the host builds comment/edit transactions against
@@ -296,16 +234,12 @@ export class BapbongEditor {
 
   /** Caret geometry at a doc position (page-local), or null. */
   caretRect(pos: number): CaretRect | null {
-    return this.resolved ? caretRect(this.resolved, pos, this.measureText) : null;
+    return this.core.caretRect(pos);
   }
 
   /** Map a page-local point to container (canvas-stack) coordinates, or null. */
-  pageToCanvas(p: {
-    pageIndex: number;
-    x: number;
-    y: number;
-  }): { x: number; y: number } | null {
-    return this.painter.pageToCanvas(p);
+  pageToCanvas(p: PagePoint): { x: number; y: number } | null {
+    return this.core.pageToCanvas(p);
   }
 
   /** Move the selection (caret if `to` omitted) and anchor the IME. */
@@ -320,11 +254,8 @@ export class BapbongEditor {
 
   /** Scroll the viewport so the caret at `pos` sits `topMargin` px from the top. */
   scrollToPos(pos: number, topMargin = 80): void {
-    const cr = this.caretRect(pos);
-    const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
-    if (pt && this.viewport) this.viewport.scrollTop = Math.max(0, pt.y - topMargin);
+    this.core.scrollToPos(pos, topMargin);
   }
-
 
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
@@ -389,7 +320,7 @@ export class BapbongEditor {
     for (const t of this.pluginTeardowns) t();
     this.pluginTeardowns.length = 0;
     this.stopBlink();
-    if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
+    this.offFonts();
     this.stack.removeEventListener('pointerdown', this.onPointerDown);
     this.stack.removeEventListener('pointermove', this.onPointerMove);
     this.stack.removeEventListener('pointerup', this.onPointerUp);
@@ -402,8 +333,7 @@ export class BapbongEditor {
     this.highlightEls.length = 0;
     this.actionEl?.remove();
     this.actionEl = null;
-    this.viewport?.removeEventListener('scroll', this.onScroll);
-    document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
+    this.core.destroy();
     this.bridge?.destroy();
     this.bridge = null;
   }
@@ -427,39 +357,25 @@ export class BapbongEditor {
     // Hidden editor lives in the page-canvas container, so IME anchoring
     // scrolls along (positioned at the painted caret, in container coords).
     this.stack.appendChild(this.bridge.dom);
-    this.refresh(this.bridge.state);
+    // The core already laid out this doc in `loadDocx`; paint the first frame
+    // with the caret overlay (no redundant relayout).
+    this.render(this.bridge.state, true);
   }
 
-  /** Layout (only when the doc changed) → paint → place IME → notify the host. */
+  /** Bridge update hook: relayout (only when the doc changed) → paint → place
+   *  IME → notify. */
   private refresh(state: EditorState, tr?: Transaction): void {
     const docChanged = tr?.docChanged ?? true;
+    if (docChanged || !this.core.layout) this.core.layoutDoc(state.doc);
+    this.render(state, docChanged);
+  }
 
-    let contentDirty = false;
-    if (docChanged || !this.resolved) {
-      this.resolved = layout(
-        state.doc,
-        { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
-        this.layoutCache,
-        {
-          header: this.chromeHeaders['default'],
-          footer: this.chromeFooters['default'],
-          headerFirst: this.chromeHeaders['first'],
-          footerFirst: this.chromeFooters['first'],
-          headerEven: this.chromeHeaders['even'],
-          footerEven: this.chromeFooters['even'],
-          titlePg: this.chromeTitlePg,
-          evenAndOdd: this.chromeEvenAndOdd,
-        },
-        this.footnotes,
-      );
-      contentDirty = true;
-    }
-
+  /** Compute the caret/selection overlay from `state`, paint it (full content
+   *  when `contentDirty`, else overlay-only), anchor the IME, and notify. */
+  private render(state: EditorState, contentDirty: boolean): void {
     const sel = state.selection;
-    this.lastCaret = caretRect(this.resolved, sel.head, this.measureText);
-    this.lastSelection = sel.empty
-      ? []
-      : selectionRects(this.resolved, sel.from, sel.to, this.measureText);
+    this.lastCaret = this.core.caretRect(sel.head);
+    this.lastSelection = sel.empty ? [] : this.core.selectionRects(sel.from, sel.to);
 
     // While dragging the caret stays solid and the timer rests; otherwise every
     // interaction restarts the blink phase.
@@ -470,21 +386,34 @@ export class BapbongEditor {
       this.restartBlink();
     }
 
-    if (contentDirty) {
-      this.repaintContent();
-    } else {
-      this.repaintOverlay(); // redraw only the caret/selection page(s)
-    }
+    const overlay = this.currentOverlay();
+    if (contentDirty) this.core.paintContent(overlay);
+    else this.core.paintOverlay(overlay);
 
     // Anchor the hidden editor (and its IME popup) at the painted caret
     // (pageToCanvas returns container-relative coords, where the editor lives).
     const caret = this.lastCaret;
     if (caret && this.bridge) {
-      const pt = this.painter.pageToCanvas({ pageIndex: caret.pageIndex, x: caret.x, y: caret.y });
+      const pt = this.core.pageToCanvas({ pageIndex: caret.pageIndex, x: caret.x, y: caret.y });
       if (pt) this.bridge.place(pt.x, pt.y, caret.height);
     }
 
-    this.emitChange({ state, pageCount: this.pageCount, docChanged });
+    this.emitChange({ state, pageCount: this.core.pageCount, docChanged: contentDirty });
+  }
+
+  /** The caret/selection overlay in the current blink phase. */
+  private currentOverlay(): { caret: CaretRect | null; selection: SelectionRect[] } {
+    return { caret: this.caretVisible ? this.lastCaret : null, selection: this.lastSelection };
+  }
+
+  /** Each plugin's doc-range decorations (the core resolves them to rects). */
+  private pluginDecorations(): RangeDecoration[] {
+    const out: RangeDecoration[] = [];
+    for (const p of this.plugins) {
+      const decos = p.decorations?.(this.pluginCtx);
+      if (decos) out.push(...decos);
+    }
+    return out;
   }
 
   private emitChange(c: EditorChange): void {
@@ -492,50 +421,9 @@ export class BapbongEditor {
     for (const p of this.plugins) p.onChange?.(c);
   }
 
-  /** Redraw caret/selection in the current blink phase (only the affected
-   *  page canvases — a blink touches just the caret's page). */
+  /** Redraw caret/selection in the current blink phase (overlay-only). */
   private repaintOverlay(): void {
-    if (!this.resolved) return;
-    this.painter.paintOverlay({
-      caret: this.caretVisible ? this.lastCaret : null,
-      selection: this.lastSelection,
-    });
-  }
-
-  /** Full content repaint, virtualized to the scroll viewport. */
-  private repaintContent(): void {
-    if (!this.resolved) return;
-    this.painter.paint(this.resolved, {
-      caret: this.caretVisible ? this.lastCaret : null,
-      selection: this.lastSelection,
-      viewport: this.currentViewport(),
-      decorations: this.collectDecorations(),
-    });
-  }
-
-  /** Gather each plugin's decorations (doc ranges) and resolve them to
-   *  page-local rects the painter can fill directly. */
-  private collectDecorations(): PaintDecoration[] {
-    if (!this.resolved) return [];
-    const out: PaintDecoration[] = [];
-    for (const p of this.plugins) {
-      const decos = p.decorations?.(this.pluginCtx);
-      if (!decos) continue;
-      for (const d of decos) {
-        const rects = selectionRects(this.resolved, d.from, d.to, this.measureText);
-        if (rects.length) out.push({ rects, kind: d.kind, color: d.color });
-      }
-    }
-    return out;
-  }
-
-  /** The viewport's window onto the page stack, in container CSS px. */
-  private currentViewport(): { top: number; height: number } | undefined {
-    const wrap = this.viewport;
-    if (!wrap) return undefined;
-    const wrapRect = wrap.getBoundingClientRect();
-    const stackRect = this.stack.getBoundingClientRect();
-    return { top: wrapRect.top - stackRect.top, height: wrap.clientHeight };
+    this.core.paintOverlay(this.currentOverlay());
   }
 
   // ── Caret blink ─────────────────────────────────────────────────────
@@ -561,15 +449,14 @@ export class BapbongEditor {
    *  wrapping is meaningless). With `extend`, Shift+arrow grows the selection. */
   private verticalCmd(dir: -1 | 1, extend = false): Command {
     return moveCaretCommand((state) => {
-      if (!this.resolved) return null;
       const head = state.selection.head;
-      const cr = caretRect(this.resolved, head, this.measureText);
+      const cr = this.core.caretRect(head);
       if (!cr) return null;
-      return verticalCaret(this.resolved, head, dir, cr.x, this.measureText);
+      return this.core.verticalCaret(head, dir, cr.x);
     }, extend);
   }
 
-  // ── Pointer / scroll ────────────────────────────────────────────────
+  // ── Pointer ─────────────────────────────────────────────────────────
 
   private onPointerDown = (ev: PointerEvent): void => {
     // A pointer plugin (e.g. table-column resize) may claim the press; if so,
@@ -587,7 +474,7 @@ export class BapbongEditor {
     // A right-click fires pointerdown (button 2) before `contextmenu`; collapsing
     // the selection here would lose it before the context menu opens.
     if (ev.button !== 0) return;
-    const pos = this.posAtEvent(ev);
+    const pos = this.core.posAtEvent(ev);
     if (pos == null || !this.bridge) return;
     ev.preventDefault(); // keep focus on the hidden editor
     this.dragAnchor = pos;
@@ -616,7 +503,7 @@ export class BapbongEditor {
     // pointerup, Google Docs-style).
     const coalesced = ev.getCoalescedEvents?.() ?? [];
     const last = coalesced.length > 0 ? coalesced[coalesced.length - 1] : ev;
-    const pos = this.posAtEvent(last);
+    const pos = this.core.posAtEvent(last);
     if (pos == null || pos === this.dragHead) return;
     this.dragHead = pos;
     this.paintDragSelection();
@@ -624,13 +511,13 @@ export class BapbongEditor {
 
   /** Overlay-only repaint of the in-progress drag selection. */
   private paintDragSelection(): void {
-    if (!this.resolved || this.dragAnchor == null || this.dragHead == null) return;
+    if (this.dragAnchor == null || this.dragHead == null) return;
     const from = Math.min(this.dragAnchor, this.dragHead);
     const to = Math.max(this.dragAnchor, this.dragHead);
-    this.lastCaret = caretRect(this.resolved, this.dragHead, this.measureText);
-    this.lastSelection = from === to ? [] : selectionRects(this.resolved, from, to, this.measureText);
+    this.lastCaret = this.core.caretRect(this.dragHead);
+    this.lastSelection = from === to ? [] : this.core.selectionRects(from, to);
     this.caretVisible = true;
-    this.painter.paintOverlay({ caret: this.lastCaret, selection: this.lastSelection });
+    this.core.paintOverlay({ caret: this.lastCaret, selection: this.lastSelection });
   }
 
   private onPointerUp = (ev: PointerEvent): void => {
@@ -652,13 +539,20 @@ export class BapbongEditor {
     if (this.offerPointer('contextmenu', ev)) ev.preventDefault();
   };
 
+  private onDblClick = (ev: MouseEvent): void => {
+    const pos = this.core.posAtEvent(ev);
+    if (pos == null || !this.bridge) return;
+    ev.preventDefault();
+    this.bridge.selectWordAt(pos);
+    this.bridge.focus();
+  };
+
   /** Offer a pointer event to plugins; returns true if one claimed it. `pos` is
    *  resolved for down/up/contextmenu only (move fires on every hover). */
   private offerPointer(type: EditorPointerEvent['type'], ev: PointerEvent | MouseEvent): boolean {
-    if (!this.pointerPlugins || !this.resolved) return false;
-    const rect = this.stack.getBoundingClientRect();
-    const point = this.painter.canvasToPage(ev.clientX - rect.left, ev.clientY - rect.top);
-    const pos = type === 'move' || !point ? null : hitTest(this.resolved, point, this.measureText);
+    if (!this.pointerPlugins || !this.core.layout) return false;
+    const point = this.core.clientToPage(ev.clientX, ev.clientY);
+    const pos = type === 'move' || !point ? null : this.core.posAtPoint(point);
     const pev: EditorPointerEvent = {
       type,
       point,
@@ -673,6 +567,8 @@ export class BapbongEditor {
     return false;
   }
 
+  // ── Overlay affordances (guide / highlight / action button) ─────────
+
   /** Position (or hide, with null) the transient vertical drag guide. Lives in
    *  the canvas stack so it scrolls/zooms with the pages. */
   private setGuide(guide: OverlayGuide | null): void {
@@ -686,8 +582,8 @@ export class BapbongEditor {
         'position:absolute;width:0;border-left:2px dashed #378add;pointer-events:none;z-index:5;';
       this.stack.appendChild(this.guideEl);
     }
-    const top = this.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y });
-    const bottom = this.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y + guide.height });
+    const top = this.core.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y });
+    const bottom = this.core.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y + guide.height });
     if (!top || !bottom) {
       this.guideEl.style.display = 'none';
       return;
@@ -711,8 +607,8 @@ export class BapbongEditor {
     }
     this.highlightEls.forEach((el, i) => {
       const r = list[i];
-      const tl = r && this.pageToCanvas({ pageIndex: r.pageIndex, x: r.x, y: r.y });
-      const br = r && this.pageToCanvas({ pageIndex: r.pageIndex, x: r.x + r.width, y: r.y + r.height });
+      const tl = r && this.core.pageToCanvas({ pageIndex: r.pageIndex, x: r.x, y: r.y });
+      const br = r && this.core.pageToCanvas({ pageIndex: r.pageIndex, x: r.x + r.width, y: r.y + r.height });
       if (!tl || !br) {
         el.style.display = 'none';
         return;
@@ -751,7 +647,7 @@ export class BapbongEditor {
       this.stack.appendChild(btn);
       this.actionEl = btn;
     }
-    const p = this.pageToCanvas(at);
+    const p = this.core.pageToCanvas(at);
     if (!p) {
       this.actionEl.style.display = 'none';
       return;
@@ -760,41 +656,6 @@ export class BapbongEditor {
     this.actionEl.style.left = `${p.x - 12}px`;
     this.actionEl.style.top = `${p.y - 12}px`;
   }
-
-  private onDblClick = (ev: MouseEvent): void => {
-    const pos = this.posAtEvent(ev);
-    if (pos == null || !this.bridge) return;
-    ev.preventDefault();
-    this.bridge.selectWordAt(pos);
-    this.bridge.focus();
-  };
-
-  /** Repaint newly visible pages while scrolling (rAF-throttled). */
-  private onScroll = (): void => {
-    if (this.scrollRaf != null) return;
-    this.scrollRaf = requestAnimationFrame(() => {
-      this.scrollRaf = null;
-      this.repaintContent();
-      // Anchored host UI lives inside the scroll content → it scrolls natively;
-      // no per-scroll repositioning needed.
-    });
-  };
-
-  private posAtEvent(ev: MouseEvent): number | null {
-    if (!this.resolved) return null;
-    // Page canvases have pointer-events:none, so events land on the container;
-    // map client coords to container-relative CSS px (offsetX/Y would be
-    // relative to whichever child the pointer happens to be over).
-    const rect = this.stack.getBoundingClientRect();
-    const pt = this.painter.canvasToPage(ev.clientX - rect.left, ev.clientY - rect.top);
-    if (!pt) return null;
-    return hitTest(this.resolved, pt, this.measureText);
-  }
-
-  private readonly onFontsLoaded = (): void => {
-    this.layoutCache = createLayoutCache();
-    if (this.bridge) this.refresh(this.bridge.state);
-  };
 }
 
 /**
@@ -818,19 +679,4 @@ export function composeSchema(base: Schema, plugins: Iterable<EditorPlugin>): Sc
     }
   }
   return changed ? new Schema({ nodes, marks }) : null;
-}
-
-/** Every fontFamily mark in the given documents, plus the engine default. */
-function collectFontFamilies(...docs: (ProseMirrorNode | undefined)[]): string[] {
-  const families = new Set<string>(['Arial']);
-  for (const doc of docs) {
-    doc?.descendants((node) => {
-      for (const mark of node.marks) {
-        if (mark.type.name === 'fontFamily' && mark.attrs['family']) {
-          families.add(String(mark.attrs['family']));
-        }
-      }
-    });
-  }
-  return [...families];
 }

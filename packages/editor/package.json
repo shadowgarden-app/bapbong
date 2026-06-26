@@ -44,13 +44,9 @@
   "dependencies": {
     "@shadow-garden/bapbong-commands": "workspace:^",
     "@shadow-garden/bapbong-contracts": "workspace:^",
-    "@shadow-garden/bapbong-docx": "workspace:^",
     "@shadow-garden/bapbong-input-bridge": "workspace:^",
-    "@shadow-garden/bapbong-layout-engine": "workspace:^",
-    "@shadow-garden/bapbong-measuring": "workspace:^",
     "@shadow-garden/bapbong-model": "workspace:^",
-    "@shadow-garden/bapbong-painter-canvas": "workspace:^",
-    "@shadow-garden/bapbong-selection": "workspace:^",
+    "@shadow-garden/bapbong-view": "workspace:^",
     "prosemirror-model": "^1.25.7"
   }
 }

@@ -1,0 +1,361 @@
+import { Node as ProseMirrorNode, Schema } from 'prosemirror-model';
+import { schema as baseSchema } from '@shadow-garden/bapbong-model';
+import { importDocx, exportDocx, type DocxImport } from '@shadow-garden/bapbong-docx';
+import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
+import {
+  createCanvasMeasurer,
+  createCanvasMetrics,
+  ensureFontsLoaded,
+} from '@shadow-garden/bapbong-measuring';
+import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
+import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
+import type {
+  CaretRect,
+  MeasureMetrics,
+  MeasureText,
+  PageConfig,
+  PagePoint,
+  PaintDecoration,
+  RangeDecoration,
+  ResolvedLayout,
+  SelectionRect,
+} from '@shadow-garden/bapbong-contracts';
+
+/** A4 at 96 dpi with 1in margins — fallback until a document is imported. */
+const A4: PageConfig = {
+  width: 794,
+  height: 1123,
+  margin: { top: 96, right: 96, bottom: 96, left: 96 },
+};
+
+export interface RenderCoreOptions {
+  /** The scroll viewport the page stack lives in (used for virtualization and
+   *  scroll-into-view). Defaults to `stack.closest('.canvas-wrap')`. */
+  viewport?: HTMLElement;
+  /** Initial zoom factor (1 = 100%). */
+  zoom?: number;
+}
+
+/** Caret + selection to paint on the overlay layer (page-local geometry). */
+export interface Overlay {
+  caret?: CaretRect | null;
+  selection?: SelectionRect[];
+}
+
+/**
+ * The render half of bapbong, with **no editing**: import → layout → paint →
+ * scroll/zoom/virtualize, plus the geometry queries (`caretRect`, `hitTest`,
+ * `pageToCanvas`, …) the editor and viewer both need.
+ *
+ * It holds a **read-only ProseMirror doc** (a `Node`, not an `EditorState`) and
+ * knows nothing about the input-bridge / editing. The {@link BapbongView}
+ * viewer uses it directly; `BapbongEditor` composes it and feeds it a fresh doc
+ * (plus a caret/selection overlay) on every transaction — so layout/paint live
+ * in exactly one place.
+ */
+export class RenderCore {
+  readonly stack: HTMLElement;
+  private readonly viewport: HTMLElement | null;
+  private readonly painter: CanvasPainter;
+  private readonly measureText: MeasureText;
+  private readonly measureMetrics: MeasureMetrics;
+
+  private resolved: ResolvedLayout | null = null;
+  private doc: ProseMirrorNode | null = null;
+  private zoomFactor: number;
+
+  // Page chrome from the imported docx, keyed by w:type (default/first/even).
+  private chromeHeaders: Record<string, ProseMirrorNode> = {};
+  private chromeFooters: Record<string, ProseMirrorNode> = {};
+  private chromeTitlePg = false;
+  private chromeEvenAndOdd = false;
+  // Footnote bodies keyed by display number (laid out at the page bottom).
+  private footnotes: Record<number, ProseMirrorNode> | undefined;
+  // The imported source package — passed to exportDocx({ carry }) so styles /
+  // numbering / headers / media survive a round-trip.
+  private importedRaw: DocxImport['raw'] | null = null;
+  // The document schema: model's base, or a caller-supplied extension.
+  private docSchema: Schema = baseSchema;
+  // Page geometry from the imported docx's sectPr (A4 until imported).
+  private page: PageConfig = A4;
+
+  // Incremental re-layout: unchanged paragraphs skip measuring on each change.
+  // Replaced wholesale when late-loading fonts invalidate every measurement.
+  private layoutCache = createLayoutCache();
+
+  // Last painted overlay — reused on scroll/zoom/font-relayout repaints.
+  private lastOverlay: Required<Overlay> = { caret: null, selection: [] };
+  // Doc-range decorations to paint (comment tint, find highlight…). The editor
+  // sets this; the core resolves the ranges to page rects at paint time.
+  private decorationProvider: (() => RangeDecoration[]) | null = null;
+
+  // Scroll repaint throttle (page virtualization).
+  private scrollRaf: number | null = null;
+  // Subscribers notified after a late-font relayout (rects moved).
+  private readonly fontsListeners = new Set<() => void>();
+
+  constructor(stack: HTMLElement, opts: RenderCoreOptions = {}) {
+    this.stack = stack;
+    this.viewport = opts.viewport ?? (stack.closest('.canvas-wrap') as HTMLElement | null);
+    this.painter = new CanvasPainter(stack);
+    this.measureText = createCanvasMeasurer();
+    this.measureMetrics = createCanvasMetrics();
+    this.zoomFactor = opts.zoom ?? 1;
+
+    this.viewport?.addEventListener('scroll', this.onScroll);
+    // Fonts that finish loading later invalidate every measurement.
+    document.fonts?.addEventListener?.('loadingdone', this.onFontsLoaded);
+  }
+
+  // ── State accessors ─────────────────────────────────────────────────
+
+  /** The current read-only document, or null before the first load. */
+  get document(): ProseMirrorNode | null {
+    return this.doc;
+  }
+
+  /** The resolved layout for the current doc, or null. */
+  get layout(): ResolvedLayout | null {
+    return this.resolved;
+  }
+
+  /** Number of laid-out pages (0 before the first document). */
+  get pageCount(): number {
+    return this.resolved?.pages.length ?? 0;
+  }
+
+  /** The document schema in use (model's base, or a caller-supplied extension). */
+  get schema(): Schema {
+    return this.docSchema;
+  }
+
+  /** Resolve doc-range decorations to page rects on each content paint. */
+  setDecorationProvider(fn: (() => RangeDecoration[]) | null): void {
+    this.decorationProvider = fn;
+  }
+
+  // ── Load / export ───────────────────────────────────────────────────
+
+  /**
+   * Import a `.docx`, lay it out, and (by default) paint the first frame. Pass
+   * `{ schema }` to import against an extended schema (e.g. plugin marks);
+   * `{ paint: false }` to skip the initial paint (the editor paints with a caret
+   * overlay itself). Resolves with the doc + imported page-chrome keys.
+   */
+  async loadDocx(
+    bytes: ArrayBuffer,
+    opts: { schema?: Schema; paint?: boolean } = {},
+  ): Promise<{ doc: ProseMirrorNode; headerKeys: string[]; footerKeys: string[] }> {
+    const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } = await importDocx(
+      bytes,
+      opts.schema ? { schema: opts.schema } : undefined,
+    );
+    this.docSchema = opts.schema ?? baseSchema;
+    this.importedRaw = raw; // carried on export so unmodelled parts survive
+    this.chromeHeaders = headers;
+    this.chromeFooters = footers;
+    this.chromeTitlePg = titlePg;
+    this.chromeEvenAndOdd = evenAndOdd;
+    this.footnotes = footnotes;
+    this.page = page;
+    // Measure with the real fonts, not their fallbacks.
+    await ensureFontsLoaded(
+      collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers)),
+    );
+    this.layoutDoc(doc);
+    if (opts.paint !== false) this.paintContent();
+    return { doc, headerKeys: Object.keys(headers), footerKeys: Object.keys(footers) };
+  }
+
+  /** Export the current document to .docx bytes, carrying the imported source
+   *  package so unmodelled parts survive the round-trip. */
+  async exportDocx(): Promise<Uint8Array> {
+    if (!this.doc) throw new Error('RenderCore: no document loaded');
+    return exportDocx(this.doc, this.importedRaw ? { carry: this.importedRaw } : undefined);
+  }
+
+  // ── Layout / paint ──────────────────────────────────────────────────
+
+  /** Lay out (or re-lay, incrementally) `doc` and store it. Does not paint. */
+  layoutDoc(doc: ProseMirrorNode): void {
+    this.doc = doc;
+    this.resolved = layout(
+      doc,
+      { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
+      this.layoutCache,
+      {
+        header: this.chromeHeaders['default'],
+        footer: this.chromeFooters['default'],
+        headerFirst: this.chromeHeaders['first'],
+        footerFirst: this.chromeFooters['first'],
+        headerEven: this.chromeHeaders['even'],
+        footerEven: this.chromeFooters['even'],
+        titlePg: this.chromeTitlePg,
+        evenAndOdd: this.chromeEvenAndOdd,
+      },
+      this.footnotes,
+    );
+  }
+
+  /** Full content repaint, virtualized to the scroll viewport. Pass an overlay
+   *  to update the caret/selection painted on top (kept for later repaints). */
+  paintContent(overlay?: Overlay): void {
+    if (!this.resolved) return;
+    if (overlay) this.lastOverlay = normalizeOverlay(overlay);
+    this.painter.paint(this.resolved, {
+      zoom: this.zoomFactor,
+      caret: this.lastOverlay.caret,
+      selection: this.lastOverlay.selection,
+      viewport: this.currentViewport(),
+      decorations: this.collectDecorations(),
+    });
+  }
+
+  /** Redraw only the caret/selection overlay (just the affected page canvases —
+   *  used for caret blink, drag preview, selection-only changes). */
+  paintOverlay(overlay: Overlay): void {
+    if (!this.resolved) return;
+    this.lastOverlay = normalizeOverlay(overlay);
+    this.painter.paintOverlay({ caret: this.lastOverlay.caret, selection: this.lastOverlay.selection });
+  }
+
+  /** Set the zoom factor (1 = 100%) and repaint content at the new scale. */
+  setZoom(zoom: number): void {
+    this.zoomFactor = zoom;
+    this.paintContent();
+  }
+
+  /** The current zoom factor. */
+  getZoom(): number {
+    return this.zoomFactor;
+  }
+
+  /** Gather decorations from the provider and resolve each doc range to
+   *  page-local rects the painter can fill directly. */
+  private collectDecorations(): PaintDecoration[] {
+    if (!this.resolved || !this.decorationProvider) return [];
+    const out: PaintDecoration[] = [];
+    for (const d of this.decorationProvider()) {
+      const rects = selectionRects(this.resolved, d.from, d.to, this.measureText);
+      if (rects.length) out.push({ rects, kind: d.kind, color: d.color });
+    }
+    return out;
+  }
+
+  // ── Geometry queries ────────────────────────────────────────────────
+
+  /** Caret geometry at a doc position (page-local), or null. */
+  caretRect(pos: number): CaretRect | null {
+    return this.resolved ? caretRect(this.resolved, pos, this.measureText) : null;
+  }
+
+  /** Selection highlight rects for a doc range (page-local). */
+  selectionRects(from: number, to: number): SelectionRect[] {
+    return this.resolved ? selectionRects(this.resolved, from, to, this.measureText) : [];
+  }
+
+  /** The doc position one line above/below `head` at horizontal `x`, or null. */
+  verticalCaret(head: number, dir: -1 | 1, x: number): number | null {
+    return this.resolved ? verticalCaret(this.resolved, head, dir, x, this.measureText) : null;
+  }
+
+  /** Map client (viewport) coords to a page-local point, or null. */
+  clientToPage(clientX: number, clientY: number): PagePoint | null {
+    // Page canvases have pointer-events:none, so events land on the container;
+    // map client coords to container-relative CSS px (offsetX/Y would be
+    // relative to whichever child the pointer happens to be over).
+    const rect = this.stack.getBoundingClientRect();
+    return this.painter.canvasToPage(clientX - rect.left, clientY - rect.top);
+  }
+
+  /** The doc position under a page-local point, or null. */
+  posAtPoint(point: PagePoint): number | null {
+    return this.resolved ? hitTest(this.resolved, point, this.measureText) : null;
+  }
+
+  /** The doc position under a pointer/mouse event, or null. */
+  posAtEvent(ev: { clientX: number; clientY: number }): number | null {
+    const pt = this.clientToPage(ev.clientX, ev.clientY);
+    return pt ? this.posAtPoint(pt) : null;
+  }
+
+  /** Map a page-local point to container (canvas-stack) coordinates, or null. */
+  pageToCanvas(p: PagePoint): { x: number; y: number } | null {
+    return this.painter.pageToCanvas(p);
+  }
+
+  /** Scroll the viewport so the caret at `pos` sits `topMargin` px from the top. */
+  scrollToPos(pos: number, topMargin = 80): void {
+    const cr = this.caretRect(pos);
+    const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
+    if (pt && this.viewport) this.viewport.scrollTop = Math.max(0, pt.y - topMargin);
+  }
+
+  /** The viewport's window onto the page stack, in container CSS px. */
+  private currentViewport(): { top: number; height: number } | undefined {
+    const wrap = this.viewport;
+    if (!wrap) return undefined;
+    const wrapRect = wrap.getBoundingClientRect();
+    const stackRect = this.stack.getBoundingClientRect();
+    return { top: wrapRect.top - stackRect.top, height: wrap.clientHeight };
+  }
+
+  // ── Lifecycle ───────────────────────────────────────────────────────
+
+  /** Subscribe to late-font relayouts (page geometry changed → recompute any
+   *  caret/selection rects you hold). Returns an unsubscribe fn. */
+  onFontsReloaded(cb: () => void): () => void {
+    this.fontsListeners.add(cb);
+    return () => this.fontsListeners.delete(cb);
+  }
+
+  destroy(): void {
+    if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
+    this.scrollRaf = null;
+    this.viewport?.removeEventListener('scroll', this.onScroll);
+    document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
+    this.fontsListeners.clear();
+  }
+
+  /** Repaint newly visible pages while scrolling (rAF-throttled). */
+  private onScroll = (): void => {
+    if (this.scrollRaf != null) return;
+    this.scrollRaf = requestAnimationFrame(() => {
+      this.scrollRaf = null;
+      this.paintContent();
+      // Anchored host UI lives inside the scroll content → it scrolls natively;
+      // no per-scroll repositioning needed.
+    });
+  };
+
+  private onFontsLoaded = (): void => {
+    this.layoutCache = createLayoutCache();
+    if (this.doc) {
+      this.layoutDoc(this.doc);
+      this.paintContent(); // repaint content with the last overlay (rects may shift)
+    }
+    // Subscribers (e.g. the editor) recompute caret/selection against the new
+    // layout and repaint the overlay precisely.
+    for (const cb of this.fontsListeners) cb();
+  };
+}
+
+/** Coalesce a partial overlay into a fully-specified one. */
+function normalizeOverlay(overlay: Overlay): Required<Overlay> {
+  return { caret: overlay.caret ?? null, selection: overlay.selection ?? [] };
+}
+
+/** Every fontFamily mark in the given documents, plus the engine default. */
+export function collectFontFamilies(...docs: (ProseMirrorNode | undefined)[]): string[] {
+  const families = new Set<string>(['Arial']);
+  for (const doc of docs) {
+    doc?.descendants((node) => {
+      for (const mark of node.marks) {
+        if (mark.type.name === 'fontFamily' && mark.attrs['family']) {
+          families.add(String(mark.attrs['family']));
+        }
+      }
+    });
+  }
+  return [...families];
+}

@@ -1,0 +1,62 @@
+{
+  "name": "@shadow-garden/bapbong-view",
+  "version": "0.0.1",
+  "description": "bapbong — render core + read-only viewer (preview). Loads/lays-out/paints a .docx to canvas with zoom + page virtualization, no input-bridge (no ProseMirror editing).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@shadow-garden/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "nx": {
+    "tags": ["scope:view"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/view/dist",
+          "main": "packages/view/src/index.ts",
+          "tsConfig": "packages/view/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/view/src",
+          "external": [
+            "@shadow-garden/bapbong-contracts",
+            "@shadow-garden/bapbong-model",
+            "@shadow-garden/bapbong-docx",
+            "@shadow-garden/bapbong-measuring",
+            "@shadow-garden/bapbong-layout-engine",
+            "@shadow-garden/bapbong-painter-canvas",
+            "@shadow-garden/bapbong-selection"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@shadow-garden/bapbong-contracts": "workspace:^",
+    "@shadow-garden/bapbong-model": "workspace:^",
+    "@shadow-garden/bapbong-docx": "workspace:^",
+    "@shadow-garden/bapbong-measuring": "workspace:^",
+    "@shadow-garden/bapbong-layout-engine": "workspace:^",
+    "@shadow-garden/bapbong-painter-canvas": "workspace:^",
+    "@shadow-garden/bapbong-selection": "workspace:^",
+    "prosemirror-model": "^1.25.7"
+  }
+}
