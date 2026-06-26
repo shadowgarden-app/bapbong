@@ -1,10 +1,15 @@
 import type { Schema } from 'prosemirror-model';
 import { RenderCore, type RenderCoreOptions } from './render-core.js';
+import { ViewerSelection } from './viewer-selection.js';
 
 export interface BapbongViewOptions extends RenderCoreOptions {
   /** The scroll viewport for virtualization / scroll-into-view. Defaults to the
    *  host element itself (give it `overflow:auto` + a bounded height). */
   viewport?: HTMLElement;
+  /** Allow read-only text selection + copy by dragging over the canvas
+   *  (double-click selects a word, Ctrl/⌘+A selects all, Ctrl/⌘+C copies).
+   *  Default true; pass false for a non-interactive preview. */
+  selectable?: boolean;
 }
 
 /** Emitted after the document (re)renders — page count changed, fonts settled. */
@@ -28,6 +33,7 @@ export interface ViewChange {
 export class BapbongView {
   private readonly stack: HTMLElement;
   private readonly core: RenderCore;
+  private readonly selection: ViewerSelection | null;
   private readonly changeListeners = new Set<(c: ViewChange) => void>();
   private readonly offFonts: () => void;
 
@@ -38,13 +44,20 @@ export class BapbongView {
     stack.style.position = 'relative';
     host.appendChild(stack);
     this.stack = stack;
-    this.core = new RenderCore(stack, { viewport: opts.viewport ?? host, zoom: opts.zoom });
+    this.core = new RenderCore(stack, {
+      viewport: opts.viewport ?? host,
+      zoom: opts.zoom,
+      a11y: opts.a11y,
+      a11yLabel: opts.a11yLabel,
+    });
     this.offFonts = this.core.onFontsReloaded(() => this.emit());
+    this.selection = opts.selectable === false ? null : new ViewerSelection(this.core);
   }
 
   /** Import a `.docx` and render the first frame. Resolves with the imported
    *  page-chrome keys (header/footer w:types present). */
   async loadDocx(bytes: ArrayBuffer): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
+    this.selection?.clear();
     const { headerKeys, footerKeys } = await this.core.loadDocx(bytes);
     this.emit();
     return { headerKeys, footerKeys };
@@ -90,6 +103,7 @@ export class BapbongView {
 
   destroy(): void {
     this.offFonts();
+    this.selection?.destroy();
     this.core.destroy();
     this.stack.remove();
   }
