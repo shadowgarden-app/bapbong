@@ -1,5 +1,5 @@
 import type { NumberingDefs } from '@shadow-garden/bapbong-model';
-import { attrOf, child, children, OoxmlNode } from './ooxml';
+import { attrOf, child, children, OoxmlNode } from './ooxml.js';
 
 /** Parsed view of `word/numbering.xml`. Markers are NOT computed at import —
  *  the defs ride the document (doc attr) and the layout engine recounts them

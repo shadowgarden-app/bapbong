@@ -20,12 +20,12 @@ import {
   parseRunProps,
   parseXml,
   RunProps,
-} from './ooxml';
+} from './ooxml.js';
 import type { BorderSide, BorderStyle, TableBorders } from '@shadow-garden/bapbong-contracts';
-import { buildStyleRegistry, StyleRegistry } from './styles';
-import { buildNumbering, NumberingResolver } from './numbering';
-import { buildRels, Relationship } from './rels';
-import { buildThemeResolver, ThemeResolver } from './theme';
+import { buildStyleRegistry, StyleRegistry } from './styles.js';
+import { buildNumbering, NumberingResolver } from './numbering.js';
+import { buildRels, Relationship } from './rels.js';
+import { buildThemeResolver, ThemeResolver } from './theme.js';
 
 export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 

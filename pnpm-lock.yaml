@@ -259,6 +259,25 @@ importers:
         specifier: ^1.25.7
         version: 1.25.8
 
+  packages/headless:
+    dependencies:
+      '@shadow-garden/bapbong-commands':
+        specifier: workspace:^
+        version: link:../commands
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
+      '@shadow-garden/bapbong-docx':
+        specifier: workspace:^
+        version: link:../docx
+      '@shadow-garden/bapbong-model':
+        specifier: workspace:^
+        version: link:../model
+    devDependencies:
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+
   packages/input-bridge:
     dependencies:
       prosemirror-commands:

@@ -1,0 +1,58 @@
+{
+  "name": "@shadow-garden/bapbong-headless",
+  "version": "0.0.1",
+  "description": "bapbong — headless backend façade: one install re-exporting contracts + model + docx + commands (isomorphic, no DOM). Import .docx → edit via commands on an EditorState → export .docx, server-side.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@shadow-garden/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "nx": {
+    "tags": ["scope:headless"],
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "options": {
+          "outputPath": "packages/headless/dist",
+          "main": "packages/headless/src/index.ts",
+          "tsConfig": "packages/headless/tsconfig.lib.json",
+          "format": ["esm", "cjs"],
+          "declarationRootDir": "packages/headless/src",
+          "external": [
+            "@shadow-garden/bapbong-contracts",
+            "@shadow-garden/bapbong-model",
+            "@shadow-garden/bapbong-docx",
+            "@shadow-garden/bapbong-commands"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@shadow-garden/bapbong-contracts": "workspace:^",
+    "@shadow-garden/bapbong-model": "workspace:^",
+    "@shadow-garden/bapbong-docx": "workspace:^",
+    "@shadow-garden/bapbong-commands": "workspace:^"
+  },
+  "devDependencies": {
+    "prosemirror-state": "^1.4.4"
+  }
+}

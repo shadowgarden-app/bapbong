@@ -86,6 +86,18 @@ export default [
               onlyDependOnLibsWithTags: ['scope:pure', 'scope:model'],
             },
             {
+              // Headless meta-tier: aggregates the isomorphic packages
+              // (contracts/model/docx/commands) into one backend façade. Stays
+              // DOM-free — must NOT pull editor/view (which drag in canvas/DOM).
+              sourceTag: 'scope:headless',
+              onlyDependOnLibsWithTags: [
+                'scope:pure',
+                'scope:model',
+                'scope:io',
+                'scope:headless',
+              ],
+            },
+            {
               sourceTag: 'scope:plugin',
               onlyDependOnLibsWithTags: ['scope:pure'],
             },

@@ -7,7 +7,7 @@ import {
   parseRunProps,
   RunProps,
   ThemeColorResolver,
-} from './ooxml';
+} from './ooxml.js';
 
 interface StyleDef {
   basedOn?: string;

@@ -1,4 +1,4 @@
-import { attrOf, child, findDescendant, OoxmlNode } from './ooxml';
+import { attrOf, child, findDescendant, OoxmlNode } from './ooxml.js';
 
 /** Resolve an OOXML `w:themeColor` (+ optional tint/shade hex) to "#RRGGBB". */
 export type ThemeResolver = (

@@ -1,2 +1,2 @@
-export * from './lib/docx';
-export * from './lib/export';
+export * from './lib/docx.js';
+export * from './lib/export.js';

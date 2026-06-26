@@ -1,4 +1,4 @@
-import { attrOf, child, children, OoxmlNode } from './ooxml';
+import { attrOf, child, children, OoxmlNode } from './ooxml.js';
 
 export interface Relationship {
   target: string;
