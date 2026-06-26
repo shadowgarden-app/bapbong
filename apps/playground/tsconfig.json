@@ -23,6 +23,7 @@
       "@shadow-garden/bapbong-selection": ["../../packages/selection/src/index.ts"],
       "@shadow-garden/bapbong-input-bridge": ["../../packages/input-bridge/src/index.ts"],
       "@shadow-garden/bapbong-view": ["../../packages/view/src/index.ts"],
+      "@shadow-garden/bapbong-a11y": ["../../packages/a11y/src/index.ts"],
       "@shadow-garden/bapbong-ui": ["../../packages/ui/src/index.ts"]
     }
   },

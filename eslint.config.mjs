@@ -101,7 +101,8 @@ export default [
               // Render tier: load → layout → paint → scroll/zoom/virtualize +
               // geometry (RenderCore) and the read-only viewer. Touches the DOM
               // (canvas) but NOT the input-bridge (scope:input) — so the preview
-              // bundle stays free of the ProseMirror editing surface.
+              // bundle stays free of the ProseMirror editing surface. May pull
+              // the a11y mirror (so both viewer + editor are accessible).
               sourceTag: 'scope:view',
               onlyDependOnLibsWithTags: [
                 'scope:pure',
@@ -111,8 +112,16 @@ export default [
                 'scope:engine',
                 'scope:painter',
                 'scope:selection',
+                'scope:a11y',
                 'scope:view',
               ],
+            },
+            {
+              // Accessibility: a visually-hidden ARIA DOM mirror of the document
+              // (DOMSerializer over the schema). Pure DOM + the doc model — no
+              // canvas/layout/editing deps.
+              sourceTag: 'scope:a11y',
+              onlyDependOnLibsWithTags: ['scope:pure', 'scope:a11y'],
             },
             {
               sourceTag: 'scope:plugin',

@@ -9,6 +9,7 @@ import {
 } from '@shadow-garden/bapbong-measuring';
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
+import { A11yMirror } from '@shadow-garden/bapbong-a11y';
 import type {
   CaretRect,
   MeasureMetrics,
@@ -34,6 +35,11 @@ export interface RenderCoreOptions {
   viewport?: HTMLElement;
   /** Initial zoom factor (1 = 100%). */
   zoom?: number;
+  /** Build a visually-hidden ARIA mirror of the document for screen readers
+   *  (the canvas is opaque to assistive tech). Default true; pass false to opt
+   *  out. `a11yLabel` sets its `aria-label`. */
+  a11y?: boolean;
+  a11yLabel?: string;
 }
 
 /** Caret + selection to paint on the overlay layer (page-local geometry). */
@@ -93,6 +99,8 @@ export class RenderCore {
   private scrollRaf: number | null = null;
   // Subscribers notified after a late-font relayout (rects moved).
   private readonly fontsListeners = new Set<() => void>();
+  // Visually-hidden ARIA mirror of the doc (screen readers; canvas is opaque).
+  private readonly a11y: A11yMirror | null;
 
   constructor(stack: HTMLElement, opts: RenderCoreOptions = {}) {
     this.stack = stack;
@@ -101,6 +109,7 @@ export class RenderCore {
     this.measureText = createCanvasMeasurer();
     this.measureMetrics = createCanvasMetrics();
     this.zoomFactor = opts.zoom ?? 1;
+    this.a11y = opts.a11y === false ? null : new A11yMirror(stack, { label: opts.a11yLabel });
 
     this.viewport?.addEventListener('scroll', this.onScroll);
     // Fonts that finish loading later invalidate every measurement.
@@ -179,6 +188,8 @@ export class RenderCore {
   /** Lay out (or re-lay, incrementally) `doc` and store it. Does not paint. */
   layoutDoc(doc: ProseMirrorNode): void {
     this.doc = doc;
+    // Keep the accessible mirror in sync (debounced internally).
+    this.a11y?.update(doc);
     this.resolved = layout(
       doc,
       { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
@@ -315,6 +326,7 @@ export class RenderCore {
     this.viewport?.removeEventListener('scroll', this.onScroll);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.fontsListeners.clear();
+    this.a11y?.destroy();
   }
 
   /** Repaint newly visible pages while scrolling (rAF-throttled). */

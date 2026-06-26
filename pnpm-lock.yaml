@@ -169,6 +169,15 @@ importers:
         specifier: ~4.1.0
         version: 4.1.8(@types/node@20.19.9)(@vitest/coverage-v8@4.1.8)(vite@8.0.16(@types/node@20.19.9)(esbuild@0.28.0)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))
 
+  packages/a11y:
+    dependencies:
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
+      prosemirror-model:
+        specifier: ^1.25.7
+        version: 1.25.8
+
   packages/commands:
     dependencies:
       '@shadow-garden/bapbong-contracts':
@@ -334,6 +343,9 @@ importers:
 
   packages/view:
     dependencies:
+      '@shadow-garden/bapbong-a11y':
+        specifier: workspace:^
+        version: link:../a11y
       '@shadow-garden/bapbong-contracts':
         specifier: workspace:^
         version: link:../contracts

@@ -10,16 +10,7 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../contracts/tsconfig.lib.json" },
-    { "path": "../model/tsconfig.lib.json" },
-    { "path": "../docx/tsconfig.lib.json" },
-    { "path": "../measuring/tsconfig.lib.json" },
-    { "path": "../layout-engine/tsconfig.lib.json" },
-    { "path": "../painter-canvas/tsconfig.lib.json" },
-    { "path": "../selection/tsconfig.lib.json" },
-    { "path": "../a11y/tsconfig.lib.json" }
-  ],
+  "references": [],
   "exclude": [
     "vite.config.ts",
     "vite.config.mts",

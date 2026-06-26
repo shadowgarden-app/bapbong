@@ -560,6 +560,10 @@ export class BapbongEditor {
       clientX: ev.clientX,
       clientY: ev.clientY,
       buttons: ev.buttons ?? 0,
+      ctrlKey: ev.ctrlKey,
+      metaKey: ev.metaKey,
+      shiftKey: ev.shiftKey,
+      altKey: ev.altKey,
     };
     for (const p of this.plugins) {
       if (p.onPointer?.(pev)) return true;

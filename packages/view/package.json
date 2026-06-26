@@ -43,7 +43,8 @@
             "@shadow-garden/bapbong-measuring",
             "@shadow-garden/bapbong-layout-engine",
             "@shadow-garden/bapbong-painter-canvas",
-            "@shadow-garden/bapbong-selection"
+            "@shadow-garden/bapbong-selection",
+            "@shadow-garden/bapbong-a11y"
           ]
         }
       }
@@ -57,6 +58,7 @@
     "@shadow-garden/bapbong-layout-engine": "workspace:^",
     "@shadow-garden/bapbong-painter-canvas": "workspace:^",
     "@shadow-garden/bapbong-selection": "workspace:^",
+    "@shadow-garden/bapbong-a11y": "workspace:^",
     "prosemirror-model": "^1.25.7"
   }
 }

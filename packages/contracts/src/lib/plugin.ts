@@ -53,6 +53,11 @@ export interface EditorPointerEvent {
   clientY: number;
   /** Mouse buttons bitmask. */
   buttons: number;
+  /** Modifier keys held — e.g. Ctrl/Cmd-click to open a hyperlink. */
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
 }
 
 /** A transient vertical guide line shown during a drag (page-local geometry) —
