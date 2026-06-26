@@ -97,6 +97,23 @@ export class Preview implements OnDestroy {
     this.fileName.set(null);
   }
 
+  /** Open a file picker to load a different document (toolbar "open" button). */
+  protected openFile(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.docx';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file) void this.loadFile(file);
+    });
+    input.click();
+  }
+
+  /** Print the rendered document (toolbar "print" button). */
+  protected print(): void {
+    void this.view?.print();
+  }
+
   private async loadFile(file: File): Promise<void> {
     this.fileName.set(file.name);
     this.state.set('loading');

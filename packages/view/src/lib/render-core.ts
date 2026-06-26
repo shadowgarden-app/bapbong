@@ -241,6 +241,31 @@ export class RenderCore {
     return this.zoomFactor;
   }
 
+  /**
+   * Print the whole document. The live canvas is virtualized (only visible
+   * pages exist), so this renders **every** page with a throwaway painter,
+   * snapshots each to a PNG, and prints one image per sheet via a hidden iframe
+   * (clean pagination, the live view untouched).
+   */
+  async print(): Promise<void> {
+    const layout = this.resolved;
+    if (!layout) return;
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:absolute;left:-99999px;top:0;pointer-events:none;';
+    document.body.appendChild(holder);
+    try {
+      // No viewport → the painter mounts a canvas for every page at full size.
+      new CanvasPainter(holder).paint(layout, { zoom: 1 });
+      const canvases = Array.from(holder.querySelectorAll('canvas')).sort(
+        (a, b) => parseFloat(a.style.top || '0') - parseFloat(b.style.top || '0'),
+      );
+      const sources = canvases.map((c) => c.toDataURL('image/png'));
+      await printImages(sources);
+    } finally {
+      holder.remove();
+    }
+  }
+
   /** Gather decorations from the provider and resolve each doc range to
    *  page-local rects the painter can fill directly. */
   private collectDecorations(): PaintDecoration[] {
@@ -355,6 +380,62 @@ export class RenderCore {
 /** Coalesce a partial overlay into a fully-specified one. */
 function normalizeOverlay(overlay: Overlay): Required<Overlay> {
   return { caret: overlay.caret ?? null, selection: overlay.selection ?? [] };
+}
+
+/** Print page images (one per sheet) via a hidden same-origin iframe. */
+function printImages(sources: string[]): Promise<void> {
+  return new Promise((resolve) => {
+    if (sources.length === 0) {
+      resolve();
+      return;
+    }
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(iframe);
+    const cw = iframe.contentWindow;
+    const doc = iframe.contentDocument;
+    if (!cw || !doc) {
+      iframe.remove();
+      resolve();
+      return;
+    }
+    const body = sources.map((s) => `<img src="${s}" alt="" />`).join('');
+    doc.open();
+    doc.write(
+      '<!doctype html><html><head><meta charset="utf-8"><style>' +
+        '@page{margin:0}html,body{margin:0;padding:0}' +
+        'img{display:block;width:100%;break-after:page;page-break-after:always}' +
+        'img:last-child{break-after:auto;page-break-after:auto}' +
+        `</style></head><body>${body}</body></html>`,
+    );
+    doc.close();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cw.focus();
+      cw.print();
+      // Leave the frame up briefly so the print job can spool before teardown.
+      setTimeout(() => iframe.remove(), 1000);
+      resolve();
+    };
+    const pending = Array.from(doc.images).filter((im) => !im.complete);
+    if (pending.length === 0) {
+      finish();
+      return;
+    }
+    let left = pending.length;
+    const onOne = () => {
+      if (--left === 0) finish();
+    };
+    for (const im of pending) {
+      im.addEventListener('load', onOne);
+      im.addEventListener('error', onOne);
+    }
+    // Safety net if an image never fires (resolve + print what loaded).
+    setTimeout(finish, 4000);
+  });
 }
 
 /** Every fontFamily mark in the given documents, plus the engine default. */

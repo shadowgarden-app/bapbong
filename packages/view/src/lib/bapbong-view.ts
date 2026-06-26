@@ -84,6 +84,11 @@ export class BapbongView {
     return this.core.getZoom();
   }
 
+  /** Print the whole document (renders every page, one per sheet). */
+  print(): Promise<void> {
+    return this.core.print();
+  }
+
   /** Number of laid-out pages (0 before the first document). */
   get pageCount(): number {
     return this.core.pageCount;
