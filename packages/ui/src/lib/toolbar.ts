@@ -35,6 +35,14 @@ const alignSvg = (spans: Array<[number, number]>) =>
   `</g></svg>`;
 
 const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
+  undo: {
+    title: 'Undo',
+    svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h6a3.5 3.5 0 0 1 0 7H6"/><path d="M4 7 7 4M4 7l3 3"/></svg>',
+  },
+  redo: {
+    title: 'Redo',
+    svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7H6a3.5 3.5 0 0 0 0 7h4"/><path d="m12 7-3-3m3 3-3 3"/></svg>',
+  },
   bold: { title: 'Bold', label: 'B', className: 'bb-i-bold' },
   italic: { title: 'Italic', label: 'I', className: 'bb-i-italic' },
   underline: { title: 'Underline', label: 'U', className: 'bb-i-underline' },

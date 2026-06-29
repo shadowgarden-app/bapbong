@@ -214,6 +214,7 @@ export class EditorPlayground implements OnDestroy {
     if (toolbarHost)
       this.toolbar = mountToolbar(toolbarHost, editor, {
         groups: [
+          ['undo', 'redo'],
           ['bold', 'italic', 'underline', 'strike'],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
           ['bullet-list', 'ordered-list'],
