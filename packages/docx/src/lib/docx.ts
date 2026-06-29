@@ -94,8 +94,9 @@ export interface DocxImport {
 }
 
 /** Footnote/endnote bodies + a counter that numbers references in document
- *  order. Notes render appended at the document end (endnote-style); true
- *  page-bottom footnote layout is deferred. */
+ *  order. Footnote bodies are laid out at the bottom of the page their
+ *  reference falls on (by the layout engine, via `DocxImport.footnotes`);
+ *  endnote bodies are appended at the document end. */
 interface NotesRegistry {
   bodies: { footnote: Map<string, OoxmlNode>; endnote: Map<string, OoxmlNode> };
   refs: { kind: 'footnote' | 'endnote'; id: string; num: number }[];
