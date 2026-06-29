@@ -6,7 +6,7 @@ import { setAlign, activeAlign } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
-import { insertColumn, insertRow } from './table-structure.js';
+import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow } from './table-structure.js';
 import { defaultCommands } from './registry.js';
 
 // A minimal schema standing in for the real document schema — the commands key
@@ -224,6 +224,34 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
   it('insert row/column are disabled outside a table', () => {
     expect(insertRow(true).isEnabled?.(paraState())).toBe(false);
     expect(insertColumn(true).isEnabled?.(gridState())).toBe(true);
+  });
+
+  it('deleteRow removes a row; deleteColumn removes a cell from every row', () => {
+    const rowsAfter = findNode(apply(gridState(), deleteRow()), 'table');
+    expect(rowsAfter?.childCount).toBe(1); // 2 → 1 row
+
+    const colsAfter = findNode(apply(gridState(), deleteColumn()), 'table');
+    expect(colsAfter?.childCount).toBe(2); // still 2 rows
+    expect(colsAfter?.firstChild?.childCount).toBe(1); // 2 → 1 cell per row
+    expect(colsAfter?.lastChild?.childCount).toBe(1);
+  });
+
+  it('deleting the last row/column removes the whole table', () => {
+    // 1×1 table: caret in its only cell.
+    const oneByOne = () => {
+      const doc = n('doc', null, n('table', null, n('table_row', null, n('table_cell', null, n('paragraph', null, schema.text('x'))))));
+      const s = EditorState.create({ schema, doc });
+      return s.apply(s.tr.setSelection(TextSelection.create(doc, 4)));
+    };
+    expect(findNode(apply(oneByOne(), deleteRow()), 'table')).toBeNull();
+    expect(findNode(apply(oneByOne(), deleteColumn()), 'table')).toBeNull();
+    expect(findNode(apply(gridState(), deleteTable()), 'table')).toBeNull();
+  });
+
+  it('delete row/column/table are disabled outside a table', () => {
+    expect(deleteRow().isEnabled?.(paraState())).toBe(false);
+    expect(deleteColumn().isEnabled?.(paraState())).toBe(false);
+    expect(deleteTable().isEnabled?.(gridState())).toBe(true);
   });
 
   it('deleteSelectionCommand removes the selected text', () => {

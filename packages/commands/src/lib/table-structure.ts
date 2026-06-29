@@ -99,3 +99,75 @@ export function insertColumn(right: boolean): Command {
     isEnabled: (state) => tableContext(state) != null,
   };
 }
+
+/** Delete the current row. Removing the last row deletes the whole table.
+ *  (Spanning cells are best-effort, like {@link insertRow}.) */
+export function deleteRow(): Command {
+  return {
+    name: 'delete-row',
+    run(state, dispatch) {
+      const cx = tableContext(state);
+      if (!cx) return false;
+      if (dispatch) {
+        const tr =
+          cx.table.childCount <= 1
+            ? state.tr.delete(cx.tablePos, cx.tablePos + cx.table.nodeSize)
+            : state.tr.delete(cx.rowPos, cx.rowPos + cx.row.nodeSize);
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+    isEnabled: (state) => tableContext(state) != null,
+  };
+}
+
+/** Delete the current column (the cell at this index in every row). Removing
+ *  the last column deletes the whole table. (Spanning cells are best-effort.) */
+export function deleteColumn(): Command {
+  return {
+    name: 'delete-column',
+    run(state, dispatch) {
+      const cx = tableContext(state);
+      if (!cx) return false;
+      if (dispatch) {
+        if (cx.row.childCount <= 1) {
+          dispatch(state.tr.delete(cx.tablePos, cx.tablePos + cx.table.nodeSize).scrollIntoView());
+          return true;
+        }
+        // The doc range of the target cell in each row (original positions).
+        const dels: { from: number; to: number }[] = [];
+        let rowStart = cx.tablePos + 1; // first row node start
+        cx.table.forEach((row) => {
+          let pos = rowStart + 1; // inside the row, before its first cell
+          row.forEach((cell, _offset, index) => {
+            if (index < cx.cellIndex) pos += cell.nodeSize;
+          });
+          const cell = row.maybeChild(cx.cellIndex);
+          if (cell) dels.push({ from: pos, to: pos + cell.nodeSize });
+          rowStart += row.nodeSize;
+        });
+        let tr = state.tr;
+        for (const d of dels) {
+          tr = tr.delete(tr.mapping.map(d.from), tr.mapping.map(d.to));
+        }
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+    isEnabled: (state) => tableContext(state) != null,
+  };
+}
+
+/** Delete the entire table the selection sits in. */
+export function deleteTable(): Command {
+  return {
+    name: 'delete-table',
+    run(state, dispatch) {
+      const cx = tableContext(state);
+      if (!cx) return false;
+      if (dispatch) dispatch(state.tr.delete(cx.tablePos, cx.tablePos + cx.table.nodeSize).scrollIntoView());
+      return true;
+    },
+    isEnabled: (state) => tableContext(state) != null,
+  };
+}

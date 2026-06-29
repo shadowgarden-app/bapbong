@@ -6,7 +6,10 @@ import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } from '@shadow-garden/bapbong-editor';
 import {
   cellAt,
+  deleteColumn,
+  deleteRow,
   deleteSelectionCommand,
+  deleteTable,
   insertColumn,
   insertImage,
   insertRow,
@@ -374,6 +377,10 @@ export class EditorPlayground implements OnDestroy {
         { label: 'Insert row below', run: () => this.exec(insertRow(true)) },
         { label: 'Insert column left', run: () => this.exec(insertColumn(false)) },
         { label: 'Insert column right', run: () => this.exec(insertColumn(true)) },
+        'separator',
+        { label: 'Delete row', run: () => this.exec(deleteRow()) },
+        { label: 'Delete column', run: () => this.exec(deleteColumn()) },
+        { label: 'Delete table', run: () => this.exec(deleteTable()) },
       );
     }
     showContextMenu(entries, { x: ev.clientX, y: ev.clientY });
