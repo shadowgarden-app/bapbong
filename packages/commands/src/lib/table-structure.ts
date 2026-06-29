@@ -158,6 +158,68 @@ export function deleteColumn(): Command {
   };
 }
 
+/** A selected cell within a block grid (matches the editor's `SelectedCell` —
+ *  passed structurally so this stays in the isomorphic command layer). */
+export interface MergeCell {
+  pos: number;
+  row: number;
+  col: number;
+}
+
+/**
+ * Merge a rectangular block of cells into the top-left one: it gains
+ * `colspan = cols` / `rowspan = rows`, the rest are removed, and their
+ * non-empty content is appended (so nothing is lost). The spanned-over cells
+ * disappear from their rows — exactly the shape the layout's occupancy grid
+ * expects for an imported merged cell. Best-effort if the block already
+ * contains spanning cells.
+ */
+export function mergeCells(cells: MergeCell[], rows: number, cols: number): Command {
+  return {
+    name: 'merge-cells',
+    run(state, dispatch) {
+      if (cells.length < 2) return false;
+      const located = cells
+        .map((c) => ({ c, node: state.doc.nodeAt(c.pos) }))
+        .filter((x): x is { c: MergeCell; node: ProseMirrorNode } => x.node?.type.name === 'table_cell');
+      if (located.length < 2) return false;
+      const tl = located.find((x) => x.c.row === 0 && x.c.col === 0);
+      if (!tl) return false;
+      if (dispatch) {
+        const cellType = state.schema.nodes['table_cell'];
+        // Merged width = the top-row cells' widths concatenated (best-effort).
+        let colwidth: number[] | null = [];
+        for (const x of located.filter((x) => x.c.row === 0).sort((a, b) => a.c.col - b.c.col)) {
+          const cw = x.node.attrs['colwidth'] as number[] | null;
+          if (!cw) {
+            colwidth = null;
+            break;
+          }
+          colwidth.push(...cw);
+        }
+        // Top-left keeps its blocks; append non-empty blocks from the others.
+        const content: ProseMirrorNode[] = [];
+        tl.node.forEach((child) => content.push(child));
+        for (const x of located) {
+          if (x === tl) continue;
+          x.node.forEach((child) => {
+            if (!child.isTextblock || child.textContent.trim().length > 0) content.push(child);
+          });
+        }
+        const merged = cellType.create({ ...tl.node.attrs, colspan: cols, rowspan: rows, colwidth }, content);
+        // Apply back-to-front so the original positions stay valid.
+        const ops = located
+          .map((x) => ({ from: x.c.pos, to: x.c.pos + x.node.nodeSize, node: x === tl ? merged : null }))
+          .sort((a, b) => b.from - a.from);
+        let tr = state.tr;
+        for (const op of ops) tr = op.node ? tr.replaceWith(op.from, op.to, op.node) : tr.delete(op.from, op.to);
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+  };
+}
+
 /** Delete the entire table the selection sits in. */
 export function deleteTable(): Command {
   return {

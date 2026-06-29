@@ -6,7 +6,7 @@ import { setAlign, activeAlign } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
-import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow } from './table-structure.js';
+import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow, mergeCells } from './table-structure.js';
 import { defaultCommands } from './registry.js';
 
 // A minimal schema standing in for the real document schema — the commands key
@@ -32,6 +32,8 @@ const schema = new Schema({
         background: { default: null },
         vAlign: { default: null },
         colwidth: { default: null },
+        colspan: { default: 1 },
+        rowspan: { default: 1 },
         borders: { default: null },
       },
       toDOM: () => ['td', 0],
@@ -252,6 +254,25 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(deleteRow().isEnabled?.(paraState())).toBe(false);
     expect(deleteColumn().isEnabled?.(paraState())).toBe(false);
     expect(deleteTable().isEnabled?.(gridState())).toBe(true);
+  });
+
+  it('mergeCells merges the top row into one colspan-2 cell, appending content', () => {
+    const state = gridState(); // 2×2: row0 [a,b], row1 [c,d]
+    const cellPos: number[] = []; // table_cell node positions
+    state.doc.descendants((node, pos) => {
+      if (node.type.name === 'table_cell') cellPos.push(pos);
+    });
+    // top-row cells are the first two; block grid 1 row × 2 cols
+    const block = [
+      { pos: cellPos[0], row: 0, col: 0 },
+      { pos: cellPos[1], row: 0, col: 1 },
+    ];
+    const after = apply(state, mergeCells(block, 1, 2));
+    const table = findNode(after, 'table');
+    expect(table?.firstChild?.childCount).toBe(1); // row 0: 2 cells → 1
+    expect(table?.firstChild?.firstChild?.attrs['colspan']).toBe(2);
+    expect(table?.lastChild?.childCount).toBe(2); // row 1 untouched
+    expect(table?.firstChild?.firstChild?.textContent).toBe('ab'); // 'a' + appended 'b'
   });
 
   it('deleteSelectionCommand removes the selected text', () => {

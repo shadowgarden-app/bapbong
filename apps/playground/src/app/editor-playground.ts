@@ -14,6 +14,7 @@ import {
   insertImage,
   insertRow,
   insertTable,
+  mergeCells,
   setLink,
 } from '@shadow-garden/bapbong-commands';
 import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
@@ -370,9 +371,11 @@ export class EditorPlayground implements OnDestroy {
     if (cell) {
       // Act on the selected block if there is one, else the clicked cell (1×1).
       const block = ed.tableSelection.block() ?? { cells: [{ pos: cell.pos, row: 0, col: 0 }], rows: 1, cols: 1 };
+      entries.push('separator', { label: 'Cell properties…', run: () => this.openCellPropsForBlock(block) });
+      if (block.cells.length > 1) {
+        entries.push({ label: 'Merge cells', run: () => this.exec(mergeCells(block.cells, block.rows, block.cols)) });
+      }
       entries.push(
-        'separator',
-        { label: 'Cell properties…', run: () => this.openCellPropsForBlock(block) },
         { label: 'Insert row above', run: () => this.exec(insertRow(false)) },
         { label: 'Insert row below', run: () => this.exec(insertRow(true)) },
         { label: 'Insert column left', run: () => this.exec(insertColumn(false)) },
