@@ -876,6 +876,15 @@ function layoutTable(
     const share = Math.max(0, (avail - known) / unknown);
     for (let i = 0; i < ncols; i++) if (colWidths[i] === 0) colWidths[i] = share;
   }
+  // A tblGrid wider than the available width (e.g. a full-page table dropped
+  // into a narrow column) would otherwise overflow into the next column's
+  // content. Scale every column down proportionally so it fits — Word/Docs
+  // reflow the cell text instead of spilling over.
+  const natural = colWidths.reduce((s, w) => s + w, 0);
+  if (natural > avail && natural > 0) {
+    const scale = avail / natural;
+    for (let i = 0; i < ncols; i++) colWidths[i] *= scale;
+  }
   const tableWidth = colWidths.reduce((s, w) => s + w, 0);
   // Table alignment (w:jc) shifts the whole grid within the content area.
   const xShift =

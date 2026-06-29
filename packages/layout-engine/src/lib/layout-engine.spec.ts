@@ -195,6 +195,16 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[2]).toMatchObject({ x: 20, y: 36, width: 80 });
   });
 
+  it('scales a tblGrid wider than the column down to fit (no overflow)', () => {
+    // content box [20,220] = 200px; the table's grid is 200+200 = 400px wide.
+    const t = table([[cell('a', { colwidth: [200] }), cell('b', { colwidth: [200] })]]);
+    const [resolved] = layoutBlocks([t], config()).pages[0].tables ?? [];
+    expect(resolved.width).toBeCloseTo(200); // 400 → scaled to the 200px box
+    // each column halved (200 → 100); right edge stays within the content box.
+    expect(resolved.cells[0]).toMatchObject({ x: 20, width: 100 });
+    expect(resolved.cells[1]).toMatchObject({ x: 120, width: 100 });
+  });
+
   it('reduces super/subscript font size and flags the segment', () => {
     const block: FlowBlock = {
       type: 'paragraph',
