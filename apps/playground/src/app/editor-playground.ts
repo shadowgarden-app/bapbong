@@ -320,7 +320,14 @@ export class EditorPlayground implements OnDestroy {
               }),
           },
           { label: 'Link…', run: () => this.execPrompt('Insert link', 'https://…', (href) => setLink(href)) },
-          { label: 'Break', submenu: [{ command: 'page-break', label: 'Page break' }] },
+          {
+            label: 'Break',
+            submenu: [
+              { command: 'page-break', label: 'Page break' },
+              { command: 'section-break-next-page', label: 'Section break (next page)' },
+              { command: 'section-break-continuous', label: 'Section break (continuous)' },
+            ],
+          },
         ],
       },
       {
@@ -353,6 +360,14 @@ export class EditorPlayground implements OnDestroy {
           {
             label: 'List',
             submenu: [{ command: 'bullet-list' }, { command: 'ordered-list' }],
+          },
+          {
+            label: 'Columns',
+            submenu: [
+              { command: 'columns-1', label: 'One column' },
+              { command: 'columns-2', label: 'Two columns' },
+              { command: 'columns-3', label: 'Three columns' },
+            ],
           },
         ],
       },

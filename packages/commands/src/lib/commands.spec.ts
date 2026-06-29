@@ -7,6 +7,7 @@ import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
 import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow, mergeCells } from './table-structure.js';
+import { insertSectionBreak, setColumns } from './sections.js';
 import { toggleList } from './list.js';
 import { defaultCommands } from './registry.js';
 
@@ -16,7 +17,7 @@ import { defaultCommands } from './registry.js';
 // EditorState in Node and drive commands, with no DOM anywhere.
 const schema = new Schema({
   nodes: {
-    doc: { content: 'block+', attrs: { numbering: { default: null } } },
+    doc: { content: 'block+', attrs: { numbering: { default: null }, sections: { default: null } } },
     paragraph: {
       group: 'block',
       content: 'inline*',
@@ -274,6 +275,41 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(table?.firstChild?.firstChild?.attrs['colspan']).toBe(2);
     expect(table?.lastChild?.childCount).toBe(2); // row 1 untouched
     expect(table?.firstChild?.firstChild?.textContent).toBe('ab'); // 'a' + appended 'b'
+  });
+
+  // A 3-paragraph doc with the caret in the 2nd block (index 1).
+  const threePara = () => {
+    const doc = n('doc', null, [
+      n('paragraph', null, schema.text('aa')),
+      n('paragraph', null, schema.text('bb')),
+      n('paragraph', null, schema.text('cc')),
+    ]);
+    const s = EditorState.create({ schema, doc });
+    return s.apply(s.tr.setSelection(TextSelection.create(doc, 5)));
+  };
+
+  it('insertSectionBreak splits the section at the caret block, keeping columns', () => {
+    const after = apply(threePara(), insertSectionBreak({ newPage: true }));
+    const sections = after.doc.attrs['sections'] as { blockCount: number; newPage: boolean; columns: { count: number } }[];
+    expect(sections.map((s) => s.blockCount)).toEqual([2, 1]); // break after block 1
+    expect(sections[0].newPage).toBe(false); // first part inherits original start
+    expect(sections[1].newPage).toBe(true); // new part starts on a new page
+    expect(sections.every((s) => s.columns.count === 1)).toBe(true); // columns unchanged
+  });
+
+  it('setColumns sets the caret section column count (and reports active)', () => {
+    const after = apply(threePara(), setColumns(2));
+    const sections = after.doc.attrs['sections'] as { blockCount: number; columns: { count: number } }[];
+    expect(sections).toHaveLength(1);
+    expect(sections[0].columns.count).toBe(2);
+    expect(setColumns(2).isActive?.(after)).toBe(true);
+    expect(setColumns(1).isActive?.(after)).toBe(false);
+  });
+
+  it('insertSectionBreak is disabled in a single-block doc', () => {
+    const doc = n('doc', null, n('paragraph', null, schema.text('only')));
+    const s = EditorState.create({ schema, doc });
+    expect(insertSectionBreak({ newPage: true }).isEnabled?.(s)).toBe(false);
   });
 
   it('deleteSelectionCommand removes the selected text', () => {
