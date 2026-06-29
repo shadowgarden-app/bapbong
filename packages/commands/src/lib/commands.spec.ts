@@ -7,6 +7,7 @@ import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
 import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow, mergeCells } from './table-structure.js';
+import { toggleList } from './list.js';
 import { defaultCommands } from './registry.js';
 
 // A minimal schema standing in for the real document schema — the commands key
@@ -15,11 +16,11 @@ import { defaultCommands } from './registry.js';
 // EditorState in Node and drive commands, with no DOM anywhere.
 const schema = new Schema({
   nodes: {
-    doc: { content: 'block+' },
+    doc: { content: 'block+', attrs: { numbering: { default: null } } },
     paragraph: {
       group: 'block',
       content: 'inline*',
-      attrs: { align: { default: null }, pageBreakBefore: { default: false } },
+      attrs: { align: { default: null }, pageBreakBefore: { default: false }, list: { default: null } },
       toDOM: () => ['p', 0],
     },
     text: { group: 'inline' },
@@ -284,8 +285,22 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
 
   it('registry includes the new static commands', () => {
     const commands = defaultCommands();
-    for (const name of ['superscript', 'subscript', 'undo', 'redo', 'page-break']) {
+    for (const name of ['superscript', 'subscript', 'undo', 'redo', 'page-break', 'bullet-list', 'ordered-list']) {
       expect(commands.has(name)).toBe(true);
     }
+  });
+
+  it('toggleList sets/clears the paragraph list attr and reports active', () => {
+    const bullet = toggleList('bullet');
+    expect(bullet.isActive?.(paraState())).toBe(false);
+    const on = apply(paraState(), bullet);
+    expect((findNode(on, 'paragraph')?.attrs['list'] as { numId: string }).numId).toBe('bb-bullet');
+    expect(bullet.isActive?.(on)).toBe(true);
+    // ordered injects a numbering def so the counter can number live
+    const ordered = apply(paraState(), toggleList('ordered'));
+    expect((ordered.doc.attrs['numbering'] as Record<string, unknown>)['bb-ordered']).toBeTruthy();
+    // toggling the same kind again clears it
+    const off = apply(on, toggleList('bullet'));
+    expect(findNode(off, 'paragraph')?.attrs['list']).toBeNull();
   });
 });

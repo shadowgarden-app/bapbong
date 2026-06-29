@@ -54,6 +54,8 @@ const DEFAULT_LABELS: Record<string, string> = {
   'align-center': 'Center',
   'align-right': 'Align right',
   'align-justify': 'Justify',
+  'bullet-list': 'Bullet list',
+  'ordered-list': 'Numbered list',
   undo: 'Undo',
   redo: 'Redo',
   'page-break': 'Page break',

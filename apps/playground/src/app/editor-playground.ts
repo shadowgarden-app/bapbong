@@ -216,6 +216,7 @@ export class EditorPlayground implements OnDestroy {
         groups: [
           ['bold', 'italic', 'underline', 'strike'],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
+          ['bullet-list', 'ordered-list'],
         ],
       });
     // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace,
@@ -343,6 +344,10 @@ export class EditorPlayground implements OnDestroy {
               { command: 'align-right' },
               { command: 'align-justify' },
             ],
+          },
+          {
+            label: 'List',
+            submenu: [{ command: 'bullet-list' }, { command: 'ordered-list' }],
           },
         ],
       },

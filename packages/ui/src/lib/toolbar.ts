@@ -43,6 +43,14 @@ const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
   'align-center': { title: 'Center', svg: alignSvg([[2, 14], [4, 12], [3, 13]]) },
   'align-right': { title: 'Align right', svg: alignSvg([[2, 14], [7, 14], [4, 14]]) },
   'align-justify': { title: 'Justify', svg: alignSvg([[2, 14], [2, 14], [2, 14]]) },
+  'bullet-list': {
+    title: 'Bullet list',
+    svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 4h8M6 8h8M6 12h8"/><circle cx="3" cy="4" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r="1" fill="currentColor" stroke="none"/></svg>',
+  },
+  'ordered-list': {
+    title: 'Numbered list',
+    svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 4h8M6 8h8M6 12h8"/><text x="0.5" y="5.6" font-size="5.5" fill="currentColor" stroke="none">1</text><text x="0.5" y="9.6" font-size="5.5" fill="currentColor" stroke="none">2</text><text x="0.5" y="13.6" font-size="5.5" fill="currentColor" stroke="none">3</text></svg>',
+  },
 };
 
 const STYLE = `
