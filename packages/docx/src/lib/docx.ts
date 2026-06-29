@@ -372,6 +372,21 @@ interface FieldState {
   phase: 'instr' | 'result';
 }
 
+/** Heading level (1–6) for a paragraph, from its style id ("Heading1"…) or an
+ *  explicit `w:outlineLvl` (0-based) in the pPr cascade; undefined for body. */
+function headingLevel(pStyleId: string | undefined, pPrChain: (OoxmlNode | undefined)[]): number | undefined {
+  if (pStyleId) {
+    const m = /^heading\s*([1-9])$/i.exec(pStyleId);
+    if (m) return Math.min(6, Number(m[1]));
+  }
+  const ol = lastWith(pPrChain, 'w:outlineLvl');
+  if (ol) {
+    const v = Number(attrOf(ol, 'w:val'));
+    if (!Number.isNaN(v) && v >= 0 && v <= 8) return Math.min(6, v + 1);
+  }
+  return undefined;
+}
+
 function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const pPr = child(p, 'w:pPr');
   const pStyleId = attrOf(child(pPr, 'w:pStyle'), 'w:val');
@@ -394,6 +409,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const indent = resolveIndent(pPrChain);
   const spacing = resolveSpacing(pPrChain);
   const tabs = resolveTabs(pPrChain);
+  const heading = headingLevel(pStyleId, pPrChain);
 
   const inline: PMNode[] = [];
   let field: FieldState | null = null;
@@ -461,9 +477,11 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     spacing?: Spacing;
     tabs?: { pos: number; val: string; leader?: string }[];
     pageBreakBefore?: boolean;
+    heading?: number;
   } = {};
   if (list) attrs.list = list;
   if (align) attrs.align = align;
+  if (heading) attrs.heading = heading;
   if (indent) attrs.indent = indent;
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;

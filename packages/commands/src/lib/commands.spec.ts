@@ -2,7 +2,7 @@ import { Schema } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command } from '@shadow-garden/bapbong-contracts';
 import { toggleMarkCommand, isMarkActive } from './marks.js';
-import { setAlign, activeAlign } from './paragraph.js';
+import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
@@ -20,7 +20,7 @@ const schema = new Schema({
     paragraph: {
       group: 'block',
       content: 'inline*',
-      attrs: { align: { default: null }, pageBreakBefore: { default: false }, list: { default: null } },
+      attrs: { align: { default: null }, pageBreakBefore: { default: false }, list: { default: null }, heading: { default: null } },
       toDOM: () => ['p', 0],
     },
     text: { group: 'inline' },
@@ -285,9 +285,23 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
 
   it('registry includes the new static commands', () => {
     const commands = defaultCommands();
-    for (const name of ['superscript', 'subscript', 'undo', 'redo', 'page-break', 'bullet-list', 'ordered-list']) {
+    for (const name of ['superscript', 'subscript', 'undo', 'redo', 'page-break', 'bullet-list', 'ordered-list', 'heading-1', 'heading-2']) {
       expect(commands.has(name)).toBe(true);
     }
+  });
+
+  it('toggleHeading sets/clears the paragraph heading level and reports active', () => {
+    const h1 = toggleHeading(1);
+    expect(h1.isActive?.(paraState())).toBe(false);
+    const on = apply(paraState(), h1);
+    expect(findNode(on, 'paragraph')?.attrs['heading']).toBe(1);
+    expect(h1.isActive?.(on)).toBe(true);
+    // toggling the same level reverts to a body paragraph
+    const off = apply(on, toggleHeading(1));
+    expect(findNode(off, 'paragraph')?.attrs['heading']).toBeNull();
+    // a different level switches
+    const h2 = apply(on, toggleHeading(2));
+    expect(findNode(h2, 'paragraph')?.attrs['heading']).toBe(2);
   });
 
   it('toggleList sets/clears the paragraph list attr and reports active', () => {

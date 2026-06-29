@@ -103,6 +103,17 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(back.child(0).textContent).toBe('an item');
   });
 
+  it('round-trips a heading level (w:pStyle HeadingN)', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', { heading: 2 }, [schema.text('My Heading')]),
+      schema.node('paragraph', null, [schema.text('body text')]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).attrs['heading']).toBe(2);
+    expect(back.child(0).textContent).toBe('My Heading');
+    expect(back.child(1).attrs['heading']).toBeNull();
+  });
+
   it('round-trips a table with borders + colspan', async () => {
     const cell = (text: string, attrs?: Record<string, unknown>) =>
       schema.node('table_cell', attrs ?? null, [schema.node('paragraph', null, [schema.text(text)])]);

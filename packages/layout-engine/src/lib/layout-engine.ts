@@ -41,6 +41,10 @@ import type {
 
 const DEFAULT_FONT: FontSpec = { family: 'Arial', sizePt: 11, bold: false, italic: false };
 const PT_TO_PX = 96 / 72;
+
+/** Default point size per heading level (the run base for a heading paragraph;
+ *  explicit fontSize marks — e.g. on imported headings — still override). */
+const HEADING_PT: Record<number, number> = { 1: 24, 2: 18, 3: 14, 4: 12, 5: 11, 6: 11 };
 const LINE_HEIGHT_FACTOR = 1.2;
 const BASELINE_FACTOR = 0.8;
 const DEFAULT_TAB_WIDTH = 48; // 0.5in, Word's default tab interval
@@ -158,10 +162,16 @@ function paragraphToFlow(
   marker?: string,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
+  // A heading paragraph sizes its runs from the level by default (bigger +
+  // bold); explicit fontSize/strong marks on a run still win.
+  const headingLevel = node.attrs['heading'] as number | null;
+  const runBase: FontSpec = headingLevel
+    ? { ...base, sizePt: HEADING_PT[headingLevel] ?? base.sizePt, bold: true }
+    : base;
   const runs: FlowInline[] = [];
   const floats: FlowFloat[] = [];
   node.forEach((child, offset) => {
-    if (child.isText) runs.push(resolveRun(child, base, contentStart + offset));
+    if (child.isText) runs.push(resolveRun(child, runBase, contentStart + offset));
     else if (child.type.name === 'image') {
       const float = child.attrs['float'] as Omit<FlowFloat, 'src' | 'width' | 'height'> | null;
       if (float && allowFloats) {
@@ -175,7 +185,7 @@ function paragraphToFlow(
         runs.push(resolveImage(child, contentStart + offset));
       }
     } else if (child.type.name === 'page_field')
-      runs.push(resolveField(child, base, contentStart + offset));
+      runs.push(resolveField(child, runBase, contentStart + offset));
     else if (child.type.name === 'hard_break') runs.push({ break: true, pos: contentStart + offset });
   });
   const list = node.attrs['list'] as { marker?: string } | null;

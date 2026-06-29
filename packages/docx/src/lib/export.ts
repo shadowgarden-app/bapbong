@@ -179,6 +179,11 @@ function sectionSectPr(s: SectionConfig): string {
 function paraProps(node: PMNode): string {
   const a = node.attrs;
   const out: string[] = [];
+  // w:pStyle is the first pPr child. (A round-tripped doc carries the matching
+  // "HeadingN" style def; authored-from-scratch headings need styles.xml regen
+  // to render the style in Word — a follow-up, like list numbering.xml.)
+  const heading = a['heading'] as number | null;
+  if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
   if (a['pageBreakBefore']) out.push('<w:pageBreakBefore/>');
   const list = a['list'] as { numId: string; level: number } | null;
   if (list) out.push(`<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(list.numId)}"/></w:numPr>`);

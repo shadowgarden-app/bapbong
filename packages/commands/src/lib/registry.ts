@@ -1,7 +1,7 @@
 import { Collection } from '@shadow-garden/bapbong-contracts';
 import type { Command } from '@shadow-garden/bapbong-contracts';
 import { toggleMarkCommand } from './marks.js';
-import { setAlign } from './paragraph.js';
+import { setAlign, toggleHeading } from './paragraph.js';
 import { toggleList } from './list.js';
 import { redoCommand, undoCommand } from './history.js';
 import { pageBreakCommand } from './insert.js';
@@ -32,6 +32,9 @@ export function defaultCommands(): Collection<Command> {
       setAlign('justify'),
       toggleList('bullet'),
       toggleList('ordered'),
+      toggleHeading(1),
+      toggleHeading(2),
+      toggleHeading(3),
       undoCommand(),
       redoCommand(),
       pageBreakCommand(),

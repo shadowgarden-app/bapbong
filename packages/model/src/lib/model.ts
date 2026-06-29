@@ -41,6 +41,10 @@ export const schema = new Schema({
         list: { default: null },
         align: { default: null },
         indent: { default: null },
+        // Heading level 1–6 (maps to a Word "Heading N" style on export, and to
+        // an <h1>–<h6> in toDOM so the a11y mirror is semantic), or null for a
+        // body paragraph.
+        heading: { default: null },
         // w:tabs — [{ pos, val: 'left'|'right'|'center'|'decimal', leader? }]
         // in px from the paragraph's content left edge, or null. Importer-set.
         tabs: { default: null },
@@ -54,8 +58,10 @@ export const schema = new Schema({
       // out through toDOM. Revisit when HTML paste lands.
       parseDOM: [{ tag: 'p' }],
       toDOM(node) {
-        const style = paragraphStyle(node.attrs as ParagraphAttrs);
-        return ['p', style ? { style } : {}, 0];
+        const attrs = node.attrs as ParagraphAttrs;
+        const style = paragraphStyle(attrs);
+        const tag = attrs.heading ? `h${attrs.heading}` : 'p';
+        return [tag, style ? { style } : {}, 0];
       },
     },
 
@@ -341,6 +347,7 @@ export interface ParagraphAttrs {
   align: Align | null;
   indent: Indent | null;
   spacing?: Spacing | null;
+  heading?: number | null;
 }
 
 /** Build an inline CSS `style` string for a paragraph's align/indent/spacing,
