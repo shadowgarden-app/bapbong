@@ -69,6 +69,36 @@ export function insertSectionBreak(opts: { newPage: boolean }): Command {
 }
 
 /**
+ * Remove the section break at `boundaryIndex` (0-based; there are
+ * `sections.length - 1` breaks, break `b` sits between section `b` and `b+1`).
+ * The two sections merge into one. Word semantics: the upper content adopts the
+ * **following** section's column layout (`columns` taken from section `b+1`),
+ * while the merged section keeps section `b`'s page-start.
+ */
+export function removeSectionBreak(boundaryIndex: number): Command {
+  return {
+    name: 'remove-section-break',
+    run(state, dispatch) {
+      const raw = state.doc.attrs['sections'] as SectionConfig[] | null;
+      const b = boundaryIndex;
+      if (!raw || b < 0 || b >= raw.length - 1) return false;
+      if (dispatch) {
+        const upper = raw[b];
+        const lower = raw[b + 1];
+        const merged: SectionConfig = {
+          blockCount: upper.blockCount + lower.blockCount,
+          columns: { ...lower.columns }, // following section's layout wins (Word)
+          newPage: upper.newPage, // merged range still begins where the upper did
+        };
+        const next = [...raw.slice(0, b), merged, ...raw.slice(b + 2)];
+        dispatch(state.tr.setDocAttribute('sections', next).scrollIntoView());
+      }
+      return true;
+    },
+  };
+}
+
+/**
  * Set the column count of the section the caret sits in (Format → Columns). A
  * count > 1 needs a section to flow into, so a single-section doc becomes
  * multi-column as a whole; scope columns to a region by inserting section

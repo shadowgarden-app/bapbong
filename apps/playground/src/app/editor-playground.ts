@@ -15,6 +15,7 @@ import {
   insertRow,
   insertTable,
   mergeCells,
+  removeSectionBreak,
   setLink,
 } from '@shadow-garden/bapbong-commands';
 import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
@@ -239,6 +240,56 @@ export class EditorPlayground implements OnDestroy {
   private onEditorChange(c: EditorChange): void {
     this.pageCount.set(c.pageCount);
     if (c.docChanged) this.schedulePanelSync(c.state);
+    this.renderSectionMarkers();
+  }
+
+  /** Show/hide the in-document section-break markers (View toggle). */
+  protected readonly showSections = signal(true);
+  /** Pool of marker pills appended to the canvas stack (scroll with the pages). */
+  private readonly sectionMarkerEls: HTMLButtonElement[] = [];
+
+  /** Draw a clickable pill at each section boundary; click → "Xoá section
+   *  break" menu. Markers live in the stack, so they scroll with the pages and
+   *  only need repositioning when the layout changes (on every `onChange`). */
+  private renderSectionMarkers(): void {
+    const ed = this.editor;
+    const stack = this.stackHost()?.nativeElement;
+    if (!ed || !stack) return;
+    const boundaries = this.showSections() ? ed.sectionBoundaries() : [];
+    while (this.sectionMarkerEls.length < boundaries.length) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.style.cssText =
+        'position:absolute;z-index:7;display:inline-flex;align-items:center;gap:5px;padding:2px 9px;' +
+        'font:500 11px/1.4 system-ui,-apple-system,sans-serif;color:#0c447c;background:#e6f1fb;' +
+        'border:1px dashed #378add;border-radius:999px;cursor:pointer;white-space:nowrap;';
+      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      btn.addEventListener('mousedown', (e) => e.stopPropagation());
+      stack.appendChild(btn);
+      this.sectionMarkerEls.push(btn);
+    }
+    this.sectionMarkerEls.forEach((btn, i) => {
+      const bnd = boundaries[i];
+      const cr = bnd && ed.caretRect(bnd.pos);
+      const pt = cr && ed.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
+      if (!bnd || !pt) {
+        btn.style.display = 'none';
+        return;
+      }
+      btn.style.display = 'inline-flex';
+      btn.style.left = `${pt.x}px`;
+      btn.style.top = `${pt.y - 10}px`;
+      btn.textContent =
+        `§ Section break · ${bnd.newPage ? 'Next page' : 'Continuous'}` +
+        (bnd.columns > 1 ? ` · ${bnd.columns} cột` : '');
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        showContextMenu([{ label: 'Xoá section break', run: () => this.exec(removeSectionBreak(bnd.index)) }], {
+          x: e.clientX,
+          y: e.clientY,
+        });
+      };
+    });
   }
 
   /** Debounced sync of the JSON / DOM-preview inspection panels. */
@@ -293,6 +344,14 @@ export class EditorPlayground implements OnDestroy {
               commentView('Expand comments', 'expand'),
               commentView('Show all comments', 'panel'),
             ],
+          },
+          {
+            label: 'Show section breaks',
+            isActive: () => this.showSections(),
+            run: () => {
+              this.showSections.update((v) => !v);
+              this.renderSectionMarkers();
+            },
           },
         ],
       },

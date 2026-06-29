@@ -7,7 +7,7 @@ import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
 import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow, mergeCells } from './table-structure.js';
-import { insertSectionBreak, setColumns } from './sections.js';
+import { insertSectionBreak, removeSectionBreak, setColumns } from './sections.js';
 import { toggleList } from './list.js';
 import { defaultCommands } from './registry.js';
 
@@ -310,6 +310,33 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const doc = n('doc', null, n('paragraph', null, schema.text('only')));
     const s = EditorState.create({ schema, doc });
     expect(insertSectionBreak({ newPage: true }).isEnabled?.(s)).toBe(false);
+  });
+
+  it('removeSectionBreak merges two sections — lower columns win, upper page-start kept', () => {
+    const doc = n(
+      'doc',
+      {
+        sections: [
+          { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: false },
+          { blockCount: 2, columns: { count: 2, gap: 28 }, newPage: true },
+        ],
+      },
+      [
+        n('paragraph', null, schema.text('a')),
+        n('paragraph', null, schema.text('b')),
+        n('paragraph', null, schema.text('c')),
+      ],
+    );
+    const after = apply(EditorState.create({ schema, doc }), removeSectionBreak(0));
+    const sections = after.doc.attrs['sections'] as { blockCount: number; columns: { count: number }; newPage: boolean }[];
+    expect(sections).toHaveLength(1);
+    expect(sections[0].blockCount).toBe(3);
+    expect(sections[0].columns.count).toBe(2); // following section's layout wins
+    expect(sections[0].newPage).toBe(false); // merged range keeps the upper's start
+  });
+
+  it('removeSectionBreak is a no-op for an out-of-range boundary', () => {
+    expect(removeSectionBreak(5).run(threePara(), undefined)).toBe(false);
   });
 
   it('deleteSelectionCommand removes the selected text', () => {

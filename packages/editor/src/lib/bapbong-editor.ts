@@ -22,8 +22,19 @@ import type {
   PagePoint,
   PluginContext,
   RangeDecoration,
+  SectionConfig,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
+
+/** A section boundary surfaced for UI markers: where it sits (`pos`), how the
+ *  following section begins (`newPage`) and its column count. `index` is the
+ *  break index passed to `removeSectionBreak`. */
+export interface SectionBoundary {
+  index: number;
+  newPage: boolean;
+  columns: number;
+  pos: number;
+}
 
 // The plugin contract's canonical home is `contracts`; re-export it here so a
 // plugin author can `import { EditorPlugin, PluginContext, EditorChange } from
@@ -240,6 +251,30 @@ export class BapbongEditor {
   /** Map a page-local point to container (canvas-stack) coordinates, or null. */
   pageToCanvas(p: PagePoint): { x: number; y: number } | null {
     return this.core.pageToCanvas(p);
+  }
+
+  /** The document's section boundaries (one per section break), for a host to
+   *  draw clickable markers. `pos` is the doc position at the start of the
+   *  section after the break — feed it to `caretRect` to place the marker. */
+  sectionBoundaries(): SectionBoundary[] {
+    if (!this.bridge) return [];
+    const doc = this.bridge.state.doc;
+    const sections = doc.attrs['sections'] as SectionConfig[] | null;
+    if (!sections || sections.length < 2) return [];
+    const offsets: number[] = [];
+    doc.forEach((_node, offset) => offsets.push(offset));
+    const out: SectionBoundary[] = [];
+    let blockIdx = 0;
+    for (let b = 0; b < sections.length - 1; b++) {
+      blockIdx += sections[b].blockCount; // first block of section b+1
+      out.push({
+        index: b,
+        newPage: sections[b + 1].newPage,
+        columns: sections[b + 1].columns.count,
+        pos: (offsets[blockIdx] ?? 0) + 1,
+      });
+    }
+    return out;
   }
 
   /** Move the selection (caret if `to` omitted) and anchor the IME. */
