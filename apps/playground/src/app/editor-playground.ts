@@ -245,49 +245,51 @@ export class EditorPlayground implements OnDestroy {
 
   /** Show/hide the in-document section-break markers (View toggle). */
   protected readonly showSections = signal(true);
-  /** Pool of marker pills appended to the canvas stack (scroll with the pages). */
-  private readonly sectionMarkerEls: HTMLButtonElement[] = [];
+  /** Pool of marker lines (each with an × delete button) appended to the stack. */
+  private readonly sectionMarkerEls: HTMLDivElement[] = [];
 
-  /** Draw a clickable pill at each section boundary; click → "Xoá section
-   *  break" menu. Markers live in the stack, so they scroll with the pages and
-   *  only need repositioning when the layout changes (on every `onChange`). */
+  /** Draw a thin dashed line at each section boundary with an × to delete the
+   *  break. Markers live in the stack, so they scroll with the pages and only
+   *  need repositioning when the layout changes (on every `onChange`). */
   private renderSectionMarkers(): void {
     const ed = this.editor;
     const stack = this.stackHost()?.nativeElement;
     if (!ed || !stack) return;
     const boundaries = this.showSections() ? ed.sectionBoundaries() : [];
     while (this.sectionMarkerEls.length < boundaries.length) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.style.cssText =
-        'position:absolute;z-index:7;display:inline-flex;align-items:center;gap:5px;padding:2px 9px;' +
-        'font:500 11px/1.4 system-ui,-apple-system,sans-serif;color:#0c447c;background:#e6f1fb;' +
-        'border:1px dashed #378add;border-radius:999px;cursor:pointer;white-space:nowrap;';
-      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
-      btn.addEventListener('mousedown', (e) => e.stopPropagation());
-      stack.appendChild(btn);
-      this.sectionMarkerEls.push(btn);
+      const line = document.createElement('div');
+      line.style.cssText = 'position:absolute;z-index:7;border-top:1px dashed #378add;pointer-events:none;';
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.setAttribute('aria-label', 'Xoá section break');
+      x.style.cssText =
+        'position:absolute;left:-9px;top:-9px;width:18px;height:18px;display:flex;align-items:center;' +
+        'justify-content:center;padding:0;border:1px solid #378add;border-radius:50%;background:#fff;' +
+        'color:#378add;cursor:pointer;pointer-events:auto;';
+      x.innerHTML =
+        '<svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 3l10 10M13 3 3 13"/></svg>';
+      x.addEventListener('pointerdown', (e) => e.stopPropagation());
+      x.addEventListener('mousedown', (e) => e.stopPropagation());
+      line.appendChild(x);
+      stack.appendChild(line);
+      this.sectionMarkerEls.push(line);
     }
-    this.sectionMarkerEls.forEach((btn, i) => {
-      const bnd = boundaries[i];
-      const cr = bnd && ed.caretRect(bnd.pos);
-      const pt = cr && ed.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
-      if (!bnd || !pt) {
-        btn.style.display = 'none';
+    this.sectionMarkerEls.forEach((line, i) => {
+      const rect = boundaries[i]?.rect;
+      const tl = rect && ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.x, y: rect.y });
+      const tr = rect && ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.x + rect.width, y: rect.y });
+      if (!rect || !tl || !tr) {
+        line.style.display = 'none';
         return;
       }
-      btn.style.display = 'inline-flex';
-      btn.style.left = `${pt.x}px`;
-      btn.style.top = `${pt.y - 10}px`;
-      btn.textContent =
-        `§ Section break · ${bnd.newPage ? 'Next page' : 'Continuous'}` +
-        (bnd.columns > 1 ? ` · ${bnd.columns} cột` : '');
-      btn.onclick = (e) => {
+      line.style.display = 'block';
+      line.style.left = `${tl.x}px`;
+      line.style.top = `${tl.y - 4}px`;
+      line.style.width = `${tr.x - tl.x}px`;
+      const index = boundaries[i].index;
+      (line.querySelector('button') as HTMLButtonElement).onclick = (e) => {
         e.stopPropagation();
-        showContextMenu([{ label: 'Xoá section break', run: () => this.exec(removeSectionBreak(bnd.index)) }], {
-          x: e.clientX,
-          y: e.clientY,
-        });
+        this.exec(removeSectionBreak(index));
       };
     });
   }

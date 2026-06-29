@@ -26,14 +26,15 @@ import type {
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
-/** A section boundary surfaced for UI markers: where it sits (`pos`), how the
- *  following section begins (`newPage`) and its column count. `index` is the
- *  break index passed to `removeSectionBreak`. */
+/** A section boundary surfaced for UI markers. `index` is the break index
+ *  passed to `removeSectionBreak`; `rect` is a full-page-width line (page-local)
+ *  at the boundary, ready for `pageToCanvas` — null if off the current layout. */
 export interface SectionBoundary {
   index: number;
   newPage: boolean;
   columns: number;
   pos: number;
+  rect: { pageIndex: number; x: number; y: number; width: number } | null;
 }
 
 // The plugin contract's canonical home is `contracts`; re-export it here so a
@@ -267,11 +268,15 @@ export class BapbongEditor {
     let blockIdx = 0;
     for (let b = 0; b < sections.length - 1; b++) {
       blockIdx += sections[b].blockCount; // first block of section b+1
+      const pos = (offsets[blockIdx] ?? 0) + 1;
+      const cr = this.core.caretRect(pos);
+      const page = cr && this.core.layout?.pages[cr.pageIndex];
       out.push({
         index: b,
         newPage: sections[b + 1].newPage,
         columns: sections[b + 1].columns.count,
-        pos: (offsets[blockIdx] ?? 0) + 1,
+        pos,
+        rect: cr && page ? { pageIndex: cr.pageIndex, x: 0, y: cr.y, width: page.width } : null,
       });
     }
     return out;
