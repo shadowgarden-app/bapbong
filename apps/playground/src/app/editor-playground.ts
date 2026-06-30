@@ -423,6 +423,11 @@ export class EditorPlayground implements OnDestroy {
           { command: 'undo', label: 'Undo' },
           { command: 'redo', label: 'Redo' },
           'separator',
+          { label: 'Cut', shortcut: '⌘X', isEnabled: () => this.hasSelection(), run: () => this.editor?.cut() },
+          { label: 'Copy', shortcut: '⌘C', isEnabled: () => this.hasSelection(), run: () => this.editor?.copy() },
+          { label: 'Paste', shortcut: '⌘V', run: () => void this.editor?.paste() },
+          { label: 'Paste without formatting', shortcut: '⇧⌘V', run: () => void this.editor?.pasteText() },
+          'separator',
           { label: 'Find and replace', run: () => this.findDialog?.open(), shortcut: '⌘F' },
         ],
       },
@@ -607,6 +612,11 @@ export class EditorPlayground implements OnDestroy {
         ed.tableSelection.clear();
       },
     });
+  }
+
+  /** Whether the editor has a non-empty selection (gates Cut/Copy). */
+  private hasSelection(): boolean {
+    return !!this.editor && !this.editor.state.selection.empty;
   }
 
   /** Run a parameterized command against the live editor. */
