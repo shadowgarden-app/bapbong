@@ -56,3 +56,74 @@ export function toggleMarkCommand(
     isEnabled: (state) => !!state.schema.marks[markName],
   };
 }
+
+/**
+ * Set a value-bearing mark (`fontSize`/`textColor`/`highlight`/`fontFamily`) to
+ * specific `attrs` over the selection — replacing any existing value — or
+ * remove it when `attrs` is null. Empty selection updates the stored marks so
+ * the next typed text carries the value. The value-bearing analogue of
+ * {@link toggleMarkCommand} (which only flips a mark on/off).
+ */
+export function setMarkAttr(markName: string, attrs: Record<string, unknown> | null): Command {
+  return {
+    name: `set-${markName}`,
+    run(state, dispatch) {
+      const type = state.schema.marks[markName];
+      if (!type) return false;
+      if (dispatch) {
+        const { from, to, empty } = state.selection;
+        const tr = state.tr;
+        if (empty) {
+          tr.removeStoredMark(type);
+          if (attrs) tr.addStoredMark(type.create(attrs));
+        } else {
+          tr.removeMark(from, to, type);
+          if (attrs) tr.addMark(from, to, type.create(attrs));
+        }
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+    isEnabled: (state) => !!state.schema.marks[markName],
+  };
+}
+
+/**
+ * The value of `markName`'s `attrKey` over the selection: the stored/cursor
+ * mark when empty, the shared value if uniform across a range, else null (mixed
+ * or unset). Used to show the current font size / colour in a toolbar control.
+ */
+export function activeMarkValue(state: EditorState, markName: string, attrKey: string): unknown {
+  const type = state.schema.marks[markName];
+  if (!type) return null;
+  const { from, to, empty, $from } = state.selection;
+  const valueOf = (marks: readonly Mark[]): unknown => {
+    const mark = type.isInSet(marks);
+    return mark ? mark.attrs[attrKey] : null;
+  };
+  if (empty) return valueOf(state.storedMarks ?? $from.marks());
+  let value: unknown;
+  let seen = false;
+  state.doc.nodesBetween(from, to, (node) => {
+    if (!node.isText) return;
+    const v = valueOf(node.marks);
+    if (!seen) {
+      value = v;
+      seen = true;
+    } else if (value !== v) {
+      value = null;
+    }
+  });
+  return seen ? value : null;
+}
+
+/** Set the font size (points) over the selection; null clears it. */
+export function setFontSize(pt: number | null): Command {
+  return setMarkAttr('fontSize', pt == null ? null : { size: pt });
+}
+
+/** The font size (pt) at the selection, or null when mixed/unset. */
+export function activeFontSize(state: EditorState): number | null {
+  const v = activeMarkValue(state, 'fontSize', 'size');
+  return typeof v === 'number' ? v : null;
+}

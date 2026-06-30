@@ -1,7 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command } from '@shadow-garden/bapbong-contracts';
-import { toggleMarkCommand, isMarkActive } from './marks.js';
+import { toggleMarkCommand, isMarkActive, setFontSize, activeFontSize } from './marks.js';
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
@@ -47,6 +47,7 @@ const schema = new Schema({
     underline: { toDOM: () => ['u', 0] },
     strike: { toDOM: () => ['s', 0] },
     vertAlign: { attrs: { value: {} }, toDOM: () => ['sup', 0] },
+    fontSize: { attrs: { size: {} }, toDOM: () => ['span', 0] },
     link: { attrs: { href: {} }, inclusive: false, toDOM: () => ['a', 0] },
   },
 });
@@ -97,6 +98,18 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const after = apply(before, bold);
     expect(after.doc.rangeHasMark(1, 6, schema.marks['strong'])).toBe(true);
     expect(isMarkActive(after, 'strong')).toBe(true);
+  });
+
+  it('setFontSize applies/clears a value mark; activeFontSize reads it', () => {
+    const sized = apply(paraState(), setFontSize(18));
+    expect(activeFontSize(sized)).toBe(18);
+    // re-sizing replaces the value (no duplicate marks)
+    const resized = apply(sized, setFontSize(24));
+    expect(activeFontSize(resized)).toBe(24);
+    // null clears it
+    expect(activeFontSize(apply(resized, setFontSize(null)))).toBeNull();
+    // mixed selection → null
+    expect(activeFontSize(paraState())).toBeNull();
   });
 
   it('run() without dispatch is a probe — returns true but does not mutate', () => {

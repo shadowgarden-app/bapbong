@@ -5,6 +5,7 @@ import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } from '@shadow-garden/bapbong-editor';
 import {
+  activeFontSize,
   cellAt,
   deleteColumn,
   deleteRow,
@@ -16,6 +17,7 @@ import {
   insertTable,
   mergeCells,
   removeSectionBreak,
+  setFontSize,
   setLink,
 } from '@shadow-garden/bapbong-commands';
 import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
@@ -216,6 +218,22 @@ export class EditorPlayground implements OnDestroy {
       this.toolbar = mountToolbar(toolbarHost, editor, {
         groups: [
           ['undo', 'redo'],
+          [
+            {
+              kind: 'select',
+              title: 'Font size',
+              width: 66,
+              options: [
+                { label: 'Cỡ chữ', value: '' },
+                ...[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map((n) => ({ label: String(n), value: String(n) })),
+              ],
+              value: (s) => {
+                const sz = activeFontSize(s);
+                return sz != null ? String(sz) : '';
+              },
+              onSelect: (v) => this.exec(setFontSize(v ? Number(v) : null)),
+            },
+          ],
           ['bold', 'italic', 'underline', 'strike'],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
           ['bullet-list', 'ordered-list'],

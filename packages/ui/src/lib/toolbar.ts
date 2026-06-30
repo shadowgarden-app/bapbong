@@ -14,10 +14,29 @@ export interface ToolbarItem {
   className?: string;
 }
 
+/** A dropdown control in the toolbar (e.g. font size / family). The host owns
+ *  the command to run — the toolbar just renders the `<select>` and reports the
+ *  current value, so the lib stays decoupled from specific commands. */
+export interface ToolbarSelect {
+  kind: 'select';
+  /** Tooltip + accessible label. */
+  title: string;
+  options: { label: string; value: string }[];
+  /** Current value to show from editor state (`''` = none / mixed). */
+  value: (state: EditorStateOf) => string;
+  /** Called when the user picks a value. */
+  onSelect: (value: string) => void;
+  /** Fixed width in px (defaults to auto). */
+  width?: number;
+}
+
+/** A toolbar group entry: a command name (button) or a control like a select. */
+export type ToolbarEntry = string | ToolbarSelect;
+
 export interface ToolbarOptions {
-  /** Command-name groups, rendered as separated button clusters. Defaults to
-   *  marks then alignments, derived from the registry. */
-  groups?: string[][];
+  /** Groups rendered as separated clusters — command names (buttons) and/or
+   *  controls (selects). Defaults to marks then alignments, from the registry. */
+  groups?: ToolbarEntry[][];
   /** Presentation per command name, merged over the built-in defaults. */
   items?: Record<string, ToolbarItem>;
 }
@@ -70,6 +89,8 @@ const STYLE = `
 .bb-toolbar-btn:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-toolbar-btn.is-active{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-border,#b5d4f4)}
 .bb-toolbar-btn:disabled{opacity:.38;cursor:default}
+.bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer}
+.bb-toolbar-select:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
 `;
 
@@ -103,31 +124,55 @@ export function mountToolbar(
   root.setAttribute('role', 'toolbar');
 
   const buttons: Array<{ name: string; el: HTMLButtonElement }> = [];
+  const selects: Array<{ spec: ToolbarSelect; el: HTMLSelectElement }> = [];
   let latest: EditorStateOf | null = null;
 
   for (const group of groups) {
-    const names = group.filter((n) => editor.commands.has(n));
-    if (names.length === 0) continue;
+    // Keep command entries only if the command exists; controls always render.
+    const entries = group.filter((e) => typeof e !== 'string' || editor.commands.has(e));
+    if (entries.length === 0) continue;
     const groupEl = document.createElement('div');
     groupEl.className = 'bb-toolbar-group';
-    for (const name of names) {
-      const item = items[name] ?? { title: name };
+    for (const entry of entries) {
+      if (typeof entry !== 'string') {
+        // A control (currently: select dropdown).
+        const sel = document.createElement('select');
+        sel.className = 'bb-toolbar-select';
+        sel.title = entry.title;
+        sel.setAttribute('aria-label', entry.title);
+        if (entry.width) sel.style.width = `${entry.width}px`;
+        for (const opt of entry.options) {
+          const o = document.createElement('option');
+          o.value = opt.value;
+          o.textContent = opt.label;
+          sel.appendChild(o);
+        }
+        sel.addEventListener('mousedown', (e) => e.stopPropagation());
+        sel.addEventListener('change', () => {
+          entry.onSelect(sel.value);
+          editor.focus();
+        });
+        groupEl.appendChild(sel);
+        selects.push({ spec: entry, el: sel });
+        continue;
+      }
+      const item = items[entry] ?? { title: entry };
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'bb-toolbar-btn' + (item.className ? ` ${item.className}` : '');
       btn.title = item.title;
       btn.setAttribute('aria-label', item.title);
       if (item.svg) btn.innerHTML = item.svg;
-      else btn.textContent = item.label ?? name;
+      else btn.textContent = item.label ?? entry;
       // Keep the editor's selection/focus when a button is pressed.
       btn.addEventListener('mousedown', (e) => e.preventDefault());
       btn.addEventListener('click', () => {
         if (!latest) return;
-        editor.commands.get(name)?.run(latest, (tr) => editor.dispatch(tr));
+        editor.commands.get(entry)?.run(latest, (tr) => editor.dispatch(tr));
         editor.focus();
       });
       groupEl.appendChild(btn);
-      buttons.push({ name, el: btn });
+      buttons.push({ name: entry, el: btn });
     }
     root.appendChild(groupEl);
   }
@@ -145,6 +190,7 @@ export function mountToolbar(
       // idempotent ops like "align-center" when already centered).
       el.disabled = cmd.isEnabled ? !cmd.isEnabled(state) : false;
     }
+    for (const { spec, el } of selects) el.value = spec.value(state);
   };
 
   const off = editor.onChange((c) => refresh(c.state));
