@@ -406,7 +406,14 @@ export class EditorPlayground implements OnDestroy {
       isActive: () => cs.commentView() === mode,
     });
     return [
-      { label: 'File', entries: [{ label: 'Open…', run: () => this.openFilePicker('.docx', (f) => this.loadFile(f)) }] },
+      {
+        label: 'File',
+        entries: [
+          { label: 'Open…', run: () => this.openFilePicker('.docx', (f) => this.loadFile(f)) },
+          'separator',
+          { label: 'Print', run: () => void this.editor?.print() },
+        ],
+      },
       {
         label: 'Edit',
         entries: [

@@ -307,6 +307,12 @@ export class BapbongEditor {
     return this.core.getZoom();
   }
 
+  /** Print the whole document — renders every page (not just the visible ones)
+   *  and prints one image per sheet. */
+  print(): Promise<void> {
+    return this.core.print();
+  }
+
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
     this.bridge?.focus();
