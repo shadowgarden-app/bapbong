@@ -410,8 +410,9 @@ export class EditorPlayground implements OnDestroy {
         label: 'File',
         entries: [
           { label: 'Open…', run: () => this.openFilePicker('.docx', (f) => this.loadFile(f)) },
+          { label: 'Download .docx', run: () => void this.downloadDocx(), isEnabled: () => this.pageCount() > 0 },
           'separator',
-          { label: 'Print', run: () => void this.editor?.print() },
+          { label: 'Print', run: () => void this.editor?.print(), isEnabled: () => this.pageCount() > 0 },
         ],
       },
       {
