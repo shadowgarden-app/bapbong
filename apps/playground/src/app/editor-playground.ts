@@ -485,7 +485,14 @@ export class EditorPlayground implements OnDestroy {
         entries: [
           {
             label: 'Heading',
-            submenu: [{ command: 'heading-1' }, { command: 'heading-2' }, { command: 'heading-3' }],
+            submenu: [
+              { command: 'heading-1' },
+              { command: 'heading-2' },
+              { command: 'heading-3' },
+              { command: 'heading-4' },
+              { command: 'heading-5' },
+              { command: 'heading-6' },
+            ],
           },
           {
             label: 'Text',
