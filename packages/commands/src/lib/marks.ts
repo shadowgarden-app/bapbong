@@ -150,6 +150,26 @@ export function activeTextColor(state: EditorState): string | null {
   return typeof v === 'string' ? v : null;
 }
 
+/**
+ * Remove all inline marks from the selection (Clear formatting). On an empty
+ * selection it clears the stored marks so the next typed text is unformatted.
+ */
+export function clearMarks(): Command {
+  return {
+    name: 'clear-format',
+    run(state, dispatch) {
+      const { from, to, empty } = state.selection;
+      if (dispatch) {
+        const tr = state.tr;
+        if (empty) tr.setStoredMarks([]);
+        else tr.removeMark(from, to); // no mark arg → strip every mark in the range
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+  };
+}
+
 /** Set the highlight (text background) colour over the selection; null clears it. */
 export function setHighlight(color: string | null): Command {
   return setMarkAttr('highlight', color ? { color } : null);

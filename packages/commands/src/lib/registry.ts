@@ -1,6 +1,6 @@
 import { Collection } from '@shadow-garden/bapbong-contracts';
 import type { Command } from '@shadow-garden/bapbong-contracts';
-import { toggleMarkCommand } from './marks.js';
+import { toggleMarkCommand, clearMarks } from './marks.js';
 import { setAlign, toggleHeading } from './paragraph.js';
 import { toggleList } from './list.js';
 import { redoCommand, undoCommand } from './history.js';
@@ -27,6 +27,7 @@ export function defaultCommands(): Collection<Command> {
       toggleMarkCommand('strike'),
       toggleMarkCommand('superscript', 'vertAlign', { value: 'super' }),
       toggleMarkCommand('subscript', 'vertAlign', { value: 'sub' }),
+      clearMarks(),
       setAlign('left'),
       setAlign('center'),
       setAlign('right'),

@@ -284,6 +284,7 @@ export class EditorPlayground implements OnDestroy {
               value: (s) => activeHighlight(s),
               onSelect: (c) => this.exec(setHighlight(c)),
             },
+            'clear-format',
           ],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
           ['bullet-list', 'ordered-list'],
@@ -475,6 +476,7 @@ export class EditorPlayground implements OnDestroy {
               { command: 'strike' },
               { command: 'superscript' },
               { command: 'subscript' },
+              { command: 'clear-format', label: 'Clear formatting' },
             ],
           },
           {

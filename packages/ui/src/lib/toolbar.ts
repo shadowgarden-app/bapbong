@@ -79,6 +79,10 @@ const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
     title: 'Redo',
     svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7H6a3.5 3.5 0 0 0 0 7h4"/><path d="m12 7-3-3m3 3-3 3"/></svg>',
   },
+  'clear-format': {
+    title: 'Clear formatting',
+    svg: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12 8 4l3 8M6 9.4h4"/><path d="M2.5 14 13.5 3" opacity=".55"/></svg>',
+  },
   bold: { title: 'Bold', label: 'B', className: 'bb-i-bold' },
   italic: { title: 'Italic', label: 'I', className: 'bb-i-italic' },
   underline: { title: 'Underline', label: 'U', className: 'bb-i-underline' },

@@ -12,6 +12,7 @@ import {
   activeTextColor,
   setHighlight,
   activeHighlight,
+  clearMarks,
 } from './marks.js';
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
@@ -142,6 +143,18 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const h = apply(paraState(), setHighlight('#fff59d'));
     expect(activeHighlight(h)).toBe('#fff59d');
     expect(activeHighlight(apply(h, setHighlight(null)))).toBeNull();
+  });
+
+  it('clearMarks strips every mark from the selection', () => {
+    // pile on a few marks, then clear them all
+    let s = apply(paraState(), toggleMarkCommand('bold', 'strong'));
+    s = apply(s, setTextColor('#e24b4a'));
+    s = apply(s, setFontSize(20));
+    expect(isMarkActive(s, 'strong')).toBe(true);
+    const cleared = apply(s, clearMarks());
+    expect(isMarkActive(cleared, 'strong')).toBe(false);
+    expect(activeTextColor(cleared)).toBeNull();
+    expect(activeFontSize(cleared)).toBeNull();
   });
 
   it('run() without dispatch is a probe — returns true but does not mutate', () => {
