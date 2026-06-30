@@ -288,6 +288,18 @@ export class EditorPlayground implements OnDestroy {
           ],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
           ['bullet-list', 'ordered-list'],
+          [
+            {
+              kind: 'select',
+              title: 'Zoom',
+              width: 72,
+              options: [50, 75, 90, 100, 125, 150, 200].map((n) => ({ label: `${n}%`, value: String(n) })),
+              // Zoom lives on the render core, not in editor state — read it from
+              // the editor (the toolbar re-reads on every change anyway).
+              value: () => String(Math.round(editor.getZoom() * 100)),
+              onSelect: (v) => editor.setZoom(Number(v) / 100),
+            },
+          ],
         ],
       });
     // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace,

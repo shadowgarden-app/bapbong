@@ -297,6 +297,16 @@ export class BapbongEditor {
     this.core.scrollToPos(pos, topMargin);
   }
 
+  /** Set the zoom factor (1 = 100%) and repaint at the new scale. */
+  setZoom(zoom: number): void {
+    this.core.setZoom(zoom);
+  }
+
+  /** The current zoom factor (1 = 100%). */
+  getZoom(): number {
+    return this.core.getZoom();
+  }
+
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
     this.bridge?.focus();
