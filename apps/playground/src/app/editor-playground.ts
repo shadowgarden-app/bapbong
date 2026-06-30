@@ -5,6 +5,7 @@ import { CommentsStore } from './comments-store';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } from '@shadow-garden/bapbong-editor';
 import {
+  activeFontFamily,
   activeFontSize,
   cellAt,
   deleteColumn,
@@ -17,6 +18,7 @@ import {
   insertTable,
   mergeCells,
   removeSectionBreak,
+  setFontFamily,
   setFontSize,
   setLink,
 } from '@shadow-garden/bapbong-commands';
@@ -219,6 +221,20 @@ export class EditorPlayground implements OnDestroy {
         groups: [
           ['undo', 'redo'],
           [
+            {
+              kind: 'select',
+              title: 'Font',
+              width: 132,
+              options: [
+                { label: 'Phông chữ', value: '' },
+                ...['Arial', 'Times New Roman', 'Georgia', 'Calibri', 'Courier New', 'Verdana', 'Tahoma'].map((f) => ({
+                  label: f,
+                  value: f,
+                })),
+              ],
+              value: (s) => activeFontFamily(s) ?? '',
+              onSelect: (v) => this.exec(setFontFamily(v || null)),
+            },
             {
               kind: 'select',
               title: 'Font size',

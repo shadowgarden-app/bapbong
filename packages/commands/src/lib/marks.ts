@@ -127,3 +127,14 @@ export function activeFontSize(state: EditorState): number | null {
   const v = activeMarkValue(state, 'fontSize', 'size');
   return typeof v === 'number' ? v : null;
 }
+
+/** Set the font family over the selection; null clears it. */
+export function setFontFamily(family: string | null): Command {
+  return setMarkAttr('fontFamily', family ? { family } : null);
+}
+
+/** The font family at the selection, or null when mixed/unset. */
+export function activeFontFamily(state: EditorState): string | null {
+  const v = activeMarkValue(state, 'fontFamily', 'family');
+  return typeof v === 'string' ? v : null;
+}

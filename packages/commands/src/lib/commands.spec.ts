@@ -1,7 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command } from '@shadow-garden/bapbong-contracts';
-import { toggleMarkCommand, isMarkActive, setFontSize, activeFontSize } from './marks.js';
+import { toggleMarkCommand, isMarkActive, setFontSize, activeFontSize, setFontFamily, activeFontFamily } from './marks.js';
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
@@ -48,6 +48,7 @@ const schema = new Schema({
     strike: { toDOM: () => ['s', 0] },
     vertAlign: { attrs: { value: {} }, toDOM: () => ['sup', 0] },
     fontSize: { attrs: { size: {} }, toDOM: () => ['span', 0] },
+    fontFamily: { attrs: { family: {} }, toDOM: () => ['span', 0] },
     link: { attrs: { href: {} }, inclusive: false, toDOM: () => ['a', 0] },
   },
 });
@@ -110,6 +111,12 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(activeFontSize(apply(resized, setFontSize(null)))).toBeNull();
     // mixed selection → null
     expect(activeFontSize(paraState())).toBeNull();
+  });
+
+  it('setFontFamily applies/clears the family; activeFontFamily reads it', () => {
+    const f = apply(paraState(), setFontFamily('Georgia'));
+    expect(activeFontFamily(f)).toBe('Georgia');
+    expect(activeFontFamily(apply(f, setFontFamily(null)))).toBeNull();
   });
 
   it('run() without dispatch is a probe — returns true but does not mutate', () => {
