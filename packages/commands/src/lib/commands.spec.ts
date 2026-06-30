@@ -10,6 +10,8 @@ import {
   activeFontFamily,
   setTextColor,
   activeTextColor,
+  setHighlight,
+  activeHighlight,
 } from './marks.js';
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
@@ -59,6 +61,7 @@ const schema = new Schema({
     fontSize: { attrs: { size: {} }, toDOM: () => ['span', 0] },
     fontFamily: { attrs: { family: {} }, toDOM: () => ['span', 0] },
     textColor: { attrs: { color: {} }, toDOM: () => ['span', 0] },
+    highlight: { attrs: { color: {} }, toDOM: () => ['span', 0] },
     link: { attrs: { href: {} }, inclusive: false, toDOM: () => ['a', 0] },
   },
 });
@@ -133,6 +136,12 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const c = apply(paraState(), setTextColor('#e24b4a'));
     expect(activeTextColor(c)).toBe('#e24b4a');
     expect(activeTextColor(apply(c, setTextColor(null)))).toBeNull();
+  });
+
+  it('setHighlight applies/clears the colour; activeHighlight reads it', () => {
+    const h = apply(paraState(), setHighlight('#fff59d'));
+    expect(activeHighlight(h)).toBe('#fff59d');
+    expect(activeHighlight(apply(h, setHighlight(null)))).toBeNull();
   });
 
   it('run() without dispatch is a probe — returns true but does not mutate', () => {

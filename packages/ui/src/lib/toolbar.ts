@@ -191,9 +191,10 @@ export function mountToolbar(
         btn.setAttribute('aria-label', entry.title);
         const glyph = document.createElement('span');
         glyph.className = 'bb-color-glyph';
+        glyph.innerHTML = entry.glyph; // text (e.g. 'A') or inline SVG (host-trusted)
         const bar = document.createElement('span');
         bar.className = 'bb-color-bar';
-        glyph.append(document.createTextNode(entry.glyph), bar);
+        glyph.appendChild(bar);
         btn.appendChild(glyph);
         const pop = document.createElement('div');
         pop.className = 'bb-color-pop';

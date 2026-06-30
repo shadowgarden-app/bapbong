@@ -7,6 +7,7 @@ import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } f
 import {
   activeFontFamily,
   activeFontSize,
+  activeHighlight,
   activeTextColor,
   cellAt,
   deleteColumn,
@@ -21,6 +22,7 @@ import {
   removeSectionBreak,
   setFontFamily,
   setFontSize,
+  setHighlight,
   setLink,
   setTextColor,
 } from '@shadow-garden/bapbong-commands';
@@ -268,6 +270,19 @@ export class EditorPlayground implements OnDestroy {
               ],
               value: (s) => activeTextColor(s),
               onSelect: (c) => this.exec(setTextColor(c)),
+            },
+            {
+              kind: 'color',
+              title: 'Highlight',
+              glyph:
+                '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h10"/><path d="M5 11l-1 1 2 0 6.5-6.5a1.5 1.5 0 0 0-2-2L4 10z"/></svg>',
+              allowNone: true,
+              swatches: [
+                '#fff59d', '#ffe082', '#ffcc80', '#ef9a9a', '#f48fb1', '#ce93d8',
+                '#90caf9', '#a5d6a7', '#80deea', '#e6ee9c', '#bcaaa4', '#eeeeee',
+              ],
+              value: (s) => activeHighlight(s),
+              onSelect: (c) => this.exec(setHighlight(c)),
             },
           ],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
