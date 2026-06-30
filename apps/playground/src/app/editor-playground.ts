@@ -7,6 +7,7 @@ import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } f
 import {
   activeFontFamily,
   activeFontSize,
+  activeTextColor,
   cellAt,
   deleteColumn,
   deleteRow,
@@ -21,6 +22,7 @@ import {
   setFontFamily,
   setFontSize,
   setLink,
+  setTextColor,
 } from '@shadow-garden/bapbong-commands';
 import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
 import {
@@ -250,7 +252,24 @@ export class EditorPlayground implements OnDestroy {
               onSelect: (v) => this.exec(setFontSize(v ? Number(v) : null)),
             },
           ],
-          ['bold', 'italic', 'underline', 'strike'],
+          [
+            'bold',
+            'italic',
+            'underline',
+            'strike',
+            {
+              kind: 'color',
+              title: 'Text color',
+              glyph: 'A',
+              allowNone: true,
+              swatches: [
+                '#000000', '#5f5e5a', '#888780', '#b4b2a9', '#e24b4a', '#d85a30', '#ba7517', '#639922',
+                '#1d9e75', '#0f6e56', '#378add', '#185fa5', '#534ab7', '#993556', '#d4537e', '#ffffff',
+              ],
+              value: (s) => activeTextColor(s),
+              onSelect: (c) => this.exec(setTextColor(c)),
+            },
+          ],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
           ['bullet-list', 'ordered-list'],
         ],

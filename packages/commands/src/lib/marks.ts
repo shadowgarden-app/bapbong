@@ -138,3 +138,14 @@ export function activeFontFamily(state: EditorState): string | null {
   const v = activeMarkValue(state, 'fontFamily', 'family');
   return typeof v === 'string' ? v : null;
 }
+
+/** Set the text colour over the selection; null clears it. */
+export function setTextColor(color: string | null): Command {
+  return setMarkAttr('textColor', color ? { color } : null);
+}
+
+/** The text colour at the selection, or null when mixed/unset. */
+export function activeTextColor(state: EditorState): string | null {
+  const v = activeMarkValue(state, 'textColor', 'color');
+  return typeof v === 'string' ? v : null;
+}

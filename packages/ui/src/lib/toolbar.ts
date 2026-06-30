@@ -30,8 +30,25 @@ export interface ToolbarSelect {
   width?: number;
 }
 
-/** A toolbar group entry: a command name (button) or a control like a select. */
-export type ToolbarEntry = string | ToolbarSelect;
+/** A colour-picker control: a button (a glyph over a colour bar) that opens a
+ *  swatch palette. The host owns the command; the lib renders the popover. */
+export interface ToolbarColor {
+  kind: 'color';
+  title: string;
+  /** Glyph above the colour bar (e.g. 'A' for text colour, '🖉' for highlight). */
+  glyph: string;
+  /** Swatch colours offered (hex). */
+  swatches: string[];
+  /** Offer a "None / automatic" entry that clears the colour. */
+  allowNone?: boolean;
+  /** Current colour from state (shown in the bar), or null. */
+  value: (state: EditorStateOf) => string | null;
+  /** Called with the picked colour (null = cleared). */
+  onSelect: (color: string | null) => void;
+}
+
+/** A toolbar group entry: a command name (button) or a control (select/colour). */
+export type ToolbarEntry = string | ToolbarSelect | ToolbarColor;
 
 export interface ToolbarOptions {
   /** Groups rendered as separated clusters — command names (buttons) and/or
@@ -91,6 +108,14 @@ const STYLE = `
 .bb-toolbar-btn:disabled{opacity:.38;cursor:default}
 .bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer}
 .bb-toolbar-select:hover{background:var(--bb-ui-hover,#f1efe8)}
+.bb-toolbar-color{position:relative}
+.bb-toolbar-color .bb-color-glyph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;line-height:1;font-size:13px}
+.bb-toolbar-color .bb-color-bar{width:16px;height:3px;border-radius:1px;background:currentColor}
+.bb-color-pop{position:absolute;z-index:1200;top:33px;left:0;display:grid;grid-template-columns:repeat(8,16px);gap:4px;padding:8px;background:var(--bb-ui-menu-bg,#fff);border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16)}
+.bb-color-pop[hidden]{display:none}
+.bb-color-swatch{width:16px;height:16px;padding:0;border:1px solid rgba(0,0,0,.18);border-radius:3px;cursor:pointer}
+.bb-color-none{grid-column:1/-1;font:inherit;font-size:12px;padding:3px 0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:5px;background:var(--bb-ui-bg,#fff);cursor:pointer}
+.bb-color-none:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
 `;
 
@@ -125,6 +150,7 @@ export function mountToolbar(
 
   const buttons: Array<{ name: string; el: HTMLButtonElement }> = [];
   const selects: Array<{ spec: ToolbarSelect; el: HTMLSelectElement }> = [];
+  const colors: Array<{ spec: ToolbarColor; bar: HTMLElement }> = [];
   let latest: EditorStateOf | null = null;
 
   for (const group of groups) {
@@ -134,8 +160,7 @@ export function mountToolbar(
     const groupEl = document.createElement('div');
     groupEl.className = 'bb-toolbar-group';
     for (const entry of entries) {
-      if (typeof entry !== 'string') {
-        // A control (currently: select dropdown).
+      if (typeof entry !== 'string' && entry.kind === 'select') {
         const sel = document.createElement('select');
         sel.className = 'bb-toolbar-select';
         sel.title = entry.title;
@@ -154,6 +179,67 @@ export function mountToolbar(
         });
         groupEl.appendChild(sel);
         selects.push({ spec: entry, el: sel });
+        continue;
+      }
+      if (typeof entry !== 'string' && entry.kind === 'color') {
+        const wrap = document.createElement('div');
+        wrap.className = 'bb-toolbar-color';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'bb-toolbar-btn';
+        btn.title = entry.title;
+        btn.setAttribute('aria-label', entry.title);
+        const glyph = document.createElement('span');
+        glyph.className = 'bb-color-glyph';
+        const bar = document.createElement('span');
+        bar.className = 'bb-color-bar';
+        glyph.append(document.createTextNode(entry.glyph), bar);
+        btn.appendChild(glyph);
+        const pop = document.createElement('div');
+        pop.className = 'bb-color-pop';
+        pop.hidden = true;
+        const pick = (color: string | null) => {
+          entry.onSelect(color);
+          pop.hidden = true;
+          editor.focus();
+        };
+        for (const c of entry.swatches) {
+          const sw = document.createElement('button');
+          sw.type = 'button';
+          sw.className = 'bb-color-swatch';
+          sw.style.background = c;
+          sw.title = c;
+          sw.addEventListener('mousedown', (e) => e.preventDefault());
+          sw.addEventListener('click', () => pick(c));
+          pop.appendChild(sw);
+        }
+        if (entry.allowNone) {
+          const none = document.createElement('button');
+          none.type = 'button';
+          none.className = 'bb-color-none';
+          none.textContent = 'None';
+          none.addEventListener('mousedown', (e) => e.preventDefault());
+          none.addEventListener('click', () => pick(null));
+          pop.appendChild(none);
+        }
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => {
+          const open = pop.hidden;
+          root.querySelectorAll('.bb-color-pop').forEach((p) => ((p as HTMLElement).hidden = true));
+          pop.hidden = !open;
+          if (!pop.hidden) {
+            const onDoc = (ev: Event) => {
+              if (!wrap.contains(ev.target as Node)) {
+                pop.hidden = true;
+                document.removeEventListener('pointerdown', onDoc, true);
+              }
+            };
+            document.addEventListener('pointerdown', onDoc, true);
+          }
+        });
+        wrap.append(btn, pop);
+        groupEl.appendChild(wrap);
+        colors.push({ spec: entry, bar });
         continue;
       }
       const item = items[entry] ?? { title: entry };
@@ -191,6 +277,8 @@ export function mountToolbar(
       el.disabled = cmd.isEnabled ? !cmd.isEnabled(state) : false;
     }
     for (const { spec, el } of selects) el.value = spec.value(state);
+    // Empty → CSS `currentColor` (the button's text colour) shows in the bar.
+    for (const { spec, bar } of colors) bar.style.background = spec.value(state) ?? '';
   };
 
   const off = editor.onChange((c) => refresh(c.state));

@@ -1,7 +1,16 @@
 import { Schema } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command } from '@shadow-garden/bapbong-contracts';
-import { toggleMarkCommand, isMarkActive, setFontSize, activeFontSize, setFontFamily, activeFontFamily } from './marks.js';
+import {
+  toggleMarkCommand,
+  isMarkActive,
+  setFontSize,
+  activeFontSize,
+  setFontFamily,
+  activeFontFamily,
+  setTextColor,
+  activeTextColor,
+} from './marks.js';
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
@@ -49,6 +58,7 @@ const schema = new Schema({
     vertAlign: { attrs: { value: {} }, toDOM: () => ['sup', 0] },
     fontSize: { attrs: { size: {} }, toDOM: () => ['span', 0] },
     fontFamily: { attrs: { family: {} }, toDOM: () => ['span', 0] },
+    textColor: { attrs: { color: {} }, toDOM: () => ['span', 0] },
     link: { attrs: { href: {} }, inclusive: false, toDOM: () => ['a', 0] },
   },
 });
@@ -117,6 +127,12 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const f = apply(paraState(), setFontFamily('Georgia'));
     expect(activeFontFamily(f)).toBe('Georgia');
     expect(activeFontFamily(apply(f, setFontFamily(null)))).toBeNull();
+  });
+
+  it('setTextColor applies/clears the colour; activeTextColor reads it', () => {
+    const c = apply(paraState(), setTextColor('#e24b4a'));
+    expect(activeTextColor(c)).toBe('#e24b4a');
+    expect(activeTextColor(apply(c, setTextColor(null)))).toBeNull();
   });
 
   it('run() without dispatch is a probe — returns true but does not mutate', () => {
