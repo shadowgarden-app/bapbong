@@ -478,6 +478,16 @@ export class EditorPlayground implements OnDestroy {
           },
           { label: 'Link…', run: () => this.execPrompt('Insert link', 'https://…', (href) => setLink(href)) },
           {
+            label: 'Remove link',
+            isEnabled: () => {
+              const ed = this.editor;
+              if (!ed) return false;
+              const cmd = setLink(null);
+              return (cmd.isEnabled?.(ed.state) ?? true) && (cmd.isActive?.(ed.state) ?? false);
+            },
+            run: () => this.exec(setLink(null)),
+          },
+          {
             label: 'Break',
             submenu: [
               { command: 'page-break', label: 'Page break' },
