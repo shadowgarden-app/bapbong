@@ -87,6 +87,14 @@ const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
   italic: { title: 'Italic', label: 'I', className: 'bb-i-italic' },
   underline: { title: 'Underline', label: 'U', className: 'bb-i-underline' },
   strike: { title: 'Strikethrough', label: 'S', className: 'bb-i-strike' },
+  superscript: {
+    title: 'Superscript',
+    svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><text x="0" y="13" font-size="10.5" font-family="serif">x</text><text x="8.5" y="6.5" font-size="7" font-family="serif">2</text></svg>',
+  },
+  subscript: {
+    title: 'Subscript',
+    svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><text x="0" y="11.5" font-size="10.5" font-family="serif">x</text><text x="8.5" y="15.5" font-size="7" font-family="serif">2</text></svg>',
+  },
   'align-left': { title: 'Align left', svg: alignSvg([[2, 14], [2, 9], [2, 12]]) },
   'align-center': { title: 'Center', svg: alignSvg([[2, 14], [4, 12], [3, 13]]) },
   'align-right': { title: 'Align right', svg: alignSvg([[2, 14], [7, 14], [4, 14]]) },

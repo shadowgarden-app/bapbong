@@ -259,6 +259,8 @@ export class EditorPlayground implements OnDestroy {
             'italic',
             'underline',
             'strike',
+            'superscript',
+            'subscript',
             {
               kind: 'color',
               title: 'Text color',
