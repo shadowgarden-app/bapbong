@@ -40,6 +40,13 @@ export interface RenderCoreOptions {
    *  out. `a11yLabel` sets its `aria-label`. */
   a11y?: boolean;
   a11yLabel?: string;
+  /** Text-width measurer. Defaults to a canvas-backed one (browser). Inject an
+   *  engine-independent measurer (e.g. font-file metrics) to make wrapping and
+   *  pagination deterministic across WebView engines / headless. */
+  measureText?: MeasureText;
+  /** Vertical-metrics provider, paired with {@link measureText}. Defaults to a
+   *  canvas-backed one. */
+  measureMetrics?: MeasureMetrics;
 }
 
 /** Caret + selection to paint on the overlay layer (page-local geometry). */
@@ -106,8 +113,8 @@ export class RenderCore {
     this.stack = stack;
     this.viewport = opts.viewport ?? (stack.closest('.canvas-wrap') as HTMLElement | null);
     this.painter = new CanvasPainter(stack);
-    this.measureText = createCanvasMeasurer();
-    this.measureMetrics = createCanvasMetrics();
+    this.measureText = opts.measureText ?? createCanvasMeasurer();
+    this.measureMetrics = opts.measureMetrics ?? createCanvasMetrics();
     this.zoomFactor = opts.zoom ?? 1;
     this.a11y = opts.a11y === false ? null : new A11yMirror(stack, { label: opts.a11yLabel });
 
