@@ -40,7 +40,9 @@
             "@shadow-garden/bapbong-contracts",
             "@shadow-garden/bapbong-model",
             "@shadow-garden/bapbong-docx",
-            "@shadow-garden/bapbong-commands"
+            "@shadow-garden/bapbong-commands",
+            "@shadow-garden/bapbong-layout-engine",
+            "@shadow-garden/bapbong-measuring"
           ]
         }
       }
@@ -50,9 +52,12 @@
     "@shadow-garden/bapbong-contracts": "workspace:^",
     "@shadow-garden/bapbong-model": "workspace:^",
     "@shadow-garden/bapbong-docx": "workspace:^",
-    "@shadow-garden/bapbong-commands": "workspace:^"
+    "@shadow-garden/bapbong-commands": "workspace:^",
+    "@shadow-garden/bapbong-layout-engine": "workspace:^",
+    "@shadow-garden/bapbong-measuring": "workspace:^"
   },
   "devDependencies": {
-    "prosemirror-state": "^1.4.4"
+    "prosemirror-state": "^1.4.4",
+    "opentype.js": "^2.0.0"
   }
 }

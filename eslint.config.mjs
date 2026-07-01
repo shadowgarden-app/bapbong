@@ -88,12 +88,16 @@ export default [
             {
               // Headless meta-tier: aggregates the isomorphic packages
               // (contracts/model/docx/commands) into one backend façade. Stays
-              // DOM-free — must NOT pull editor/view (which drag in canvas/DOM).
+              // DOM-free — may paginate (layout-engine is pure; measuring's
+              // font-file metrics are DOM-free) but must NOT pull editor/view
+              // (which drag in canvas/DOM).
               sourceTag: 'scope:headless',
               onlyDependOnLibsWithTags: [
                 'scope:pure',
                 'scope:model',
                 'scope:io',
+                'scope:measuring',
+                'scope:engine',
                 'scope:headless',
               ],
             },

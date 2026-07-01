@@ -273,10 +273,19 @@ importers:
       '@shadow-garden/bapbong-docx':
         specifier: workspace:^
         version: link:../docx
+      '@shadow-garden/bapbong-layout-engine':
+        specifier: workspace:^
+        version: link:../layout-engine
+      '@shadow-garden/bapbong-measuring':
+        specifier: workspace:^
+        version: link:../measuring
       '@shadow-garden/bapbong-model':
         specifier: workspace:^
         version: link:../model
     devDependencies:
+      opentype.js:
+        specifier: ^2.0.0
+        version: 2.0.0
       prosemirror-state:
         specifier: ^1.4.4
         version: 1.4.4
