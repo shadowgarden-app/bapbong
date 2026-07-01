@@ -24,6 +24,11 @@
           {
             "glob": "**/*",
             "input": "apps/playground/public"
+          },
+          {
+            "glob": "*.woff",
+            "input": "node_modules/@fontsource/carlito/files",
+            "output": "fonts/carlito"
           }
         ],
         "styles": ["apps/playground/src/styles.css"]

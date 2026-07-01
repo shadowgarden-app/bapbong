@@ -26,12 +26,18 @@ importers:
       '@angular/router':
         specifier: ~21.2.0
         version: 21.2.16(@angular/common@21.2.16(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2))(@angular/platform-browser@21.2.16(@angular/common@21.2.16(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.16(@angular/compiler@21.2.16)(rxjs@7.8.2)))(rxjs@7.8.2)
+      '@fontsource/carlito':
+        specifier: ^5.2.8
+        version: 5.2.8
       fast-xml-parser:
         specifier: ^5.8.0
         version: 5.8.0
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
+      opentype.js:
+        specifier: ^2.0.0
+        version: 2.0.0
       prosemirror-commands:
         specifier: ^1.7.1
         version: 1.7.1
@@ -1556,6 +1562,9 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@fontsource/carlito@5.2.8':
+    resolution: {integrity: sha512-EbsNaWvGUWiuSAv/9+n9lHMi2hfPabhw5rY7r+B84XDb0fvkw+3bCksrcEBE3sQDIKgAsIjDzzSbb0+GYJlvEQ==}
 
   '@gar/promise-retry@1.0.3':
     resolution: {integrity: sha512-GmzA9ckNokPypTg10pgpeHNQe7ph+iIKKmhKu3Ob9ANkswreCx7R3cKmY781K8QK3AqVL3xVh9A42JvIAbkkSA==}
@@ -9478,6 +9487,8 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
+
+  '@fontsource/carlito@5.2.8': {}
 
   '@gar/promise-retry@1.0.3': {}
 

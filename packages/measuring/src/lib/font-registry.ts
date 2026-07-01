@@ -15,18 +15,30 @@ function faceKey(family: string, bold: boolean, italic: boolean): string {
 }
 
 /**
- * Holds parsed font faces keyed by family + bold/italic and resolves the best
- * match for a {@link FontSpec}. Widths and vertical metrics derived from a
- * registered face are byte-for-byte identical on every platform and WebView
- * engine — that determinism is the whole reason layout is measured from font
- * files instead of the browser's `measureText`.
+ * Holds parsed font faces keyed by family + bold/italic and resolves per-glyph
+ * advance widths + vertical metrics from the font files. Widths derived here are
+ * byte-for-byte identical on every platform and WebView engine — that
+ * determinism is the whole reason layout is measured from fonts rather than the
+ * browser's `measureText`.
+ *
+ * A single face may be backed by **several files** because webfonts are commonly
+ * shipped subsetted by `unicode-range` (e.g. `@fontsource` splits latin /
+ * latin-ext / vietnamese). Each requested character is routed to the first file
+ * in the face that actually contains its glyph.
  */
 export class FontRegistry {
-  private readonly faces = new Map<string, opentype.Font>();
+  private readonly faces = new Map<string, opentype.Font[]>();
+  /** Per-face memo: code point → the file that serves it (or its .notdef fallback). */
+  private readonly glyphMemo = new Map<string, Map<number, opentype.Font>>();
 
-  /** Register an already-parsed opentype font for a family + variant. */
+  /** Register a parsed opentype font for a family + variant (appends to the
+   *  face's file list; register subset files in coverage-priority order). */
   register(family: string, variant: FontVariant, font: opentype.Font): void {
-    this.faces.set(faceKey(family, !!variant.bold, !!variant.italic), font);
+    const key = faceKey(family, !!variant.bold, !!variant.italic);
+    const list = this.faces.get(key);
+    if (list) list.push(font);
+    else this.faces.set(key, [font]);
+    this.glyphMemo.clear(); // a new file may now cover code points cached elsewhere
   }
 
   /** Parse font-file bytes (TTF/OTF/WOFF) and register the resulting face. */
@@ -34,37 +46,66 @@ export class FontRegistry {
     this.register(family, variant, opentype.parse(bytes));
   }
 
-  /** Whether a face (exact or regular-variant fallback) can serve this spec. */
-  has(spec: FontSpec): boolean {
-    return this.resolve(spec) !== null;
-  }
-
-  /**
-   * The best registered face for a spec: the exact family+bold+italic face if
-   * present, else the family's regular face, else null. The regular-variant
-   * fallback lets a document lay out from real metrics even when only one weight
-   * was bundled (bold/italic then approximated by the same outlines).
-   */
-  resolve(spec: FontSpec): opentype.Font | null {
+  /** The files backing a spec: the exact family+bold+italic face, else the
+   *  family's regular face, else empty. */
+  private files(spec: FontSpec): opentype.Font[] {
     return (
       this.faces.get(faceKey(spec.family, spec.bold, spec.italic)) ??
       this.faces.get(faceKey(spec.family, false, false)) ??
-      null
+      []
     );
+  }
+
+  /** Whether any registered file can serve this spec. */
+  has(spec: FontSpec): boolean {
+    return this.files(spec).length > 0;
+  }
+
+  /** The face's first file, for shared vertical metrics (all subset files of one
+   *  face carry the same hhea/head metrics), or null. */
+  primary(spec: FontSpec): opentype.Font | null {
+    return this.files(spec)[0] ?? null;
+  }
+
+  /** The file in the face that has a glyph for `codePoint`, else the first file
+   *  (whose .notdef advance is used), else null. Memoised per face. */
+  fileForCodePoint(spec: FontSpec, codePoint: number): opentype.Font | null {
+    const list = this.files(spec);
+    if (list.length === 0) return null;
+    if (list.length === 1) return list[0];
+    const key = faceKey(spec.family, spec.bold, spec.italic);
+    let memo = this.glyphMemo.get(key);
+    if (!memo) {
+      memo = new Map();
+      this.glyphMemo.set(key, memo);
+    }
+    const cached = memo.get(codePoint);
+    if (cached) return cached;
+    const ch = String.fromCodePoint(codePoint);
+    const found = list.find((f) => f.charToGlyph(ch).index !== 0) ?? list[0];
+    memo.set(codePoint, found);
+    return found;
   }
 }
 
 /**
  * A {@link MeasureText} that sums glyph advance widths from a registered face —
- * engine-independent, unlike canvas `measureText`. Families absent from the
- * registry defer to `fallback` (e.g. a canvas measurer). Kerning is disabled to
- * match Word's default line-breaking (kerning-for-fonts is off by default).
+ * engine-independent, unlike canvas `measureText`. Each character is routed to
+ * the subset file that contains its glyph. Families absent from the registry
+ * defer to `fallback` (e.g. a canvas measurer). Kerning is not applied, matching
+ * Word's default line-breaking (kerning-for-fonts is off by default).
  */
 export function createFontRegistryMeasurer(registry: FontRegistry, fallback: MeasureText): MeasureText {
   return (text, font) => {
-    const face = registry.resolve(font);
-    if (!face) return fallback(text, font);
-    return face.getAdvanceWidth(text, font.sizePt * PT_TO_PX, { kerning: false });
+    if (!registry.has(font)) return fallback(text, font);
+    const px = font.sizePt * PT_TO_PX;
+    let total = 0;
+    for (const ch of text) {
+      const file = registry.fileForCodePoint(font, ch.codePointAt(0) ?? 0);
+      if (!file) continue;
+      total += ((file.charToGlyph(ch).advanceWidth ?? 0) / file.unitsPerEm) * px;
+    }
+    return total;
   };
 }
 
@@ -74,7 +115,7 @@ export function createFontRegistryMeasurer(registry: FontRegistry, fallback: Mea
  */
 export function createFontRegistryMetrics(registry: FontRegistry, fallback: MeasureMetrics): MeasureMetrics {
   return (font) => {
-    const face = registry.resolve(font);
+    const face = registry.primary(font);
     if (!face) return fallback(font);
     const scale = (font.sizePt * PT_TO_PX) / face.unitsPerEm;
     return { ascent: face.ascender * scale, descent: Math.abs(face.descender) * scale };

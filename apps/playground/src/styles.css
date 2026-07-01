@@ -1,1 +1,10 @@
 /* You can add global styles to this file, and also import other style files */
+
+/* Bundled metric-compatible fonts (canvas rendering). Carlito ↔ Calibri.
+   @fontsource ships per-`unicode-range` subsets (incl. vietnamese), so the
+   browser fetches only the subsets a document actually uses. The matching
+   metrics for layout come from FontRegistry (see app/fonts.ts). */
+@import '@fontsource/carlito/400.css';
+@import '@fontsource/carlito/700.css';
+@import '@fontsource/carlito/400-italic.css';
+@import '@fontsource/carlito/700-italic.css';

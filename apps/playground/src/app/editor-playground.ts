@@ -27,6 +27,8 @@ import {
   setTextColor,
 } from '@shadow-garden/bapbong-commands';
 import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
+import type { FontRegistry } from '@shadow-garden/bapbong-measuring';
+import { loadBundledFonts } from './fonts';
 import {
   createFindDialog,
   Dialog,
@@ -128,6 +130,14 @@ export class EditorPlayground implements OnDestroy {
 
   /** The framework-agnostic render/edit core (lazily created on first load). */
   private editor: BapbongEditor | null = null;
+
+  /** Bundled metric-compatible fonts for engine-independent layout, loaded
+   *  eagerly at startup (wired into the editor in a later step). */
+  protected fontRegistry: FontRegistry | null = null;
+
+  constructor() {
+    void loadBundledFonts().then((r) => (this.fontRegistry = r));
+  }
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
 
