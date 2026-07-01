@@ -17,6 +17,8 @@ import type {
   EditorChange,
   EditorPlugin,
   EditorPointerEvent,
+  MeasureMetrics,
+  MeasureText,
   OverlayGuide,
   OverlayRect,
   PagePoint,
@@ -63,6 +65,12 @@ export interface BapbongEditorOptions {
   /** Editor plugins. Their lifecycle/event hooks are invoked by the core; they
    *  reach back through the PluginContext handed to `setup`. */
   plugins?: EditorPlugin[];
+  /** Engine-independent text measurer (e.g. font-file metrics). Defaults to a
+   *  canvas-backed one; inject to make wrapping/pagination deterministic across
+   *  WebView engines. Pair with {@link measureMetrics}. */
+  measureText?: MeasureText;
+  /** Vertical-metrics provider paired with {@link measureText}. */
+  measureMetrics?: MeasureMetrics;
 }
 
 /**
@@ -119,7 +127,11 @@ export class BapbongEditor {
 
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
-    this.core = new RenderCore(stack, { viewport: opts.viewport });
+    this.core = new RenderCore(stack, {
+      viewport: opts.viewport,
+      measureText: opts.measureText,
+      measureMetrics: opts.measureMetrics,
+    });
     // The core resolves plugin decorations to page rects at paint time.
     this.core.setDecorationProvider(() => this.pluginDecorations());
     // After a late-font relayout the core repaints content; recompute the caret

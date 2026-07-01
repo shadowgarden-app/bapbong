@@ -27,7 +27,13 @@ import {
   setTextColor,
 } from '@shadow-garden/bapbong-commands';
 import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
-import type { FontRegistry } from '@shadow-garden/bapbong-measuring';
+import {
+  createCanvasMeasurer,
+  createCanvasMetrics,
+  createFontRegistryMeasurer,
+  createFontRegistryMetrics,
+  type FontRegistry,
+} from '@shadow-garden/bapbong-measuring';
 import { loadBundledFonts } from './fonts';
 import {
   createFindDialog,
@@ -132,11 +138,15 @@ export class EditorPlayground implements OnDestroy {
   private editor: BapbongEditor | null = null;
 
   /** Bundled metric-compatible fonts for engine-independent layout, loaded
-   *  eagerly at startup (wired into the editor in a later step). */
+   *  eagerly at startup; awaited before the editor is created so the first
+   *  layout already measures from real font metrics. */
   protected fontRegistry: FontRegistry | null = null;
+  private readonly fontsReady: Promise<void>;
 
   constructor() {
-    void loadBundledFonts().then((r) => (this.fontRegistry = r));
+    this.fontsReady = loadBundledFonts().then((r) => {
+      this.fontRegistry = r;
+    });
   }
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -183,6 +193,7 @@ export class EditorPlayground implements OnDestroy {
     this.fileName.set(name);
 
     try {
+      await this.fontsReady; // real metrics ready before the first layout
       const editor = this.ensureEditor();
       if (!editor) throw new Error('Canvas chưa sẵn sàng.');
       this.cs.closeComposer(); // a stale composer would point at the old doc
@@ -202,8 +213,16 @@ export class EditorPlayground implements OnDestroy {
     if (this.editor) return this.editor;
     const stack = this.stackHost()?.nativeElement;
     if (!stack) return null;
+    const reg = this.fontRegistry;
     const editor = new BapbongEditor(stack, {
       viewport: this.wrapHost()?.nativeElement,
+      // Measure from bundled font metrics (engine-independent), falling back to
+      // canvas for families we don't bundle. Omitted (canvas default) if the
+      // bundled fonts failed to load.
+      ...(reg && {
+        measureText: createFontRegistryMeasurer(reg, createCanvasMeasurer()),
+        measureMetrics: createFontRegistryMetrics(reg, createCanvasMetrics()),
+      }),
       // External plugins: comment tint + a right-click context menu (find/replace
       // and table-resize are built into the editor).
       plugins: [
