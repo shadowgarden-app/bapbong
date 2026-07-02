@@ -26,7 +26,12 @@
             "input": "apps/playground/public"
           },
           {
-            "glob": "*.woff",
+            "glob": "carlito-latin*.woff",
+            "input": "node_modules/@fontsource/carlito/files",
+            "output": "fonts/carlito"
+          },
+          {
+            "glob": "carlito-vietnamese*.woff",
             "input": "node_modules/@fontsource/carlito/files",
             "output": "fonts/carlito"
           }
