@@ -37,6 +37,10 @@ export interface MenubarOptions {
   menus?: Menu[];
   /** Command-name → row label override, merged over the built-in labels. */
   labels?: Record<string, string>;
+  /** `vertical` stacks the menu titles in a column and opens each dropdown to
+   *  the right, bottom-aligned so it grows upward — for a menubar docked in a
+   *  corner (e.g. bottom-left). Default `horizontal` (a classic top bar). */
+  orientation?: 'horizontal' | 'vertical';
 }
 
 export interface MenubarHandle {
@@ -87,6 +91,9 @@ const STYLE = `
 .bb-menu-shortcut{flex:none;opacity:.5;font-size:12px;padding-left:24px}
 .bb-menu-arrow{flex:none;opacity:.55;padding-left:12px}
 .bb-menu-sep{height:1px;margin:4px 6px;background:var(--bb-ui-border,#e3e3e0)}
+.bb-menubar-v{flex-direction:column;align-items:stretch;gap:1px;border-bottom:none;padding:4px}
+.bb-menubar-v .bb-menubar-title{text-align:left;width:100%}
+.bb-menubar-v .bb-menu{top:auto;bottom:0;left:100%;margin-top:0;margin-left:4px}
 `;
 
 /** Default menus: a "Format" menu of marks, a separator, then alignments —
@@ -119,9 +126,11 @@ export function mountMenubar(
   const labels = { ...DEFAULT_LABELS, ...(options.labels ?? {}) };
   const menus = options.menus ?? defaultMenus(editor.commands);
 
+  const vertical = options.orientation === 'vertical';
   const root = document.createElement('div');
-  root.className = 'bb-menubar';
+  root.className = 'bb-menubar' + (vertical ? ' bb-menubar-v' : '');
   root.setAttribute('role', 'menubar');
+  if (vertical) root.setAttribute('aria-orientation', 'vertical');
 
   const panels: Array<{ title: HTMLButtonElement; dropdown: HTMLElement }> = [];
   // Rows whose check / disabled state tracks editor state (any nesting depth).
@@ -249,7 +258,8 @@ export function mountMenubar(
       if (openIdx >= 0 && openIdx !== idx) open(idx);
     });
     title.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      // Vertical titles open to the right, so ArrowRight also opens there.
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ' || (vertical && e.key === 'ArrowRight')) {
         e.preventDefault();
         open(idx, true);
       }
