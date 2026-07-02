@@ -6,6 +6,13 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["nx", "serve", "playground"],
       "port": 4200
+    },
+    {
+      "name": "desktop-ui",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["nx", "serve", "desktop-ui", "--port=4320"],
+      "port": 4320,
+      "autoPort": false
     }
   ]
 }
