@@ -110,10 +110,14 @@ const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
 };
 
 const STYLE = `
-.bb-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 8px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-bg,#fff);border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
+.bb-toolbar-wrap{position:relative}
+.bb-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;overflow:hidden;padding:6px 8px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-bg,#fff);border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
 .bb-toolbar *{box-sizing:border-box}
-.bb-toolbar-group{display:flex;gap:2px}
+.bb-toolbar-group{display:flex;gap:2px;flex:none}
 .bb-toolbar-group+.bb-toolbar-group{padding-left:10px;border-left:1px solid var(--bb-ui-border,#e3e3e0)}
+.bb-toolbar-more{margin-left:auto;flex:none}
+.bb-toolbar-pop{position:absolute;z-index:1200;top:100%;left:0;right:0;margin-top:4px;display:flex;flex-wrap:wrap;gap:10px;row-gap:6px;align-items:center;padding:6px 8px;background:var(--bb-ui-menu-bg,#fff);border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a)}
+.bb-toolbar-pop[hidden]{display:none}
 .bb-toolbar-btn{min-width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0 7px;font-family:inherit}
 .bb-toolbar-btn:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-toolbar-btn.is-active{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-border,#b5d4f4)}
@@ -156,6 +160,10 @@ export function mountToolbar(
   const items = { ...DEFAULT_ITEMS, ...(options.items ?? {}) };
   const groups = options.groups ?? defaultToolbarGroups(editor.commands);
 
+  // wrap (position anchor) > toolbar row + overflow popover. The row never
+  // wraps: groups that don't fit fold into the popover behind a ⋮ button.
+  const wrap = document.createElement('div');
+  wrap.className = 'bb-toolbar-wrap';
   const root = document.createElement('div');
   root.className = 'bb-toolbar';
   root.setAttribute('role', 'toolbar');
@@ -275,7 +283,64 @@ export function mountToolbar(
     }
     root.appendChild(groupEl);
   }
-  host.appendChild(root);
+
+  // ── Overflow: single-row toolbar with a ⋮ popover ────────────────────
+  // On mount + resize, measure the row; while it overflows, fold whole groups
+  // (tail-first) into a popover as wide as the toolbar. Group elements only
+  // MOVE between containers, so every button/select/color ref stays live.
+  const moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.className = 'bb-toolbar-btn bb-toolbar-more';
+  moreBtn.title = 'More tools';
+  moreBtn.setAttribute('aria-label', 'More tools');
+  moreBtn.setAttribute('aria-expanded', 'false');
+  moreBtn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><circle cx="8" cy="3.2" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="12.8" r="1.4"/></svg>';
+  moreBtn.style.display = 'none';
+  root.appendChild(moreBtn);
+
+  const pop = document.createElement('div');
+  pop.className = 'bb-toolbar-pop';
+  pop.hidden = true;
+  wrap.append(root, pop);
+  host.appendChild(wrap);
+
+  const closePop = (): void => {
+    pop.hidden = true;
+    moreBtn.setAttribute('aria-expanded', 'false');
+  };
+  const onDocPointer = (e: Event): void => {
+    if (!pop.hidden && !wrap.contains(e.target as Node)) closePop();
+  };
+  document.addEventListener('pointerdown', onDocPointer, true);
+  moreBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  moreBtn.addEventListener('click', () => {
+    pop.hidden = !pop.hidden;
+    moreBtn.setAttribute('aria-expanded', String(!pop.hidden));
+  });
+
+  const fits = (): boolean => root.scrollWidth <= root.clientWidth + 1;
+  const layout = (): void => {
+    // Unfold everything (in order), then refold the tail until the row fits.
+    while (pop.firstChild) root.insertBefore(pop.firstChild, moreBtn);
+    moreBtn.style.display = 'none';
+    closePop();
+    if (fits()) return;
+    moreBtn.style.display = '';
+    const groupEls = Array.from(root.children).filter((el) => el.classList.contains('bb-toolbar-group'));
+    for (let i = groupEls.length - 1; i >= 0 && !fits(); i--) {
+      pop.insertBefore(groupEls[i], pop.firstChild);
+    }
+  };
+  // Direct call (no rAF): backgrounded/headless pages throttle rAF, and our
+  // mutations never change the row's own box, so there's no observer loop.
+  let ro: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(layout);
+    ro.observe(root);
+  }
+  window.addEventListener('resize', layout); // fallback where RO misbehaves
+  layout();
 
   const refresh = (state: EditorStateOf): void => {
     latest = state;
@@ -304,7 +369,10 @@ export function mountToolbar(
   return {
     destroy() {
       off();
-      root.remove();
+      ro?.disconnect();
+      window.removeEventListener('resize', layout);
+      document.removeEventListener('pointerdown', onDocPointer, true);
+      wrap.remove();
     },
   };
 }
