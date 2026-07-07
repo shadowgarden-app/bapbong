@@ -295,9 +295,26 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
   return float;
 }
 
+/** The run's w:drawing, looking through mc:AlternateContent — Word wraps
+ *  shapes and some images in Choice/Fallback pairs (`Requires="wps"` etc.);
+ *  the Choice branch carries the richer DrawingML, so it wins over Fallback. */
+function runDrawing(run: OoxmlNode): OoxmlNode | undefined {
+  const direct = child(run, 'w:drawing');
+  if (direct) return direct;
+  const alt = child(run, 'mc:AlternateContent');
+  if (!alt) return undefined;
+  for (const branch of ['mc:Choice', 'mc:Fallback']) {
+    for (const b of children(alt, branch)) {
+      const d = child(b, 'w:drawing');
+      if (d) return d;
+    }
+  }
+  return undefined;
+}
+
 /** Extract an image (inline or floating) from a run's w:drawing, if any. */
 function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
-  const drawing = child(run, 'w:drawing');
+  const drawing = runDrawing(run);
   if (!drawing) return null;
   const blip = findDescendant(drawing, 'a:blip');
   const embed = attrOf(blip, 'r:embed') ?? attrOf(blip, 'r:link');

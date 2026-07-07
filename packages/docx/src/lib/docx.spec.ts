@@ -734,6 +734,27 @@ describe('importDocx', () => {
     expect(img.attrs.alt).toBe('a cat');
   });
 
+  it('finds a w:drawing wrapped in mc:AlternateContent (Choice branch)', async () => {
+    // Word wraps some drawings in Choice/Fallback pairs; the image must be
+    // rescued from the mc:Choice branch instead of being dropped.
+    const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:mc="${MC_NS}"><w:body>
+      <w:p><w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:inline>
+        <wp:extent cx="952500" cy="476250"/>
+        <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></mc:Choice><mc:Fallback><w:pict/></mc:Fallback></mc:AlternateContent></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image1.png': PNG_1x1 }),
+    );
+    const img = doc.child(0).child(0);
+    expect(img.type.name).toBe('image');
+    expect(img.attrs.src).toBe(`data:image/png;base64,${PNG_1x1}`);
+    expect(img.attrs.width).toBe(100);
+  });
+
   it('resolves theme colors (w:themeColor) via theme1.xml, incl. shade', async () => {
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
       <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
