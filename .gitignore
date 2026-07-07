@@ -50,6 +50,7 @@ Thumbs.db
 vitest.config.*.timestamp*
 .angular
 
-# Large local-only stress-test doc for the playground (10MB; not committed —
-# drop your own here to use the "Load large sample" button).
-apps/playground/public/large_sample.docx
+# Local-only sample docs for the playground (real-world fixtures may carry
+# personal data; the repo goes open-source). Drop your own here for the
+# "Load sample" buttons and file-link previews.
+apps/playground/public/*.docx
