@@ -1852,12 +1852,15 @@ function layoutChrome(
   right: number,
   ctx: Ctx,
 ): ResolvedChrome {
-  // Chrome can't host floats — anchored images degrade to inline there.
-  const flow = layoutFlow(toFlowBlocks(doc, ctx.base, false), left, right, ctx);
+  // Anchored floats are positioned within the band (painted only — chrome
+  // text doesn't wrap around them; layoutFlow places them at their offsets).
+  const flow = layoutFlow(toFlowBlocks(doc, ctx.base, true), left, right, ctx);
   const lines = flow.lines.map((l) => ({ ...l, y: l.y + topY }));
   flow.tables.forEach((t) => offsetTable(t, topY));
   stripPositions(lines, flow.tables);
-  return { lines, tables: flow.tables, height: flow.height };
+  const band: ResolvedChrome = { lines, tables: flow.tables, height: flow.height };
+  if (flow.floats.length > 0) band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY }));
+  return band;
 }
 
 /** Lay out a footer document pinned `CHROME_DISTANCE` from the page bottom. */
@@ -1876,6 +1879,7 @@ function layoutFooterChrome(
     height: flow.height,
   };
   band.tables.forEach((t) => offsetTable(t, topY));
+  if (flow.floats) band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY }));
   return band;
 }
 

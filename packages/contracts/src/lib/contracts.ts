@@ -455,6 +455,10 @@ export interface ResolvedFootnotes {
 export interface ResolvedChrome {
   lines: LayoutLine[];
   tables: ResolvedTable[];
+  /** Anchored images/shapes positioned within the band (e.g. the horizontal
+   *  rule real headers draw under their contact block). Painted only — the
+   *  chrome text does not wrap around them. */
+  floats?: ResolvedFloat[];
   height: number;
 }
 

@@ -830,6 +830,28 @@ describe('floats in table cells', () => {
     // v1: the cell text does not wrap around the float — one full-band line.
     expect(cell?.lines).toHaveLength(1);
   });
+
+  it('positions anchored floats in the header band (chrome)', () => {
+    // The horizontal rule real headers draw under their contact block.
+    const header = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.text('contact'),
+        schema.node('image', {
+          src: '',
+          width: 200,
+          height: 0,
+          float: { wrap: 'none', hOffset: -10, vOffset: 30, vRel: 'paragraph' },
+          shape: { kind: 'line', stroke: '#000000', strokeWidth: 1 },
+        }),
+      ]),
+    ]);
+    const body = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('body')])]);
+    const resolved = layout(body, config(), undefined, { header });
+    const f = resolved.pageHeader?.floats?.[0];
+    // Chrome pins at 48: y = 48 + paragraph top (0) + vOffset; x = left 20 − 10.
+    expect(f).toMatchObject({ x: 10, y: 78, width: 200 });
+    expect(f?.shape).toMatchObject({ kind: 'line' });
+  });
 });
 
 describe('floating images', () => {

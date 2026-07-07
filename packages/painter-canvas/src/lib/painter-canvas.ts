@@ -213,6 +213,16 @@ export class CanvasPainter {
       if (!chrome) continue;
       for (const line of chrome.lines) this.paintLine(line, 0, o, pageInfo);
       for (const table of chrome.tables) this.paintTable(table, 0, o, pageInfo);
+      for (const f of chrome.floats ?? []) {
+        if (f.shape) {
+          this.drawShape(f.shape, f.x, f.y, f.width, f.height);
+          continue;
+        }
+        const el = this.requestImage(f.src);
+        if (el?.complete && el.naturalWidth > 0) {
+          this.ctx.drawImage(el, f.x, f.y, f.width, f.height);
+        }
+      }
     }
   }
 
