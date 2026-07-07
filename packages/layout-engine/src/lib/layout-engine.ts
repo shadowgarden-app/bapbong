@@ -146,6 +146,7 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
     width: Number(a['width']) || 0,
     height: Number(a['height']) || 0,
     link: link ? String(link.attrs['href']) : undefined,
+    ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
     pos,
   };
 }
@@ -180,6 +181,7 @@ function paragraphToFlow(
           src: String(child.attrs['src'] ?? ''),
           width: Number(child.attrs['width']) || 0,
           height: Number(child.attrs['height']) || 0,
+          ...(child.attrs['shape'] ? { shape: child.attrs['shape'] as FlowFloat['shape'] } : {}),
         });
       } else {
         runs.push(resolveImage(child, contentStart + offset));
@@ -604,6 +606,7 @@ function wrapParagraph(
           width: t.image.width,
           height: t.image.height,
           link: t.link,
+          ...(t.image.shape ? { shape: t.image.shape } : {}),
           pos: t.pos,
         });
       } else {
@@ -1412,7 +1415,7 @@ function placeBlocks(
           : f.vRel === 'margin'
             ? top + (f.vOffset ?? 0)
             : yPara + (f.vOffset ?? 0);
-      pageFloats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src });
+      pageFloats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src, ...(f.shape ? { shape: f.shape } : {}) });
       colDirty = true;
       if (f.wrap === 'square') {
         exclusions.push({

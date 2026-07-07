@@ -149,6 +149,34 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(String(img?.attrs['src'])).toBe(src);
   });
 
+  it('round-trips drawn shapes (anchored rect + inline line)', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: '',
+          width: 18,
+          height: 16,
+          float: { wrap: 'square', hOffset: 319, hRel: 'margin', vOffset: -7, vRel: 'paragraph' },
+          shape: { kind: 'rect', stroke: '#4472C4', strokeWidth: 2 },
+        }),
+        schema.node('image', {
+          src: '',
+          width: 100,
+          height: 0,
+          shape: { kind: 'line', stroke: '#C45911', strokeWidth: 1, flipV: true },
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const shapes = [...range(back.child(0))].filter((n) => n.type.name === 'image');
+    expect(shapes).toHaveLength(2);
+    expect(shapes[0].attrs['shape']).toEqual({ kind: 'rect', stroke: '#4472C4', strokeWidth: 2 });
+    expect(shapes[0].attrs['width']).toBe(18);
+    expect(shapes[0].attrs['float']).toMatchObject({ wrap: 'square', hOffset: 319, vOffset: -7, vRel: 'paragraph' });
+    expect(shapes[1].attrs['shape']).toEqual({ kind: 'line', stroke: '#C45911', strokeWidth: 1, flipV: true });
+    expect(shapes[1].attrs['float']).toBeNull();
+  });
+
   it('round-trips a hyperlink (link mark + href)', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

@@ -102,12 +102,30 @@ export interface InlineRun {
   pos?: number;
 }
 
+/** A vector shape riding an image box (drawn, not a bitmap — `src` stays '').
+ *  Word drawing shapes (wps/VML rect + straight connector) map to this: same
+ *  layout semantics as an image (atomic box, inline or anchored), different
+ *  paint. Dimensions live on the carrying image; colors are CSS. */
+export interface ShapeSpec {
+  kind: 'rect' | 'line';
+  /** Stroke color; absent = no stroke (a:noFill on the outline). */
+  stroke?: string;
+  /** Stroke width in px (defaults to 1 when a stroke is drawn). */
+  strokeWidth?: number;
+  /** Rect fill; absent = transparent (outline only). */
+  fill?: string;
+  /** Line drawn bottom-left → top-right instead (a:xfrm flipV). */
+  flipV?: boolean;
+}
+
 /** An atomic inline image laid out inline with text. Dimensions are CSS px. */
 export interface InlineImage {
   src: string;
   width: number;
   height: number;
   link?: string;
+  /** Present when this box is a drawn vector shape instead of a bitmap. */
+  shape?: ShapeSpec;
   /** Absolute ProseMirror position of the image node (occupies 1 position). */
   pos?: number;
 }
@@ -138,6 +156,8 @@ export interface FlowFloat {
   src: string;
   width: number;
   height: number;
+  /** Present when this float is a drawn vector shape instead of a bitmap. */
+  shape?: ShapeSpec;
   wrap: 'square' | 'topAndBottom' | 'none';
   /** Horizontal: alignment within hRel, or an offset from its left edge. */
   hAlign?: 'left' | 'right' | 'center';
@@ -338,6 +358,8 @@ export interface LayoutImageSegment {
   width: number;
   height: number;
   link?: string;
+  /** Present when this box is a drawn vector shape instead of a bitmap. */
+  shape?: ShapeSpec;
   /** Absolute PM position of the image node (occupies 1 position). */
   pos?: number;
 }
@@ -398,6 +420,8 @@ export interface ResolvedFloat {
   width: number;
   height: number;
   src: string;
+  /** Present when this float is a drawn vector shape instead of a bitmap. */
+  shape?: ShapeSpec;
 }
 
 export interface ResolvedPage {

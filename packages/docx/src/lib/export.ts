@@ -16,6 +16,7 @@ const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationship
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
 const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
 const CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
@@ -85,7 +86,60 @@ function runProps(marks: readonly Mark[]): string {
   return out.length ? `<w:rPr>${out.join('')}</w:rPr>` : '';
 }
 
+/** Float attrs → the wp:anchor wrapper (position + wrap) around a graphic. */
+function anchorXml(float: Record<string, unknown>, cx: number, cy: number, n: number, graphic: string): string {
+  const dist = (k: string) => pxToEmu((float[k] as number) ?? 0);
+  const hRel = float['hRel'] === 'page' ? 'page' : 'column';
+  const vRel = float['vRel'] === 'page' ? 'page' : float['vRel'] === 'margin' ? 'margin' : 'paragraph';
+  const posH = float['hAlign']
+    ? `<wp:align>${float['hAlign']}</wp:align>`
+    : `<wp:posOffset>${pxToEmu((float['hOffset'] as number) ?? 0)}</wp:posOffset>`;
+  const posV = `<wp:posOffset>${pxToEmu((float['vOffset'] as number) ?? 0)}</wp:posOffset>`;
+  const wrap =
+    float['wrap'] === 'topAndBottom'
+      ? '<wp:wrapTopAndBottom/>'
+      : float['wrap'] === 'none'
+        ? '<wp:wrapNone/>'
+        : '<wp:wrapSquare wrapText="bothSides"/>';
+  return (
+    `<wp:anchor distT="${dist('distT')}" distB="${dist('distB')}" distL="${dist('distL')}" distR="${dist('distR')}" ` +
+    `simplePos="0" relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">` +
+    `<wp:simplePos x="0" y="0"/>` +
+    `<wp:positionH relativeFrom="${hRel}">${posH}</wp:positionH>` +
+    `<wp:positionV relativeFrom="${vRel}">${posV}</wp:positionV>` +
+    `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    wrap +
+    `<wp:docPr id="${n}" name="Shape ${n}"/><wp:cNvGraphicFramePr/>` +
+    graphic +
+    `</wp:anchor>`
+  );
+}
+
+/** A drawn shape (rect/line) → wps drawing; inline or anchored per `float`. */
+function shapeXml(node: PMNode, ctx: ExportCtx): string {
+  const s = node.attrs['shape'] as { kind: 'rect' | 'line'; stroke?: string; strokeWidth?: number; fill?: string; flipV?: boolean };
+  const n = ctx.nextId++;
+  const cx = pxToEmu((node.attrs['width'] as number) ?? 0);
+  const cy = pxToEmu((node.attrs['height'] as number) ?? 0);
+  const fill = s.fill ? `<a:solidFill><a:srgbClr val="${s.fill.replace(/^#/, '')}"/></a:solidFill>` : '<a:noFill/>';
+  const ln = s.stroke
+    ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill></a:ln>`
+    : '<a:ln><a:noFill/></a:ln>';
+  const graphic =
+    `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr/>` +
+    `<wps:spPr><a:xfrm${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+    `<a:prstGeom prst="${s.kind === 'line' ? 'line' : 'rect'}"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>` +
+    `<wps:bodyPr/></wps:wsp></a:graphicData></a:graphic>`;
+  const float = node.attrs['float'] as Record<string, unknown> | null;
+  const body = float
+    ? anchorXml(float, cx, cy, n, graphic)
+    : `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>` +
+      `<wp:docPr id="${n}" name="Shape ${n}"/>${graphic}</wp:inline>`;
+  return `<w:r><w:drawing>${body}</w:drawing></w:r>`;
+}
+
 function imageXml(node: PMNode, ctx: ExportCtx): string {
+  if (node.attrs['shape']) return shapeXml(node, ctx);
   const src = String(node.attrs['src'] ?? '');
   const m = /^data:([^;]+);base64,(.+)$/.exec(src);
   if (!m) return '';
@@ -492,7 +546,7 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}">` +
+    `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wps="${WPS_NS}">` +
     `<w:body>${body}${sectPr}</w:body></w:document>`;
   zip.file('word/document.xml', documentXml);
   if (hasComments) {

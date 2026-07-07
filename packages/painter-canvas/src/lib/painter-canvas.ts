@@ -10,6 +10,7 @@ import type {
   ResolvedPage,
   ResolvedTable,
   SelectionRect,
+  ShapeSpec,
 } from '@shadow-garden/bapbong-contracts';
 
 export interface PaintOptions {
@@ -285,6 +286,10 @@ export class CanvasPainter {
 
     // Floating images sit behind the text (text already flows around them).
     for (const f of page.floats ?? []) {
+      if (f.shape) {
+        this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
+        continue;
+      }
       const el = this.requestImage(f.src);
       if (el?.complete && el.naturalWidth > 0) {
         ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
@@ -383,12 +388,49 @@ export class CanvasPainter {
       }
     }
     for (const img of line.images ?? []) {
+      if (img.shape) {
+        // Same box the bitmap would occupy: bottom edge on the baseline.
+        this.drawShape(img.shape, img.x, baselineY - img.height, img.width, img.height);
+        continue;
+      }
       const el = this.requestImage(img.src);
       if (el?.complete && el.naturalWidth > 0) {
         // The image's bottom edge sits on the baseline (matches the layout).
         ctx.drawImage(el, img.x, baselineY - img.height, img.width, img.height);
       }
     }
+  }
+
+  /** Vector shape in an image box: outlined/filled rect, or a straight line
+   *  corner-to-corner (top-left → bottom-right; flipV mirrors vertically). */
+  private drawShape(s: ShapeSpec, x: number, y: number, w: number, h: number): void {
+    const ctx = this.ctx;
+    if (s.kind === 'rect') {
+      if (s.fill) {
+        ctx.fillStyle = s.fill;
+        ctx.fillRect(x, y, w, h);
+      }
+      if (s.stroke) {
+        const lw = s.strokeWidth || 1;
+        ctx.strokeStyle = s.stroke;
+        ctx.lineWidth = lw;
+        // Stroke inside the box so thick outlines don't bleed into text.
+        ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0, w - lw), Math.max(0, h - lw));
+      }
+      return;
+    }
+    if (!s.stroke) return;
+    ctx.strokeStyle = s.stroke;
+    ctx.lineWidth = s.strokeWidth || 1;
+    ctx.beginPath();
+    if (s.flipV) {
+      ctx.moveTo(x, y + h);
+      ctx.lineTo(x + w, y);
+    } else {
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + w, y + h);
+    }
+    ctx.stroke();
   }
 
   private paintTable(

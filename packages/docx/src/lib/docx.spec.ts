@@ -755,6 +755,53 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100);
   });
 
+  it('imports wps shapes (rect/line) as shape-carrying image nodes', async () => {
+    const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+    const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
+      <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+    </a:clrScheme></a:themeElements></a:theme>`;
+    // Checkbox-style rect: anchored, outline width via a:ln, color via the
+    // style's lnRef (theme accent1) — the shape real quote documents draw.
+    const rect = `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300">
+      <wp:positionH relativeFrom="column"><wp:posOffset>3041015</wp:posOffset></wp:positionH>
+      <wp:positionV relativeFrom="paragraph"><wp:posOffset>-67945</wp:posOffset></wp:positionV>
+      <wp:extent cx="170815" cy="150495"/><wp:wrapThrough wrapText="bothSides"/><wp:docPr id="5" name="Rectangle 5"/>
+      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS}"><wps:cNvSpPr/>
+        <wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="170815" cy="150495"/></a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln w="19050"/></wps:spPr>
+        <wps:style><a:lnRef idx="2"><a:schemeClr val="accent1"/></a:lnRef></wps:style>
+      <wps:bodyPr/></wps:wsp></a:graphicData></a:graphic>
+    </wp:anchor></w:drawing></mc:Choice><mc:Fallback><w:pict/></mc:Fallback></mc:AlternateContent>`;
+    // Horizontal-rule style straight connector with a direct outline color.
+    const line = `<w:drawing><wp:inline><wp:extent cx="952500" cy="0"/><wp:docPr id="6" name="Straight Connector 6"/>
+      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS}">
+        <wps:spPr><a:xfrm flipV="1"/><a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom>
+          <a:ln w="9525"><a:solidFill><a:srgbClr val="C45911"/></a:solidFill></a:ln></wps:spPr>
+      </wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:mc="${MC_NS}"><w:body>
+      <w:p><w:r>${rect}</w:r><w:r>${line}</w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, undefined, undefined, undefined, undefined, themeXml));
+    const para = doc.child(0);
+    expect(para.childCount).toBe(2);
+
+    const rectNode = para.child(0);
+    expect(rectNode.type.name).toBe('image');
+    expect(rectNode.attrs.src).toBe('');
+    expect(rectNode.attrs.width).toBe(18); // 170815 EMU
+    expect(rectNode.attrs.height).toBe(16); // 150495 EMU
+    expect(rectNode.attrs.shape).toEqual({ kind: 'rect', strokeWidth: 2, stroke: '#4472C4' });
+    expect(rectNode.attrs.float).toMatchObject({ wrap: 'square', hOffset: 319, vRel: 'paragraph' });
+
+    const lineNode = para.child(1);
+    expect(lineNode.attrs.shape).toEqual({ kind: 'line', strokeWidth: 1, stroke: '#C45911', flipV: true });
+    expect(lineNode.attrs.width).toBe(100);
+    expect(lineNode.attrs.height).toBe(0);
+    expect(lineNode.attrs.float).toBeNull();
+  });
+
   it('resolves theme colors (w:themeColor) via theme1.xml, incl. shade', async () => {
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
       <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>

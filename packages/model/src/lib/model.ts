@@ -92,6 +92,10 @@ export const schema = new Schema({
         // hAlign?, hOffset?, hRel?, vOffset?, vRel?, distL?, distR?, distT?,
         // distB? } in px, or null for inline images. Importer-set.
         float: { default: null },
+        // Drawn vector shape (wps rect / straight connector) riding this box:
+        // { kind: 'rect'|'line', stroke?, strokeWidth?, fill?, flipV? } — src
+        // is then '' and the box paints as vector. Null for real bitmaps.
+        shape: { default: null },
       },
       toDOM(node) {
         const a = node.attrs;

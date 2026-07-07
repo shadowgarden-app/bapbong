@@ -215,7 +215,7 @@ function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
 /** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
  *  (page breaks are handled at the paragraph level, not here). */
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
-  const image = parseImage(run, ctx);
+  const image = parseImage(run, ctx) ?? parseShape(run, ctx);
   if (image) return [image];
 
   const out: PMNode[] = [];
@@ -333,6 +333,56 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     height: emuToPx(attrOf(extent, 'cy')),
     alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
     float,
+  });
+}
+
+/** Color of a node's <a:solidFill>: srgbClr directly, schemeClr via theme. */
+function solidFillColor(node: OoxmlNode | undefined, ctx: Ctx): string | undefined {
+  const fill = child(node, 'a:solidFill');
+  if (!fill) return undefined;
+  const srgb = attrOf(child(fill, 'a:srgbClr'), 'val');
+  if (srgb) return `#${srgb}`;
+  const scheme = attrOf(child(fill, 'a:schemeClr'), 'val');
+  return scheme ? ctx.resolveTheme(scheme) : undefined;
+}
+
+/** A drawn wps shape (rect / straight connector) in a run's drawing — the
+ *  checkbox squares and horizontal rules real documents draw with Shapes.
+ *  Rides the image node (same box semantics) with a `shape` payload; other
+ *  prstGeom kinds stay unmodelled (dropped) for now. */
+function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const drawing = runDrawing(run);
+  if (!drawing) return null;
+  const wsp = findDescendant(drawing, 'wps:wsp');
+  const spPr = child(wsp, 'wps:spPr');
+  const prst = attrOf(child(spPr, 'a:prstGeom'), 'prst');
+  const kind = prst === 'rect' ? 'rect' : prst === 'line' || prst === 'straightConnector1' ? 'line' : null;
+  if (!kind) return null;
+
+  const shape: Record<string, unknown> = { kind };
+  const ln = child(spPr, 'a:ln');
+  if (!child(ln, 'a:noFill')) {
+    const w = attrOf(ln, 'w'); // outline width in EMU
+    shape['strokeWidth'] = w ? Math.max(1, Math.round(Number(w) / 9525)) : 1;
+    // Direct outline color, else the style's line reference (how Word themes
+    // shape outlines), else black.
+    const lnRef = findDescendant(child(wsp, 'wps:style'), 'a:lnRef');
+    const refScheme = attrOf(child(lnRef, 'a:schemeClr'), 'val');
+    shape['stroke'] = solidFillColor(ln, ctx) ?? (refScheme ? ctx.resolveTheme(refScheme) : undefined) ?? '#000000';
+  }
+  const fill = solidFillColor(spPr, ctx);
+  if (fill) shape['fill'] = fill;
+  if (attrOf(child(spPr, 'a:xfrm'), 'flipV') === '1') shape['flipV'] = true;
+
+  const extent = findDescendant(drawing, 'wp:extent');
+  const docPr = findDescendant(drawing, 'wp:docPr');
+  return ctx.schema.nodes['image'].create({
+    src: '',
+    width: emuToPxZero(attrOf(extent, 'cx')) ?? 0,
+    height: emuToPxZero(attrOf(extent, 'cy')) ?? 0,
+    alt: attrOf(docPr, 'name') ?? kind,
+    float: parseAnchorFloat(drawing),
+    shape,
   });
 }
 
