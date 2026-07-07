@@ -450,12 +450,18 @@ export class CanvasPainter {
     pageInfo?: PageInfo,
   ): void {
     const ctx = this.ctx;
-    // Cell fills (w:shd) first — behind borders and content.
+    // Cell fills (w:shd) first — behind everything.
     for (const cell of table.cells) {
       if (cell.background) {
         ctx.fillStyle = cell.background;
         ctx.fillRect(cell.x, yOffset + cell.y, cell.width, cell.height);
       }
+    }
+    // Cell content next: run shading/highlight boxes can reach the cell edge,
+    // so borders must stroke AFTER them (Word paints grid lines on top).
+    for (const cell of table.cells) {
+      for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
+      for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
     }
     // OOXML tables are borderless unless w:tblBorders (or a table style) says
     // otherwise. Outer edges use top/bottom/left/right; shared edges insideH/V.
@@ -486,11 +492,9 @@ export class CanvasPainter {
       }
       ctx.setLineDash([]);
     }
+    // Anchored images/shapes positioned in the cells, on top (Word paints
+    // non-behindDoc drawings over the table grid).
     for (const cell of table.cells) {
-      for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
-      for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
-      // Anchored images/shapes positioned in this cell (in front of the text,
-      // like Word paints non-behindDoc drawings).
       for (const f of cell.floats ?? []) {
         if (f.shape) {
           this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
