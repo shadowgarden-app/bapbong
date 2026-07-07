@@ -744,6 +744,94 @@ describe('toFlowBlocks', () => {
   });
 });
 
+describe('floats in table cells', () => {
+  const schema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      text: { group: 'inline' },
+      image: {
+        inline: true,
+        group: 'inline',
+        attrs: {
+          src: {},
+          width: { default: null },
+          height: { default: null },
+          float: { default: null },
+          shape: { default: null },
+        },
+      },
+      table: { group: 'block', content: 'table_row+' },
+      table_row: { content: 'table_cell+' },
+      table_cell: {
+        content: 'block+',
+        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } },
+      },
+    },
+  });
+
+  it('keeps anchored floats when flattening cell content (no inline degrade)', () => {
+    const doc = schema.node('doc', null, [
+      schema.node('table', null, [
+        schema.node('table_row', null, [
+          schema.node('table_cell', null, [
+            schema.node('paragraph', null, [
+              schema.text('x'),
+              schema.node('image', {
+                src: '',
+                width: 18,
+                height: 16,
+                float: { wrap: 'square', hOffset: 30, vOffset: 5, vRel: 'paragraph' },
+                shape: { kind: 'rect', stroke: '#4472C4', strokeWidth: 2 },
+              }),
+            ]),
+          ]),
+        ]),
+      ]),
+    ]);
+    const block = toFlowBlocks(doc)[0];
+    if (block.type !== 'table') throw new Error('expected table');
+    const para = block.rows[0].cells[0].content[0];
+    if (para.type !== 'paragraph') throw new Error('expected paragraph');
+    expect(para.floats).toHaveLength(1);
+    expect(para.floats?.[0]).toMatchObject({ width: 18, shape: { kind: 'rect' } });
+    expect(para.runs.filter((r) => 'src' in r)).toHaveLength(0); // not inline
+  });
+
+  it('positions the float at its anchor offsets inside the cell box', () => {
+    const cellPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hello', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 18,
+          height: 16,
+          wrap: 'square',
+          hOffset: 30,
+          vOffset: 5,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#4472C4', strokeWidth: 2 },
+        },
+      ],
+    };
+    const table: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [{ colspan: 1, rowspan: 1, colwidth: [120], content: [cellPara] }] }],
+    };
+    const { pages } = layoutBlocks([table], config());
+    const cell = pages[0].tables?.[0].cells[0];
+    expect(cell?.floats).toHaveLength(1);
+    const f = cell?.floats?.[0];
+    // x = cell content left (cell.x + 7.2 pad) + hOffset; y = pad top + vOffset.
+    expect(f?.x).toBeCloseTo((cell?.x ?? 0) + 7.2 + 30);
+    expect(f?.y).toBeCloseTo((cell?.y ?? 0) + 5);
+    expect(f?.shape).toMatchObject({ kind: 'rect', stroke: '#4472C4' });
+    // v1: the cell text does not wrap around the float — one full-band line.
+    expect(cell?.lines).toHaveLength(1);
+  });
+});
+
 describe('floating images', () => {
   const words = (n: number, len = 9) => Array.from({ length: n }, () => 'a'.repeat(len)).join(' ');
 

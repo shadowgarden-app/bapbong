@@ -258,7 +258,9 @@ function tableToFlow(
       const cellPos = rowPos + 1 + cellOffset;
       const content: FlowBlock[] = [];
       cellNode.forEach((child, childOffset) => {
-        const block = nodeToBlock(child, base, cellPos + 1 + childOffset, false, counter);
+        // Cells keep anchored floats: layoutFlow positions them inside the
+        // cell box (painted at their offsets; text doesn't wrap around them).
+        const block = nodeToBlock(child, base, cellPos + 1 + childOffset, true, counter);
         if (block) content.push(block);
       });
       const a = cellNode.attrs;
@@ -771,6 +773,7 @@ function offsetTable(table: ResolvedTable, dy: number): void {
   for (const cell of table.cells) {
     cell.y += dy;
     for (const line of cell.lines) line.y += dy;
+    if (cell.floats) for (const f of cell.floats) f.y += dy;
     if (cell.tables) for (const t of cell.tables) offsetTable(t, dy);
   }
 }
@@ -791,23 +794,42 @@ function shiftTableX(table: ResolvedTable, dx: number): void {
   for (const cell of table.cells) {
     cell.x += dx;
     for (const line of cell.lines) shiftLineX(line, dx);
+    if (cell.floats) for (const f of cell.floats) f.x += dx;
     if (cell.tables) for (const t of cell.tables) shiftTableX(t, dx);
   }
 }
 
 /** Lay out a sequence of blocks within a content box, stacking vertically from
- *  y = 0. No pagination — used for table-cell content. */
+ *  y = 0. No pagination — used for table-cell content. Anchored floats are
+ *  positioned at their offsets within the box (v1: painted only — the cell's
+ *  text does not wrap around them, which matches how Word renders the small
+ *  wrapThrough shapes real documents drop into table cells). */
 function layoutFlow(
   blocks: FlowBlock[],
   contentLeft: number,
   contentRight: number,
   ctx: Ctx,
-): { lines: LayoutLine[]; tables: ResolvedTable[]; height: number } {
+): { lines: LayoutLine[]; tables: ResolvedTable[]; floats: ResolvedFloat[]; height: number } {
   const lines: LayoutLine[] = [];
   const tables: ResolvedTable[] = [];
+  const floats: ResolvedFloat[] = [];
   let y = 0;
   for (const block of blocks) {
     if (block.type === 'paragraph') {
+      for (const f of block.floats ?? []) {
+        // Horizontal: alignment within the box, else offset from its left.
+        // (hRel 'page' has no page here — the box is the closest analogue.)
+        const fx =
+          f.hAlign === 'right'
+            ? contentRight - f.width
+            : f.hAlign === 'center'
+              ? (contentLeft + contentRight - f.width) / 2
+              : contentLeft + (f.hOffset ?? 0);
+        // Vertical: relative to the anchor paragraph's top (margin/page
+        // degrade to the same — a cell has no margin band of its own).
+        const fy = y + (f.vOffset ?? 0);
+        floats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src, ...(f.shape ? { shape: f.shape } : {}) });
+      }
       for (const d of layoutParagraph(block, contentLeft, contentRight, ctx)) {
         lines.push(draftToLine(d, y));
         y += d.height;
@@ -819,7 +841,7 @@ function layoutFlow(
       y += table.height;
     }
   }
-  return { lines, tables, height: y };
+  return { lines, tables, floats, height: y };
 }
 
 /**
@@ -909,6 +931,7 @@ function layoutTable(
     cellWidth: number;
     lines: LayoutLine[];
     tables: ResolvedTable[];
+    floats: ResolvedFloat[];
     contentHeight: number;
     background?: string;
     vAlign?: 'center' | 'bottom';
@@ -937,6 +960,7 @@ function layoutTable(
       cellWidth,
       lines: flow.lines,
       tables: flow.tables,
+      floats: flow.floats,
       contentHeight: flow.height,
       background: cell.background,
       vAlign: cell.vAlign,
@@ -993,6 +1017,7 @@ function layoutTable(
     if (c.background) cell.background = c.background;
     if (c.borders) cell.borders = c.borders;
     if (c.tables.length > 0) cell.tables = c.tables;
+    if (c.floats.length > 0) cell.floats = c.floats.map((f) => ({ ...f, y: f.y + dy }));
     return cell;
   });
 
@@ -1068,6 +1093,7 @@ const MIN_BAND = 24;
 function shiftCell(cell: ResolvedCell, dy: number): ResolvedCell {
   cell.y += dy;
   for (const line of cell.lines) line.y += dy;
+  cell.floats?.forEach((f) => (f.y += dy));
   cell.tables?.forEach((t) => offsetTable(t, dy));
   return cell;
 }
@@ -1080,6 +1106,7 @@ function cloneTable(t: ResolvedTable): ResolvedTable {
 function cloneCell(cell: ResolvedCell): ResolvedCell {
   const copy: ResolvedCell = { ...cell, lines: cell.lines.map((l) => ({ ...l })) };
   if (cell.tables) copy.tables = cell.tables.map(cloneTable);
+  if (cell.floats) copy.floats = cell.floats.map((f) => ({ ...f }));
   return copy;
 }
 
@@ -1139,12 +1166,18 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
       const topCell: ResolvedCell = { ...cell, height: cut - cell.y, lines: topLines };
       if (topTables.length > 0) topCell.tables = topTables;
       else delete topCell.tables;
+      const topFloats = (cell.floats ?? []).filter((f) => f.y + f.height <= cut);
+      if (topFloats.length > 0) topCell.floats = topFloats;
+      else delete topCell.floats;
       topCells.push(topCell);
 
       const delta = -c.firstY;
       const lines = c.remLines.map((l) => ({ ...l, y: l.y + delta }));
       const remTables = c.remTables.map(cloneTable);
       remTables.forEach((t) => offsetTable(t, delta));
+      const remFloats = (cell.floats ?? [])
+        .filter((f) => f.y + f.height > cut)
+        .map((f) => ({ ...f, y: f.y + delta }));
       const contCell: ResolvedCell = {
         x: cell.x,
         y: 0,
@@ -1155,6 +1188,7 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
         lines,
       };
       if (remTables.length > 0) contCell.tables = remTables;
+      if (remFloats.length > 0) contCell.floats = remFloats;
       restCells.push(contCell);
     }
   }
@@ -1183,6 +1217,7 @@ function cloneHeaderCells(table: ResolvedTable, headerBottom: number): ResolvedC
   return band.map((cell) => ({
     ...cell,
     tables: undefined,
+    floats: cell.floats?.map((f) => ({ ...f })),
     lines: cell.lines.map((l) => {
       const line: LayoutLine = { ...l, segments: l.segments.map((s) => ({ ...s, pos: undefined })) };
       delete line.from;
@@ -1714,6 +1749,7 @@ function cloneTableShifted(t: ResolvedTable, delta: number): ResolvedTable {
       borders: c.borders ? { ...c.borders } : c.borders,
       lines: c.lines.map((l) => cloneLineShifted(l, delta)),
       tables: c.tables?.map((nt) => cloneTableShifted(nt, delta)),
+      floats: c.floats?.map((f) => ({ ...f })),
     })),
   };
 }

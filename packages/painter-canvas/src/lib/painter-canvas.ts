@@ -479,6 +479,18 @@ export class CanvasPainter {
     for (const cell of table.cells) {
       for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
       for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
+      // Anchored images/shapes positioned in this cell (in front of the text,
+      // like Word paints non-behindDoc drawings).
+      for (const f of cell.floats ?? []) {
+        if (f.shape) {
+          this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
+          continue;
+        }
+        const el = this.requestImage(f.src);
+        if (el?.complete && el.naturalWidth > 0) {
+          ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
+        }
+      }
     }
   }
 

@@ -397,6 +397,9 @@ export interface ResolvedCell {
   borders?: TableBorders;
   /** Tables nested inside this cell. */
   tables?: ResolvedTable[];
+  /** Anchored images/shapes positioned within this cell (v1: painted at their
+   *  anchor offsets; cell text does not wrap around them). */
+  floats?: ResolvedFloat[];
 }
 
 /** A laid-out table; (x, y) is its top-left in page coordinates (px). */
