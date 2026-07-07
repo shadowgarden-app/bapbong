@@ -19,6 +19,10 @@ const parser = new XMLParser({
   preserveOrder: true,
   // Keep significant whitespace in <w:t> (e.g. xml:space="preserve" "Hello ").
   trimValues: false,
+  // Text is text — never strnum it. The default (true) mangles document
+  // content: "100.000" → 100, "00" → 0, "1." → 1 — Word splits numbers like
+  // "1.500.000" across runs (rsid), and each fragment got destroyed.
+  parseTagValue: false,
 });
 
 function buildNode(entry: Record<string, unknown>): OoxmlNode {

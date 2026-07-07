@@ -103,6 +103,20 @@ describe('importDocx', () => {
     expect(rawDocumentXml).toContain('<w:body>');
   });
 
+  it('keeps numeric-looking text verbatim (no strnum mangling)', async () => {
+    // Word splits "1.500.000" across runs (rsid); each fragment must survive
+    // untouched — parseTagValue would turn "1." → 1, "00" → 0, "100.000" → 100.
+    const runs = ['1.', '5', '00', '.000']
+      .map((t) => `<w:r><w:t>${t}</w:t></w:r>`)
+      .join('');
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>${runs}</w:p><w:p><w:r><w:t>100.000</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(xml));
+    expect(doc.child(0).textContent).toBe('1.500.000');
+    expect(doc.child(1).textContent).toBe('100.000');
+  });
+
   it('treats a toggle disabled via w:val="false" as off', async () => {
     const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>not bold</w:t></w:r></w:p></w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(xml));
