@@ -704,6 +704,12 @@ function wrapParagraph(
   const clusterable = (t: Token) =>
     t.text != null && !t.isSpace && !t.isTab && !t.field && !t.image;
 
+  // Spaces at the start of a soft-wrapped continuation line are suppressed
+  // (they belong to the previous line's end). But typed leading spaces — the
+  // paragraph's first line, or right after a hard break — DO render; Word
+  // keeps them, and real documents position text with them.
+  let softWrapped = false;
+
   for (let ti = 0; ti < tokens.length; ti++) {
     const token = tokens[ti];
     // A forced break (w:br) ends the current line; its PM position is the slot
@@ -712,10 +718,11 @@ function wrapParagraph(
       if (token.pos != null) prevTo = token.pos + 1;
       flushLine(false);
       resetCluster();
+      softWrapped = false;
       continue;
     }
-    // Skip leading spaces (but keep a leading tab — it indents the line).
-    if (token.isSpace && !token.isTab && lineTokens.length === 0) continue;
+    // Skip leading spaces on wrapped lines (a leading tab always indents).
+    if (token.isSpace && !token.isTab && lineTokens.length === 0 && softWrapped) continue;
     if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
     if (clusterable(token) && clusterFont && sameFont(clusterFont, token.font)) {
       token.width = Math.max(0, measure(clusterText + token.text, token.font) - clusterWidth);
@@ -724,6 +731,7 @@ function wrapParagraph(
     if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > lineRight) {
       flushLine(false);
       resetCluster(); // the wrapped token starts a fresh glyph run
+      softWrapped = true;
       if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
       else if (clusterable(token)) token.width = measure(token.text as string, token.font);
     }

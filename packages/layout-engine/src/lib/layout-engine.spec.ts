@@ -525,6 +525,30 @@ describe('layoutBlocks', () => {
     expect(pages[0].lines[0]).toMatchObject({ from: 7, to: 7 });
   });
 
+  it('renders typed leading spaces on a first line, drops them after a wrap', () => {
+    // Real documents right-position text ("Ký tên") with a run of spaces —
+    // those must render. Spaces landing at a soft-wrapped line start don't.
+    const first: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: '     x', font: font() }], // 5 leading spaces @10px each
+    };
+    const { pages } = layoutBlocks([first], config());
+    const segs = pages[0].lines[0].segments;
+    // The glyph lands 50px past the content left edge (spaces painted).
+    expect(segs.at(-1)?.x).toBeCloseTo(20 + 50);
+
+    // A paragraph wide enough to wrap: the continuation line still starts
+    // flush at the content edge (no leading space), as before.
+    const wrapping: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaaaaaaaa '.repeat(8).trim(), font: font() }],
+    };
+    const wrapped = layoutBlocks([wrapping], config()).pages[0].lines;
+    expect(wrapped.length).toBeGreaterThan(1);
+    expect(wrapped[1].segments[0].x).toBeCloseTo(20);
+    expect(wrapped[1].segments[0].text?.startsWith(' ')).toBe(false);
+  });
+
   it('applies paragraph spacing (before/after gaps + line multiplier)', () => {
     const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
     const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };
