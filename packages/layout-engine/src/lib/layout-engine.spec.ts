@@ -549,6 +549,21 @@ describe('layoutBlocks', () => {
     expect(wrapped[1].segments[0].text?.startsWith(' ')).toBe(false);
   });
 
+  it('breaks a word at character level when the band cannot fit it (narrow cell)', () => {
+    // "STT" in a header cell narrower than one word: Word stacks S/T/T.
+    const cellPara: FlowBlock = { type: 'paragraph', runs: [{ text: 'STT', font: font(), pos: 10 }], pos: 9 };
+    const table: FlowBlock = {
+      type: 'table',
+      // colwidth 26 − 2×7.2 padding → 11.6px band: one 10px char per line.
+      rows: [{ cells: [{ colspan: 1, rowspan: 1, colwidth: [26], content: [cellPara] }] }],
+    };
+    const { pages } = layoutBlocks([table], config());
+    const cell = pages[0].tables?.[0].cells[0];
+    expect(cell?.lines.map((l) => l.segments[0]?.text)).toEqual(['S', 'T', 'T']);
+    // PM positions follow the split characters (caret/selection stay usable).
+    expect(cell?.lines.map((l) => l.segments[0]?.pos)).toEqual([10, 11, 12]);
+  });
+
   it('applies paragraph spacing (before/after gaps + line multiplier)', () => {
     const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
     const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };

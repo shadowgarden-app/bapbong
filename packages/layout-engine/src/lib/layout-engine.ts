@@ -735,6 +735,26 @@ function wrapParagraph(
       if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
       else if (clusterable(token)) token.width = measure(token.text as string, token.font);
     }
+    // A single word wider than the whole band (narrow table cells): break it
+    // at character level, Word-style — fit what we can (at least one char),
+    // the remainder re-enters the loop as its own token on the next line.
+    if (
+      clusterable(token) &&
+      lineTokens.length === 0 &&
+      token.text!.length > 1 &&
+      lineStart() + token.width > lineRight
+    ) {
+      const avail = lineRight - lineStart();
+      let n = 1;
+      while (n < token.text!.length && measure(token.text!.slice(0, n + 1), token.font) <= avail) n++;
+      const restText = token.text!.slice(n);
+      const rest: Token = { ...token, text: restText, width: measure(restText, token.font), size: restText.length };
+      if (token.pos != null) rest.pos = token.pos + n;
+      token.text = token.text!.slice(0, n);
+      token.size = n;
+      token.width = measure(token.text, token.font);
+      tokens.splice(ti + 1, 0, rest);
+    }
     if (clusterable(token)) {
       if (clusterFont && !sameFont(clusterFont, token.font)) resetCluster();
       clusterText += token.text;
