@@ -7,7 +7,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { AnchorError, VersionConflictError, type DocumentSession, type SessionProvider } from './contract.js';
+import { AnchorError, NoDocumentError, VersionConflictError, type DocumentSession, type SessionProvider } from './contract.js';
 
 export interface CreateMcpServerOptions {
   name?: string;
@@ -64,7 +64,9 @@ export function createMcpServer(provider: SessionProvider, opts: CreateMcpServer
     try {
       return await fn(session);
     } catch (err) {
-      if (err instanceof AnchorError || err instanceof VersionConflictError) return errorText(err.message);
+      if (err instanceof AnchorError || err instanceof VersionConflictError || err instanceof NoDocumentError) {
+        return errorText(err.message);
+      }
       throw err;
     }
   };

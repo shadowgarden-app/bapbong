@@ -113,3 +113,11 @@ export class AnchorError extends Error {
     this.name = 'AnchorError';
   }
 }
+
+/** The host has no document to operate on (desktop: nothing open yet). */
+export class NoDocumentError extends Error {
+  constructor(message = 'No document is open. Ask the user to open a document first.') {
+    super(message);
+    this.name = 'NoDocumentError';
+  }
+}

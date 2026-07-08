@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { exportDocx, schema } from '@shadow-garden/bapbong-headless';
-import { AnchorError, VersionConflictError } from './contract.js';
+import { AnchorError, NoDocumentError, VersionConflictError } from './contract.js';
 import { HeadlessSession } from './headless-session.js';
 import { createMcpServer } from './server.js';
+import { executeOp, RemoteSession, reviveError, type SessionOpName } from './wire.js';
 
 /** A small real .docx: three paragraphs, one duplicated phrase, bold mark. */
 async function sampleBytes(): Promise<Uint8Array> {
@@ -114,6 +115,43 @@ describe('HeadlessSession', () => {
     const reopened = await HeadlessSession.open(saved as Uint8Array);
     const snap = await reopened.snapshot();
     expect(snap.blocks[1].text).toBe('Tong phi: 7.777.777 VND.');
+  });
+});
+
+describe('wire (RemoteSession ↔ executeOp)', () => {
+  /** A RemoteSession whose transport is executeOp against a local session —
+   *  exactly the desktop shape (Bun proxy ↔ WebView executor), minus SSE. */
+  async function remotePair() {
+    const local = await openSession();
+    const remote = new RemoteSession(async (op: SessionOpName, args: unknown[]) => {
+      const res = await executeOp(local, { id: 'x', op, args });
+      // Simulate the process hop: everything travels as JSON.
+      const wire = JSON.parse(JSON.stringify(res)) as typeof res;
+      if (!wire.ok) throw reviveError(wire.error);
+      return wire.value;
+    }, { selection: false });
+    return { remote, local };
+  }
+
+  it('round-trips reads and mutations across the hop', async () => {
+    const { remote } = await remotePair();
+    const snap = await remote.snapshot();
+    expect(snap.blocks).toHaveLength(3);
+    const res = await remote.replaceText('1.500.000', '8.888.888', { expectedVersion: snap.docVersion });
+    expect(res.docVersion).toBe('v2');
+    expect((await remote.snapshot()).blocks[1].text).toBe('Tong phi: 8.888.888 VND.');
+  });
+
+  it('revives contract errors by name across the hop', async () => {
+    const { remote } = await remotePair();
+    await expect(remote.replaceText('Tong phi', 'x')).rejects.toThrow(AnchorError);
+    await expect(remote.replaceText('VND', 'x', { expectedVersion: 'v9' })).rejects.toThrow(VersionConflictError);
+  });
+
+  it('encodes a missing document as NoDocumentError', async () => {
+    const res = await executeOp(null, { id: 'x', op: 'snapshot', args: [] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(reviveError(res.error)).toBeInstanceOf(NoDocumentError);
   });
 });
 
