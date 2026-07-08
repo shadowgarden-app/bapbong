@@ -88,7 +88,7 @@ export class PmDocSession implements DocumentSession {
     this.checkVersion(opts.expectedVersion);
     const hit = this.uniqueHit(oldText, opts.occurrence);
     this.host.apply(this.host.getState().tr.insertText(newText, hit.from, hit.to));
-    return { docVersion: this.host.getVersion() };
+    return { docVersion: this.host.getVersion(), range: { from: hit.from, to: hit.from + newText.length } };
   }
 
   async insertContent(content: string, anchor: InsertAnchor, opts: MutationOptions = {}): Promise<MutationResult> {
@@ -107,8 +107,9 @@ export class PmDocSession implements DocumentSession {
       const block = this.textblocks()[hit.blockIndex];
       insertAt = anchor.position === 'before' ? block.pos : block.pos + block.node.nodeSize;
     }
+    const inserted = paragraphs.reduce((size, node) => size + node.nodeSize, 0);
     this.host.apply(state.tr.insert(insertAt, paragraphs));
-    return { docVersion: this.host.getVersion() };
+    return { docVersion: this.host.getVersion(), range: { from: insertAt, to: insertAt + inserted } };
   }
 
   async applyFormatting(target: string, format: Formatting, opts: MutationOptions = {}): Promise<MutationResult> {
@@ -133,7 +134,7 @@ export class PmDocSession implements DocumentSession {
       return { docVersion: this.host.getVersion() };
     }
     this.host.apply(tr);
-    return { docVersion: this.host.getVersion() };
+    return { docVersion: this.host.getVersion(), range: { from: hit.from, to: hit.to } };
   }
 
   async save(): Promise<void> {

@@ -59,6 +59,10 @@ export interface Formatting {
 
 export interface MutationResult {
   docVersion: string;
+  /** The affected range (PM positions) — informational; hosts use it to
+   *  surface the edit (the desktop selects + scrolls to it). Positions are
+   *  only stable within the returned docVersion. */
+  range?: { from: number; to: number };
 }
 
 export interface MutationOptions {
