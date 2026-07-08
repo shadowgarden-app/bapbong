@@ -1,7 +1,7 @@
 {
   "name": "@shadow-garden/bapbong-mcp",
   "version": "0.0.1",
-  "description": "bapbong — MCP server for AI agents: host-agnostic document tools (read/find/edit/format) over a DocumentSession port. Desktop app and headless server mount the same contract.",
+  "description": "bapbong \u2014 MCP server for AI agents: host-agnostic document tools (read/find/edit/format) over a DocumentSession port. Desktop app and headless server mount the same contract.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -15,6 +15,20 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
+    },
+    "./session": {
+      "@shadow-garden/source": "./src/session.ts",
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js",
+      "require": "./dist/session.cjs",
+      "default": "./dist/session.js"
+    },
+    "./host": {
+      "@shadow-garden/source": "./src/host.ts",
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js",
+      "require": "./dist/host.cjs",
+      "default": "./dist/host.js"
     }
   },
   "files": [
@@ -25,19 +39,30 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:headless"],
+    "tags": [
+      "scope:headless"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/mcp/dist",
           "main": "packages/mcp/src/index.ts",
           "tsConfig": "packages/mcp/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/mcp/src",
           "external": [
             "@shadow-garden/bapbong-headless"
+          ],
+          "additionalEntryPoints": [
+            "packages/mcp/src/session.ts",
+            "packages/mcp/src/host.ts"
           ]
         }
       }
