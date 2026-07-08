@@ -326,6 +326,24 @@ importers:
         specifier: ^1.25.7
         version: 1.25.8
 
+  packages/mcp:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.12.0
+        version: 1.26.0(zod@3.25.76)
+      '@shadow-garden/bapbong-headless':
+        specifier: workspace:^
+        version: link:../headless
+      prosemirror-model:
+        specifier: ^1.25.0
+        version: 1.25.8
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      zod:
+        specifier: ^3.25.28
+        version: 3.25.76
+
   packages/measuring:
     dependencies:
       '@shadow-garden/bapbong-contracts':
@@ -8156,6 +8174,9 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
@@ -9859,6 +9880,28 @@ snapshots:
 
   '@lmdb/lmdb-win32-x64@3.5.1':
     optional: true
+
+  '@modelcontextprotocol/sdk@1.26.0(zod@3.25.76)':
+    dependencies:
+      '@hono/node-server': 1.19.14(hono@4.12.25)
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      content-type: 1.0.5
+      cors: 2.8.6
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.0
+      express: 5.2.1
+      express-rate-limit: 8.5.2(express@5.2.1)
+      hono: 4.12.25
+      jose: 6.2.3
+      json-schema-typed: 8.0.2
+      pkce-challenge: 5.0.1
+      raw-body: 3.0.2
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.2(zod@3.25.76)
+    transitivePeerDependencies:
+      - supports-color
 
   '@modelcontextprotocol/sdk@1.26.0(zod@4.3.6)':
     dependencies:
@@ -16901,8 +16944,14 @@ snapshots:
 
   yoctocolors@2.1.2: {}
 
+  zod-to-json-schema@3.25.2(zod@3.25.76):
+    dependencies:
+      zod: 3.25.76
+
   zod-to-json-schema@3.25.2(zod@4.3.6):
     dependencies:
       zod: 4.3.6
+
+  zod@3.25.76: {}
 
   zod@4.3.6: {}
