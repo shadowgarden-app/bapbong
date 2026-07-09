@@ -117,6 +117,40 @@ describe('importDocx', () => {
     expect(doc.child(1).textContent).toBe('100.000');
   });
 
+  it('flattens OMML equations to readable text runs', async () => {
+    const M_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+    const mr = (t: string, rPr = '') => `<m:r>${rPr}<m:t>${t}</m:t></m:r>`;
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:m="${M_NS}"><w:body>
+      <w:p><m:oMathPara><m:oMath>
+        <m:sSub><m:e>${mr('t', '<w:rPr><w:i/></w:rPr>')}</m:e><m:sub>${mr('1')}</m:sub></m:sSub>
+      </m:oMath></m:oMathPara></w:p>
+      <w:p>
+        <w:r><w:t xml:space="preserve">S = </w:t></w:r>
+        <m:oMath>
+          <m:sSup><m:e>${mr('x')}</m:e><m:sup>${mr('2')}</m:sup></m:sSup>
+          ${mr('+')}
+          <m:f><m:num>${mr('a')}</m:num><m:den>${mr('b')}</m:den></m:f>
+          ${mr('+')}
+          <m:f><m:num><m:r><m:t>a+b</m:t></m:r></m:num><m:den>${mr('c')}</m:den></m:f>
+          ${mr('+')}
+          <m:rad><m:deg/><m:e>${mr('y')}</m:e></m:rad>
+          ${mr('+')}
+          <m:d><m:e>${mr('u+v')}</m:e></m:d>
+        </m:oMath>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(xml));
+
+    // Subscripted digits become Unicode subscripts; the run is formatted like
+    // the equation's first math run (italic here).
+    expect(doc.child(0).textContent).toBe('t₁');
+    expect(doc.child(0).child(0).marks.map((m) => m.type.name)).toContain('em');
+
+    // Inline equation after plain text: sup, fractions (multi-term numerator
+    // gets parens), radical, delimiter.
+    expect(doc.child(1).textContent).toBe('S = x²+a/b+(a+b)/c+√(y)+(u+v)');
+  });
+
   it('treats a toggle disabled via w:val="false" as off', async () => {
     const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>not bold</w:t></w:r></w:p></w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(xml));

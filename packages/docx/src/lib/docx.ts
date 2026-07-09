@@ -488,6 +488,68 @@ function headingLevel(pStyleId: string | undefined, pPrChain: (OoxmlNode | undef
   return undefined;
 }
 
+const SUB_DIGITS = '₀₁₂₃₄₅₆₇₈₉';
+const SUP_DIGITS = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+
+/** Digits mapped through a Unicode sub/superscript alphabet, or null when the
+ *  text isn't digits-only (falls back to `_(…)` / `^(…)` linear format). */
+function scriptDigits(text: string, alphabet: string): string | null {
+  if (!/^[0-9]+$/.test(text)) return null;
+  return [...text].map((d) => alphabet[Number(d)]).join('');
+}
+
+/** OMML (`m:oMath`) flattened to readable plain text — v1 keeps the equation's
+ *  CONTENT, not its typesetting: `t` sub `1` → "t₁", `x` sup `2` → "x²",
+ *  fractions → "num/den", radicals → "√(…)", delimiters → "(…)". Unknown
+ *  constructs concatenate their children's text so nothing is dropped. */
+function flattenOmml(node: OoxmlNode): string {
+  const flat = (n: OoxmlNode | undefined): string => (n ? flattenOmml(n) : '');
+  switch (node.name) {
+    case 'm:t':
+      return node.text;
+    case 'm:f': {
+      // Multi-term sides get parens so "t₁+t₂+t₃ over 3" doesn't flatten to
+      // the ambiguous "t₁+t₂+t₃/3".
+      const side = (s: string): string => (/[+\-±×÷/ ]/.test(s) ? `(${s})` : s);
+      return `${side(flat(child(node, 'm:num')))}/${side(flat(child(node, 'm:den')))}`;
+    }
+    case 'm:sSub': {
+      const sub = flat(child(node, 'm:sub'));
+      return flat(child(node, 'm:e')) + (scriptDigits(sub, SUB_DIGITS) ?? `_(${sub})`);
+    }
+    case 'm:sSup': {
+      const sup = flat(child(node, 'm:sup'));
+      return flat(child(node, 'm:e')) + (scriptDigits(sup, SUP_DIGITS) ?? `^(${sup})`);
+    }
+    case 'm:sSubSup': {
+      const sub = flat(child(node, 'm:sub'));
+      const sup = flat(child(node, 'm:sup'));
+      return (
+        flat(child(node, 'm:e')) +
+        (scriptDigits(sub, SUB_DIGITS) ?? `_(${sub})`) +
+        (scriptDigits(sup, SUP_DIGITS) ?? `^(${sup})`)
+      );
+    }
+    case 'm:rad': {
+      const deg = flat(child(node, 'm:deg'));
+      return `${deg}√(${flat(child(node, 'm:e'))})`;
+    }
+    case 'm:d': {
+      // Delimiters: explicit m:begChr/m:endChr/m:sepChr in m:dPr, parens/comma
+      // by default (empty w:val means "none").
+      const pr = child(node, 'm:dPr');
+      const chr = (name: string, dflt: string): string =>
+        attrOf(child(pr, name), 'm:val') ?? dflt;
+      const args = children(node, 'm:e').map(flat);
+      return chr('m:begChr', '(') + args.join(chr('m:sepChr', ',')) + chr('m:endChr', ')');
+    }
+    default:
+      // Property containers hold formatting (and ctrlPr), never content.
+      if (node.name.startsWith('m:') && node.name.endsWith('Pr')) return '';
+      return node.children.map(flat).join('');
+  }
+}
+
 function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const pPr = child(p, 'w:pPr');
   const pStyleId = attrOf(child(pPr, 'w:pStyle'), 'w:val');
@@ -559,6 +621,14 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       const href = rel?.target ?? (anchor ? `#${anchor}` : null);
       for (const run of children(node, 'w:r')) {
         inline.push(...runToInline(run, paraBase, ctx, href));
+      }
+    } else if (node.name === 'm:oMath' || node.name === 'm:oMathPara') {
+      // OMML equations, flattened to a plain-text run (v1: content over
+      // typesetting — see flattenOmml). Formatted like the first math run.
+      const text = flattenOmml(node);
+      if (text.length > 0) {
+        const first = findDescendant(node, 'm:r');
+        inline.push(ctx.schema.text(text, runMarks(first, paraBase, ctx, null)));
       }
     } else if (node.name === 'w:commentRangeStart') {
       const id = Number(attrOf(node, 'w:id'));
