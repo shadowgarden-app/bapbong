@@ -117,6 +117,35 @@ describe('importDocx', () => {
     expect(doc.child(1).textContent).toBe('100.000');
   });
 
+  it('unwraps w:sdt content controls (block + inline checkbox)', async () => {
+    const W14_CHK = 'http://schemas.microsoft.com/office/word/2010/wordml';
+    // Block-level control (how Word wraps cover pages) holding a paragraph
+    // and a table; inline control with a w14:checkbox whose glyph run is the
+    // usual MS-Gothic ☒; nested control inside the block one.
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:w14="${W14_CHK}"><w:body>
+      <w:sdt><w:sdtPr><w:id w:val="1"/></w:sdtPr><w:sdtContent>
+        <w:p><w:r><w:t>Cover title</w:t></w:r></w:p>
+        <w:sdt><w:sdtPr><w:id w:val="2"/></w:sdtPr><w:sdtContent>
+          <w:p><w:r><w:t>Nested subtitle</w:t></w:r></w:p>
+        </w:sdtContent></w:sdt>
+        <w:tbl><w:tr><w:tc><w:p><w:r><w:t>In table</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+      </w:sdtContent></w:sdt>
+      <w:p>
+        <w:sdt><w:sdtPr><w14:checkbox><w14:checked w14:val="1"/></w14:checkbox></w:sdtPr><w:sdtContent>
+          <w:r><w:rPr><w:rFonts w:ascii="MS Gothic"/></w:rPr><w:t>☒</w:t></w:r>
+        </w:sdtContent></w:sdt>
+        <w:r><w:t xml:space="preserve"> Đồng ý</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(xml));
+
+    expect(doc.child(0).textContent).toBe('Cover title');
+    expect(doc.child(1).textContent).toBe('Nested subtitle');
+    expect(doc.child(2).type.name).toBe('table');
+    expect(doc.child(2).textContent).toBe('In table');
+    expect(doc.child(3).textContent).toBe('☒ Đồng ý');
+  });
+
   it('flattens OMML equations to readable text runs', async () => {
     const M_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
     const mr = (t: string, rPr = '') => `<m:r>${rPr}<m:t>${t}</m:t></m:r>`;

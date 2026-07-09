@@ -205,6 +205,25 @@ function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
     if (node.name === 'w:del' || node.name === 'w:moveFrom') continue;
     if (node.name === 'w:ins' || node.name === 'w:moveTo') {
       out.push(...effectiveChildren(node.children));
+    } else if (node.name === 'w:sdt') {
+      out.push(...effectiveChildren(unwrapSdt([node])));
+    } else {
+      out.push(node);
+    }
+  }
+  return out;
+}
+
+/** Content controls (w:sdt) unwrap to their w:sdtContent children — the
+ *  control chrome is dropped, the content (paragraphs/tables at block level,
+ *  runs inline — a w14:checkbox's ☒/☐ glyph run included) survives. Recurses
+ *  so nested controls (cover pages hold several) fully unwrap. */
+function unwrapSdt(nodes: OoxmlNode[]): OoxmlNode[] {
+  const out: OoxmlNode[] = [];
+  for (const node of nodes) {
+    if (node.name === 'w:sdt') {
+      const content = child(node, 'w:sdtContent');
+      if (content) out.push(...unwrapSdt(content.children));
     } else {
       out.push(node);
     }
@@ -1017,7 +1036,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 /** Walk an element's children in document order, mapping w:p / w:tbl to blocks. */
 function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   const blocks: PMNode[] = [];
-  for (const node of parent.children) {
+  for (const node of unwrapSdt(parent.children)) {
     if (node.name === 'w:p') blocks.push(parseParagraph(node, ctx));
     else if (node.name === 'w:tbl') blocks.push(parseTable(node, ctx));
   }
@@ -1057,7 +1076,7 @@ function parseBodyBlocks(
   const blocks: PMNode[] = [];
   const sections: SectionConfig[] = [];
   let start = 0;
-  for (const node of body.children) {
+  for (const node of unwrapSdt(body.children)) {
     if (node.name === 'w:p') {
       blocks.push(parseParagraph(node, ctx));
       const sectPr = child(child(node, 'w:pPr'), 'w:sectPr');
