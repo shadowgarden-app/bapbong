@@ -78,7 +78,7 @@
         ],
         "options": {
           "cwd": "packages/mcp",
-          "command": "bun build --compile --minify tools/shim.mts --outfile dist-shim/bapbong-mcp"
+          "command": "bun build --target=bun --minify tools/shim.mts --outfile dist-shim/shim.js"
         }
       }
     }
