@@ -6,6 +6,7 @@ import type {
   PagePoint,
   PaintDecoration,
   ResolvedChrome,
+  ResolvedFloat,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
@@ -213,16 +214,7 @@ export class CanvasPainter {
       if (!chrome) continue;
       for (const line of chrome.lines) this.paintLine(line, 0, o, pageInfo);
       for (const table of chrome.tables) this.paintTable(table, 0, o, pageInfo);
-      for (const f of chrome.floats ?? []) {
-        if (f.shape) {
-          this.drawShape(f.shape, f.x, f.y, f.width, f.height);
-          continue;
-        }
-        const el = this.requestImage(f.src);
-        if (el?.complete && el.naturalWidth > 0) {
-          this.ctx.drawImage(el, f.x, f.y, f.width, f.height);
-        }
-      }
+      for (const f of chrome.floats ?? []) this.paintFloat(f, 0, o, pageInfo);
     }
   }
 
@@ -295,16 +287,7 @@ export class CanvasPainter {
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
 
     // Floating images sit behind the text (text already flows around them).
-    for (const f of page.floats ?? []) {
-      if (f.shape) {
-        this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
-        continue;
-      }
-      const el = this.requestImage(f.src);
-      if (el?.complete && el.naturalWidth > 0) {
-        ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
-      }
-    }
+    for (const f of page.floats ?? []) this.paintFloat(f, yOffset, o, pageInfo);
 
     // Selection sits under the text.
     ctx.fillStyle = o.selectionColor;
@@ -355,6 +338,30 @@ export class CanvasPainter {
     if (caret && caret.pageIndex === page.index) {
       ctx.fillStyle = o.caretColor;
       ctx.fillRect(caret.x, yOffset + caret.y, 1.5, caret.height);
+    }
+  }
+
+  /** One anchored float: vector shape or bitmap, then any textbox text laid
+   *  out inside it (box-local lines — translate to the float's origin, and
+   *  clip to the box the way Word hides textbox overflow). */
+  private paintFloat(f: ResolvedFloat, yOffset: number, o: ResolvedOptions, pageInfo?: PageInfo): void {
+    if (f.shape) {
+      this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
+    } else {
+      const el = this.requestImage(f.src);
+      if (el?.complete && el.naturalWidth > 0) {
+        this.ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
+      }
+    }
+    if (f.lines && f.lines.length > 0) {
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(f.x, yOffset + f.y, f.width, f.height);
+      ctx.clip();
+      ctx.translate(f.x, yOffset + f.y);
+      for (const line of f.lines) this.paintLine(line, 0, o, pageInfo);
+      ctx.restore();
     }
   }
 
@@ -495,16 +502,7 @@ export class CanvasPainter {
     // Anchored images/shapes positioned in the cells, on top (Word paints
     // non-behindDoc drawings over the table grid).
     for (const cell of table.cells) {
-      for (const f of cell.floats ?? []) {
-        if (f.shape) {
-          this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
-          continue;
-        }
-        const el = this.requestImage(f.src);
-        if (el?.complete && el.naturalWidth > 0) {
-          ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
-        }
-      }
+      for (const f of cell.floats ?? []) this.paintFloat(f, yOffset, o, pageInfo);
     }
   }
 

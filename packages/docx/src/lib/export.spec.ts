@@ -194,6 +194,37 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(shapes[1].attrs['float']).toBeNull();
   });
 
+  it('round-trips textbox text on a drawn shape', async () => {
+    const boxParas = [
+      schema.node('paragraph', null, [
+        schema.text('Phiếu học tập: ', [schema.marks['strong'].create()]),
+        schema.text('Học sinh trả lời.'),
+      ]),
+      schema.node('paragraph', null, [schema.text('Câu 1')]),
+    ].map((p) => p.toJSON());
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: '',
+          width: 643,
+          height: 274,
+          float: { wrap: 'none', hOffset: 7, hRel: 'margin', vOffset: 14, vRel: 'paragraph' },
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1, fill: '#FFFFFF' },
+          textbox: { paragraphs: boxParas, inset: { l: 19, t: 10, r: 10, b: 5 } },
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const node = [...range(back.child(0))].find((n) => n.type.name === 'image');
+    const tb = node?.attrs['textbox'] as { paragraphs: unknown[]; inset?: unknown };
+    expect(tb).toBeTruthy();
+    expect(tb.paragraphs).toHaveLength(2);
+    const p0 = schema.nodeFromJSON(tb.paragraphs[0] as never);
+    expect(p0.textContent).toBe('Phiếu học tập: Học sinh trả lời.');
+    expect(p0.child(0).marks.map((m) => m.type.name)).toContain('strong');
+    expect(tb.inset).toEqual({ l: 19, t: 10, r: 10, b: 5 });
+  });
+
   it('round-trips a hyperlink (link mark + href)', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

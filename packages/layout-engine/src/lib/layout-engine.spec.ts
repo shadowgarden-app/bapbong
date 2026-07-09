@@ -911,6 +911,49 @@ describe('floats in table cells', () => {
   });
 });
 
+describe('textbox floats', () => {
+  it('flows textbox paragraphs inside the box (box-local lines, stripped positions)', () => {
+    // Box 120×60 anchored at hOffset 40 / vOffset 10. Interior: default inset
+    // l 10, r 10 → text band [10, 110] = 100px → "aaaa bbbb cccc" (14 chars,
+    // 40px words) wraps into 2 lines at y = inset.t (5) and 5 + 16.
+    const boxPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc', font: font(), pos: 123 }],
+      pos: 122,
+      end: 137,
+    };
+    const host: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 120,
+          height: 60,
+          wrap: 'none',
+          hOffset: 40,
+          vOffset: 10,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+          content: [boxPara],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([host], config());
+    const f = pages[0].floats?.[0];
+    expect(f).toMatchObject({ x: 60, y: 30, width: 120, height: 60 });
+    // Lines are box-local: x from the interior inset, y from the box top.
+    expect(f?.lines).toHaveLength(2);
+    expect(f?.lines?.[0].segments.map((s) => s.text).join('')).toBe('aaaa bbbb');
+    expect(f?.lines?.[0].segments[0].x).toBe(10);
+    expect(f?.lines?.[0].y).toBe(5);
+    expect(f?.lines?.[1].segments.map((s) => s.text)).toEqual(['cccc']);
+    expect(f?.lines?.[1].y).toBe(21); // 5 + 16px line
+    // Never caret-addressable — PM positions are stripped.
+    expect(f?.lines?.[0].segments[0].pos).toBeUndefined();
+  });
+});
+
 describe('floating images', () => {
   const words = (n: number, len = 9) => Array.from({ length: n }, () => 'a'.repeat(len)).join(' ');
 

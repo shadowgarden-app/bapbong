@@ -390,7 +390,17 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const wsp = findDescendant(drawing, 'wps:wsp');
   const spPr = child(wsp, 'wps:spPr');
   const prst = attrOf(child(spPr, 'a:prstGeom'), 'prst');
-  const kind = prst === 'rect' ? 'rect' : prst === 'line' || prst === 'straightConnector1' ? 'line' : null;
+  const textbox = parseTextbox(wsp, ctx);
+  // Unsupported geometry with a textbox degrades to a rect frame — the text
+  // matters more than the fancy outline (horizontalScroll banners etc.).
+  const kind =
+    prst === 'rect'
+      ? 'rect'
+      : prst === 'line' || prst === 'straightConnector1'
+        ? 'line'
+        : textbox
+          ? 'rect'
+          : null;
   if (!kind) return null;
 
   const shape: Record<string, unknown> = { kind };
@@ -417,7 +427,29 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     alt: attrOf(docPr, 'name') ?? kind,
     float: parseAnchorFloat(drawing),
     shape,
+    textbox,
   });
+}
+
+/** Textbox content of a wps shape (wps:txbx/w:txbxContent), as paragraph node
+ *  JSON the layout engine flows inside the shape's box, plus the interior
+ *  padding from wps:bodyPr (EMU attrs; absent → Word's 0.1"/0.05" defaults). */
+function parseTextbox(
+  wsp: OoxmlNode | undefined,
+  ctx: Ctx,
+): { paragraphs: unknown[]; inset?: { l: number; t: number; r: number; b: number } } | null {
+  const content = child(child(wsp, 'wps:txbx'), 'w:txbxContent');
+  if (!content) return null;
+  const paragraphs = children(content, 'w:p').map((p) => parseParagraph(p, ctx).toJSON());
+  if (paragraphs.length === 0) return null;
+  const bodyPr = child(wsp, 'wps:bodyPr');
+  const ins = (name: string): number | undefined => emuToPxZero(attrOf(bodyPr, name));
+  const l = ins('lIns'), t = ins('tIns'), r = ins('rIns'), b = ins('bIns');
+  const inset =
+    l !== undefined || t !== undefined || r !== undefined || b !== undefined
+      ? { l: l ?? 10, t: t ?? 5, r: r ?? 10, b: b ?? 5 }
+      : undefined;
+  return inset ? { paragraphs, inset } : { paragraphs };
 }
 
 /** Effective marks for a run (docDefaults+paraStyle → run style → inline rPr). */

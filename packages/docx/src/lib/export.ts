@@ -125,11 +125,24 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const ln = s.stroke
     ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill></a:ln>`
     : '<a:ln><a:noFill/></a:ln>';
+  // Textbox paragraphs ride the node as PM JSON; re-emit them as txbxContent
+  // so the text survives the round-trip.
+  const tb = node.attrs['textbox'] as
+    | { paragraphs: unknown[]; inset?: { l: number; t: number; r: number; b: number } }
+    | null;
+  const txbx = tb
+    ? `<wps:txbx><w:txbxContent>${tb.paragraphs
+        .map((json) => paragraphXml(node.type.schema.nodeFromJSON(json), ctx))
+        .join('')}</w:txbxContent></wps:txbx>`
+    : '';
+  const bodyPr = tb?.inset
+    ? `<wps:bodyPr lIns="${pxToEmu(tb.inset.l)}" tIns="${pxToEmu(tb.inset.t)}" rIns="${pxToEmu(tb.inset.r)}" bIns="${pxToEmu(tb.inset.b)}"/>`
+    : '<wps:bodyPr/>';
   const graphic =
-    `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr/>` +
+    `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr${tb ? ' txBox="1"' : ''}/>` +
     `<wps:spPr><a:xfrm${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="${s.kind === 'line' ? 'line' : 'rect'}"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>` +
-    `<wps:bodyPr/></wps:wsp></a:graphicData></a:graphic>`;
+    `${txbx}${bodyPr}</wps:wsp></a:graphicData></a:graphic>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
     ? anchorXml(float, cx, cy, n, graphic)

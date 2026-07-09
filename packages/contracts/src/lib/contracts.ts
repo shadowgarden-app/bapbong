@@ -171,6 +171,10 @@ export interface FlowFloat {
   distR?: number;
   distT?: number;
   distB?: number;
+  /** Textbox (wps:txbx) paragraphs laid out inside the shape's box. */
+  content?: FlowParagraph[];
+  /** Textbox interior padding (wps:bodyPr lIns…), px. Absent → Word defaults. */
+  inset?: { l: number; t: number; r: number; b: number };
 }
 
 /** Paragraph horizontal alignment (mirrors w:jc / CSS text-align). */
@@ -430,6 +434,10 @@ export interface ResolvedFloat {
   src: string;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** Textbox text laid out inside the shape, in BOX-LOCAL coordinates
+   *  (origin at the float's top-left) — the painter translates by (x, y).
+   *  Never caret-addressable; PM positions are stripped. */
+  lines?: LayoutLine[];
 }
 
 export interface ResolvedPage {

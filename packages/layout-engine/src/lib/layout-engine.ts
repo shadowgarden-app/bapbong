@@ -176,13 +176,26 @@ function paragraphToFlow(
     else if (child.type.name === 'image') {
       const float = child.attrs['float'] as Omit<FlowFloat, 'src' | 'width' | 'height'> | null;
       if (float && allowFloats) {
-        floats.push({
+        const f: FlowFloat = {
           ...float,
           src: String(child.attrs['src'] ?? ''),
           width: Number(child.attrs['width']) || 0,
           height: Number(child.attrs['height']) || 0,
           ...(child.attrs['shape'] ? { shape: child.attrs['shape'] as FlowFloat['shape'] } : {}),
-        });
+        };
+        // Textbox paragraphs ride the image node as PM JSON; rebuild them and
+        // flatten like any other flow (no nested floats inside the box).
+        const tb = child.attrs['textbox'] as
+          | { paragraphs: unknown[]; inset?: { l: number; t: number; r: number; b: number } }
+          | null;
+        if (tb && tb.paragraphs.length > 0) {
+          const schema = child.type.schema;
+          f.content = tb.paragraphs.map((json, i) =>
+            paragraphToFlow(schema.nodeFromJSON(json), base, i),
+          );
+          if (tb.inset) f.inset = tb.inset;
+        }
+        floats.push(f);
       } else {
         runs.push(resolveImage(child, contentStart + offset));
       }
@@ -828,6 +841,26 @@ function shiftTableX(table: ResolvedTable, dx: number): void {
   }
 }
 
+/** Word's default textbox interior padding (bodyPr lIns 0.1", tIns 0.05"). */
+const TEXTBOX_INSET = { l: 10, t: 5, r: 10, b: 5 };
+
+/** ResolvedFloat for `f` pinned at (x, y). A textbox's paragraphs are flowed
+ *  inside the shape's box, in box-local coordinates (the painter translates
+ *  by the float's origin) — never caret-addressable, positions stripped. */
+function resolveFloat(f: FlowFloat, x: number, y: number, ctx: Ctx): ResolvedFloat {
+  const rf: ResolvedFloat = { x, y, width: f.width, height: f.height, src: f.src };
+  if (f.shape) rf.shape = f.shape;
+  if (f.content && f.content.length > 0) {
+    const inset = f.inset ?? TEXTBOX_INSET;
+    const right = Math.max(inset.l + MIN_BAND, f.width - inset.r);
+    const inner = layoutFlow(f.content, inset.l, right, ctx);
+    const lines = inner.lines.map((l) => ({ ...l, y: l.y + inset.t }));
+    stripPositions(lines, inner.tables);
+    if (lines.length > 0) rf.lines = lines;
+  }
+  return rf;
+}
+
 /** Lay out a sequence of blocks within a content box, stacking vertically from
  *  y = 0. No pagination — used for table-cell content. Anchored floats are
  *  positioned at their offsets within the box (v1: painted only — the cell's
@@ -857,7 +890,7 @@ function layoutFlow(
         // Vertical: relative to the anchor paragraph's top (margin/page
         // degrade to the same — a cell has no margin band of its own).
         const fy = y + (f.vOffset ?? 0);
-        floats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src, ...(f.shape ? { shape: f.shape } : {}) });
+        floats.push(resolveFloat(f, fx, fy, ctx));
       }
       for (const d of layoutParagraph(block, contentLeft, contentRight, ctx)) {
         lines.push(draftToLine(d, y));
@@ -1483,7 +1516,7 @@ function placeBlocks(
           : f.vRel === 'margin'
             ? top + (f.vOffset ?? 0)
             : yPara + (f.vOffset ?? 0);
-      pageFloats.push({ x: fx, y: fy, width: f.width, height: f.height, src: f.src, ...(f.shape ? { shape: f.shape } : {}) });
+      pageFloats.push(resolveFloat(f, fx, fy, ctx));
       colDirty = true;
       if (f.wrap === 'square') {
         exclusions.push({

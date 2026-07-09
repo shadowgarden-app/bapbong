@@ -850,6 +850,44 @@ describe('importDocx', () => {
     expect(lineNode.attrs.float).toBeNull();
   });
 
+  it('imports textbox (wps:txbx) paragraphs onto the shape node', async () => {
+    const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+    const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+    const box = `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300">
+      <wp:positionH relativeFrom="column"><wp:posOffset>62865</wp:posOffset></wp:positionH>
+      <wp:positionV relativeFrom="paragraph"><wp:posOffset>137453</wp:posOffset></wp:positionV>
+      <wp:extent cx="6124575" cy="2607310"/><wp:wrapNone/><wp:docPr id="65" name="Text Box 65"/>
+      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS}"><wps:cNvSpPr txBox="1"/>
+        <wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="6124575" cy="2607310"/></a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+          <a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>
+          <a:ln w="9525"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></wps:spPr>
+        <wps:txbx><w:txbxContent>
+          <w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Phiếu học tập: </w:t></w:r><w:r><w:t>Học sinh trả lời.</w:t></w:r></w:p>
+          <w:p><w:r><w:t>Câu 1</w:t></w:r></w:p>
+        </w:txbxContent></wps:txbx>
+      <wps:bodyPr lIns="182880" tIns="91440"/></wps:wsp></a:graphicData></a:graphic>
+    </wp:anchor></w:drawing></mc:Choice><mc:Fallback><w:pict/></mc:Fallback></mc:AlternateContent>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:mc="${MC_NS}"><w:body>
+      <w:p><w:r>${box}</w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const node = doc.child(0).child(0);
+    expect(node.type.name).toBe('image');
+    expect(node.attrs.shape).toMatchObject({ kind: 'rect', fill: '#FFFFFF' });
+
+    const tb = node.attrs.textbox as { paragraphs: unknown[]; inset?: unknown };
+    expect(tb).toBeTruthy();
+    expect(tb.paragraphs).toHaveLength(2);
+    // Formatting survives: paragraphs are real PM JSON with marks.
+    const p0 = schema.nodeFromJSON(tb.paragraphs[0] as never);
+    expect(p0.textContent).toBe('Phiếu học tập: Học sinh trả lời.');
+    expect(p0.child(0).marks.map((m) => m.type.name)).toContain('strong');
+    // Explicit bodyPr insets in EMU → px (missing sides get Word defaults).
+    expect(tb.inset).toEqual({ l: 19, t: 10, r: 10, b: 5 });
+  });
+
   it('imports legacy VML images (w:object + v:imagedata) with pt sizes', async () => {
     const V_NS = 'urn:schemas-microsoft-com:vml';
     const O_NS = 'urn:schemas-microsoft-com:office:office';
