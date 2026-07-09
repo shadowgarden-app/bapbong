@@ -18,7 +18,7 @@
       "name": "desktop",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["nx", "run", "desktop:serve"],
-      "port": 50000,
+      "port": 4323,
       "autoPort": false
     }
   ]
