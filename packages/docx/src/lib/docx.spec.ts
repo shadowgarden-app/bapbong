@@ -879,6 +879,50 @@ describe('importDocx', () => {
     expect(lineNode.attrs.float).toBeNull();
   });
 
+  it('flattens wpg group pictures into per-member floats', async () => {
+    const WPG_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup';
+    // Group extent 200×100 px (1905000×952500 EMU), child space 2× that with
+    // chOff (100000, -50000) → scale 0.5. Two member pictures.
+    const pic = (rid: string, x: number, y: number, cx: number, cy: number) =>
+      `<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr>
+        <pic:blipFill><a:blip r:embed="${rid}"/></pic:blipFill>
+        <pic:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm></pic:spPr></pic:pic>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wpg="${WPG_NS}"><w:body>
+      <w:p><w:r><w:drawing><wp:anchor>
+        <wp:positionH relativeFrom="column"><wp:posOffset>95250</wp:posOffset></wp:positionH>
+        <wp:positionV relativeFrom="paragraph"><wp:posOffset>190500</wp:posOffset></wp:positionV>
+        <wp:extent cx="1905000" cy="952500"/><wp:wrapNone/><wp:docPr id="9" name="Group 9"/>
+        <a:graphic><a:graphicData uri="${WPG_NS}"><wpg:wgp>
+          <wpg:grpSpPr><a:xfrm>
+            <a:off x="0" y="0"/><a:ext cx="1905000" cy="952500"/>
+            <a:chOff x="100000" y="-50000"/><a:chExt cx="3810000" cy="1905000"/>
+          </a:xfrm></wpg:grpSpPr>
+          ${pic('rId9', 100000, -50000, 1905000, 952500)}
+          ${pic('rId9', 2005000, 902500, 1905000, 952500)}
+        </wpg:wgp></a:graphicData></a:graphic>
+      </wp:anchor></w:drawing></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}">
+      <Relationship Id="rId9" Type="${R_NS}/image" Target="media/image9.png"/>
+    </Relationships>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image9.png': PNG_1x1 }),
+    );
+    const para = doc.child(0);
+    expect(para.childCount).toBe(2);
+    // Member 1 sits at the group origin: float offset = anchor offset (10, 20).
+    const m1 = para.child(0);
+    expect(m1.type.name).toBe('image');
+    expect(m1.attrs.src).toMatch(/^data:image\/png/);
+    expect(m1.attrs.width).toBe(100); // 1905000 EMU × 0.5 scale
+    expect(m1.attrs.height).toBe(50);
+    expect(m1.attrs.float).toMatchObject({ wrap: 'none', hOffset: 10, vOffset: 20 });
+    // Member 2 offset (1905000, 952500) in child space → +100, +50 px on page.
+    const m2 = para.child(1);
+    expect(m2.attrs.float).toMatchObject({ hOffset: 110, vOffset: 70 });
+  });
+
   it('imports textbox (wps:txbx) paragraphs onto the shape node', async () => {
     const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
     const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';

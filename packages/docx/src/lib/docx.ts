@@ -234,6 +234,8 @@ function unwrapSdt(nodes: OoxmlNode[]): OoxmlNode[] {
 /** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
  *  (page breaks are handled at the paragraph level, not here). */
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
+  const group = parseGroup(run, ctx);
+  if (group) return group;
   const image = parseImage(run, ctx) ?? parseShape(run, ctx) ?? parseVmlImage(run, ctx);
   if (image) return [image];
 
@@ -329,6 +331,59 @@ function runDrawing(run: OoxmlNode): OoxmlNode | undefined {
     }
   }
   return undefined;
+}
+
+/** A wpg group (wp:anchor holding wpg:wgp) flattened to one floating image
+ *  per member picture: child coordinates live in the group's child space
+ *  (a:chOff/chExt) and scale to its on-page extent (a:ext), each member
+ *  becoming its own float offset from the group anchor. V1 handles pic:pic
+ *  members (bitmaps); member wps shapes and nested groups stay unmodelled.
+ *  Inline (non-anchored) groups fall through to the single-image path. */
+function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
+  const drawing = runDrawing(run);
+  if (!drawing) return null;
+  const wgp = findDescendant(drawing, 'wpg:wgp');
+  if (!wgp) return null;
+  const baseFloat = parseAnchorFloat(drawing);
+  if (!baseFloat) return null;
+  const num = (n: OoxmlNode | undefined, a: string) => Number(attrOf(n, a) ?? '0');
+  const xfrm = child(child(wgp, 'wpg:grpSpPr'), 'a:xfrm');
+  const ext = child(xfrm, 'a:ext');
+  const chOff = child(xfrm, 'a:chOff');
+  const chExt = child(xfrm, 'a:chExt');
+  const chW = num(chExt, 'cx') || num(ext, 'cx') || 1;
+  const chH = num(chExt, 'cy') || num(ext, 'cy') || 1;
+  const sx = (num(ext, 'cx') || chW) / chW;
+  const sy = (num(ext, 'cy') || chH) / chH;
+
+  const out: PMNode[] = [];
+  for (const pic of children(wgp, 'pic:pic')) {
+    const blip = findDescendant(pic, 'a:blip');
+    const embed = attrOf(blip, 'r:embed') ?? attrOf(blip, 'r:link');
+    const rel = embed ? ctx.rels.get(embed) : undefined;
+    if (!rel) continue;
+    const target = rel.target.replace(/^\/+/, '');
+    const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
+    if (!src) continue;
+    const picXfrm = child(child(pic, 'pic:spPr'), 'a:xfrm');
+    const off = child(picXfrm, 'a:off');
+    const cext = child(picXfrm, 'a:ext');
+    const emuPx = (emu: number) => Math.round(emu / 9525);
+    out.push(
+      ctx.schema.nodes['image'].create({
+        src,
+        width: emuPx(num(cext, 'cx') * sx),
+        height: emuPx(num(cext, 'cy') * sy),
+        alt: attrOf(findDescendant(pic, 'pic:cNvPr'), 'descr') ?? '',
+        float: {
+          ...baseFloat,
+          hOffset: ((baseFloat['hOffset'] as number) ?? 0) + emuPx((num(off, 'x') - num(chOff, 'x')) * sx),
+          vOffset: ((baseFloat['vOffset'] as number) ?? 0) + emuPx((num(off, 'y') - num(chOff, 'y')) * sy),
+        },
+      }),
+    );
+  }
+  return out.length > 0 ? out : null;
 }
 
 /** Extract an image (inline or floating) from a run's w:drawing, if any. */
