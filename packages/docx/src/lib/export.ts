@@ -321,6 +321,7 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
 function rowXml(row: PMNode, ctx: ExportCtx): string {
   const pr: string[] = [];
   if (row.attrs['header']) pr.push('<w:tblHeader/>');
+  if (row.attrs['cantSplit']) pr.push('<w:cantSplit/>');
   const h = row.attrs['height'] as { value: number; exact: boolean } | null;
   if (h) pr.push(`<w:trHeight w:val="${pxToTwips(h.value)}" w:hRule="${h.exact ? 'exact' : 'atLeast'}"/>`);
   const trPr = pr.length ? `<w:trPr>${pr.join('')}</w:trPr>` : '';

@@ -144,6 +144,9 @@ export const schema = new Schema({
       content: 'table_cell+',
       attrs: {
         header: { default: false }, // w:trPr/w:tblHeader — repeat on every page
+        // w:trPr/w:cantSplit — the row must not break across pages. Absent
+        // (Word's default) means the paginator may split the row mid-content.
+        cantSplit: { default: false },
         // w:trHeight — { value: px, exact: boolean } or null (auto).
         height: { default: null },
       },

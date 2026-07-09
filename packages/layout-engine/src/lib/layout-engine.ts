@@ -276,6 +276,7 @@ function tableToFlow(
     });
     const row: FlowTableRow = { cells };
     if (rowNode.attrs['header'] === true) row.header = true;
+    if (rowNode.attrs['cantSplit'] === true) row.cantSplit = true;
     const height = rowNode.attrs['height'] as { value: number; exact: boolean } | null;
     if (height) row.height = height;
     rows.push(row);
@@ -1061,6 +1062,10 @@ function layoutTable(
     const spansOut = cells.some((c) => c.y < headerBottom && c.y + c.height > headerBottom);
     if (!spansOut) resolved.headerBottom = headerBottom;
   }
+  const cantSplitBands = table.rows
+    .map((row, r) => (row.cantSplit ? { top: rowY[r], bottom: rowY[r + 1] } : null))
+    .filter((b): b is { top: number; bottom: number } => b !== null);
+  if (cantSplitBands.length > 0) resolved.cantSplitBands = cantSplitBands;
   return resolved;
 }
 
@@ -1621,19 +1626,24 @@ function placeBlocks(
           if (cell.y > hb && cell.y <= avail) cut = Math.max(cut, cell.y);
         }
         if (cut === 0) {
-          // No row boundary fits the remaining space. Word only moves the row
-          // to a fresh band when it would fit one whole; a row taller than a
-          // full band starts right here and splits mid-row (no blank gap).
+          // No row boundary fits the remaining space, i.e. the first row is
+          // taller than what's left. Word's default lets a row break across
+          // pages, so it starts here and splits mid-row (no blank gap) — only
+          // a row marked w:cantSplit moves whole to a fresh band (and even
+          // then only when it would actually fit one).
           let firstRowBottom = table.height;
           for (const cell of table.cells) {
             if (cell.y > hb && cell.y < firstRowBottom) firstRowBottom = cell.y;
           }
           const fitsFullBand = firstRowBottom - hb <= limit() - bandTop;
-          if (fitsFullBand && colDirty) {
+          const rowCantSplit = (table.cantSplitBands ?? []).some(
+            (b) => b.top <= hb + 0.5 && b.bottom >= firstRowBottom - 0.5,
+          );
+          if (rowCantSplit && fitsFullBand && colDirty) {
             breakBand(); // retry with a full fresh column/page
             continue;
           }
-          cut = avail; // split the oversize row in the space we have
+          cut = avail; // split the row in the space we have
         }
         if (cut <= hb) {
           // Header band swallows the remaining space — try a fresh band, or

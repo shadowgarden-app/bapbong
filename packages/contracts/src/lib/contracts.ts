@@ -250,6 +250,8 @@ export interface FlowTableRow {
   /** Repeat this row at the top of every page the table spans (w:tblHeader).
    *  Only honored for contiguous header rows at the top of the table. */
   header?: boolean;
+  /** w:cantSplit — never break this row across pages (Word default allows). */
+  cantSplit?: boolean;
   /** Explicit row height (w:trHeight): a floor, or `exact` to force it. */
   height?: { value: number; exact: boolean };
 }
@@ -412,6 +414,9 @@ export interface ResolvedTable {
   /** Bottom edge (px from the table top) of the repeating header band, when
    *  the table's leading rows are marked as header rows. */
   headerBottom?: number;
+  /** Vertical bands (px from the table top) of rows marked w:cantSplit — the
+   *  paginator moves these whole instead of splitting them mid-content. */
+  cantSplitBands?: { top: number; bottom: number }[];
   /** Visible borders; absent → the table paints borderless (OOXML default). */
   borders?: TableBorders;
 }

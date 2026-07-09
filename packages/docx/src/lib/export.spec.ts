@@ -149,6 +149,23 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(String(img?.attrs['src'])).toBe(src);
   });
 
+  it('round-trips w:cantSplit on table rows', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('table', null, [
+        schema.node('table_row', { cantSplit: true }, [
+          schema.node('table_cell', null, [schema.node('paragraph', null, [schema.text('keep me whole')])]),
+        ]),
+        schema.node('table_row', null, [
+          schema.node('table_cell', null, [schema.node('paragraph', null, [schema.text('free to split')])]),
+        ]),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const table = back.child(0);
+    expect(table.child(0).attrs['cantSplit']).toBe(true);
+    expect(table.child(1).attrs['cantSplit']).toBe(false);
+  });
+
   it('round-trips drawn shapes (anchored rect + inline line)', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

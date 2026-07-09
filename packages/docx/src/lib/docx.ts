@@ -855,7 +855,9 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     const hv = attrOf(trH, 'w:val');
     const height =
       hv !== undefined ? { value: twipsToPx(Number(hv)), exact: attrOf(trH, 'w:hRule') === 'exact' } : null;
-    return { header, height };
+    const cs = child(trPr, 'w:cantSplit');
+    const cantSplit = cs ? attrOf(cs, 'w:val') !== 'false' && attrOf(cs, 'w:val') !== '0' : false;
+    return { header, height, cantSplit };
   });
 
   const colIndex = logicalRows.map((cells) => new Map(cells.map((c) => [c.startCol, c])));
@@ -890,6 +892,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     const rowAttrs: Record<string, unknown> = {};
     if (rp.header) rowAttrs['header'] = true;
     if (rp.height) rowAttrs['height'] = rp.height;
+    if (rp.cantSplit) rowAttrs['cantSplit'] = true;
     return ctx.schema.nodes["table_row"].create(
       Object.keys(rowAttrs).length > 0 ? rowAttrs : null,
       emitted.length > 0 ? emitted : [emptyCell(ctx)],

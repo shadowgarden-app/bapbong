@@ -446,9 +446,10 @@ describe('layoutBlocks', () => {
     expect(pages[2].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l6']);
   });
 
-  it('still moves a row whole when it fits a fresh page', () => {
+  it('splits an ordinary tall row in the leftover space (Word default)', () => {
     // content 60; paragraph (16) leaves 44px; one row of 3 lines (48px) does
-    // not fit the leftover but DOES fit a full page → moves whole (no split).
+    // not fit the leftover. Word's default lets rows break across pages, so
+    // the row starts here (2 lines) and continues on page 2 — no blank gap.
     const para1: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
     const rowCell: FlowTableCell = {
       colspan: 1,
@@ -457,6 +458,23 @@ describe('layoutBlocks', () => {
       content: Array.from({ length: 3 }, (_, i) => para(`l${i + 1}`)),
     };
     const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell] }] };
+    const { pages } = layoutBlocks([para1, t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    expect(pages[0].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l1', 'l2']);
+    expect(pages[1].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l3']);
+  });
+
+  it('moves a w:cantSplit row whole when it fits a fresh page', () => {
+    // Same geometry, but the row is marked cantSplit → the old behavior:
+    // leave the gap, start the intact row on page 2.
+    const para1: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const rowCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+      content: Array.from({ length: 3 }, (_, i) => para(`l${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell], cantSplit: true }] };
     const { pages } = layoutBlocks([para1, t], config({ height: 100 }));
     expect(pages).toHaveLength(2);
     expect(pages[0].tables ?? []).toHaveLength(0); // gap left intentionally
