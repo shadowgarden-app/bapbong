@@ -107,7 +107,10 @@ export interface InlineRun {
  *  layout semantics as an image (atomic box, inline or anchored), different
  *  paint. Dimensions live on the carrying image; colors are CSS. */
 export interface ShapeSpec {
-  kind: 'rect' | 'line';
+  /** Preset geometry. Names mirror OOXML prstGeom tokens: 'line' is a
+   *  corner-to-corner straight connector; 'rightArrow' a block arrow;
+   *  'horizontalScroll' paints as a stylized banner with rolled ends. */
+  kind: 'rect' | 'line' | 'ellipse' | 'roundRect' | 'rightArrow' | 'horizontalScroll';
   /** Stroke color; absent = no stroke (a:noFill on the outline). */
   stroke?: string;
   /** Stroke width in px (defaults to 1 when a stroke is drawn). */

@@ -418,36 +418,107 @@ export class CanvasPainter {
     }
   }
 
-  /** Vector shape in an image box: outlined/filled rect, or a straight line
-   *  corner-to-corner (top-left → bottom-right; flipV mirrors vertically). */
+  /** Vector shape in an image box, per ShapeSpec.kind. The path is built with
+   *  primitive calls (no Path2D) and filled then stroked; strokes stay inside
+   *  the box so thick outlines don't bleed into text. */
   private drawShape(s: ShapeSpec, x: number, y: number, w: number, h: number): void {
     const ctx = this.ctx;
-    if (s.kind === 'rect') {
+    const lw = s.strokeWidth || 1;
+    const fillStroke = () => {
       if (s.fill) {
         ctx.fillStyle = s.fill;
-        ctx.fillRect(x, y, w, h);
+        ctx.fill();
       }
       if (s.stroke) {
-        const lw = s.strokeWidth || 1;
         ctx.strokeStyle = s.stroke;
         ctx.lineWidth = lw;
-        // Stroke inside the box so thick outlines don't bleed into text.
-        ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0, w - lw), Math.max(0, h - lw));
+        ctx.stroke();
       }
-      return;
+    };
+    switch (s.kind) {
+      case 'rect': {
+        if (s.fill) {
+          ctx.fillStyle = s.fill;
+          ctx.fillRect(x, y, w, h);
+        }
+        if (s.stroke) {
+          ctx.strokeStyle = s.stroke;
+          ctx.lineWidth = lw;
+          ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0, w - lw), Math.max(0, h - lw));
+        }
+        return;
+      }
+      case 'line': {
+        if (!s.stroke) return;
+        ctx.strokeStyle = s.stroke;
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        if (s.flipV) {
+          ctx.moveTo(x, y + h);
+          ctx.lineTo(x + w, y);
+        } else {
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + w, y + h);
+        }
+        ctx.stroke();
+        return;
+      }
+      case 'ellipse': {
+        ctx.beginPath();
+        ctx.ellipse(x + w / 2, y + h / 2, Math.max(0, (w - lw) / 2), Math.max(0, (h - lw) / 2), 0, 0, Math.PI * 2);
+        fillStroke();
+        return;
+      }
+      case 'roundRect': {
+        // OOXML default corner adj 16667/100000 of the shorter side.
+        const r = Math.min(0.16667 * Math.min(w, h), w / 2, h / 2);
+        const [x0, y0, x1, y1] = [x + lw / 2, y + lw / 2, x + w - lw / 2, y + h - lw / 2];
+        ctx.beginPath();
+        ctx.moveTo(x0 + r, y0);
+        ctx.lineTo(x1 - r, y0);
+        ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
+        ctx.lineTo(x1, y1 - r);
+        ctx.quadraticCurveTo(x1, y1, x1 - r, y1);
+        ctx.lineTo(x0 + r, y1);
+        ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
+        ctx.lineTo(x0, y0 + r);
+        ctx.quadraticCurveTo(x0, y0, x0 + r, y0);
+        ctx.closePath();
+        fillStroke();
+        return;
+      }
+      case 'rightArrow': {
+        // Block arrow, OOXML defaults: shaft height h/2, head length half the
+        // shorter side.
+        const head = Math.min(0.5 * Math.min(w, h), w);
+        const hx = x + w - head;
+        ctx.beginPath();
+        ctx.moveTo(x, y + h / 4);
+        ctx.lineTo(hx, y + h / 4);
+        ctx.lineTo(hx, y);
+        ctx.lineTo(x + w, y + h / 2);
+        ctx.lineTo(hx, y + h);
+        ctx.lineTo(hx, y + (3 * h) / 4);
+        ctx.lineTo(x, y + (3 * h) / 4);
+        ctx.closePath();
+        fillStroke();
+        return;
+      }
+      case 'horizontalScroll': {
+        // Stylized banner: paper band between two vertical rolled ends
+        // (full-height ellipses), roll radius per the preset's default adj.
+        const r = Math.min(0.125 * Math.min(w, h), w / 4);
+        ctx.beginPath();
+        ctx.rect(x + r, y + lw / 2, w - 2 * r, h - lw);
+        fillStroke();
+        for (const cx of [x + r, x + w - r]) {
+          ctx.beginPath();
+          ctx.ellipse(cx, y + h / 2, r, Math.max(0, (h - lw) / 2), 0, 0, Math.PI * 2);
+          fillStroke();
+        }
+        return;
+      }
     }
-    if (!s.stroke) return;
-    ctx.strokeStyle = s.stroke;
-    ctx.lineWidth = s.strokeWidth || 1;
-    ctx.beginPath();
-    if (s.flipV) {
-      ctx.moveTo(x, y + h);
-      ctx.lineTo(x + w, y);
-    } else {
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + w, y + h);
-    }
-    ctx.stroke();
   }
 
   private paintTable(

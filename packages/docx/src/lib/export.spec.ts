@@ -182,16 +182,24 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
           height: 0,
           shape: { kind: 'line', stroke: '#C45911', strokeWidth: 1, flipV: true },
         }),
+        schema.node('image', {
+          src: '',
+          width: 60,
+          height: 40,
+          shape: { kind: 'ellipse', stroke: '#000000', strokeWidth: 1, fill: '#FFEE00' },
+        }),
       ]),
     ]);
     const { doc: back } = await importDocx(await exportDocx(doc));
     const shapes = [...range(back.child(0))].filter((n) => n.type.name === 'image');
-    expect(shapes).toHaveLength(2);
+    expect(shapes).toHaveLength(3);
     expect(shapes[0].attrs['shape']).toEqual({ kind: 'rect', stroke: '#4472C4', strokeWidth: 2 });
     expect(shapes[0].attrs['width']).toBe(18);
     expect(shapes[0].attrs['float']).toMatchObject({ wrap: 'square', hOffset: 319, vOffset: -7, vRel: 'paragraph' });
     expect(shapes[1].attrs['shape']).toEqual({ kind: 'line', stroke: '#C45911', strokeWidth: 1, flipV: true });
     expect(shapes[1].attrs['float']).toBeNull();
+    // Preset geometry beyond rect/line keeps its kind through the round-trip.
+    expect(shapes[2].attrs['shape']).toEqual({ kind: 'ellipse', stroke: '#000000', strokeWidth: 1, fill: '#FFEE00' });
   });
 
   it('round-trips textbox text on a drawn shape', async () => {

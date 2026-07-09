@@ -21,7 +21,7 @@ import {
   parseXml,
   RunProps,
 } from './ooxml.js';
-import type { BorderSide, BorderStyle, TableBorders } from '@shadow-garden/bapbong-contracts';
+import type { BorderSide, BorderStyle, ShapeSpec, TableBorders } from '@shadow-garden/bapbong-contracts';
 import { buildStyleRegistry, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
@@ -465,16 +465,19 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const spPr = child(wsp, 'wps:spPr');
   const prst = attrOf(child(spPr, 'a:prstGeom'), 'prst');
   const textbox = parseTextbox(wsp, ctx);
-  // Unsupported geometry with a textbox degrades to a rect frame — the text
-  // matters more than the fancy outline (horizontalScroll banners etc.).
-  const kind =
-    prst === 'rect'
-      ? 'rect'
-      : prst === 'line' || prst === 'straightConnector1'
-        ? 'line'
-        : textbox
-          ? 'rect'
-          : null;
+  // Geometry we paint natively (ShapeSpec kinds mirror the prst tokens);
+  // anything else with a textbox degrades to a rect frame — the text matters
+  // more than the fancy outline — and without one stays unmodelled.
+  const KIND: Record<string, ShapeSpec['kind']> = {
+    rect: 'rect',
+    line: 'line',
+    straightConnector1: 'line',
+    ellipse: 'ellipse',
+    roundRect: 'roundRect',
+    rightArrow: 'rightArrow',
+    horizontalScroll: 'horizontalScroll',
+  };
+  const kind = (prst && KIND[prst]) || (textbox ? 'rect' : null);
   if (!kind) return null;
 
   const shape: Record<string, unknown> = { kind };

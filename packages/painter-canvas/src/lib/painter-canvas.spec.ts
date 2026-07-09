@@ -29,6 +29,15 @@ class RecordingCtx {
   lineTo(...args: unknown[]) { this.record('lineTo', args); }
   stroke(...args: unknown[]) { this.record('stroke', args); }
   setLineDash(...args: unknown[]) { this.record('setLineDash', args); }
+  fill(...args: unknown[]) { this.record('fill', args); }
+  rect(...args: unknown[]) { this.record('rect', args); }
+  ellipse(...args: unknown[]) { this.record('ellipse', args); }
+  quadraticCurveTo(...args: unknown[]) { this.record('quadraticCurveTo', args); }
+  closePath(...args: unknown[]) { this.record('closePath', args); }
+  save(...args: unknown[]) { this.record('save', args); }
+  restore(...args: unknown[]) { this.record('restore', args); }
+  translate(...args: unknown[]) { this.record('translate', args); }
+  clip(...args: unknown[]) { this.record('clip', args); }
 
   of(method: string): Call[] {
     return this.calls.filter((c) => c.method === method);
@@ -511,5 +520,29 @@ describe('CanvasPainter', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('draws preset geometry floats (ellipse, roundRect, horizontalScroll)', () => {
+    const { painter, container } = setup();
+    const floats = [
+      { x: 10, y: 20, width: 40, height: 20, src: '', shape: { kind: 'ellipse' as const, fill: '#FFEE00', stroke: '#000000', strokeWidth: 2 } },
+      { x: 0, y: 60, width: 40, height: 40, src: '', shape: { kind: 'roundRect' as const, stroke: '#112233' } },
+      { x: 0, y: 120, width: 80, height: 40, src: '', shape: { kind: 'horizontalScroll' as const, fill: '#FFFFFF', stroke: '#000000' } },
+    ];
+    painter.paint({ pages: [{ ...page([]), floats }] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
+
+    // Ellipse: centered in its box, radii shrunk by the stroke width.
+    const ell = ctx.of('ellipse');
+    expect(ell[0].args).toEqual([30, 30, 19, 9, 0, 0, Math.PI * 2]);
+    expect(ctx.of('fill').length).toBeGreaterThan(0);
+
+    // Round rect traces four corner curves.
+    expect(ctx.of('quadraticCurveTo')).toHaveLength(4);
+
+    // Scroll: paper band + two rolled ends (full-height ellipses).
+    // r = 0.125 × min(80,40) = 5 → band from x+5, width 70; rolls at 5 and 75.
+    expect(ctx.of('rect').some((c) => c.args[0] === 5 && c.args[2] === 70)).toBe(true);
+    expect(ell.filter((c) => c.args[0] === 5 || c.args[0] === 75)).toHaveLength(2);
   });
 });

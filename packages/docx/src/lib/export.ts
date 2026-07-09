@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { commentSchema } from '@shadow-garden/bapbong-model';
-import type { BorderStyle, CommentNode, SectionConfig, TableBorders } from '@shadow-garden/bapbong-contracts';
+import type { BorderStyle, CommentNode, SectionConfig, ShapeSpec, TableBorders } from '@shadow-garden/bapbong-contracts';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -117,7 +117,7 @@ function anchorXml(float: Record<string, unknown>, cx: number, cy: number, n: nu
 
 /** A drawn shape (rect/line) → wps drawing; inline or anchored per `float`. */
 function shapeXml(node: PMNode, ctx: ExportCtx): string {
-  const s = node.attrs['shape'] as { kind: 'rect' | 'line'; stroke?: string; strokeWidth?: number; fill?: string; flipV?: boolean };
+  const s = node.attrs['shape'] as ShapeSpec;
   const n = ctx.nextId++;
   const cx = pxToEmu((node.attrs['width'] as number) ?? 0);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 0);
@@ -141,7 +141,7 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const graphic =
     `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr${tb ? ' txBox="1"' : ''}/>` +
     `<wps:spPr><a:xfrm${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
-    `<a:prstGeom prst="${s.kind === 'line' ? 'line' : 'rect'}"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>` +
+    `<a:prstGeom prst="${s.kind}"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>` +
     `${txbx}${bodyPr}</wps:wsp></a:graphicData></a:graphic>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
