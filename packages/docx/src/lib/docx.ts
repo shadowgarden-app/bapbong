@@ -215,7 +215,7 @@ function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
 /** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
  *  (page breaks are handled at the paragraph level, not here). */
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
-  const image = parseImage(run, ctx) ?? parseShape(run, ctx);
+  const image = parseImage(run, ctx) ?? parseShape(run, ctx) ?? parseVmlImage(run, ctx);
   if (image) return [image];
 
   const out: PMNode[] = [];
@@ -333,6 +333,40 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     height: emuToPx(attrOf(extent, 'cy')),
     alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
     float,
+  });
+}
+
+/** Legacy VML image (w:object / w:pict holding v:shape + v:imagedata) — how
+ *  older Word versions and OLE embeds carry pictures. The bitmap rides
+ *  v:imagedata's relationship; the display size lives in the v:shape style
+ *  ("width:108.3pt;height:61.35pt"), with w:object's dxaOrig/dyaOrig (twips)
+ *  as the fallback. */
+function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const holder = child(run, 'w:object') ?? child(run, 'w:pict');
+  if (!holder) return null;
+  const imagedata = findDescendant(holder, 'v:imagedata');
+  const rid = attrOf(imagedata, 'r:id');
+  const rel = rid ? ctx.rels.get(rid) : undefined;
+  if (!rel) return null;
+  const target = rel.target.replace(/^\/+/, '');
+  const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
+  if (!src) return null;
+
+  const style = attrOf(findDescendant(holder, 'v:shape'), 'style') ?? '';
+  const ptToPx = (m: RegExpExecArray | null) => (m ? Math.round((parseFloat(m[1]) * 96) / 72) : null);
+  const width =
+    ptToPx(/(?:^|;)width:([\d.]+)pt/.exec(style)) ??
+    (Number(attrOf(holder, 'w:dxaOrig')) ? twipsToPx(Number(attrOf(holder, 'w:dxaOrig'))) : null);
+  const height =
+    ptToPx(/(?:^|;)height:([\d.]+)pt/.exec(style)) ??
+    (Number(attrOf(holder, 'w:dyaOrig')) ? twipsToPx(Number(attrOf(holder, 'w:dyaOrig'))) : null);
+
+  return ctx.schema.nodes['image'].create({
+    src,
+    width,
+    height,
+    alt: attrOf(imagedata, 'o:title') ?? '',
+    float: null,
   });
 }
 

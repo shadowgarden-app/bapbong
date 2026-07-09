@@ -816,6 +816,28 @@ describe('importDocx', () => {
     expect(lineNode.attrs.float).toBeNull();
   });
 
+  it('imports legacy VML images (w:object + v:imagedata) with pt sizes', async () => {
+    const V_NS = 'urn:schemas-microsoft-com:vml';
+    const O_NS = 'urn:schemas-microsoft-com:office:office';
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:v="${V_NS}" xmlns:o="${O_NS}"><w:body>
+      <w:p><w:r><w:object w:dxaOrig="4240" w:dyaOrig="2290">
+        <v:shape id="_x0000_i1025" type="#_x0000_t75" style="width:108.3pt;height:61.35pt">
+          <v:imagedata r:id="rId9" o:title="hinh 1"/>
+        </v:shape>
+      </w:object></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId9" Type="${R_NS}/image" Target="media/image2.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image2.png': PNG_1x1 }),
+    );
+    const img = doc.child(0).child(0);
+    expect(img.type.name).toBe('image');
+    expect(img.attrs.src).toBe(`data:image/png;base64,${PNG_1x1}`);
+    expect(img.attrs.width).toBe(144); // 108.3pt × 96/72
+    expect(img.attrs.height).toBe(82); // 61.35pt × 96/72
+    expect(img.attrs.alt).toBe('hinh 1');
+  });
+
   it('resolves theme colors (w:themeColor) via theme1.xml, incl. shade', async () => {
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
       <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
