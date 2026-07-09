@@ -104,6 +104,11 @@ export class RenderCore {
 
   // Scroll repaint throttle (page virtualization).
   private scrollRaf: number | null = null;
+  // Late-font re-layout coalescing: families the current doc actually uses
+  // (set at load) + a debounce timer so a burst of loadingdone events (fonts
+  // land face-by-face) costs ONE re-layout, not one per event.
+  private docFamilies = new Set<string>();
+  private fontRelayoutTimer: ReturnType<typeof setTimeout> | null = null;
   // Subscribers notified after a late-font relayout (rects moved).
   private readonly fontsListeners = new Set<() => void>();
   // Visually-hidden ARIA mirror of the doc (screen readers; canvas is opaque).
@@ -175,9 +180,9 @@ export class RenderCore {
     this.footnotes = footnotes;
     this.page = page;
     // Measure with the real fonts, not their fallbacks.
-    await ensureFontsLoaded(
-      collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers)),
-    );
+    const families = collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers));
+    this.docFamilies = new Set(families.map(normalizeFamily));
+    await ensureFontsLoaded(families);
     this.layoutDoc(doc);
     if (opts.paint !== false) this.paintContent();
     return { doc, headerKeys: Object.keys(headers), footerKeys: Object.keys(footers) };
@@ -355,6 +360,8 @@ export class RenderCore {
   destroy(): void {
     if (this.scrollRaf != null) cancelAnimationFrame(this.scrollRaf);
     this.scrollRaf = null;
+    if (this.fontRelayoutTimer != null) clearTimeout(this.fontRelayoutTimer);
+    this.fontRelayoutTimer = null;
     this.viewport?.removeEventListener('scroll', this.onScroll);
     document.fonts?.removeEventListener?.('loadingdone', this.onFontsLoaded);
     this.fontsListeners.clear();
@@ -372,15 +379,28 @@ export class RenderCore {
     });
   };
 
-  private onFontsLoaded = (): void => {
-    this.layoutCache = createLayoutCache();
-    if (this.doc) {
+  private onFontsLoaded = (ev: Event): void => {
+    if (!this.doc) return;
+    // Only faces the document actually uses invalidate measurements — UI
+    // fonts and unused variants must not each trigger a full re-layout.
+    // (Families set at loadDocx; a family added by later edits isn't tracked
+    // yet — neither is its ensureFontsLoaded, a pre-existing gap.)
+    const faces = (ev as { fontfaces?: { family: string }[] }).fontfaces ?? [];
+    if (faces.length > 0 && !faces.some((f) => this.docFamilies.has(normalizeFamily(f.family)))) {
+      return;
+    }
+    // Coalesce the burst: one re-layout after the last batch settles.
+    if (this.fontRelayoutTimer != null) clearTimeout(this.fontRelayoutTimer);
+    this.fontRelayoutTimer = setTimeout(() => {
+      this.fontRelayoutTimer = null;
+      if (!this.doc) return;
+      this.layoutCache = createLayoutCache();
       this.layoutDoc(this.doc);
       this.paintContent(); // repaint content with the last overlay (rects may shift)
-    }
-    // Subscribers (e.g. the editor) recompute caret/selection against the new
-    // layout and repaint the overlay precisely.
-    for (const cb of this.fontsListeners) cb();
+      // Subscribers (e.g. the editor) recompute caret/selection against the
+      // new layout and repaint the overlay precisely.
+      for (const cb of this.fontsListeners) cb();
+    }, 150);
   };
 }
 
@@ -443,6 +463,11 @@ function printImages(sources: string[]): Promise<void> {
     // Safety net if an image never fires (resolve + print what loaded).
     setTimeout(finish, 4000);
   });
+}
+
+/** Font-family names as `document.fonts` reports them: unquoted, lowercase. */
+function normalizeFamily(family: string): string {
+  return family.replace(/^["']|["']$/g, '').trim().toLowerCase();
 }
 
 /** Every fontFamily mark in the given documents, plus the engine default. */
