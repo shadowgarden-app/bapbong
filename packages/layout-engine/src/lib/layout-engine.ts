@@ -147,6 +147,7 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
     height: Number(a['height']) || 0,
     link: link ? String(link.attrs['href']) : undefined,
     ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
+    ...(Number(a['rotation']) ? { rotation: Number(a['rotation']) } : {}),
     pos,
   };
 }
@@ -183,6 +184,7 @@ function paragraphToFlow(
           height: Number(child.attrs['height']) || 0,
           pos: contentStart + offset,
           ...(child.attrs['shape'] ? { shape: child.attrs['shape'] as FlowFloat['shape'] } : {}),
+          ...(Number(child.attrs['rotation']) ? { rotation: Number(child.attrs['rotation']) } : {}),
         };
         // Textbox paragraphs ride the image node as PM JSON; rebuild them and
         // flatten like any other flow (no nested floats inside the box).
@@ -624,6 +626,7 @@ function wrapParagraph(
           height: t.image.height,
           link: t.link,
           ...(t.image.shape ? { shape: t.image.shape } : {}),
+          ...(t.image.rotation ? { rotation: t.image.rotation } : {}),
           pos: t.pos,
         });
       } else {
@@ -851,6 +854,7 @@ const TEXTBOX_INSET = { l: 10, t: 5, r: 10, b: 5 };
 function resolveFloat(f: FlowFloat, x: number, y: number, ctx: Ctx): ResolvedFloat {
   const rf: ResolvedFloat = { x, y, width: f.width, height: f.height, src: f.src };
   if (f.pos != null) rf.pos = f.pos;
+  if (f.rotation) rf.rotation = f.rotation;
   if (f.shape) rf.shape = f.shape;
   if (f.content && f.content.length > 0) {
     const inset = f.inset ?? TEXTBOX_INSET;

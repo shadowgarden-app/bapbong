@@ -386,6 +386,12 @@ function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
   return out.length > 0 ? out : null;
 }
 
+/** Rotation (clockwise degrees) from a subtree's a:xfrm@rot (1/60000 deg). */
+function xfrmRotation(root: OoxmlNode | undefined): number {
+  const rot = Number(attrOf(findDescendant(root, 'a:xfrm'), 'rot'));
+  return rot ? Math.round((rot / 60000) * 100) / 100 : 0;
+}
+
 /** Extract an image (inline or floating) from a run's w:drawing, if any. */
 function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const drawing = runDrawing(run);
@@ -407,6 +413,7 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     height: emuToPx(attrOf(extent, 'cy')),
     alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
     float,
+    rotation: xfrmRotation(drawing),
   });
 }
 
@@ -505,6 +512,7 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     float: parseAnchorFloat(drawing),
     shape,
     textbox,
+    rotation: xfrmRotation(spPr),
   });
 }
 

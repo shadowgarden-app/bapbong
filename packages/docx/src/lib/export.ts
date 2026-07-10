@@ -115,9 +115,16 @@ function anchorXml(float: Record<string, unknown>, cx: number, cy: number, n: nu
   );
 }
 
+/** ` rot="..."` for a:xfrm from the node's rotation attr (1/60000 deg), or ''. */
+function rotAttr(node: PMNode): string {
+  const deg = Number(node.attrs['rotation']) || 0;
+  return deg ? ` rot="${Math.round(deg * 60000)}"` : '';
+}
+
 /** A drawn shape (rect/line) → wps drawing; inline or anchored per `float`. */
 function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const s = node.attrs['shape'] as ShapeSpec;
+  const rot = rotAttr(node);
   const n = ctx.nextId++;
   const cx = pxToEmu((node.attrs['width'] as number) ?? 0);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 0);
@@ -140,7 +147,7 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
     : '<wps:bodyPr/>';
   const graphic =
     `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr${tb ? ' txBox="1"' : ''}/>` +
-    `<wps:spPr><a:xfrm${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+    `<wps:spPr><a:xfrm${rot}${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="${s.kind}"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>` +
     `${txbx}${bodyPr}</wps:wsp></a:graphicData></a:graphic>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
@@ -170,7 +177,7 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
     `<pic:nvPicPr><pic:cNvPr id="${n}" name="image${n}.${ext}"/><pic:cNvPicPr/></pic:nvPicPr>` +
     `<pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
-    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+    `<pic:spPr><a:xfrm${rotAttr(node)}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
     `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
   );

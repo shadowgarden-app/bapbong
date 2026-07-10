@@ -187,6 +187,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
           width: 60,
           height: 40,
           shape: { kind: 'ellipse', stroke: '#000000', strokeWidth: 1, fill: '#FFEE00' },
+          rotation: 15.5,
         }),
       ]),
     ]);
@@ -200,6 +201,9 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(shapes[1].attrs['float']).toBeNull();
     // Preset geometry beyond rect/line keeps its kind through the round-trip.
     expect(shapes[2].attrs['shape']).toEqual({ kind: 'ellipse', stroke: '#000000', strokeWidth: 1, fill: '#FFEE00' });
+    // Rotation round-trips via a:xfrm@rot (1/60000 deg).
+    expect(shapes[2].attrs['rotation']).toBeCloseTo(15.5);
+    expect(shapes[0].attrs['rotation']).toBe(0);
   });
 
   it('round-trips textbox text on a drawn shape', async () => {

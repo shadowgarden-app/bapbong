@@ -37,6 +37,7 @@ class RecordingCtx {
   save(...args: unknown[]) { this.record('save', args); }
   restore(...args: unknown[]) { this.record('restore', args); }
   translate(...args: unknown[]) { this.record('translate', args); }
+  rotate(...args: unknown[]) { this.record('rotate', args); }
   clip(...args: unknown[]) { this.record('clip', args); }
 
   of(method: string): Call[] {
@@ -544,5 +545,19 @@ describe('CanvasPainter', () => {
     // r = 0.125 × min(80,40) = 5 → band from x+5, width 70; rolls at 5 and 75.
     expect(ctx.of('rect').some((c) => c.args[0] === 5 && c.args[2] === 70)).toBe(true);
     expect(ell.filter((c) => c.args[0] === 5 || c.args[0] === 75)).toHaveLength(2);
+  });
+
+  it('rotates a float shape around its box center (paint-only)', () => {
+    const { painter, container } = setup();
+    const floats = [
+      { x: 20, y: 40, width: 60, height: 20, src: '', rotation: 90, shape: { kind: 'rect' as const, stroke: '#000000' } },
+    ];
+    painter.paint({ pages: [{ ...page([]), floats }] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
+    // translate(center) → rotate(π/2) → translate(−center) around (50, 50).
+    const tr = ctx.of('translate');
+    expect(tr.some((c) => c.args[0] === 50 && c.args[1] === 50)).toBe(true);
+    expect(ctx.of('rotate')[0].args[0]).toBeCloseTo(Math.PI / 2);
+    expect(ctx.of('strokeRect').length).toBeGreaterThan(0);
   });
 });

@@ -341,28 +341,46 @@ export class CanvasPainter {
     }
   }
 
+  /** Run `draw` rotated `deg` clockwise around the center of the given box —
+   *  the paint-only rotation of images/shapes (the layout box stays put). */
+  private withRotation(deg: number | undefined, x: number, y: number, w: number, h: number, draw: () => void): void {
+    if (!deg) {
+      draw();
+      return;
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.rotate((deg * Math.PI) / 180);
+    ctx.translate(-(x + w / 2), -(y + h / 2));
+    draw();
+    ctx.restore();
+  }
+
   /** One anchored float: vector shape or bitmap, then any textbox text laid
    *  out inside it (box-local lines — translate to the float's origin, and
    *  clip to the box the way Word hides textbox overflow). */
   private paintFloat(f: ResolvedFloat, yOffset: number, o: ResolvedOptions, pageInfo?: PageInfo): void {
-    if (f.shape) {
-      this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
-    } else {
-      const el = this.requestImage(f.src);
-      if (el?.complete && el.naturalWidth > 0) {
-        this.ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
+    this.withRotation(f.rotation, f.x, yOffset + f.y, f.width, f.height, () => {
+      if (f.shape) {
+        this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
+      } else {
+        const el = this.requestImage(f.src);
+        if (el?.complete && el.naturalWidth > 0) {
+          this.ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
+        }
       }
-    }
-    if (f.lines && f.lines.length > 0) {
-      const ctx = this.ctx;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(f.x, yOffset + f.y, f.width, f.height);
-      ctx.clip();
-      ctx.translate(f.x, yOffset + f.y);
-      for (const line of f.lines) this.paintLine(line, 0, o, pageInfo);
-      ctx.restore();
-    }
+      if (f.lines && f.lines.length > 0) {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(f.x, yOffset + f.y, f.width, f.height);
+        ctx.clip();
+        ctx.translate(f.x, yOffset + f.y);
+        for (const line of f.lines) this.paintLine(line, 0, o, pageInfo);
+        ctx.restore();
+      }
+    });
   }
 
   private paintLine(
@@ -405,16 +423,18 @@ export class CanvasPainter {
       }
     }
     for (const img of line.images ?? []) {
-      if (img.shape) {
-        // Same box the bitmap would occupy: bottom edge on the baseline.
-        this.drawShape(img.shape, img.x, baselineY - img.height, img.width, img.height);
-        continue;
-      }
-      const el = this.requestImage(img.src);
-      if (el?.complete && el.naturalWidth > 0) {
-        // The image's bottom edge sits on the baseline (matches the layout).
-        ctx.drawImage(el, img.x, baselineY - img.height, img.width, img.height);
-      }
+      this.withRotation(img.rotation, img.x, baselineY - img.height, img.width, img.height, () => {
+        if (img.shape) {
+          // Same box the bitmap would occupy: bottom edge on the baseline.
+          this.drawShape(img.shape, img.x, baselineY - img.height, img.width, img.height);
+          return;
+        }
+        const el = this.requestImage(img.src);
+        if (el?.complete && el.naturalWidth > 0) {
+          // The image's bottom edge sits on the baseline (matches the layout).
+          ctx.drawImage(el, img.x, baselineY - img.height, img.width, img.height);
+        }
+      });
     }
   }
 
