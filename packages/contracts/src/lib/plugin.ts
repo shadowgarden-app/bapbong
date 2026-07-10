@@ -81,6 +81,8 @@ export interface OverlayFrame {
   height: number;
   /** Clockwise degrees around the rect center (default 0). */
   rotation?: number;
+  /** Small readout above the frame (e.g. "320 × 214" during a resize). */
+  label?: string;
 }
 
 /** A page-local rect the editor fills as a translucent highlight (e.g. a

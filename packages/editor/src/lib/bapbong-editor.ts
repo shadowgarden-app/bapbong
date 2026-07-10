@@ -708,6 +708,12 @@ export class BapbongEditor {
         'position:absolute;left:50%;top:-27px;width:13px;height:13px;border-radius:50%;' +
         'background:#fff;border:1.5px solid #378add;transform:translate(-50%,-50%);';
       el.appendChild(knob);
+      const label = document.createElement('div');
+      label.dataset['role'] = 'label';
+      label.style.cssText =
+        'position:absolute;right:0;top:-46px;display:none;background:#042c53;color:#b5d4f4;' +
+        'font:11px/1.6 ui-monospace,monospace;padding:0 7px;border-radius:4px;white-space:nowrap;';
+      el.appendChild(label);
       this.stack.appendChild(el);
       this.frameEl = el;
     }
@@ -728,6 +734,11 @@ export class BapbongEditor {
     el.style.width = `${br.x - tl.x}px`;
     el.style.height = `${br.y - tl.y}px`;
     el.style.transform = frame.rotation ? `rotate(${frame.rotation}deg)` : '';
+    const label = el.querySelector<HTMLDivElement>('[data-role="label"]');
+    if (label) {
+      label.style.display = frame.label ? 'block' : 'none';
+      if (frame.label) label.textContent = frame.label;
+    }
   }
 
   /** Fill (or clear, with null) translucent highlight rects — e.g. a selected
