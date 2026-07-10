@@ -5,7 +5,7 @@ import type {
   ResolvedLayout,
   ResolvedPage,
 } from '@shadow-garden/bapbong-contracts';
-import { caretRect, hitTest, selectionRects, verticalCaret } from './selection.js';
+import { caretRect, hitTest, imageAtPoint, selectionRects, verticalCaret } from './selection.js';
 
 const F: FontSpec = { family: 'Arial', sizePt: 10, bold: false, italic: false };
 /** 10px per character. */
@@ -157,5 +157,66 @@ describe('verticalCaret', () => {
     };
     expect(verticalCaret(layout, 2, 1, 30, measure)).toBe(8);
     expect(verticalCaret(layout, 8, -1, 30, measure)).toBe(2);
+  });
+});
+
+describe('imageAtPoint', () => {
+  const layout: ResolvedLayout = {
+    pages: [
+      page(
+        [
+          // Inline image on the line: x 60..100, bottom on the baseline
+          // (line y 20 + baseline 12 = 32), height 10 → top 22.
+          line(20, [seg(20, 'himg', 1)], 1, 7, {
+            images: [{ x: 60, src: 'a', width: 40, height: 10, pos: 5 }],
+          }),
+        ],
+        0,
+        {
+          floats: [
+            { x: 120, y: 40, width: 50, height: 30, src: 'f1', pos: 9 },
+            // Overlapping later float wins (painted on top). This one has no
+            // pos (chrome-style) so it must be skipped even though it's on top.
+            { x: 130, y: 45, width: 50, height: 30, src: 'deco' },
+          ],
+          tables: [
+            {
+              x: 20, y: 80, width: 100, height: 20,
+              cells: [{
+                x: 20, y: 80, width: 100, height: 20, colspan: 1, rowspan: 1,
+                lines: [],
+                floats: [{ x: 30, y: 85, width: 20, height: 10, src: 'cf', pos: 15 }],
+              }],
+            },
+          ],
+        },
+      ),
+    ],
+  };
+  it('hits an inline image via its baseline-anchored box', () => {
+    const hit = imageAtPoint(layout, { pageIndex: 0, x: 70, y: 25 });
+    expect(hit).toMatchObject({ pos: 5, kind: 'inline', rect: { x: 60, y: 22, width: 40, height: 10 } });
+    // Just above the image box (line top band) → no hit.
+    expect(imageAtPoint(layout, { pageIndex: 0, x: 70, y: 21 })).toBeNull();
+  });
+
+  it('hits floats (topmost with a pos) and cell floats', () => {
+    const f = imageAtPoint(layout, { pageIndex: 0, x: 125, y: 50 });
+    expect(f).toMatchObject({ pos: 9, kind: 'float' });
+    // Point only inside the pos-less decoration float → skipped → null.
+    expect(imageAtPoint(layout, { pageIndex: 0, x: 175, y: 60 })).toBeNull();
+    const cf = imageAtPoint(layout, { pageIndex: 0, x: 35, y: 90 });
+    expect(cf).toMatchObject({ pos: 15, kind: 'float', rect: { x: 30, y: 85 } });
+  });
+
+  it('prefers the float over an underlying inline image', () => {
+    const both: ResolvedLayout = {
+      pages: [page(
+        [line(20, [seg(20, 'x', 1)], 1, 3, { images: [{ x: 20, src: 'a', width: 40, height: 10, pos: 2 }] })],
+        0,
+        { floats: [{ x: 20, y: 20, width: 40, height: 12, src: 'f', pos: 30 }] },
+      )],
+    };
+    expect(imageAtPoint(both, { pageIndex: 0, x: 30, y: 26 })?.pos).toBe(30);
   });
 });

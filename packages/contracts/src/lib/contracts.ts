@@ -178,6 +178,10 @@ export interface FlowFloat {
   content?: FlowParagraph[];
   /** Textbox interior padding (wps:bodyPr lIns…), px. Absent → Word defaults. */
   inset?: { l: number; t: number; r: number; b: number };
+  /** Absolute PM position of the carrying image node — lets the editor map a
+   *  resolved float back to its node (resize). Absent in chrome (not
+   *  caret-addressable). */
+  pos?: number;
 }
 
 /** Paragraph horizontal alignment (mirrors w:jc / CSS text-align). */
@@ -441,6 +445,8 @@ export interface ResolvedFloat {
    *  (origin at the float's top-left) — the painter translates by (x, y).
    *  Never caret-addressable; PM positions are stripped. */
   lines?: LayoutLine[];
+  /** Absolute PM position of the carrying image node (absent in chrome). */
+  pos?: number;
 }
 
 export interface ResolvedPage {

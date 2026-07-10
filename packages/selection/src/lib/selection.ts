@@ -257,3 +257,57 @@ export function verticalCaret(
   }
   return posAtLineX(target, goalX, measure);
 }
+
+/** A document image under a page point: the carrying node's PM position plus
+ *  its page-local box — what the resize plugin anchors its frame to. */
+export interface ImageHit {
+  pos: number;
+  pageIndex: number;
+  rect: { x: number; y: number; width: number; height: number };
+  kind: 'inline' | 'float';
+}
+
+/** The topmost document image at a page-local point, or null. Floats win over
+ *  inline images (they paint over the text); among floats, the later one wins
+ *  (painted last = on top). Chrome/textbox art carries no pos and is skipped. */
+export function imageAtPoint(layout: ResolvedLayout, point: PagePoint): ImageHit | null {
+  const page = layout.pages[point.pageIndex];
+  if (!page) return null;
+  const inside = (x: number, y: number, w: number, h: number) =>
+    point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h;
+
+  const floats = [...(page.floats ?? [])];
+  const visitCells = (t: ResolvedTable) => {
+    for (const cell of t.cells) {
+      floats.push(...(cell.floats ?? []));
+      cell.tables?.forEach(visitCells);
+    }
+  };
+  page.tables?.forEach(visitCells);
+  for (let i = floats.length - 1; i >= 0; i--) {
+    const f = floats[i];
+    if (f.pos == null || !inside(f.x, f.y, f.width, f.height)) continue;
+    return {
+      pos: f.pos,
+      pageIndex: point.pageIndex,
+      rect: { x: f.x, y: f.y, width: f.width, height: f.height },
+      kind: 'float',
+    };
+  }
+
+  for (const line of allLines(page)) {
+    for (const img of line.images ?? []) {
+      if (img.pos == null) continue;
+      // The image's bottom edge sits on the baseline (matches the painter).
+      const top = line.y + line.baseline - img.height;
+      if (!inside(img.x, top, img.width, img.height)) continue;
+      return {
+        pos: img.pos,
+        pageIndex: point.pageIndex,
+        rect: { x: img.x, y: top, width: img.width, height: img.height },
+        kind: 'inline',
+      };
+    }
+  }
+  return null;
+}

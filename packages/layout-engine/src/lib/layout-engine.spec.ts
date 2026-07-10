@@ -852,6 +852,8 @@ describe('floats in table cells', () => {
     if (para.type !== 'paragraph') throw new Error('expected paragraph');
     expect(para.floats).toHaveLength(1);
     expect(para.floats?.[0]).toMatchObject({ width: 18, shape: { kind: 'rect' } });
+    // The carrying image node's PM position rides along (resize hit-testing).
+    expect(typeof para.floats?.[0].pos).toBe('number');
     expect(para.runs.filter((r) => 'src' in r)).toHaveLength(0); // not inline
   });
 
@@ -936,12 +938,13 @@ describe('textbox floats', () => {
           vRel: 'paragraph',
           shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
           content: [boxPara],
+          pos: 42,
         },
       ],
     };
     const { pages } = layoutBlocks([host], config());
     const f = pages[0].floats?.[0];
-    expect(f).toMatchObject({ x: 60, y: 30, width: 120, height: 60 });
+    expect(f).toMatchObject({ x: 60, y: 30, width: 120, height: 60, pos: 42 });
     // Lines are box-local: x from the interior inset, y from the box top.
     expect(f?.lines).toHaveLength(2);
     expect(f?.lines?.[0].segments.map((s) => s.text).join('')).toBe('aaaa bbbb');

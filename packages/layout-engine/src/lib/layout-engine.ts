@@ -181,6 +181,7 @@ function paragraphToFlow(
           src: String(child.attrs['src'] ?? ''),
           width: Number(child.attrs['width']) || 0,
           height: Number(child.attrs['height']) || 0,
+          pos: contentStart + offset,
           ...(child.attrs['shape'] ? { shape: child.attrs['shape'] as FlowFloat['shape'] } : {}),
         };
         // Textbox paragraphs ride the image node as PM JSON; rebuild them and
@@ -849,6 +850,7 @@ const TEXTBOX_INSET = { l: 10, t: 5, r: 10, b: 5 };
  *  by the float's origin) — never caret-addressable, positions stripped. */
 function resolveFloat(f: FlowFloat, x: number, y: number, ctx: Ctx): ResolvedFloat {
   const rf: ResolvedFloat = { x, y, width: f.width, height: f.height, src: f.src };
+  if (f.pos != null) rf.pos = f.pos;
   if (f.shape) rf.shape = f.shape;
   if (f.content && f.content.length > 0) {
     const inset = f.inset ?? TEXTBOX_INSET;
@@ -1911,7 +1913,10 @@ function stripPositions(lines: LayoutLine[], tables: ResolvedTable[]): void {
     if (line.images) for (const im of line.images) delete im.pos;
   }
   for (const t of tables) {
-    for (const c of t.cells) stripPositions(c.lines, c.tables ?? []);
+    for (const c of t.cells) {
+      stripPositions(c.lines, c.tables ?? []);
+      if (c.floats) for (const f of c.floats) delete f.pos;
+    }
   }
 }
 
@@ -1930,7 +1935,8 @@ function layoutChrome(
   flow.tables.forEach((t) => offsetTable(t, topY));
   stripPositions(lines, flow.tables);
   const band: ResolvedChrome = { lines, tables: flow.tables, height: flow.height };
-  if (flow.floats.length > 0) band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY }));
+  if (flow.floats.length > 0)
+    band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY, pos: undefined }));
   return band;
 }
 
