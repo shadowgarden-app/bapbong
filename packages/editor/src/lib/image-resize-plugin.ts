@@ -63,6 +63,15 @@ export function toLocal(x: number, y: number, rect: Rect, rotation: number): { x
   return { x: cx + dx * Math.cos(rad) - dy * Math.sin(rad), y: cy + dx * Math.sin(rad) + dy * Math.cos(rad) };
 }
 
+/** Resize cursor for a handle, accounting for the frame's rotation: each
+ *  handle points at a compass angle (n = 0°, e = 90°, …); adding the rotation
+ *  and quantizing to 45° picks among the four bidirectional resize cursors. */
+export function cursorFor(handle: Handle, rotation: number): string {
+  const DIR: Record<Handle, number> = { n: 0, ne: 45, e: 90, se: 135, s: 180, sw: 225, w: 270, nw: 315 };
+  const idx = Math.round((((DIR[handle] + rotation) % 360) + 360) % 360 / 45) % 4;
+  return ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'][idx];
+}
+
 /** Snap: within SNAP_TOL of a cardinal angle → that angle; with Shift → 15°
  *  steps. Result normalized to [0, 360). */
 export function snapAngle(deg: number, shift: boolean): number {
@@ -189,6 +198,13 @@ export function imageResizePlugin(): EditorPlugin {
   let sel: Selected | null = null;
   let drag: DragState | null = null;
   let rot: RotateState | null = null;
+  let hoverCursor = false; // we set the canvas cursor (so we may clear it)
+
+  const setCursor = (c: PluginContext, cursor: string | null): void => {
+    if (cursor === null && !hoverCursor) return; // don't clobber other plugins
+    c.setCursor(cursor);
+    hoverCursor = cursor !== null;
+  };
 
   const refresh = (c: PluginContext): void => {
     if (!sel || !imageNodeAt(c.state, sel.pos)) {
@@ -275,6 +291,26 @@ export function imageResizePlugin(): EditorPlugin {
           }
           return true;
         }
+        // Hover feedback over the selection's handles / rotate knob.
+        if (ev.buttons === 0 && ev.point && sel && imageNodeAt(c.state, sel.pos)) {
+          const frame = frameForPos(c.layout, sel.pos);
+          if (frame && frame.pageIndex === ev.point.pageIndex) {
+            const rotation = rotationAt(c.state, sel.pos);
+            const base = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+            const local = toLocal(ev.point.x, ev.point.y, base, rotation);
+            if (
+              Math.abs(local.x - (base.x + base.width / 2)) <= KNOB_TOL &&
+              Math.abs(local.y - (base.y - KNOB_OFFSET)) <= KNOB_TOL
+            ) {
+              setCursor(c, 'grab');
+              return false;
+            }
+            const handle = handleAt(base, local.x, local.y);
+            setCursor(c, handle ? cursorFor(handle, rotation) : null);
+            return false;
+          }
+          setCursor(c, null);
+        }
         return false;
       }
 
@@ -295,6 +331,7 @@ export function imageResizePlugin(): EditorPlugin {
                 grip: rotation - angleAround(base, ev.point.x, ev.point.y),
                 rotation,
               };
+              setCursor(c, 'grabbing');
               return true;
             }
             const handle = handleAt(base, local.x, local.y);
@@ -326,6 +363,7 @@ export function imageResizePlugin(): EditorPlugin {
         if (sel) {
           sel = null;
           c.setFrame(null);
+          setCursor(c, null);
         }
         return false; // let the editor place the caret
       }
@@ -334,6 +372,7 @@ export function imageResizePlugin(): EditorPlugin {
         if (rot) {
           const r = rot;
           rot = null;
+          setCursor(c, null);
           commitRotation(c, r);
           refresh(c);
           return true;

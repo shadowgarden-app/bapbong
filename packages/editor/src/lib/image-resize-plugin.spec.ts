@@ -1,4 +1,4 @@
-import { resizeRect, snapAngle, toLocal } from './image-resize-plugin';
+import { cursorFor, resizeRect, snapAngle, toLocal } from './image-resize-plugin';
 
 const base = { x: 100, y: 50, width: 200, height: 100 };
 
@@ -71,5 +71,22 @@ describe('toLocal', () => {
     expect(p.y).toBeCloseTo(0);
     // No rotation → identity.
     expect(toLocal(7, 9, rect, 0)).toEqual({ x: 7, y: 9 });
+  });
+});
+
+describe('cursorFor', () => {
+  it('maps handles to bidirectional resize cursors', () => {
+    expect(cursorFor('n', 0)).toBe('ns-resize');
+    expect(cursorFor('ne', 0)).toBe('nesw-resize');
+    expect(cursorFor('e', 0)).toBe('ew-resize');
+    expect(cursorFor('se', 0)).toBe('nwse-resize');
+  });
+
+  it('rotates the cursor with the frame', () => {
+    // At 90° the north handle points east.
+    expect(cursorFor('n', 90)).toBe('ew-resize');
+    expect(cursorFor('se', 90)).toBe('nesw-resize');
+    // Between steps it quantizes to the nearest 45°.
+    expect(cursorFor('n', 40)).toBe('nesw-resize');
   });
 });
