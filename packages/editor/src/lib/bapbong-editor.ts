@@ -19,6 +19,7 @@ import type {
   EditorPointerEvent,
   MeasureMetrics,
   MeasureText,
+  OverlayFrame,
   OverlayGuide,
   OverlayRect,
   PagePoint,
@@ -118,6 +119,8 @@ export class BapbongEditor {
   // Floating action button (e.g. the cell-block properties trigger).
   private actionEl: HTMLButtonElement | null = null;
   private actionHandler: (() => void) | null = null;
+  // Object-selection frame (image resize handles + rotate knob); lazily created.
+  private frameEl: HTMLDivElement | null = null;
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -176,6 +179,7 @@ export class BapbongEditor {
       setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
       setHighlight: (rects: OverlayRect[] | null) => this.setHighlight(rects),
       setActionButton: (at: PagePoint | null, onActivate?: () => void) => this.setActionButton(at, onActivate),
+      setFrame: (frame: OverlayFrame | null) => this.setFrame(frame),
     };
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
@@ -396,6 +400,8 @@ export class BapbongEditor {
     this.stack.removeEventListener('dblclick', this.onDblClick);
     this.stack.removeEventListener('contextmenu', this.onContextMenu);
     this.guideEl?.remove();
+    this.frameEl?.remove();
+    this.frameEl = null;
     this.guideEl = null;
     for (const el of this.highlightEls) el.remove();
     this.highlightEls.length = 0;
@@ -664,6 +670,64 @@ export class BapbongEditor {
     this.guideEl.style.left = `${top.x}px`;
     this.guideEl.style.top = `${top.y}px`;
     this.guideEl.style.height = `${bottom.y - top.y}px`;
+  }
+
+  /** Position (or hide, with null) the object-selection frame: border, 8
+   *  resize handles, and a rotate knob above the top edge — all one absolutely
+   *  positioned container rotated around its center, so a drag updates plain
+   *  DOM (no canvas repaint). Handle geometry stays constant-size on screen. */
+  private setFrame(frame: OverlayFrame | null): void {
+    if (!frame) {
+      if (this.frameEl) this.frameEl.style.display = 'none';
+      return;
+    }
+    if (!this.frameEl) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:absolute;pointer-events:none;z-index:6;transform-origin:center;';
+      const border = document.createElement('div');
+      border.style.cssText = 'position:absolute;inset:-1px;border:1.5px solid #378add;';
+      el.appendChild(border);
+      const handle = (left: string, top: string) => {
+        const h = document.createElement('div');
+        h.style.cssText =
+          `position:absolute;width:7px;height:7px;background:#fff;border:1.5px solid #378add;` +
+          `left:${left};top:${top};transform:translate(-50%,-50%);`;
+        el.appendChild(h);
+      };
+      for (const lx of ['0%', '50%', '100%'])
+        for (const ty of ['0%', '50%', '100%']) {
+          if (lx === '50%' && ty === '50%') continue;
+          handle(lx, ty);
+        }
+      const stem = document.createElement('div');
+      stem.style.cssText =
+        'position:absolute;left:50%;top:-20px;width:1.5px;height:19px;background:#378add;transform:translateX(-50%);';
+      el.appendChild(stem);
+      const knob = document.createElement('div');
+      knob.style.cssText =
+        'position:absolute;left:50%;top:-27px;width:13px;height:13px;border-radius:50%;' +
+        'background:#fff;border:1.5px solid #378add;transform:translate(-50%,-50%);';
+      el.appendChild(knob);
+      this.stack.appendChild(el);
+      this.frameEl = el;
+    }
+    const tl = this.core.pageToCanvas({ pageIndex: frame.pageIndex, x: frame.x, y: frame.y });
+    const br = this.core.pageToCanvas({
+      pageIndex: frame.pageIndex,
+      x: frame.x + frame.width,
+      y: frame.y + frame.height,
+    });
+    if (!tl || !br) {
+      this.frameEl.style.display = 'none';
+      return;
+    }
+    const el = this.frameEl;
+    el.style.display = 'block';
+    el.style.left = `${tl.x}px`;
+    el.style.top = `${tl.y}px`;
+    el.style.width = `${br.x - tl.x}px`;
+    el.style.height = `${br.y - tl.y}px`;
+    el.style.transform = frame.rotation ? `rotate(${frame.rotation}deg)` : '';
   }
 
   /** Fill (or clear, with null) translucent highlight rects — e.g. a selected

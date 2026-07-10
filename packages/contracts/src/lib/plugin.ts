@@ -69,6 +69,20 @@ export interface OverlayGuide {
   height: number;
 }
 
+/** A selection frame around an object (image resize): border + 8 resize
+ *  handles + a rotate knob above the top edge, rotated by `rotation` degrees
+ *  around the rect center. Page-local geometry; purely visual — the plugin
+ *  hit-tests handles itself from the same numbers. */
+export interface OverlayFrame {
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Clockwise degrees around the rect center (default 0). */
+  rotation?: number;
+}
+
 /** A page-local rect the editor fills as a translucent highlight (e.g. a
  *  selected table-cell block). */
 export interface OverlayRect {
@@ -110,6 +124,10 @@ export interface PluginContext {
   /** Fill these page-local rects as a translucent highlight (e.g. a selected
    *  table-cell block), or null to clear. The editor renders them on the canvas. */
   setHighlight(rects: OverlayRect[] | null): void;
+  /** Show an object-selection frame (border + resize handles + rotate knob),
+   *  or null to clear. Page-local geometry; the editor renders it as DOM
+   *  overlay in the canvas stack — no canvas repaint. */
+  setFrame(frame: OverlayFrame | null): void;
   /** Show a small action button straddling a page-local point (e.g. a selected
    *  cell block's top-right), invoking `onActivate` on click/tap; null clears it.
    *  A touch-friendly trigger where hover/right-click aren't available. */

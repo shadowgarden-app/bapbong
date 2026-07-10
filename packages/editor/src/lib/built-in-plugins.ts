@@ -1,5 +1,6 @@
 import type { EditorPlugin } from '@shadow-garden/bapbong-contracts';
 import { findPlugin } from './find-plugin';
+import { imageResizePlugin } from './image-resize-plugin';
 import { tableResizePlugin } from './table-resize-plugin';
 import { tableSelectionPlugin } from './table-selection-plugin';
 import { hyperlinkPlugin } from './hyperlink-plugin';
@@ -16,7 +17,8 @@ import { hyperlinkPlugin } from './hyperlink-plugin';
  * every editor needs its own fresh instances.
  */
 export function createBuiltins(): EditorPlugin[] {
-  // Order matters for the pointer hook: hyperlink claims modifier-clicks first,
-  // then resize claims borders before selection.
-  return [hyperlinkPlugin(), findPlugin(), tableResizePlugin(), tableSelectionPlugin()];
+  // Order matters for the pointer hook: hyperlink claims modifier-clicks
+  // first, then the resizers claim their geometry (table column borders,
+  // then image boxes) before table selection.
+  return [hyperlinkPlugin(), findPlugin(), tableResizePlugin(), imageResizePlugin(), tableSelectionPlugin()];
 }
