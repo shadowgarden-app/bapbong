@@ -255,6 +255,9 @@ importers:
       '@shadow-garden/bapbong-model':
         specifier: workspace:^
         version: link:../model
+      '@shadow-garden/bapbong-selection':
+        specifier: workspace:^
+        version: link:../selection
       '@shadow-garden/bapbong-view':
         specifier: workspace:^
         version: link:../view
