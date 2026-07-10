@@ -273,8 +273,22 @@ export interface ImageHit {
 export function imageAtPoint(layout: ResolvedLayout, point: PagePoint): ImageHit | null {
   const page = layout.pages[point.pageIndex];
   if (!page) return null;
-  const inside = (x: number, y: number, w: number, h: number) =>
-    point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h;
+  // A rotated image paints rotated around its box center; hit-test in its
+  // local space by inverse-rotating the point.
+  const inside = (x: number, y: number, w: number, h: number, rotation?: number) => {
+    let px = point.x;
+    let py = point.y;
+    if (rotation) {
+      const rad = (-rotation * Math.PI) / 180;
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      const dx = px - cx;
+      const dy = py - cy;
+      px = cx + dx * Math.cos(rad) - dy * Math.sin(rad);
+      py = cy + dx * Math.sin(rad) + dy * Math.cos(rad);
+    }
+    return px >= x && px <= x + w && py >= y && py <= y + h;
+  };
 
   const floats = [...(page.floats ?? [])];
   const visitCells = (t: ResolvedTable) => {
@@ -286,7 +300,7 @@ export function imageAtPoint(layout: ResolvedLayout, point: PagePoint): ImageHit
   page.tables?.forEach(visitCells);
   for (let i = floats.length - 1; i >= 0; i--) {
     const f = floats[i];
-    if (f.pos == null || !inside(f.x, f.y, f.width, f.height)) continue;
+    if (f.pos == null || !inside(f.x, f.y, f.width, f.height, f.rotation)) continue;
     return {
       pos: f.pos,
       pageIndex: point.pageIndex,
@@ -300,7 +314,7 @@ export function imageAtPoint(layout: ResolvedLayout, point: PagePoint): ImageHit
       if (img.pos == null) continue;
       // The image's bottom edge sits on the baseline (matches the painter).
       const top = line.y + line.baseline - img.height;
-      if (!inside(img.x, top, img.width, img.height)) continue;
+      if (!inside(img.x, top, img.width, img.height, img.rotation)) continue;
       return {
         pos: img.pos,
         pageIndex: point.pageIndex,
