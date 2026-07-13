@@ -913,6 +913,37 @@ describe('floats in table cells', () => {
   });
 });
 
+describe('rotated inline images', () => {
+  it('grows the line box to the rotated bounding-box height (width untouched)', () => {
+    // 100×20 image rotated 90°: the painted box is 20 wide × 100 tall around
+    // the same center, so the line needs ascent 60 (h/2 + rotH/2) and descent
+    // 40 — but the token still advances 100 horizontally (no re-wrap).
+    const metrics = (f: FontSpec) => ({ ascent: sizeAscent(f), descent: sizeDescent(f) });
+    const sizeAscent = (f: FontSpec) => f.sizePt * (96 / 72) * 0.8;
+    const sizeDescent = (f: FontSpec) => f.sizePt * (96 / 72) * 0.25;
+    const cfg: LayoutConfig = { ...config(), measureMetrics: metrics };
+    const para: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        { text: 'x', font: font() },
+        { src: 'a', width: 100, height: 20, rotation: 90 },
+      ],
+    };
+    const { pages } = layoutBlocks([para], cfg);
+    const line = pages[0].lines[0];
+    expect(line.baseline).toBeCloseTo(60); // ascent: 20/2 + 100/2
+    expect(line.height).toBeCloseTo(100); // + descent (100−20)/2 = 40
+    expect(line.images?.[0].width).toBe(100); // horizontal advance unchanged
+    // Unrotated control: the line only needs the image height above baseline.
+    const flat: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ src: 'a', width: 100, height: 20 }],
+    };
+    const l2 = layoutBlocks([flat], cfg).pages[0].lines[0];
+    expect(l2.baseline).toBeCloseTo(20);
+  });
+});
+
 describe('textbox floats', () => {
   it('flows textbox paragraphs inside the box (box-local lines, stripped positions)', () => {
     // Box 120×60 anchored at hOffset 40 / vOffset 10. Interior: default inset

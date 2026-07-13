@@ -558,8 +558,19 @@ export class CanvasPainter {
     // Cell content next: run shading/highlight boxes can reach the cell edge,
     // so borders must stroke AFTER them (Word paints grid lines on top).
     for (const cell of table.cells) {
+      // A rotated image's box can poke past the cell horizontally (the row
+      // only grew vertically) — clip the cell like overflow:hidden so it
+      // doesn't paint over neighbouring columns.
+      const clip = cell.lines.some((l) => l.images?.some((im) => im.rotation));
+      if (clip) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(cell.x, yOffset + cell.y, cell.width, cell.height);
+        ctx.clip();
+      }
       for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
       for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
+      if (clip) ctx.restore();
     }
     // OOXML tables are borderless unless w:tblBorders (or a table style) says
     // otherwise. Outer edges use top/bottom/left/right; shared edges insideH/V.

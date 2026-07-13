@@ -784,8 +784,14 @@ function wrapParagraph(
     lineTokens.push(token);
     lineWidth += token.width;
     if (token.image) {
-      maxImagePx = Math.max(maxImagePx, token.image.height);
-      maxAscent = Math.max(maxAscent, token.image.height); // image sits on the baseline
+      // A rotated image paints around the center of its baseline-anchored box,
+      // so the line must hold the rotated box's HEIGHT — above and below the
+      // baseline. Width is deliberately not grown: horizontal overflow clips
+      // (Word keeps the column grid; the picture just pokes out).
+      const rotH = rotatedBoxHeight(token.image);
+      maxImagePx = Math.max(maxImagePx, rotH);
+      maxAscent = Math.max(maxAscent, token.image.height / 2 + rotH / 2);
+      maxDescent = Math.max(maxDescent, Math.max(0, (rotH - token.image.height) / 2));
     } else {
       maxFontPx = Math.max(maxFontPx, sizePx(token.font));
       if (metrics) {
@@ -796,6 +802,14 @@ function wrapParagraph(
     }
   }
   flushLine(true); // emit the paragraph's last (or only/empty) line
+}
+
+/** Height of the axis-aligned box containing an image after its paint-only
+ *  rotation (identity when unrotated). */
+function rotatedBoxHeight(img: { width: number; height: number; rotation?: number }): number {
+  if (!img.rotation) return img.height;
+  const rad = (img.rotation * Math.PI) / 180;
+  return Math.abs(img.width * Math.sin(rad)) + Math.abs(img.height * Math.cos(rad));
 }
 
 /** Wrap one paragraph into line drafts within [contentLeft, contentRight].

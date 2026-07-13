@@ -547,6 +547,25 @@ describe('CanvasPainter', () => {
     expect(ell.filter((c) => c.args[0] === 5 || c.args[0] === 75)).toHaveLength(2);
   });
 
+  it('clips a cell holding a rotated image to the cell box (overflow hidden)', () => {
+    const { painter, container } = setup();
+    const line = {
+      x: 20, y: 60, width: 100, height: 100, baseline: 60,
+      segments: [],
+      images: [{ x: 20, src: '', width: 100, height: 20, rotation: 90, shape: { kind: 'rect' as const, stroke: '#000' } }],
+    };
+    const p = {
+      ...page([]),
+      tables: [{ x: 20, y: 60, width: 100, height: 100, cells: [{ x: 20, y: 60, width: 100, height: 100, colspan: 1, rowspan: 1, lines: [line] }] }],
+    };
+    painter.paint({ pages: [p] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
+    // save → rect(cell box) → clip … restore around the cell's content.
+    expect(ctx.of('clip').length).toBe(1);
+    expect(ctx.of('rect').some((c) => c.args[0] === 20 && c.args[1] === 60 && c.args[2] === 100 && c.args[3] === 100)).toBe(true);
+    expect(ctx.of('rotate').length).toBe(1); // the image still paints rotated
+  });
+
   it('rotates a float shape around its box center (paint-only)', () => {
     const { painter, container } = setup();
     const floats = [
