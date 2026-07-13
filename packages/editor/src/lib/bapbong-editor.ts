@@ -19,6 +19,7 @@ import type {
   EditorPointerEvent,
   MeasureMetrics,
   MeasureText,
+  EditorKeyEvent,
   OverlayFrame,
   OverlayGuide,
   OverlayRect,
@@ -149,6 +150,9 @@ export class BapbongEditor {
     stack.addEventListener('pointercancel', this.onPointerUp);
     stack.addEventListener('dblclick', this.onDblClick);
     stack.addEventListener('contextmenu', this.onContextMenu);
+    // Window-level capture: keys must reach plugins even mid-gesture, when a
+    // claimed pointerdown left focus outside the hidden editor (see onKeyDown).
+    window.addEventListener('keydown', this.onKeyDown, true);
 
     // Plugins: build their context and run setup (teardowns collected for destroy).
     // Internal (built-in) plugins first, then external/host-provided plugins.
@@ -393,6 +397,7 @@ export class BapbongEditor {
     this.pluginTeardowns.length = 0;
     this.stopBlink();
     this.offFonts();
+    window.removeEventListener('keydown', this.onKeyDown, true);
     this.stack.removeEventListener('pointerdown', this.onPointerDown);
     this.stack.removeEventListener('pointermove', this.onPointerMove);
     this.stack.removeEventListener('pointerup', this.onPointerUp);
@@ -565,6 +570,29 @@ export class BapbongEditor {
     this.bridge.focus();
     for (const cb of this.caretPickListeners) cb(pos);
     for (const p of this.plugins) p.onCaretPick?.(pos);
+  };
+
+  /** Offer a key to plugins (before the hidden editor's keymaps). Only when
+   *  the event targets this editor (the canvas stack / hidden bridge) or has
+   *  no specific target (body — where focus lands after a claimed pointer
+   *  gesture), so plugins never steal keys from other inputs on the page. */
+  private onKeyDown = (ev: KeyboardEvent): void => {
+    const target = ev.target as Node | null;
+    if (target && target !== document.body && !this.stack.contains(target)) return;
+    const offered: EditorKeyEvent = {
+      key: ev.key,
+      ctrlKey: ev.ctrlKey,
+      metaKey: ev.metaKey,
+      shiftKey: ev.shiftKey,
+      altKey: ev.altKey,
+    };
+    for (const p of this.plugins) {
+      if (p.onKey?.(offered)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+    }
   };
 
   private onPointerMove = (ev: PointerEvent): void => {

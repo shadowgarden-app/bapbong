@@ -60,6 +60,17 @@ export interface EditorPointerEvent {
   altKey: boolean;
 }
 
+/** A keyboard event offered to plugins (via {@link EditorPlugin.onKey})
+ *  before the editor's own keymaps see it. */
+export interface EditorKeyEvent {
+  /** `KeyboardEvent.key` — e.g. "Escape", "Enter", "a". */
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+
 /** A transient vertical guide line shown during a drag (page-local geometry) —
  *  e.g. a column-resize preview. The editor positions it on the canvas. */
 export interface OverlayGuide {
@@ -166,4 +177,8 @@ export interface EditorPlugin {
    *  preventDefaults it, captures the pointer on `down`, and skips its default).
    *  `move` fires on every hover (for cursor feedback / drag). */
   onPointer?(ev: EditorPointerEvent): boolean;
+  /** Keyboard input, offered before the editor's keymaps (typing, undo,
+   *  arrows) — e.g. Escape cancelling an in-flight drag gesture. Return true
+   *  to claim (the editor preventDefaults and stops the event). */
+  onKey?(ev: EditorKeyEvent): boolean;
 }

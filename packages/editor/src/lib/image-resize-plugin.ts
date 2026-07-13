@@ -255,6 +255,26 @@ export function imageResizePlugin(): EditorPlugin {
       // the pointer, not snap back to the (unchanged) layout.
       if (ctx && sel && !drag && !rot) refresh(ctx);
     },
+    onKey(ev) {
+      const c = ctx;
+      if (ev.key !== 'Escape' || !c) return false;
+      // Mid-gesture: abandon the preview, snap the frame back to the layout
+      // (nothing was dispatched, so there is nothing to undo).
+      if (drag || rot) {
+        drag = null;
+        rot = null;
+        setCursor(c, null);
+        refresh(c);
+        return true;
+      }
+      if (sel) {
+        sel = null;
+        c.setFrame(null);
+        setCursor(c, null);
+        return true;
+      }
+      return false;
+    },
     onPointer(ev: EditorPointerEvent): boolean {
       const c = ctx;
       if (!c) return false;
