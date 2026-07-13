@@ -110,14 +110,28 @@ export function createEditingState(doc: PMNode, keys: Record<string, Command> = 
  * popups appear next to the visible (painted) caret.
  */
 export class InputBridge {
-  /** Host element of the hidden editor. Append it near the canvas. */
+  /** Clip layer appended near the canvas: it fills the positioned ancestor
+   *  and `overflow: hidden`s the 800px-wide host riding the caret inside —
+   *  otherwise that tail pokes past the right page edge and gifts the
+   *  scroll viewport a horizontal scrollbar. */
   readonly dom: HTMLElement;
+  /** The hidden editor's host — the element `place()` actually moves. */
+  private readonly host: HTMLElement;
   readonly view: EditorView;
 
   constructor(options: InputBridgeOptions) {
     this.dom = document.createElement('div');
     this.dom.className = 'bapbong-input-bridge';
     Object.assign(this.dom.style, {
+      position: 'absolute',
+      inset: '0',
+      overflow: 'hidden',
+      pointerEvents: 'none',
+      zIndex: '-1',
+    } satisfies Partial<CSSStyleDeclaration>);
+
+    this.host = document.createElement('div');
+    Object.assign(this.host.style, {
       position: 'absolute',
       top: '0',
       left: '0',
@@ -132,10 +146,10 @@ export class InputBridge {
       opacity: '0',
       // Keep it focusable but out of the way of canvas pointer events.
       pointerEvents: 'none',
-      zIndex: '-1',
     } satisfies Partial<CSSStyleDeclaration>);
+    this.dom.appendChild(this.host);
 
-    this.view = new EditorView(this.dom, {
+    this.view = new EditorView(this.host, {
       state: createEditingState(options.doc, options.keys),
       dispatchTransaction: (tr) => {
         const state = this.view.state.apply(tr);
@@ -179,8 +193,8 @@ export class InputBridge {
   /** Move the hidden editor to the painted caret (CSS px, relative to the
    *  positioned ancestor) so IME popups anchor in the right place. */
   place(x: number, y: number, height: number): void {
-    this.dom.style.transform = `translate(${x}px, ${y}px)`;
-    this.dom.style.height = `${height}px`;
+    this.host.style.transform = `translate(${x}px, ${y}px)`;
+    this.host.style.height = `${height}px`;
   }
 
   destroy(): void {
