@@ -20,6 +20,7 @@ import {
   type DocumentSession,
   type FindMatch,
   type Formatting,
+  type ImageChanges,
   type InsertAnchor,
   type MutationOptions,
   type MutationResult,
@@ -59,11 +60,19 @@ export class PmDocSession implements DocumentSession {
   // ── reads ────────────────────────────────────────────────────────────
 
   async snapshot(): Promise<DocSnapshot> {
-    const blocks: DocBlock[] = this.textblocks().map(({ node }, index) => ({
-      index,
-      type: blockType(node),
-      text: node.textContent,
-    }));
+    const blocks: DocBlock[] = this.textblocks().map(({ node }, index) => {
+      const block: DocBlock = { index, type: blockType(node), text: node.textContent };
+      const images = blockImages(node).map(({ node: img }, i) => ({
+        index: i,
+        alt: String(img.attrs['alt'] ?? ''),
+        width: Number(img.attrs['width']) || 0,
+        height: Number(img.attrs['height']) || 0,
+        rotation: Number(img.attrs['rotation']) || 0,
+        kind: img.attrs['shape'] ? ('shape' as const) : ('bitmap' as const),
+      }));
+      if (images.length > 0) block.images = images;
+      return block;
+    });
     return { docVersion: this.host.getVersion(), blocks, meta: this.host.meta() };
   }
 
@@ -135,6 +144,42 @@ export class PmDocSession implements DocumentSession {
     }
     this.host.apply(tr);
     return { docVersion: this.host.getVersion(), range: { from: hit.from, to: hit.to } };
+  }
+
+  async updateImage(
+    blockIndex: number,
+    imageIndex: number,
+    changes: ImageChanges,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult> {
+    this.checkVersion(opts.expectedVersion);
+    const blocks = this.textblocks();
+    const block = blocks[blockIndex];
+    if (!block) {
+      throw new AnchorError(
+        `blockIndex ${blockIndex} is out of range — the document has ${blocks.length} block(s). ` +
+          `Block indexes change with every edit; call get_document again.`,
+      );
+    }
+    const images = blockImages(block.node).map((img) => ({ ...img, pos: block.pos + 1 + img.offset }));
+    if (images.length === 0) {
+      throw new AnchorError(`Block ${blockIndex} has no images. get_document lists each block's images.`);
+    }
+    const img = images[imageIndex];
+    if (!img) {
+      throw new AnchorError(
+        `imageIndex ${imageIndex} is out of range — block ${blockIndex} has ${images.length} image(s) (0-${images.length - 1}).`,
+      );
+    }
+    let tr = this.host.getState().tr;
+    if (changes.width !== undefined) tr = tr.setNodeAttribute(img.pos, 'width', Math.max(1, Math.round(changes.width)));
+    if (changes.height !== undefined) tr = tr.setNodeAttribute(img.pos, 'height', Math.max(1, Math.round(changes.height)));
+    if (changes.rotation !== undefined) {
+      tr = tr.setNodeAttribute(img.pos, 'rotation', ((changes.rotation % 360) + 360) % 360);
+    }
+    if (tr.steps.length === 0) return { docVersion: this.host.getVersion() };
+    this.host.apply(tr);
+    return { docVersion: this.host.getVersion(), range: { from: img.pos, to: img.pos + 1 } };
   }
 
   async save(): Promise<void> {
@@ -230,6 +275,15 @@ export class PmDocSession implements DocumentSession {
     }
     return all[0];
   }
+}
+
+/** The block's inline image children, in order, with their child offsets. */
+function blockImages(block: PMNode): { node: PMNode; offset: number }[] {
+  const out: { node: PMNode; offset: number }[] = [];
+  block.forEach((child, offset) => {
+    if (child.type.name === 'image') out.push({ node: child, offset });
+  });
+  return out;
 }
 
 function blockType(node: PMNode): string {

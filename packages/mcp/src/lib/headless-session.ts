@@ -14,6 +14,7 @@ import type {
   DocumentSession,
   FindMatch,
   Formatting,
+  ImageChanges,
   InsertAnchor,
   MutationOptions,
   MutationResult,
@@ -83,6 +84,9 @@ export class HeadlessSession implements DocumentSession {
   }
   applyFormatting(target: string, format: Formatting, opts?: MutationOptions): Promise<MutationResult> {
     return this.inner.applyFormatting(target, format, opts);
+  }
+  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions): Promise<MutationResult> {
+    return this.inner.updateImage(blockIndex, imageIndex, changes, opts);
   }
   save(): Promise<void> {
     return this.inner.save();

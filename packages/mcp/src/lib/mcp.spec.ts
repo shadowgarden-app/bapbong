@@ -7,7 +7,11 @@ import { HeadlessSession } from './headless-session.js';
 import { createMcpServer } from './server.js';
 import { executeOp, RemoteSession, reviveError, type SessionOpName } from './wire.js';
 
-/** A small real .docx: three paragraphs, one duplicated phrase, bold mark. */
+// 1×1 transparent PNG.
+const PNG_1PX =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+/** A small real .docx: three text paragraphs + one holding an image. */
 async function sampleBytes(): Promise<Uint8Array> {
   const doc = schema.node('doc', null, [
     schema.node('paragraph', null, [schema.text('Bao gia dich vu thanh lap cong ty.')]),
@@ -17,6 +21,10 @@ async function sampleBytes(): Promise<Uint8Array> {
       schema.text(' VND.'),
     ]),
     schema.node('paragraph', null, [schema.text('Lien he: 0336697918. Tong phi: chua VAT.')]),
+    schema.node('paragraph', null, [
+      schema.text('Hinh minh hoa: '),
+      schema.node('image', { src: `data:image/png;base64,${PNG_1PX}`, width: 100, height: 50 }),
+    ]),
   ]);
   return exportDocx(doc);
 }
@@ -30,7 +38,7 @@ describe('HeadlessSession', () => {
     const s = await openSession();
     const snap = await s.snapshot();
     expect(snap.docVersion).toBe('v1');
-    expect(snap.blocks).toHaveLength(3);
+    expect(snap.blocks).toHaveLength(4);
     expect(snap.blocks[1]).toMatchObject({ index: 1, type: 'paragraph', text: 'Tong phi: 1.500.000 VND.' });
     expect(snap.meta).toMatchObject({ name: 'sample.docx', dirty: false });
   });
@@ -85,6 +93,7 @@ describe('HeadlessSession', () => {
       'Bao gia dich vu thanh lap cong ty.',
       'Tong phi: 1.500.000 VND.',
       'Lien he: 0336697918. Tong phi: chua VAT.',
+      'Hinh minh hoa: ',
       'Dong 1',
       'Dong 2',
     ]);
@@ -104,6 +113,30 @@ describe('HeadlessSession', () => {
     const before = snap.docVersion;
     const res = await reopened.applyFormatting('Lien he', { bold: false });
     expect(res.docVersion).not.toBe(before);
+  });
+
+  it('lists a block\'s images in the snapshot', async () => {
+    const s = await openSession();
+    const snap = await s.snapshot();
+    expect(snap.blocks[3].text).toBe('Hinh minh hoa: ');
+    expect(snap.blocks[3].images).toEqual([
+      { index: 0, alt: '', width: 100, height: 50, rotation: 0, kind: 'bitmap' },
+    ]);
+    expect(snap.blocks[0].images).toBeUndefined();
+  });
+
+  it('updateImage resizes/rotates in one step, teaching on bad anchors', async () => {
+    const s = await openSession();
+    const v1 = (await s.snapshot()).docVersion;
+    const res = await s.updateImage(3, 0, { width: 200, rotation: 450.5 }, { expectedVersion: v1 });
+    expect(res.docVersion).toBe('v2');
+    const img = (await s.snapshot()).blocks[3].images?.[0];
+    expect(img).toMatchObject({ width: 200, height: 50, rotation: 90.5 }); // height kept; 450.5 → 90.5
+
+    await expect(s.updateImage(0, 0, { width: 10 })).rejects.toThrow(/has no images/);
+    await expect(s.updateImage(3, 5, { width: 10 })).rejects.toThrow(/0-0/);
+    await expect(s.updateImage(99, 0, { width: 10 })).rejects.toThrow(AnchorError);
+    await expect(s.updateImage(3, 0, { width: 10 }, { expectedVersion: 'v1' })).rejects.toThrow(VersionConflictError);
   });
 
   it('save() exports round-trippable bytes to the sink', async () => {
@@ -136,10 +169,13 @@ describe('wire (RemoteSession ↔ executeOp)', () => {
   it('round-trips reads and mutations across the hop', async () => {
     const { remote } = await remotePair();
     const snap = await remote.snapshot();
-    expect(snap.blocks).toHaveLength(3);
+    expect(snap.blocks).toHaveLength(4);
     const res = await remote.replaceText('1.500.000', '8.888.888', { expectedVersion: snap.docVersion });
     expect(res.docVersion).toBe('v2');
     expect((await remote.snapshot()).blocks[1].text).toBe('Tong phi: 8.888.888 VND.');
+    const img = await remote.updateImage(3, 0, { rotation: -90 });
+    expect(img.docVersion).toBe('v3');
+    expect((await remote.snapshot()).blocks[3].images?.[0].rotation).toBe(270);
   });
 
   it('revives contract errors by name across the hop', async () => {
@@ -179,13 +215,14 @@ describe('createMcpServer (end-to-end over MCP)', () => {
       'insert_content',
       'replace_text',
       'save_document',
+      'update_image',
     ]);
   });
 
   it('reads the document and edits it through tool calls', async () => {
     const { client } = await connect();
     const doc = JSON.parse(text(await client.callTool({ name: 'get_document', arguments: {} })));
-    expect(doc.blocks).toHaveLength(3);
+    expect(doc.blocks).toHaveLength(4);
 
     const res = await client.callTool({
       name: 'replace_text',
@@ -213,6 +250,24 @@ describe('createMcpServer (end-to-end over MCP)', () => {
     });
     expect(ambiguous.isError).toBe(true);
     expect(text(ambiguous)).toContain('occurrence');
+  });
+
+  it('updates an image through the tool (and rejects an empty change)', async () => {
+    const { client } = await connect();
+    const doc = JSON.parse(text(await client.callTool({ name: 'get_document', arguments: {} })));
+    expect(doc.blocks[3].images).toHaveLength(1);
+
+    const empty = await client.callTool({ name: 'update_image', arguments: { block_index: 3 } });
+    expect(empty.isError).toBe(true);
+    expect(text(empty)).toContain('at least one');
+
+    const res = await client.callTool({
+      name: 'update_image',
+      arguments: { block_index: 3, width: 150, height: 75, rotation: 45, expectedVersion: doc.docVersion },
+    });
+    expect(res.isError).toBeFalsy();
+    const after = JSON.parse(text(await client.callTool({ name: 'get_document', arguments: {} })));
+    expect(after.blocks[3].images[0]).toMatchObject({ width: 150, height: 75, rotation: 45 });
   });
 
   it('exposes the document as a resource', async () => {

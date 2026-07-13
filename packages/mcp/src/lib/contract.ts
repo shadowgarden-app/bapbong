@@ -18,6 +18,21 @@
  *   {@link VersionConflictError} and the caller re-reads before retrying.
  */
 
+/** An inline image (bitmap picture or drawn shape) inside a block —
+ *  addressable as (block index, image index) by updateImage. */
+export interface DocImage {
+  /** 0-based among the block's images, in block order. */
+  index: number;
+  alt: string;
+  /** CSS px. */
+  width: number;
+  height: number;
+  /** Clockwise degrees around the image center (0 when unrotated). */
+  rotation: number;
+  /** Drawn vector shape (rect/ellipse/…) vs a bitmap picture. */
+  kind: 'bitmap' | 'shape';
+}
+
 /** One addressable block in reading order (table-cell paragraphs included). */
 export interface DocBlock {
   /** Stable only within one docVersion — re-read after any change. */
@@ -25,6 +40,8 @@ export interface DocBlock {
   /** 'paragraph' | 'heading1'..'heading6' | future kinds. */
   type: string;
   text: string;
+  /** The block's inline images, when it has any. */
+  images?: DocImage[];
 }
 
 export interface DocSnapshot {
@@ -57,6 +74,16 @@ export interface Formatting {
   align?: 'left' | 'center' | 'right' | 'justify';
 }
 
+/** Partial image update — absent fields keep their current value. */
+export interface ImageChanges {
+  /** CSS px (rounded; must be positive). */
+  width?: number;
+  /** CSS px (rounded; must be positive). */
+  height?: number;
+  /** Clockwise degrees around the center — normalized to [0, 360). */
+  rotation?: number;
+}
+
 export interface MutationResult {
   docVersion: string;
   /** The affected range (PM positions) — informational; hosts use it to
@@ -86,6 +113,9 @@ export interface DocumentSession {
   /** `content`: plain text; each line becomes one paragraph. */
   insertContent(content: string, anchor: InsertAnchor, opts?: MutationOptions): Promise<MutationResult>;
   applyFormatting(target: string, format: Formatting, opts?: MutationOptions): Promise<MutationResult>;
+  /** Resize/rotate one image, addressed as (blockIndex, imageIndex) from the
+   *  latest snapshot. One transaction — a single undo step in a live editor. */
+  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions): Promise<MutationResult>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */

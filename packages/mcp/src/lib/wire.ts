@@ -17,6 +17,7 @@ import {
   VersionConflictError,
   type DocumentSession,
   type Formatting,
+  type ImageChanges,
   type InsertAnchor,
   type MutationOptions,
   type SessionCapabilities,
@@ -28,6 +29,7 @@ export type SessionOpName =
   | 'replaceText'
   | 'insertContent'
   | 'applyFormatting'
+  | 'updateImage'
   | 'getSelection'
   | 'save'
   | 'consent';
@@ -70,6 +72,13 @@ function run(session: DocumentSession, { op, args }: SessionOpRequest): Promise<
       return session.insertContent(args[0] as string, args[1] as InsertAnchor, args[2] as MutationOptions | undefined);
     case 'applyFormatting':
       return session.applyFormatting(args[0] as string, args[1] as Formatting, args[2] as MutationOptions | undefined);
+    case 'updateImage':
+      return session.updateImage(
+        args[0] as number,
+        args[1] as number,
+        args[2] as ImageChanges,
+        args[3] as MutationOptions | undefined,
+      );
     case 'getSelection':
       return session.getSelection?.() ?? Promise.resolve(null);
     case 'save':
@@ -126,6 +135,9 @@ export class RemoteSession implements DocumentSession {
   }
   applyFormatting(target: string, format: Formatting, opts?: MutationOptions) {
     return this.call<Awaited<ReturnType<DocumentSession['applyFormatting']>>>('applyFormatting', [target, format, opts]);
+  }
+  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['updateImage']>>>('updateImage', [blockIndex, imageIndex, changes, opts]);
   }
   async getSelection() {
     return this.call<{ text: string; blockIndex: number } | null>('getSelection');

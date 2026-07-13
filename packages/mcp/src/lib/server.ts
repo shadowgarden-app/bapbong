@@ -167,6 +167,36 @@ export function createMcpServer(provider: SessionProvider, opts: CreateMcpServer
   );
 
   server.registerTool(
+    'update_image',
+    {
+      title: 'Resize / rotate an image',
+      description:
+        'Resize and/or rotate one image. Read get_document first: blocks list their images, and ' +
+        '(block_index, image_index) addresses one. Omitted fields keep their current value; width/height are CSS px, ' +
+        'rotation is clockwise degrees around the image center (normalized to 0-360; 0 = upright). ' +
+        'Block indexes change with every edit — pass expectedVersion from your last read.',
+      inputSchema: {
+        documentId,
+        block_index: z.number().int().min(0).describe('Index of the block holding the image (from get_document).'),
+        image_index: z.number().int().min(0).optional().describe('0-based image within the block (default 0, the first).'),
+        width: z.number().positive().optional().describe('New width in CSS px.'),
+        height: z.number().positive().optional().describe('New height in CSS px.'),
+        rotation: z.number().optional().describe('Clockwise degrees around the center.'),
+        expectedVersion,
+      },
+    },
+    async ({ documentId: id, block_index, image_index, width, height, rotation, expectedVersion: ver }) =>
+      withSession(id, async (s) => {
+        if (width === undefined && height === undefined && rotation === undefined) {
+          return errorText('Pass at least one of width, height, rotation.');
+        }
+        return json(
+          await s.updateImage(block_index, image_index ?? 0, { width, height, rotation }, { expectedVersion: ver }),
+        );
+      }),
+  );
+
+  server.registerTool(
     'save_document',
     {
       title: 'Save the document',
