@@ -59,3 +59,6 @@ apps/playground/public/*.docx
 # staged copy inside the desktop app.
 packages/mcp/dist-shim
 apps/desktop/shim
+
+# signing credentials (apps/desktop/scripts/release.sh)
+.env.release
