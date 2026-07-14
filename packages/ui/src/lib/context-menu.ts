@@ -16,7 +16,7 @@ export interface ContextMenuHandle {
 }
 
 const STYLE = `
-.bb-ctx{position:fixed;z-index:1200;min-width:208px;padding:4px;background:var(--bb-ui-menu-bg,#fff);color:var(--bb-ui-fg,#2c2c2a);border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif)}
+.bb-ctx{position:fixed;z-index:1200;min-width:208px;padding:4px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);color:var(--bb-ui-fg,#2c2c2a);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif)}
 .bb-ctx *{box-sizing:border-box}
 .bb-ctx-item{display:flex;align-items:center;gap:16px;width:100%;height:30px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;font-size:13px;text-align:left;white-space:nowrap;cursor:pointer}
 .bb-ctx-item:hover:not(:disabled),.bb-ctx-item:focus{background:var(--bb-ui-hover,#f1efe8);outline:none}

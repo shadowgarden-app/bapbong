@@ -77,7 +77,7 @@ const STYLE = `
 .bb-menubar-menu{position:relative}
 .bb-menubar-title{height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-menubar-title:hover,.bb-menubar-title[aria-expanded="true"]{background:var(--bb-ui-hover,#f1efe8)}
-.bb-menu{position:absolute;top:100%;left:0;min-width:200px;margin-top:3px;padding:4px;background:var(--bb-ui-menu-bg,#fff);border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.14);z-index:1000}
+.bb-menu{position:absolute;top:100%;left:0;min-width:200px;margin-top:3px;padding:4px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.14);z-index:1000}
 .bb-menu[hidden]{display:none}
 .bb-menu-sub{position:relative}
 .bb-submenu{top:-5px;left:100%;margin-left:2px;display:none}

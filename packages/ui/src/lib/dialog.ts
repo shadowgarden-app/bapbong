@@ -15,7 +15,7 @@ export interface DialogOptions {
 }
 
 const STYLE = `
-.bb-dialog{position:fixed;inset:auto;z-index:1100;margin:0;padding:0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:10px;background:var(--bb-ui-menu-bg,#fff);color:var(--bb-ui-fg,#2c2c2a);box-shadow:0 12px 40px rgba(0,0,0,.18);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);min-width:280px;max-width:min(92vw,440px)}
+.bb-dialog{position:fixed;inset:auto;z-index:1100;margin:0;padding:0;border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:10px;background:var(--bb-ui-dialog-bg,var(--bb-ui-menu-bg,#fff));-webkit-backdrop-filter:var(--bb-ui-dialog-filter,none);backdrop-filter:var(--bb-ui-dialog-filter,none);color:var(--bb-ui-fg,#2c2c2a);box-shadow:0 12px 40px rgba(0,0,0,.18);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);min-width:280px;max-width:min(92vw,440px)}
 .bb-dialog *{box-sizing:border-box}
 .bb-dialog::backdrop{background:rgba(0,0,0,.28)}
 .bb-dialog-modal{top:50%;left:50%;transform:translate(-50%,-50%)}
