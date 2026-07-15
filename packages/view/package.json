@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-view",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "bapbong — render core + read-only viewer (preview). Loads/lays-out/paints a .docx to canvas with zoom + page virtualization, no input-bridge (no ProseMirror editing).",
   "license": "MIT",
   "repository": {
