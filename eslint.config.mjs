@@ -44,7 +44,6 @@ export default [
         {
           enforceBuildableLibDependency: true,
           allow: ['^.*/eslint(\\.base)?\\.config\\.[cm]?[jt]s$'],
-          // Layering borrowed from [ref] (see the plan doc §5.2).
           // A package may only import packages whose tag is in its allow-list.
           // Key invariants: word-layout/contracts stay pure; painter-canvas
           // may NOT import the layout engine (it only consumes ResolvedLayout).
