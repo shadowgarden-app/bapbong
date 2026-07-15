@@ -1,7 +1,4 @@
-import { Component, ElementRef, OnDestroy, inject, signal, viewChild } from '@angular/core';
-import { NgTemplateOutlet } from '@angular/common';
-import { ReplyEditorDirective } from './reply-editor.directive';
-import { CommentsStore } from './comments-store';
+import { Component, ElementRef, OnDestroy, signal, viewChild } from '@angular/core';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
 import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } from '@shadow-garden/bapbong-editor';
 import {
@@ -94,22 +91,15 @@ function borderSidesFor(
 
 /**
  * The playground is a thin shell: {@link BapbongEditor} owns the canvas
- * render/edit loop, {@link CommentsStore} owns the comment subsystem, and this
- * component just wires file load → editor + the inspection panels (rendered
- * preview, document JSON). The template binds the comment UI straight to the
- * store (`cs.*`).
+ * render/edit loop, and this component just wires file load → editor + the
+ * inspection panels (rendered preview, document JSON).
  */
 @Component({
   selector: 'app-editor-playground',
   templateUrl: './editor-playground.html',
   styleUrl: './editor-playground.css',
-  imports: [NgTemplateOutlet, ReplyEditorDirective],
-  providers: [CommentsStore],
 })
 export class EditorPlayground implements OnDestroy {
-  /** Comment subsystem — state + behaviour, bound directly by the template. */
-  protected readonly cs = inject(CommentsStore);
-
   protected readonly fileName = signal<string | null>(null);
   protected readonly error = signal<string | null>(null);
   protected readonly json = signal<string | null>(null);
@@ -123,9 +113,6 @@ export class EditorPlayground implements OnDestroy {
   private readonly stackHost = viewChild<ElementRef<HTMLDivElement>>('canvasStack');
   // The scroll viewport the page stack lives in (handed to the editor).
   private readonly wrapHost = viewChild<ElementRef<HTMLDivElement>>('canvasWrap');
-  // Comment-UI hosts the store reaches into (anchored layer + composer mount).
-  private readonly anchorLayer = viewChild<ElementRef<HTMLDivElement>>('anchorLayer');
-  private readonly composerHost = viewChild<ElementRef<HTMLDivElement>>('composerHost');
   // Menubar / toolbar hosts — bapbong-ui renders + wires them. The find panel
   // is a body-level dialog (no host slot), opened from Edit ▸ Find and replace.
   private readonly editorMenubar = viewChild<ElementRef<HTMLDivElement>>('editorMenubar');
@@ -196,7 +183,6 @@ export class EditorPlayground implements OnDestroy {
       await this.fontsReady; // real metrics ready before the first layout
       const editor = this.ensureEditor();
       if (!editor) throw new Error('Canvas chưa sẵn sàng.');
-      this.cs.closeComposer(); // a stale composer would point at the old doc
       const { headerKeys, footerKeys } = await editor.loadDocx(bytes);
       this.headerKeys.set(headerKeys);
       this.footerKeys.set(footerKeys);
@@ -223,10 +209,9 @@ export class EditorPlayground implements OnDestroy {
         measureText: createFontRegistryMeasurer(reg, createCanvasMeasurer()),
         measureMetrics: createFontRegistryMetrics(reg, createCanvasMetrics()),
       }),
-      // External plugins: comment tint + a right-click context menu (find/replace
-      // and table-resize are built into the editor).
+      // External plugin: a right-click context menu (find/replace and
+      // table-resize are built into the editor).
       plugins: [
-        this.cs.tintPlugin,
         {
           name: 'context-menu',
           onPointer: (ev) => {
@@ -339,12 +324,6 @@ export class EditorPlayground implements OnDestroy {
     this.findDialog = createFindDialog(editor.find, {
       anchor: () => this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
     });
-    // Comment subsystem owns the rest (threads, anchors, tint, caret picks).
-    this.cs.attachViews({
-      anchorLayer: () => this.anchorLayer()?.nativeElement ?? null,
-      composerHost: () => this.composerHost()?.nativeElement ?? null,
-    });
-    this.cs.attach(editor);
     this.editor = editor;
     return editor;
   }
@@ -427,15 +406,9 @@ export class EditorPlayground implements OnDestroy {
 
   // ── Menubar config ───────────────────────────────────────────────
   /** The full menu tree handed to bapbong-ui. Registry commands are referenced
-   *  by name; everything else (open file, comment view, find, image/link/table,
-   *  shortcuts) is a host action the shell owns. */
+   *  by name; everything else (open file, find, image/link/table, shortcuts)
+   *  is a host action the shell owns. */
   private buildMenus(): Menu[] {
-    const cs = this.cs;
-    const commentView = (label: string, mode: 'hide' | 'minimize' | 'expand' | 'panel') => ({
-      label,
-      run: () => cs.setCommentView(mode),
-      isActive: () => cs.commentView() === mode,
-    });
     return [
       {
         label: 'File',
@@ -463,15 +436,6 @@ export class EditorPlayground implements OnDestroy {
       {
         label: 'View',
         entries: [
-          {
-            label: 'Comments',
-            submenu: [
-              commentView('Hide comments', 'hide'),
-              commentView('Minimize comments', 'minimize'),
-              commentView('Expand comments', 'expand'),
-              commentView('Show all comments', 'panel'),
-            ],
-          },
           {
             label: 'Show section breaks',
             isActive: () => this.showSections(),

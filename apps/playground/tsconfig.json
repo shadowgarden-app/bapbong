@@ -5,26 +5,55 @@
     "experimentalDecorators": true,
     "moduleResolution": "bundler",
     "module": "preserve",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "composite": false,
     "declaration": false,
     "declarationMap": false,
     "emitDeclarationOnly": false,
     "paths": {
-      "@shadow-garden/bapbong-comments": ["../../packages/comments/src/index.ts"],
-      "@shadow-garden/bapbong-commands": ["../../packages/commands/src/index.ts"],
-      "@shadow-garden/bapbong-editor": ["../../packages/editor/src/index.ts"],
-      "@shadow-garden/bapbong-model": ["../../packages/model/src/index.ts"],
-      "@shadow-garden/bapbong-docx": ["../../packages/docx/src/index.ts"],
-      "@shadow-garden/bapbong-contracts": ["../../packages/contracts/src/index.ts"],
-      "@shadow-garden/bapbong-measuring": ["../../packages/measuring/src/index.ts"],
-      "@shadow-garden/bapbong-layout-engine": ["../../packages/layout-engine/src/index.ts"],
-      "@shadow-garden/bapbong-painter-canvas": ["../../packages/painter-canvas/src/index.ts"],
-      "@shadow-garden/bapbong-selection": ["../../packages/selection/src/index.ts"],
-      "@shadow-garden/bapbong-input-bridge": ["../../packages/input-bridge/src/index.ts"],
-      "@shadow-garden/bapbong-view": ["../../packages/view/src/index.ts"],
-      "@shadow-garden/bapbong-a11y": ["../../packages/a11y/src/index.ts"],
-      "@shadow-garden/bapbong-ui": ["../../packages/ui/src/index.ts"]
+      "@shadow-garden/bapbong-commands": [
+        "../../packages/commands/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-editor": [
+        "../../packages/editor/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-model": [
+        "../../packages/model/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-docx": [
+        "../../packages/docx/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-contracts": [
+        "../../packages/contracts/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-measuring": [
+        "../../packages/measuring/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-layout-engine": [
+        "../../packages/layout-engine/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-painter-canvas": [
+        "../../packages/painter-canvas/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-selection": [
+        "../../packages/selection/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-input-bridge": [
+        "../../packages/input-bridge/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-view": [
+        "../../packages/view/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-a11y": [
+        "../../packages/a11y/src/index.ts"
+      ],
+      "@shadow-garden/bapbong-ui": [
+        "../../packages/ui/src/index.ts"
+      ]
     }
   },
   "angularCompilerOptions": {
