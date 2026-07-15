@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "description": "bapbong monorepo — canvas-rendered DOCX editor (Nx workspace)",
   "license": "MIT",
+  "packageManager": "pnpm@10.2.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/shadowgarden-app/bapbong.git"
