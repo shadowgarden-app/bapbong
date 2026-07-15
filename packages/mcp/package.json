@@ -1,8 +1,13 @@
 {
   "name": "@shadow-garden/bapbong-mcp",
   "version": "0.0.1",
-  "description": "bapbong \u2014 MCP server for AI agents: host-agnostic document tools (read/find/edit/format) over a DocumentSession port. Desktop app and headless server mount the same contract.",
+  "description": "bapbong — MCP server for AI agents: host-agnostic document tools (read/find/edit/format) over a DocumentSession port. Desktop app and headless server mount the same contract.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/mcp"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

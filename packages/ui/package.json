@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — framework-agnostic editor UI (toolbar/menubar) that mounts into a host element and binds to editor.commands",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/ui"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,18 +30,27 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:app"],
+    "tags": [
+      "scope:app"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/ui/dist",
           "main": "packages/ui/src/index.ts",
           "tsConfig": "packages/ui/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/ui/src",
-          "external": ["@shadow-garden/bapbong-contracts"]
+          "external": [
+            "@shadow-garden/bapbong-contracts"
+          ]
         }
       }
     }

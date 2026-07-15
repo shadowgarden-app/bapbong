@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — text measurement (canvas) + font helpers",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/measuring"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

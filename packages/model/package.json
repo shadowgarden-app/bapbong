@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — ProseMirror document model / schema",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/model"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,16 +30,23 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:model"],
+    "tags": [
+      "scope:model"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/model/dist",
           "main": "packages/model/src/index.ts",
           "tsConfig": "packages/model/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/model/src",
           "generatePackageJson": false
         }

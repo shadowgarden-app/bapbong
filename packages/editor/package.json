@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — canvas-rendered DOCX editor for the browser (work in progress)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/editor"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,16 +30,23 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:app"],
+    "tags": [
+      "scope:app"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/editor/dist",
           "main": "packages/editor/src/index.ts",
           "tsConfig": "packages/editor/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/editor/src",
           "generatePackageJson": false
         }

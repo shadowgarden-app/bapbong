@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — headless backend façade: one install re-exporting contracts + model + docx + commands (isomorphic, no DOM). Import .docx → edit via commands on an EditorState → export .docx, server-side.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/headless"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,16 +30,23 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:headless"],
+    "tags": [
+      "scope:headless"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/headless/dist",
           "main": "packages/headless/src/index.ts",
           "tsConfig": "packages/headless/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/headless/src",
           "external": [
             "@shadow-garden/bapbong-contracts",

@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — shared layout + plugin contracts/types (type-only deps)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/contracts"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,16 +30,23 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:pure"],
+    "tags": [
+      "scope:pure"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/contracts/dist",
           "main": "packages/contracts/src/index.ts",
           "tsConfig": "packages/contracts/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/contracts/src"
         }
       }

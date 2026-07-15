@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — DOCX (OOXML) import / export",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/docx"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,19 +30,28 @@
     "access": "public"
   },
   "nx": {
-    "tags": ["scope:io"],
+    "tags": [
+      "scope:io"
+    ],
     "targets": {
       "build": {
         "executor": "@nx/esbuild:esbuild",
-        "outputs": ["{options.outputPath}"],
+        "outputs": [
+          "{options.outputPath}"
+        ],
         "options": {
           "outputPath": "packages/docx/dist",
           "main": "packages/docx/src/index.ts",
           "tsConfig": "packages/docx/tsconfig.lib.json",
-          "format": ["esm", "cjs"],
+          "format": [
+            "esm",
+            "cjs"
+          ],
           "declarationRootDir": "packages/docx/src",
           "generatePackageJson": false,
-          "external": ["@shadow-garden/bapbong-model"]
+          "external": [
+            "@shadow-garden/bapbong-model"
+          ]
         }
       }
     }

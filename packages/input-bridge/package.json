@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "bapbong — hidden ProseMirror editor as the input/IME sink for the canvas",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowgarden-app/bapbong.git",
+    "directory": "packages/input-bridge"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
