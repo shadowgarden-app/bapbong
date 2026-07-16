@@ -1,5 +1,9 @@
 # bapbong
 
+[![npm](https://img.shields.io/npm/v/@shadow-garden/bapbong-editor?label=npm%20%C2%B7%20%40shadow-garden&color=e8722a)](https://www.npmjs.com/org/shadow-garden)
+[![license](https://img.shields.io/badge/license-MIT-3da639)](LICENSE)
+[![node](https://img.shields.io/badge/types-TypeScript-3178c6)](tsconfig.base.json)
+
 > A **canvas-rendered DOCX editor** engine for the browser — the presentation
 > layer paints to **HTML Canvas 2D** instead of the DOM, for pixel-accurate,
 > truly paginated documents.
@@ -28,20 +32,27 @@ overlay) are independent of the paint target; bapbong swaps the **painter** to c
 
 ## Packages
 
-All packages publish under the `@shadow-garden` scope with the `bapbong-` prefix.
-Module boundaries are enforced by Nx scope tags (see `eslint.config.mjs`).
+All packages publish under the [`@shadow-garden`](https://www.npmjs.com/org/shadow-garden)
+scope with the `bapbong-` prefix. Module boundaries are enforced by Nx scope
+tags (see `eslint.config.mjs`). Package names link to the source; badges link to npm.
 
-| Package | Scope | Purpose |
+| Package | npm | Purpose |
 |---|---|---|
-| `@shadow-garden/bapbong-contracts` | `pure` | Shared types (`FlowParagraph`, `ResolvedLayout`, …) |
-| `@shadow-garden/bapbong-model` | `model` | ProseMirror schema + list numbering |
-| `@shadow-garden/bapbong-docx` | `io` | DOCX (OOXML) import → model |
-| `@shadow-garden/bapbong-measuring` | `measuring` | Text measurement + font-metrics cache |
-| `@shadow-garden/bapbong-layout-engine` | `engine` | Line-break + pagination → `ResolvedLayout` |
-| `@shadow-garden/bapbong-painter-canvas` | `painter` | Canvas 2D renderer (the core differentiator) |
-| `@shadow-garden/bapbong-selection` | `selection` | Caret/selection math + hit-testing |
-| `@shadow-garden/bapbong-input-bridge` | `input` | Hidden ProseMirror (IME/undo) + composer hooks |
-| `@shadow-garden/bapbong-editor` | `app` | Umbrella entry point / public API (in progress) |
+| [`bapbong-contracts`](packages/contracts) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-contracts?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-contracts) | Shared types & plugin contracts (`FlowParagraph`, `ResolvedLayout`, …) |
+| [`bapbong-model`](packages/model) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-model?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-model) | ProseMirror schema + list numbering |
+| [`bapbong-docx`](packages/docx) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-docx?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-docx) | DOCX (OOXML) import / export |
+| [`bapbong-measuring`](packages/measuring) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-measuring?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-measuring) | Text measurement + font-metrics registry |
+| [`bapbong-layout-engine`](packages/layout-engine) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-layout-engine?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-layout-engine) | Line-breaking + pagination → `ResolvedLayout` |
+| [`bapbong-painter-canvas`](packages/painter-canvas) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-painter-canvas?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-painter-canvas) | Canvas 2D renderer (the core differentiator) |
+| [`bapbong-selection`](packages/selection) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-selection?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-selection) | Caret/selection math + hit-testing over `ResolvedLayout` |
+| [`bapbong-input-bridge`](packages/input-bridge) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-input-bridge?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-input-bridge) | Hidden ProseMirror editor as the input/IME sink |
+| [`bapbong-editor`](packages/editor) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-editor?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-editor) | The umbrella editor: render/edit loop + public API |
+| [`bapbong-view`](packages/view) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-view?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-view) | Read-only render core (zoom + page virtualization, no editing) |
+| [`bapbong-ui`](packages/ui) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-ui?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-ui) | Framework-agnostic toolbar/menubar/dialogs bound to `editor.commands` |
+| [`bapbong-commands`](packages/commands) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-commands?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-commands) | Headless commands + queries + registry (UI and backends share ops) |
+| [`bapbong-headless`](packages/headless) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-headless?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-headless) | Server-side façade: import → edit → export, no DOM |
+| [`bapbong-mcp`](packages/mcp) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-mcp?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-mcp) | MCP server — AI agents edit documents over a `DocumentSession` port |
+| [`bapbong-a11y`](packages/a11y) | [![npm](https://img.shields.io/npm/v/%40shadow-garden%2Fbapbong-a11y?label=)](https://www.npmjs.com/package/@shadow-garden/bapbong-a11y) | Screen-reader mirror of the canvas document (ARIA DOM) |
 
 [`apps/playground`](apps/playground) is the reference app that wires everything
 together and is where features are dogfooded.
