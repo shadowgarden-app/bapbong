@@ -1,6 +1,7 @@
 # bapbong
 
 [![npm](https://img.shields.io/npm/v/@shadow-garden/bapbong-editor?label=npm%20%C2%B7%20%40shadow-garden&color=e8722a)](https://www.npmjs.com/org/shadow-garden)
+[![CI](https://github.com/shadowgarden-app/bapbong/actions/workflows/ci.yml/badge.svg)](https://github.com/shadowgarden-app/bapbong/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-3da639)](LICENSE)
 [![node](https://img.shields.io/badge/types-TypeScript-3178c6)](tsconfig.base.json)
 
