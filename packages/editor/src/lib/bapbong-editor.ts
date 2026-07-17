@@ -376,13 +376,14 @@ export class BapbongEditor {
    *
    *  Menu-driven paste can't ride a native ClipboardEvent, so it climbs a
    *  ladder of acquisition strategies until one yields content:
-   *  1. async Clipboard API (`navigator.clipboard.read`) — richest, but
-   *     permission-gated in some webviews;
-   *  2. the host's native clipboard reader (`readClipboardFallback`) —
-   *     never permission-blocked; tried before execCommand because WebKit
-   *     answers programmatic DOM paste with a confirmation callout;
-   *  3. `document.execCommand('paste')` on the focused hidden view — the
-   *     exact Cmd-V path, last resort for hosts with no native reader. */
+   *  1. the host's native clipboard reader (`readClipboardFallback`) when
+   *     provided — on WKWebView every programmatic clipboard READ (both
+   *     `navigator.clipboard.*` and execCommand) pops a "Paste" permission
+   *     callout and pends until the user taps it, so the desktop shell
+   *     must never touch the DOM clipboard from a menu click;
+   *  2. async Clipboard API (`navigator.clipboard.read`) — browsers, where
+   *     a user-gesture read is granted silently;
+   *  3. `document.execCommand('paste')` — legacy last resort. */
   async paste(): Promise<void> {
     const view = this.bridge?.view;
     if (!view) return;
@@ -390,8 +391,9 @@ export class BapbongEditor {
     // must work right after a paste — and a focused view keeps the call
     // closer to the user gesture for Clipboard API permission checks.
     this.bridge?.focus();
-    if (await this.pasteViaClipboardApi(view)) return;
     if (await this.pasteViaHostClipboard(view)) return;
+    if (this.readClipboardFallback) return; // host said empty — don't summon webview paste UI
+    if (await this.pasteViaClipboardApi(view)) return;
     document.execCommand('paste');
   }
 
@@ -463,21 +465,22 @@ export class BapbongEditor {
     const view = this.bridge?.view;
     if (!view) return;
     this.bridge?.focus(); // see paste()
+    // Host reader first, same reason as paste(): a webview readText() would
+    // pop the WKWebView paste-permission callout.
+    if (this.readClipboardFallback) {
+      try {
+        const data = await this.readClipboardFallback();
+        if (data?.text) view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
+      } catch (err) {
+        console.warn('[bapbong] host clipboard fallback failed:', err);
+      }
+      return;
+    }
     try {
       const text = await navigator.clipboard.readText();
-      if (text) {
-        view.dispatch(view.state.tr.insertText(text).scrollIntoView());
-        return;
-      }
+      if (text) view.dispatch(view.state.tr.insertText(text).scrollIntoView());
     } catch (err) {
-      console.warn('[bapbong] Clipboard API readText unavailable, falling back:', err);
-    }
-    // Host fallback (text only — this is the "without formatting" path).
-    try {
-      const data = await this.readClipboardFallback?.();
-      if (data?.text) view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
-    } catch (err) {
-      console.warn('[bapbong] host clipboard fallback failed:', err);
+      console.warn('[bapbong] Clipboard API readText unavailable:', err);
     }
   }
 
