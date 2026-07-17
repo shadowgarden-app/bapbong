@@ -1,5 +1,45 @@
 import { Schema } from 'prosemirror-model';
 
+/** Structural view of a DOM element — this package has no DOM lib, so parseDOM
+ *  getAttrs callbacks narrow structurally (same idiom as the footnote mark). */
+interface DomEl {
+  getAttribute(name: string): string | null;
+}
+
+/** getAttrs for pasted <p>/<h1>–<h6>: heading level from the tag, alignment
+ *  from inline style. Everything else keeps its schema default. */
+function pastedParagraphAttrs(el: unknown, heading: number | null) {
+  const style = (el as DomEl).getAttribute('style') ?? '';
+  const m = /(?:^|;)\s*text-align\s*:\s*(center|right|justify)/i.exec(style);
+  return { heading, align: m ? m[1].toLowerCase() : null };
+}
+
+/** Pasted <img>: only embedded bitmaps survive. Remote URLs are rejected —
+ *  the canvas painter can't reliably fetch them (CORS) and DOCX export embeds
+ *  media bytes; the paste layer converts blobs to data URLs before insert. */
+function pastedImageAttrs(el: unknown) {
+  const e = el as DomEl;
+  const src = e.getAttribute('src') ?? '';
+  if (!/^data:image\//i.test(src)) return false as const;
+  const dim = (v: string | null) => {
+    const n = parseFloat(v ?? '');
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  };
+  return {
+    src,
+    alt: e.getAttribute('alt') ?? '',
+    width: dim(e.getAttribute('width')),
+    height: dim(e.getAttribute('height')),
+  };
+}
+
+/** Pasted <a href>: allow web/mail/anchor protocols only (blocks javascript:
+ *  and friends). A rejected rule drops the mark but keeps the text. */
+function pastedLinkAttrs(el: unknown) {
+  const href = ((el as DomEl).getAttribute('href') ?? '').trim();
+  return /^(https?:|mailto:|#)/i.test(href) ? { href } : (false as const);
+}
+
 /**
  * bapbong's ProseMirror document schema.
  *
@@ -53,10 +93,16 @@ export const schema = new Schema({
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
       },
-      // No getAttrs: nothing in the pipeline parses paragraphs from the DOM
-      // yet (the importer builds nodes directly). align/indent still round-trip
-      // out through toDOM. Revisit when HTML paste lands.
-      parseDOM: [{ tag: 'p' }],
+      // HTML paste path: recover heading level from h1–h6 and alignment from
+      // inline style. Other attrs (list/indent/tabs/spacing) stay importer-only
+      // — pasted HTML rarely carries them faithfully.
+      parseDOM: [
+        { tag: 'p', getAttrs: (el) => pastedParagraphAttrs(el, null) },
+        ...[1, 2, 3, 4, 5, 6].map((level) => ({
+          tag: `h${level}`,
+          getAttrs: (el: unknown) => pastedParagraphAttrs(el, level),
+        })),
+      ],
       toDOM(node) {
         const attrs = node.attrs as ParagraphAttrs;
         const style = paragraphStyle(attrs);
@@ -104,6 +150,7 @@ export const schema = new Schema({
         // Paint-only: the layout box stays axis-aligned.
         rotation: { default: 0 },
       },
+      parseDOM: [{ tag: 'img[src]', getAttrs: pastedImageAttrs }],
       toDOM(node) {
         const a = node.attrs;
         const attrs: Record<string, string> = { src: a['src'] as string, alt: a['alt'] as string };
@@ -261,6 +308,7 @@ export const schema = new Schema({
     link: {
       attrs: { href: {} },
       inclusive: false,
+      parseDOM: [{ tag: 'a[href]', getAttrs: pastedLinkAttrs }],
       toDOM(mark) {
         return ['a', { href: mark.attrs['href'] as string, rel: 'noopener', target: '_blank' }, 0];
       },

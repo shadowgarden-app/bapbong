@@ -367,8 +367,9 @@ export class BapbongEditor {
       for (const item of items) {
         if (item.types.includes('text/html')) {
           const html = await (await item.getType('text/html')).text();
-          const dom = document.createElement('div');
-          dom.innerHTML = html;
+          // Inert document: no script execution and (unlike innerHTML on a
+          // live div) no eager <img src> network fetches while parsing.
+          const dom = new DOMParser().parseFromString(html, 'text/html').body;
           const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
           view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
           return;
