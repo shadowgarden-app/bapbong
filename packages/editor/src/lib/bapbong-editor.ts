@@ -81,7 +81,8 @@ export interface BapbongEditorOptions {
   readClipboardFallback?: () => Promise<{
     html?: string;
     text?: string;
-    imagePng?: Uint8Array;
+    image?: Uint8Array;
+    imageMime?: string;
   } | null>;
 }
 
@@ -445,8 +446,8 @@ export class BapbongEditor {
           return true;
         }
       }
-      if (data.imagePng?.length) {
-        const blob = new Blob([data.imagePng as BlobPart], { type: 'image/png' });
+      if (data.image?.length) {
+        const blob = new Blob([data.image as BlobPart], { type: data.imageMime ?? 'image/png' });
         if (await insertImageBlobs(view, [blob])) return true;
       }
       if (data.text) {
