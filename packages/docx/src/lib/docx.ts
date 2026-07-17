@@ -766,10 +766,16 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     tabs?: { pos: number; val: string; leader?: string }[];
     pageBreakBefore?: boolean;
     heading?: number;
+    styleId?: string;
   } = {};
   if (list) attrs.list = list;
   if (align) attrs.align = align;
   if (heading) attrs.heading = heading;
+  // Title/Subtitle: named styles without an outline level. Only when the
+  // paragraph isn't already a heading (invariant: styleId ⇒ heading null).
+  else if (pStyleId && /^(title|subtitle)$/i.test(pStyleId)) {
+    attrs.styleId = pStyleId.toLowerCase() === 'title' ? 'Title' : 'Subtitle';
+  }
   if (indent) attrs.indent = indent;
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;

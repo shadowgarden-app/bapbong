@@ -253,11 +253,13 @@ function sectionSectPr(s: SectionConfig): string {
 function paraProps(node: PMNode): string {
   const a = node.attrs;
   const out: string[] = [];
-  // w:pStyle is the first pPr child. (A round-tripped doc carries the matching
-  // "HeadingN" style def; authored-from-scratch headings need styles.xml regen
-  // to render the style in Word — a follow-up, like list numbering.xml.)
+  // w:pStyle is the first pPr child. ensureStyleDefs() guarantees the
+  // referenced style exists in styles.xml (generated from scratch, or merged
+  // into a carried package that lacks it).
   const heading = a['heading'] as number | null;
+  const styleId = a['styleId'] as string | null;
   if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
+  else if (styleId === 'Title' || styleId === 'Subtitle') out.push(`<w:pStyle w:val="${styleId}"/>`);
   if (a['pageBreakBefore']) out.push('<w:pageBreakBefore/>');
   const list = a['list'] as { numId: string; level: number } | null;
   if (list) out.push(`<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(list.numId)}"/></w:numPr>`);
@@ -453,6 +455,66 @@ function commentsExtendedXml(comments: CommentNode[]): string {
 const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`;
 
+// ── styles.xml ──────────────────────────────────────────────────────
+// Definitions for every style id a w:pStyle can reference. Sizes are
+// half-points and mirror the layout engine's defaults (HEADING_PT + the
+// Title/Subtitle run bases), so Word renders what the canvas showed.
+
+const STYLE_DEFS: Record<string, string> = (() => {
+  const heading = (level: number, halfPt: number) =>
+    `<w:style w:type="paragraph" w:styleId="Heading${level}"><w:name w:val="heading ${level}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
+    `<w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="${level - 1}"/></w:pPr>` +
+    `<w:rPr><w:b/><w:sz w:val="${halfPt}"/><w:szCs w:val="${halfPt}"/></w:rPr></w:style>`;
+  return {
+    Heading1: heading(1, 48),
+    Heading2: heading(2, 36),
+    Heading3: heading(3, 28),
+    Heading4: heading(4, 24),
+    Heading5: heading(5, 22),
+    Heading6: heading(6, 22),
+    Title:
+      `<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
+      `<w:pPr><w:spacing w:after="80"/></w:pPr><w:rPr><w:sz w:val="56"/><w:szCs w:val="56"/></w:rPr></w:style>`,
+    Subtitle:
+      `<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
+      `<w:rPr><w:i/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>`,
+  };
+})();
+
+/** Every style id the document's paragraphs reference via w:pStyle. */
+function usedStyleIds(doc: PMNode): Set<string> {
+  const used = new Set<string>();
+  doc.descendants((n) => {
+    if (n.type.name !== 'paragraph') return;
+    const heading = n.attrs['heading'] as number | null;
+    const styleId = n.attrs['styleId'] as string | null;
+    if (heading) used.add(`Heading${heading}`);
+    else if (styleId && STYLE_DEFS[styleId]) used.add(styleId);
+  });
+  return used;
+}
+
+/** A from-scratch word/styles.xml: docDefaults + Normal + the used defs. */
+function stylesXml(used: Set<string>): string {
+  const defs = [...used].map((id) => STYLE_DEFS[id]).join('');
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="${W_NS}">` +
+    `<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault/></w:docDefaults>` +
+    `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>` +
+    defs +
+    `</w:styles>`
+  );
+}
+
+/** Append any used-but-missing style defs to a carried styles.xml, so
+ *  headings/Title/Subtitle authored in bapbong render styled in Word even
+ *  when the source document never defined them. */
+function mergeStyles(xml: string, used: Set<string>): string {
+  const missing = [...used].filter((id) => !xml.includes(`w:styleId="${id}"`));
+  if (!missing.length) return xml;
+  return xml.replace('</w:styles>', `${missing.map((id) => STYLE_DEFS[id]).join('')}</w:styles>`);
+}
+
 function contentTypes(exts: Set<string>, hasComments: boolean): string {
   const parts = [
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
@@ -460,6 +522,7 @@ function contentTypes(exts: Set<string>, hasComments: boolean): string {
   ];
   for (const ext of exts) parts.push(`<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`);
   parts.push('<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>');
+  parts.push('<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>');
   if (hasComments) {
     parts.push('<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>');
     parts.push('<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>');
@@ -544,6 +607,7 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
   }
 
   const zip = new JSZip();
+  const styleIds = usedStyleIds(doc);
   let sectPr = ''; // re-attached from the original (carry) for page setup + headers
   if (opts?.carry) {
     // E4: start from the original package so unmodelled parts survive.
@@ -553,16 +617,20 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
     }
     const ct = await carry.file('[Content_Types].xml')?.async('string');
     zip.file('[Content_Types].xml', ct ? mergeContentTypes(ct, ctx.exts, hasComments) : contentTypes(ctx.exts, hasComments));
+    // Styles referenced by pStyle but never defined by the source (headings /
+    // Title / Subtitle authored in bapbong) get their defs appended.
+    const carriedStyles = await carry.file('word/styles.xml')?.async('string');
+    if (carriedStyles) zip.file('word/styles.xml', mergeStyles(carriedStyles, styleIds));
     const rels = await carry.file('word/_rels/document.xml.rels')?.async('string');
     zip.file('word/_rels/document.xml.rels', mergeRels(rels, ctx.rels));
     const origDoc = await carry.file('word/document.xml')?.async('string');
     if (origDoc) sectPr = extractBodySectPr(origDoc);
   } else {
+    ctx.rels.push(`<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`);
+    zip.file('word/styles.xml', stylesXml(styleIds));
     zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
     zip.file('_rels/.rels', ROOT_RELS);
-    if (ctx.rels.length) {
-      zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`);
-    }
+    zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`);
   }
 
   const documentXml =

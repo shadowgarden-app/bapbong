@@ -85,6 +85,11 @@ export const schema = new Schema({
         // an <h1>–<h6> in toDOM so the a11y mirror is semantic), or null for a
         // body paragraph.
         heading: { default: null },
+        // Named Word paragraph style with no outline level: 'Title' |
+        // 'Subtitle', or null. Mutually exclusive with `heading` — the
+        // setParagraphStyle command is the only writer and keeps the
+        // invariant (styleId set ⇒ heading null).
+        styleId: { default: null },
         // w:tabs — [{ pos, val: 'left'|'right'|'center'|'decimal', leader? }]
         // in px from the paragraph's content left edge, or null. Importer-set.
         tabs: { default: null },
@@ -107,7 +112,9 @@ export const schema = new Schema({
         const attrs = node.attrs as ParagraphAttrs;
         const style = paragraphStyle(attrs);
         const tag = attrs.heading ? `h${attrs.heading}` : 'p';
-        return [tag, style ? { style } : {}, 0];
+        const dom: Record<string, string> = style ? { style } : {};
+        if (attrs.styleId) dom['data-style'] = attrs.styleId;
+        return [tag, dom, 0];
       },
     },
 
@@ -410,6 +417,7 @@ export interface ParagraphAttrs {
   indent: Indent | null;
   spacing?: Spacing | null;
   heading?: number | null;
+  styleId?: 'Title' | 'Subtitle' | null;
 }
 
 /** Build an inline CSS `style` string for a paragraph's align/indent/spacing,

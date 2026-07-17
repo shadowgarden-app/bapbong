@@ -83,3 +83,62 @@ export function toggleHeading(level: number): Command {
     isEnabled: (state) => selectedParagraphs(state).length > 0,
   };
 }
+
+/** The six named paragraph styles the toolbar dropdown offers. */
+export type ParagraphStyleKey = 'normal' | 'title' | 'subtitle' | 'h1' | 'h2' | 'h3';
+
+/** heading/styleId attr pair for each dropdown key — the single source of the
+ *  "styleId set ⇒ heading null" invariant. */
+const STYLE_ATTRS: Record<ParagraphStyleKey, { heading: number | null; styleId: string | null }> = {
+  normal: { heading: null, styleId: null },
+  title: { heading: null, styleId: 'Title' },
+  subtitle: { heading: null, styleId: 'Subtitle' },
+  h1: { heading: 1, styleId: null },
+  h2: { heading: 2, styleId: null },
+  h3: { heading: 3, styleId: null },
+};
+
+/**
+ * Set (not toggle — dropdowns state absolutes) the named paragraph style on
+ * every selected paragraph: Normal / Title / Subtitle / Heading 1–3. The only
+ * writer of `styleId`, so heading and styleId can never both be set.
+ */
+export function setParagraphStyle(key: ParagraphStyleKey): Command {
+  const attrs = STYLE_ATTRS[key];
+  return {
+    name: `paragraph-style-${key}`,
+    run(state, dispatch) {
+      const paras = selectedParagraphs(state);
+      if (paras.length === 0) return false;
+      if (dispatch) {
+        const tr = state.tr;
+        for (const p of paras) {
+          tr.setNodeAttribute(p.pos, 'heading', attrs.heading);
+          tr.setNodeAttribute(p.pos, 'styleId', attrs.styleId);
+        }
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+    isActive: (state) => activeParagraphStyle(state) === key,
+    isEnabled: (state) => selectedParagraphs(state).length > 0,
+  };
+}
+
+/** The dropdown's current value: the shared style of every selected paragraph,
+ *  or null when the selection is empty / mixed / on an unlisted style (H4–H6).
+ *  O(selection) — it only walks the selected range (called per transaction). */
+export function activeParagraphStyle(state: EditorState): ParagraphStyleKey | null {
+  const paras = selectedParagraphs(state);
+  if (paras.length === 0) return null;
+  const keyOf = (node: (typeof paras)[number]['node']): ParagraphStyleKey | null => {
+    const styleId = node.attrs['styleId'];
+    if (styleId === 'Title') return 'title';
+    if (styleId === 'Subtitle') return 'subtitle';
+    const h = node.attrs['heading'];
+    if (h === 1 || h === 2 || h === 3) return `h${h}` as ParagraphStyleKey;
+    return h == null ? 'normal' : null; // h4–h6: real but not a dropdown entry
+  };
+  const first = keyOf(paras[0].node);
+  return paras.every((p) => keyOf(p.node) === first) ? first : null;
+}

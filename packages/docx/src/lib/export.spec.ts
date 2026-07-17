@@ -399,3 +399,54 @@ describe('exportDocx (sections + footnotes)', () => {
     expect(xml).not.toContain('>1</w:t>'); // the carrier number isn't emitted as text
   });
 });
+
+describe('named paragraph styles (Title/Subtitle/HeadingN) + styles.xml', () => {
+  it('round-trips Title/Subtitle through pStyle and generates their defs', async () => {
+    const doc = makeDoc(
+      [[{ text: 'Báo cáo' }], [{ text: 'quý 3' }], [{ text: 'Mục A' }], [{ text: 'nội dung' }]],
+      [{ styleId: 'Title' }, { styleId: 'Subtitle' }, { heading: 2 }, {}],
+    );
+    const bytes = await exportDocx(doc);
+
+    const zip = await JSZip.loadAsync(bytes);
+    const documentXml = (await zip.file('word/document.xml')!.async('string'));
+    expect(documentXml).toContain('<w:pStyle w:val="Title"/>');
+    expect(documentXml).toContain('<w:pStyle w:val="Subtitle"/>');
+    expect(documentXml).toContain('<w:pStyle w:val="Heading2"/>');
+
+    const stylesXml = await zip.file('word/styles.xml')!.async('string');
+    for (const id of ['Title', 'Subtitle', 'Heading2']) {
+      expect(stylesXml).toContain(`w:styleId="${id}"`);
+    }
+    expect(stylesXml).not.toContain('w:styleId="Heading5"'); // only used defs
+
+    const rels = await zip.file('word/_rels/document.xml.rels')!.async('string');
+    expect(rels).toContain('Target="styles.xml"');
+    const ct = await zip.file('[Content_Types].xml')!.async('string');
+    expect(ct).toContain('/word/styles.xml');
+
+    const { doc: back } = await importDocx(bytes);
+    expect(back.child(0).attrs['styleId']).toBe('Title');
+    expect(back.child(0).attrs['heading']).toBeNull();
+    expect(back.child(1).attrs['styleId']).toBe('Subtitle');
+    expect(back.child(2).attrs['heading']).toBe(2);
+    expect(back.child(2).attrs['styleId']).toBeNull();
+    expect(back.child(3).attrs['styleId']).toBeNull();
+  });
+
+  it('merges missing style defs into a carried styles.xml', async () => {
+    // A carried package whose styles.xml only defines Normal.
+    const src = makeDoc([[{ text: 'x' }]], [{}]);
+    const zip = await JSZip.loadAsync(await exportDocx(src));
+    zip.file(
+      'word/styles.xml',
+      `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}"><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`,
+    );
+
+    const doc = makeDoc([[{ text: 'tiêu đề' }]], [{ styleId: 'Title' }]);
+    const out = await JSZip.loadAsync(await exportDocx(doc, { carry: zip }));
+    const styles = await out.file('word/styles.xml')!.async('string');
+    expect(styles).toContain('w:styleId="Normal"');
+    expect(styles).toContain('w:styleId="Title"');
+  });
+});

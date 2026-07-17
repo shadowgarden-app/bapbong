@@ -165,11 +165,18 @@ function paragraphToFlow(
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   // A heading paragraph sizes its runs from the level by default (bigger +
-  // bold); explicit fontSize/strong marks on a run still win.
+  // bold); explicit fontSize/strong marks on a run still win. Title/Subtitle
+  // (named styles without an outline level) get Word-like defaults the same
+  // way: Title large, Subtitle a modest italic.
   const headingLevel = node.attrs['heading'] as number | null;
+  const styleId = node.attrs['styleId'] as string | null;
   const runBase: FontSpec = headingLevel
     ? { ...base, sizePt: HEADING_PT[headingLevel] ?? base.sizePt, bold: true }
-    : base;
+    : styleId === 'Title'
+      ? { ...base, sizePt: 28 }
+      : styleId === 'Subtitle'
+        ? { ...base, sizePt: 14, italic: true }
+        : base;
   const runs: FlowInline[] = [];
   const floats: FlowFloat[] = [];
   node.forEach((child, offset) => {
