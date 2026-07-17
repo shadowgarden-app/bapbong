@@ -482,17 +482,18 @@ describe('layoutBlocks', () => {
   });
 
   it('carries border visibility onto split fragments', () => {
+    const side = { width: 1, style: 'solid', color: '#000000' } as const;
     const t: FlowBlock = {
       type: 'table',
       rows: [[cell('r1')], [cell('r2')], [cell('r3')], [cell('r4')], [cell('r5')]].map(
         (cells) => ({ cells }),
       ),
-      borders: { top: true, insideH: true },
+      borders: { top: side, insideH: side },
     };
     const { pages } = layoutBlocks([t], config({ height: 100 }));
     expect(pages).toHaveLength(2);
-    expect(pages[0].tables?.[0]?.borders).toEqual({ top: true, insideH: true });
-    expect(pages[1].tables?.[0]?.borders).toEqual({ top: true, insideH: true });
+    expect(pages[0].tables?.[0]?.borders).toEqual({ top: side, insideH: side });
+    expect(pages[1].tables?.[0]?.borders).toEqual({ top: side, insideH: side });
   });
 
   it('splits a row taller than the page mid-row and re-stacks the remainder', () => {

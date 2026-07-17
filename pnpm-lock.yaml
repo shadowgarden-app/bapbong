@@ -252,6 +252,9 @@ importers:
       prosemirror-model:
         specifier: ^1.25.7
         version: 1.25.8
+      prosemirror-view:
+        specifier: ^1.41.3
+        version: 1.41.9
 
   packages/headless:
     dependencies:

@@ -1,4 +1,4 @@
-import { Schema } from 'prosemirror-model';
+import { Schema, type Node as PMNode } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command } from '@shadow-garden/bapbong-contracts';
 import {
@@ -80,8 +80,8 @@ function apply(state: EditorState, cmd: Command): EditorState {
 }
 
 /** First node of the given type in the doc, or null. */
-function findNode(state: EditorState, typeName: string) {
-  let found: ReturnType<typeof state.doc.nodeAt> = null;
+function findNode(state: EditorState, typeName: string): PMNode | null {
+  let found: PMNode | null = null;
   state.doc.descendants((node) => {
     if (!found && node.type.name === typeName) found = node;
   });

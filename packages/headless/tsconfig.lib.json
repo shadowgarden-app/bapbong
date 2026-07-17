@@ -9,7 +9,26 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [],
+  "references": [
+    {
+      "path": "../measuring/tsconfig.lib.json"
+    },
+    {
+      "path": "../layout-engine/tsconfig.lib.json"
+    },
+    {
+      "path": "../commands/tsconfig.lib.json"
+    },
+    {
+      "path": "../docx/tsconfig.lib.json"
+    },
+    {
+      "path": "../model/tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    }
+  ],
   "exclude": [
     "vite.config.ts",
     "vite.config.mts",

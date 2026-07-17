@@ -13,11 +13,24 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../commands/tsconfig.lib.json" },
-    { "path": "../contracts/tsconfig.lib.json" },
-    { "path": "../input-bridge/tsconfig.lib.json" },
-    { "path": "../model/tsconfig.lib.json" },
-    { "path": "../view/tsconfig.lib.json" }
+    {
+      "path": "../view/tsconfig.lib.json"
+    },
+    {
+      "path": "../selection/tsconfig.lib.json"
+    },
+    {
+      "path": "../model/tsconfig.lib.json"
+    },
+    {
+      "path": "../input-bridge/tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../commands/tsconfig.lib.json"
+    }
   ],
   "exclude": [
     "vite.config.ts",

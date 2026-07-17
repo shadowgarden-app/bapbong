@@ -1,6 +1,9 @@
 import baseConfig, { isomorphicGuard } from '../../eslint.config.mjs';
 
 export default [
+  // dist-shim is a bundler artifact (esbuild output committed for the desktop
+  // stage step) — not source; linting it trips no-var etc.
+  { ignores: ['dist-shim/**'] },
   ...baseConfig,
   isomorphicGuard, // the headless façade must stay DOM-free (Node/server-runnable)
   {

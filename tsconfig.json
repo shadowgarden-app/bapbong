@@ -29,6 +29,24 @@
     },
     {
       "path": "./packages/input-bridge"
+    },
+    {
+      "path": "./packages/commands"
+    },
+    {
+      "path": "./packages/headless"
+    },
+    {
+      "path": "./packages/a11y"
+    },
+    {
+      "path": "./packages/view"
+    },
+    {
+      "path": "./packages/mcp"
+    },
+    {
+      "path": "./packages/ui"
     }
   ]
 }

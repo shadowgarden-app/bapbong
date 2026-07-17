@@ -8,46 +8,22 @@
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
   "references": [
     {
-      "path": "../../packages/comments/tsconfig.lib.json"
+      "path": "../../packages/view/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/measuring/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/contracts/tsconfig.lib.json"
     },
     {
       "path": "../../packages/commands/tsconfig.lib.json"
     },
     {
       "path": "../../packages/editor/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/docx/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/model/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/contracts/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/measuring/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/layout-engine/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/painter-canvas/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/selection/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/input-bridge/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/view/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/a11y/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/ui/tsconfig.lib.json"
     }
   ]
 }
