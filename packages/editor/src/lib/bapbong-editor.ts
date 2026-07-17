@@ -75,10 +75,14 @@ export interface BapbongEditorOptions {
   measureText?: MeasureText;
   /** Vertical-metrics provider paired with {@link measureText}. */
   measureMetrics?: MeasureMetrics;
-  /** Last-resort clipboard reader for hosts whose webview denies the async
+  /** Fallback clipboard reader for hosts whose webview denies the async
    *  Clipboard API (e.g. the desktop shell reads the OS clipboard natively).
-   *  Return null when the clipboard is empty / unavailable. */
-  readClipboardFallback?: () => Promise<{ text?: string; imagePng?: Uint8Array } | null>;
+   *  Return every flavor present; null when empty / unavailable. */
+  readClipboardFallback?: () => Promise<{
+    html?: string;
+    text?: string;
+    imagePng?: Uint8Array;
+  } | null>;
 }
 
 /**
@@ -374,11 +378,11 @@ export class BapbongEditor {
    *  ladder of acquisition strategies until one yields content:
    *  1. async Clipboard API (`navigator.clipboard.read`) — richest, but
    *     permission-gated in some webviews;
-   *  2. `document.execCommand('paste')` on the focused hidden view — the
-   *     exact Cmd-V path (handlePaste + schema parse) where the host allows
-   *     programmatic DOM paste;
-   *  3. the host's native clipboard reader (`readClipboardFallback`) —
-   *     text + PNG only, but never permission-blocked. */
+   *  2. the host's native clipboard reader (`readClipboardFallback`) —
+   *     never permission-blocked; tried before execCommand because WebKit
+   *     answers programmatic DOM paste with a confirmation callout;
+   *  3. `document.execCommand('paste')` on the focused hidden view — the
+   *     exact Cmd-V path, last resort for hosts with no native reader. */
   async paste(): Promise<void> {
     const view = this.bridge?.view;
     if (!view) return;
@@ -387,8 +391,8 @@ export class BapbongEditor {
     // closer to the user gesture for Clipboard API permission checks.
     this.bridge?.focus();
     if (await this.pasteViaClipboardApi(view)) return;
-    if (document.execCommand('paste')) return;
-    await this.pasteViaHostClipboard(view);
+    if (await this.pasteViaHostClipboard(view)) return;
+    document.execCommand('paste');
   }
 
   private async pasteViaClipboardApi(view: EditorView): Promise<boolean> {
@@ -425,18 +429,32 @@ export class BapbongEditor {
     }
   }
 
-  private async pasteViaHostClipboard(view: EditorView): Promise<void> {
-    if (!this.readClipboardFallback) return;
+  private async pasteViaHostClipboard(view: EditorView): Promise<boolean> {
+    if (!this.readClipboardFallback) return false;
     try {
       const data = await this.readClipboardFallback();
-      if (!data) return;
+      if (!data) return false;
+      // Same preference order as the Clipboard API path.
+      if (data.html) {
+        const dom = new DOMParser().parseFromString(data.html, 'text/html').body;
+        if ((dom.textContent ?? '').trim()) {
+          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          return true;
+        }
+      }
       if (data.imagePng?.length) {
         const blob = new Blob([data.imagePng as BlobPart], { type: 'image/png' });
-        if (await insertImageBlobs(view, [blob])) return;
+        if (await insertImageBlobs(view, [blob])) return true;
       }
-      if (data.text) view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
+      if (data.text) {
+        view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
+        return true;
+      }
+      return false;
     } catch (err) {
       console.warn('[bapbong] host clipboard fallback failed:', err);
+      return false;
     }
   }
 
