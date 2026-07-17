@@ -1,4 +1,6 @@
 import { DOMParser as PMDOMParser, Node as ProseMirrorNode, Schema } from 'prosemirror-model';
+import type { EditorView } from 'prosemirror-view';
+import { imagePasteHandler, insertImageBlobs } from './paste-images';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
 import { RenderCore } from '@shadow-garden/bapbong-view';
 import {
@@ -73,6 +75,10 @@ export interface BapbongEditorOptions {
   measureText?: MeasureText;
   /** Vertical-metrics provider paired with {@link measureText}. */
   measureMetrics?: MeasureMetrics;
+  /** Last-resort clipboard reader for hosts whose webview denies the async
+   *  Clipboard API (e.g. the desktop shell reads the OS clipboard natively).
+   *  Return null when the clipboard is empty / unavailable. */
+  readClipboardFallback?: () => Promise<{ text?: string; imagePng?: Uint8Array } | null>;
 }
 
 /**
@@ -129,8 +135,11 @@ export class BapbongEditor {
    *  (Plugin-contributed commands are an additive follow-up.) */
   readonly commands: Collection<EditorCommand> = defaultCommands();
 
+  private readonly readClipboardFallback?: BapbongEditorOptions['readClipboardFallback'];
+
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
+    this.readClipboardFallback = opts.readClipboardFallback;
     this.core = new RenderCore(stack, {
       viewport: opts.viewport,
       measureText: opts.measureText,
@@ -358,26 +367,76 @@ export class BapbongEditor {
     return document.execCommand('cut');
   }
 
-  /** Paste clipboard content (HTML → parsed by the schema, else plain text). */
+  /** Paste clipboard content — HTML parsed by the schema, image blobs as
+   *  embedded images, else plain text.
+   *
+   *  Menu-driven paste can't ride a native ClipboardEvent, so it climbs a
+   *  ladder of acquisition strategies until one yields content:
+   *  1. async Clipboard API (`navigator.clipboard.read`) — richest, but
+   *     permission-gated in some webviews;
+   *  2. `document.execCommand('paste')` on the focused hidden view — the
+   *     exact Cmd-V path (handlePaste + schema parse) where the host allows
+   *     programmatic DOM paste;
+   *  3. the host's native clipboard reader (`readClipboardFallback`) —
+   *     text + PNG only, but never permission-blocked. */
   async paste(): Promise<void> {
     const view = this.bridge?.view;
     if (!view) return;
+    // Focus up front: menu clicks steal focus from the hidden view — typing
+    // must work right after a paste — and a focused view keeps the call
+    // closer to the user gesture for Clipboard API permission checks.
+    this.bridge?.focus();
+    if (await this.pasteViaClipboardApi(view)) return;
+    if (document.execCommand('paste')) return;
+    await this.pasteViaHostClipboard(view);
+  }
+
+  private async pasteViaClipboardApi(view: EditorView): Promise<boolean> {
     try {
       const items = await navigator.clipboard.read();
-      for (const item of items) {
-        if (item.types.includes('text/html')) {
-          const html = await (await item.getType('text/html')).text();
-          // Inert document: no script execution and (unlike innerHTML on a
-          // live div) no eager <img src> network fetches while parsing.
-          const dom = new DOMParser().parseFromString(html, 'text/html').body;
+      // Mirror imagePasteHandler's preference: HTML with real text wins;
+      // image-wrapper-only HTML defers to the blob (remote <img> srcs are
+      // rejected by the schema, the blob keeps the pixels).
+      const htmlItem = items.find((i) => i.types.includes('text/html'));
+      if (htmlItem) {
+        const html = await (await htmlItem.getType('text/html')).text();
+        // Inert document: no script execution and (unlike innerHTML on a
+        // live div) no eager <img src> network fetches while parsing.
+        const dom = new DOMParser().parseFromString(html, 'text/html').body;
+        if ((dom.textContent ?? '').trim()) {
           const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
           view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
-          return;
+          return true;
         }
       }
-      await this.pasteText();
-    } catch {
-      /* clipboard unavailable (permission / sandbox) */
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith('image/'));
+        if (type && (await insertImageBlobs(view, [await item.getType(type)]))) return true;
+      }
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn('[bapbong] Clipboard API paste unavailable, falling back:', err);
+      return false;
+    }
+  }
+
+  private async pasteViaHostClipboard(view: EditorView): Promise<void> {
+    if (!this.readClipboardFallback) return;
+    try {
+      const data = await this.readClipboardFallback();
+      if (!data) return;
+      if (data.imagePng?.length) {
+        const blob = new Blob([data.imagePng as BlobPart], { type: 'image/png' });
+        if (await insertImageBlobs(view, [blob])) return;
+      }
+      if (data.text) view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
+    } catch (err) {
+      console.warn('[bapbong] host clipboard fallback failed:', err);
     }
   }
 
@@ -385,11 +444,22 @@ export class BapbongEditor {
   async pasteText(): Promise<void> {
     const view = this.bridge?.view;
     if (!view) return;
+    this.bridge?.focus(); // see paste()
     try {
       const text = await navigator.clipboard.readText();
-      if (text) view.dispatch(view.state.tr.insertText(text).scrollIntoView());
-    } catch {
-      /* clipboard unavailable */
+      if (text) {
+        view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+        return;
+      }
+    } catch (err) {
+      console.warn('[bapbong] Clipboard API readText unavailable, falling back:', err);
+    }
+    // Host fallback (text only — this is the "without formatting" path).
+    try {
+      const data = await this.readClipboardFallback?.();
+      if (data?.text) view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
+    } catch (err) {
+      console.warn('[bapbong] host clipboard fallback failed:', err);
     }
   }
 
@@ -433,6 +503,7 @@ export class BapbongEditor {
         'Shift-ArrowDown': this.verticalCmd(1, true),
       },
       onUpdate: (state, tr) => this.refresh(state, tr),
+      handlePaste: imagePasteHandler,
     });
     // Hidden editor lives in the page-canvas container, so IME anchoring
     // scrolls along (positioned at the painted caret, in container coords).

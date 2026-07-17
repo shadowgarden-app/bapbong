@@ -86,6 +86,9 @@ export interface InputBridgeOptions {
   /** Called after every dispatched transaction (typing, IME composition
    *  steps, undo, selection changes). Re-layout + repaint here. */
   onUpdate: (state: EditorState, tr: Transaction) => void;
+  /** editorProps.handlePaste — return true to claim the paste (e.g. image
+   *  blobs); false lets ProseMirror's default clipboard parsing run. */
+  handlePaste?: (view: EditorView, event: ClipboardEvent) => boolean;
 }
 
 /** Editing state with history + base keymap; exported for headless tests. */
@@ -151,6 +154,7 @@ export class InputBridge {
 
     this.view = new EditorView(this.host, {
       state: createEditingState(options.doc, options.keys),
+      handlePaste: options.handlePaste,
       dispatchTransaction: (tr) => {
         const state = this.view.state.apply(tr);
         this.view.updateState(state);
