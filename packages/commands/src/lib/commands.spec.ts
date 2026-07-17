@@ -16,10 +16,26 @@ import {
 } from './marks.js';
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
-import { insertImage, insertTable, pageBreakCommand, setLink } from './insert.js';
+import {
+  insertImage,
+  insertTable,
+  pageBreakCommand,
+  setLink,
+} from './insert.js';
 import { deleteSelectionCommand } from './edit.js';
-import { deleteColumn, deleteRow, deleteTable, insertColumn, insertRow, mergeCells } from './table-structure.js';
-import { insertSectionBreak, removeSectionBreak, setColumns } from './sections.js';
+import {
+  deleteColumn,
+  deleteRow,
+  deleteTable,
+  insertColumn,
+  insertRow,
+  mergeCells,
+} from './table-structure.js';
+import {
+  insertSectionBreak,
+  removeSectionBreak,
+  setColumns,
+} from './sections.js';
 import { toggleList } from './list.js';
 import { defaultCommands } from './registry.js';
 
@@ -29,16 +45,33 @@ import { defaultCommands } from './registry.js';
 // EditorState in Node and drive commands, with no DOM anywhere.
 const schema = new Schema({
   nodes: {
-    doc: { content: 'block+', attrs: { numbering: { default: null }, sections: { default: null } } },
+    doc: {
+      content: 'block+',
+      attrs: { numbering: { default: null }, sections: { default: null } },
+    },
     paragraph: {
       group: 'block',
       content: 'inline*',
-      attrs: { align: { default: null }, pageBreakBefore: { default: false }, list: { default: null }, heading: { default: null } },
+      attrs: {
+        align: { default: null },
+        pageBreakBefore: { default: false },
+        list: { default: null },
+        heading: { default: null },
+      },
       toDOM: () => ['p', 0],
     },
     text: { group: 'inline' },
-    image: { inline: true, group: 'inline', attrs: { src: {}, alt: { default: '' } }, toDOM: () => ['img'] },
-    table: { group: 'block', content: 'table_row+', toDOM: () => ['table', ['tbody', 0]] },
+    image: {
+      inline: true,
+      group: 'inline',
+      attrs: { src: {}, alt: { default: '' } },
+      toDOM: () => ['img'],
+    },
+    table: {
+      group: 'block',
+      content: 'table_row+',
+      toDOM: () => ['table', ['tbody', 0]],
+    },
     table_row: { content: 'table_cell+', toDOM: () => ['tr', 0] },
     table_cell: {
       content: 'block+',
@@ -90,8 +123,10 @@ function findNode(state: EditorState, typeName: string): PMNode | null {
 
 /** A 2×2 table doc with the caret in the top-left cell (pos 4). */
 function gridState(): EditorState {
-  const cell = (t: string) => n('table_cell', null, n('paragraph', null, schema.text(t)));
-  const row = (a: string, b: string) => n('table_row', null, [cell(a), cell(b)]);
+  const cell = (t: string) =>
+    n('table_cell', null, n('paragraph', null, schema.text(t)));
+  const row = (a: string, b: string) =>
+    n('table_row', null, [cell(a), cell(b)]);
   const doc = n('doc', null, n('table', null, [row('a', 'b'), row('c', 'd')]));
   const state = EditorState.create({ schema, doc });
   return state.apply(state.tr.setSelection(TextSelection.create(doc, 4)));
@@ -187,7 +222,15 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const doc = n(
       'doc',
       null,
-      n('table', null, n('table_row', null, n('table_cell', null, n('paragraph', null, schema.text('x'))))),
+      n(
+        'table',
+        null,
+        n(
+          'table_row',
+          null,
+          n('table_cell', null, n('paragraph', null, schema.text('x'))),
+        ),
+      ),
     );
     let state = EditorState.create({ schema, doc });
     state = state.apply(state.tr.setSelection(TextSelection.create(doc, 4))); // inside the cell's text
@@ -217,7 +260,9 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
   });
 
   it('superscript toggles vertAlign with its attr; sub/super are exclusive', () => {
-    const sup = toggleMarkCommand('superscript', 'vertAlign', { value: 'super' });
+    const sup = toggleMarkCommand('superscript', 'vertAlign', {
+      value: 'super',
+    });
     const sub = toggleMarkCommand('subscript', 'vertAlign', { value: 'sub' });
     const after = apply(paraState(), sup);
     expect(sup.isActive?.(after)).toBe(true);
@@ -243,7 +288,10 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
   });
 
   it('insertImage inserts an inline image; setLink needs a range', () => {
-    const img = findNode(apply(paraState(), insertImage('data:img', 'pic')), 'image');
+    const img = findNode(
+      apply(paraState(), insertImage('data:img', 'pic')),
+      'image',
+    );
     expect(img?.attrs['src']).toBe('data:img');
 
     const linked = apply(paraState(), setLink('https://x.test'));
@@ -275,10 +323,14 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
       if (node.type.name === 'table_cell') positions.push(pos);
     });
     expect(positions.length).toBe(4);
-    const after = apply(state, setCellsAttrs(positions, { background: '#abcdef' }));
+    const after = apply(
+      state,
+      setCellsAttrs(positions, { background: '#abcdef' }),
+    );
     const bgs: Array<string | null> = [];
     after.doc.descendants((node) => {
-      if (node.type.name === 'table_cell') bgs.push(node.attrs['background'] as string | null);
+      if (node.type.name === 'table_cell')
+        bgs.push(node.attrs['background'] as string | null);
     });
     expect(bgs.every((b) => b === '#abcdef')).toBe(true);
   });
@@ -301,7 +353,19 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
   it('deleting the last row/column removes the whole table', () => {
     // 1×1 table: caret in its only cell.
     const oneByOne = () => {
-      const doc = n('doc', null, n('table', null, n('table_row', null, n('table_cell', null, n('paragraph', null, schema.text('x'))))));
+      const doc = n(
+        'doc',
+        null,
+        n(
+          'table',
+          null,
+          n(
+            'table_row',
+            null,
+            n('table_cell', null, n('paragraph', null, schema.text('x'))),
+          ),
+        ),
+      );
       const s = EditorState.create({ schema, doc });
       return s.apply(s.tr.setSelection(TextSelection.create(doc, 4)));
     };
@@ -348,7 +412,11 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
 
   it('insertSectionBreak splits the section at the caret block, keeping columns', () => {
     const after = apply(threePara(), insertSectionBreak({ newPage: true }));
-    const sections = after.doc.attrs['sections'] as { blockCount: number; newPage: boolean; columns: { count: number } }[];
+    const sections = after.doc.attrs['sections'] as {
+      blockCount: number;
+      newPage: boolean;
+      columns: { count: number };
+    }[];
     expect(sections.map((s) => s.blockCount)).toEqual([2, 1]); // break after block 1
     expect(sections[0].newPage).toBe(false); // first part inherits original start
     expect(sections[1].newPage).toBe(true); // new part starts on a new page
@@ -357,7 +425,10 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
 
   it('setColumns sets the caret section column count (and reports active)', () => {
     const after = apply(threePara(), setColumns(2));
-    const sections = after.doc.attrs['sections'] as { blockCount: number; columns: { count: number } }[];
+    const sections = after.doc.attrs['sections'] as {
+      blockCount: number;
+      columns: { count: number };
+    }[];
     expect(sections).toHaveLength(1);
     expect(sections[0].columns.count).toBe(2);
     expect(setColumns(2).isActive?.(after)).toBe(true);
@@ -385,8 +456,15 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
         n('paragraph', null, schema.text('c')),
       ],
     );
-    const after = apply(EditorState.create({ schema, doc }), removeSectionBreak(0));
-    const sections = after.doc.attrs['sections'] as { blockCount: number; columns: { count: number }; newPage: boolean }[];
+    const after = apply(
+      EditorState.create({ schema, doc }),
+      removeSectionBreak(0),
+    );
+    const sections = after.doc.attrs['sections'] as {
+      blockCount: number;
+      columns: { count: number };
+      newPage: boolean;
+    }[];
     expect(sections).toHaveLength(1);
     expect(sections[0].blockCount).toBe(3);
     expect(sections[0].columns.count).toBe(2); // following section's layout wins
@@ -406,7 +484,17 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
 
   it('registry includes the new static commands', () => {
     const commands = defaultCommands();
-    for (const name of ['superscript', 'subscript', 'undo', 'redo', 'page-break', 'bullet-list', 'ordered-list', 'heading-1', 'heading-2']) {
+    for (const name of [
+      'superscript',
+      'subscript',
+      'undo',
+      'redo',
+      'page-break',
+      'bullet-list',
+      'ordered-list',
+      'heading-1',
+      'heading-2',
+    ]) {
       expect(commands.has(name)).toBe(true);
     }
   });
@@ -429,11 +517,15 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const bullet = toggleList('bullet');
     expect(bullet.isActive?.(paraState())).toBe(false);
     const on = apply(paraState(), bullet);
-    expect((findNode(on, 'paragraph')?.attrs['list'] as { numId: string }).numId).toBe('bb-bullet');
+    expect(
+      (findNode(on, 'paragraph')?.attrs['list'] as { numId: string }).numId,
+    ).toBe('bb-bullet');
     expect(bullet.isActive?.(on)).toBe(true);
     // ordered injects a numbering def so the counter can number live
     const ordered = apply(paraState(), toggleList('ordered'));
-    expect((ordered.doc.attrs['numbering'] as Record<string, unknown>)['bb-ordered']).toBeTruthy();
+    expect(
+      (ordered.doc.attrs['numbering'] as Record<string, unknown>)['bb-ordered'],
+    ).toBeTruthy();
     // toggling the same kind again clears it
     const off = apply(on, toggleList('bullet'));
     expect(findNode(off, 'paragraph')?.attrs['list']).toBeNull();

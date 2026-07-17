@@ -6,7 +6,12 @@ import type {
   LayoutConfig,
   MeasureText,
 } from '@shadow-garden/bapbong-contracts';
-import { createLayoutCache, layout, layoutBlocks, toFlowBlocks } from './layout-engine.js';
+import {
+  createLayoutCache,
+  layout,
+  layoutBlocks,
+  toFlowBlocks,
+} from './layout-engine.js';
 
 // 10px per character, font-agnostic — keeps wrapping math predictable.
 const measure: MeasureText = (text) => text.length * 10;
@@ -28,13 +33,21 @@ const para = (text: string, marker?: string): FlowBlock => ({
 const config = (over: Partial<LayoutConfig['page']> = {}): LayoutConfig => ({
   measureText: measure,
   defaultFont: { sizePt: 10 },
-  page: { width: 240, height: 1000, margin: { top: 20, right: 20, bottom: 20, left: 20 }, ...over },
+  page: {
+    width: 240,
+    height: 1000,
+    margin: { top: 20, right: 20, bottom: 20, left: 20 },
+    ...over,
+  },
 });
 
 describe('layoutBlocks', () => {
   it('wraps a paragraph at the content width', () => {
     // content width = 240 - 20 - 20 = 200px → 5 words of "aaaa"(40) + spaces.
-    const { pages } = layoutBlocks([para('aaaa bbbb cccc dddd eeee')], config());
+    const { pages } = layoutBlocks(
+      [para('aaaa bbbb cccc dddd eeee')],
+      config(),
+    );
     expect(pages).toHaveLength(1);
     expect(pages[0].lines).toHaveLength(2);
     expect(pages[0].lines[0].segments[0].text).toBe('aaaa');
@@ -46,7 +59,10 @@ describe('layoutBlocks', () => {
   it('paginates when content exceeds the page height', () => {
     // page height 80, margins 20 → content 20..60 = 40px → 2 lines/page.
     const cfg = config({ height: 80 });
-    const { pages } = layoutBlocks([para('one'), para('two'), para('three')], cfg);
+    const { pages } = layoutBlocks(
+      [para('one'), para('two'), para('three')],
+      cfg,
+    );
     expect(pages).toHaveLength(2);
     expect(pages[0].lines).toHaveLength(2);
     expect(pages[1].lines).toHaveLength(1);
@@ -140,7 +156,12 @@ describe('layoutBlocks', () => {
     const [line] = pages[0].lines;
     // see(30) ' '(10) img(50) ' '(10) end(30) all fit on one line from x=20.
     expect(line.images).toHaveLength(1);
-    expect(line.images?.[0]).toMatchObject({ src: 'data:img', x: 60, width: 50, height: 30 });
+    expect(line.images?.[0]).toMatchObject({
+      src: 'data:img',
+      x: 60,
+      width: 50,
+      height: 30,
+    });
     expect(line.segments.at(-1)).toMatchObject({ text: 'end', x: 120 });
     // image (30) is taller than the text line box (16) → line height = 30.
     expect(line.height).toBe(30);
@@ -161,7 +182,10 @@ describe('layoutBlocks', () => {
   });
 
   // Build a single-cell paragraph cell (1×1) with optional overrides.
-  const cell = (text: string, over: Partial<FlowTableCell> = {}): FlowTableCell => ({
+  const cell = (
+    text: string,
+    over: Partial<FlowTableCell> = {},
+  ): FlowTableCell => ({
     colspan: 1,
     rowspan: 1,
     colwidth: null,
@@ -197,7 +221,9 @@ describe('layoutBlocks', () => {
 
   it('scales a tblGrid wider than the column down to fit (no overflow)', () => {
     // content box [20,220] = 200px; the table's grid is 200+200 = 400px wide.
-    const t = table([[cell('a', { colwidth: [200] }), cell('b', { colwidth: [200] })]]);
+    const t = table([
+      [cell('a', { colwidth: [200] }), cell('b', { colwidth: [200] })],
+    ]);
     const [resolved] = layoutBlocks([t], config()).pages[0].tables ?? [];
     expect(resolved.width).toBeCloseTo(200); // 400 → scaled to the 200px box
     // each column halved (200 → 100); right edge stays within the content box.
@@ -213,7 +239,8 @@ describe('layoutBlocks', () => {
         { text: '2', font: font({ sizePt: 10 }), vertAlign: 'super' },
       ],
     };
-    const [base, sup] = layoutBlocks([block], config()).pages[0].lines[0].segments;
+    const [base, sup] = layoutBlocks([block], config()).pages[0].lines[0]
+      .segments;
     expect(base.vertAlign).toBeUndefined();
     expect(sup.vertAlign).toBe('super');
     expect(sup.font.sizePt).toBeCloseTo(6.6); // 10 × 0.66
@@ -231,7 +258,8 @@ describe('layoutBlocks', () => {
       type: 'table',
       rows: [{ cells: [{ ...cell('h'), background: '#D9E2F3' }] }],
     };
-    const resolvedCell = layoutBlocks([t], config()).pages[0].tables?.[0]?.cells[0];
+    const resolvedCell = layoutBlocks([t], config()).pages[0].tables?.[0]
+      ?.cells[0];
     expect(resolvedCell?.background).toBe('#D9E2F3');
   });
 
@@ -242,7 +270,12 @@ describe('layoutBlocks', () => {
     };
     const { pages } = layoutBlocks([block], config());
     const [s0] = pages[0].lines[0].segments;
-    expect(s0).toMatchObject({ text: 'ab', underline: true, strike: true, width: 20 });
+    expect(s0).toMatchObject({
+      text: 'ab',
+      underline: true,
+      strike: true,
+      width: 20,
+    });
   });
 
   it('pads cell content by the Word default cell margin', () => {
@@ -332,7 +365,11 @@ describe('layoutBlocks', () => {
     // 3 cols (80/60/60). A rowspan-2 cell holds col 0 of rows 1-2, so the
     // 2-cell third row must land in cols 1 and 2 — not overlap col 0.
     const t = table([
-      [cell('a', { colwidth: [80] }), cell('b', { colwidth: [60] }), cell('c', { colwidth: [60] })],
+      [
+        cell('a', { colwidth: [80] }),
+        cell('b', { colwidth: [60] }),
+        cell('c', { colwidth: [60] }),
+      ],
       [cell('M', { rowspan: 2, colwidth: [80] }), cell('b1'), cell('c1')],
       [cell('b2'), cell('c2')],
     ]);
@@ -354,7 +391,10 @@ describe('layoutBlocks', () => {
   it('splits an overflowing table at the row boundary (Word-like)', () => {
     // page height 80 → content 20..60 (40px). One line (16) + table.
     const cfg = config({ height: 80 });
-    const para: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const para: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+    };
     const t = table([[cell('a')], [cell('b')]]); // 2 rows × 16 = 32px tall
     const { pages } = layoutBlocks([para, t], cfg);
     // line at y=20 → free 24px: row 'a' (16) fits, row 'b' flows to page 2.
@@ -372,14 +412,27 @@ describe('layoutBlocks', () => {
 
   it('splits a long table between rows across pages', () => {
     // content height 60; 5 one-line rows (80px) → 3 rows + 2 rows.
-    const t = table([[cell('r1')], [cell('r2')], [cell('r3')], [cell('r4')], [cell('r5')]]);
+    const t = table([
+      [cell('r1')],
+      [cell('r2')],
+      [cell('r3')],
+      [cell('r4')],
+      [cell('r5')],
+    ]);
     const { pages } = layoutBlocks([t], config({ height: 100 }));
     expect(pages).toHaveLength(2);
     const f1 = pages[0].tables?.[0];
-    expect(f1?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['r1', 'r2', 'r3']);
+    expect(f1?.cells.map((c) => c.lines[0].segments[0].text)).toEqual([
+      'r1',
+      'r2',
+      'r3',
+    ]);
     expect(f1?.height).toBeCloseTo(48);
     const f2 = pages[1].tables?.[0];
-    expect(f2?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['r4', 'r5']);
+    expect(f2?.cells.map((c) => c.lines[0].segments[0].text)).toEqual([
+      'r4',
+      'r5',
+    ]);
     expect(f2?.cells[0]).toMatchObject({ y: 20 });
   });
 
@@ -390,7 +443,14 @@ describe('layoutBlocks', () => {
       colspan: 1,
       rowspan: 1,
       colwidth: null,
-      content: [{ type: 'paragraph', runs: [{ text, font: font(), pos }], pos, end: pos + text.length }],
+      content: [
+        {
+          type: 'paragraph',
+          runs: [{ text, font: font(), pos }],
+          pos,
+          end: pos + text.length,
+        },
+      ],
     });
     const t: FlowBlock = {
       type: 'table',
@@ -406,10 +466,18 @@ describe('layoutBlocks', () => {
     expect(pages).toHaveLength(2);
     // page 1: header + r1 + r2 (cut at 48 ≤ 60).
     const f1 = pages[0].tables?.[0];
-    expect(f1?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['head', 'r1', 'r2']);
+    expect(f1?.cells.map((c) => c.lines[0].segments[0].text)).toEqual([
+      'head',
+      'r1',
+      'r2',
+    ]);
     // page 2: GHOST header (positions stripped) + r3 + r4.
     const f2 = pages[1].tables?.[0];
-    expect(f2?.cells.map((c) => c.lines[0].segments[0].text)).toEqual(['head', 'r3', 'r4']);
+    expect(f2?.cells.map((c) => c.lines[0].segments[0].text)).toEqual([
+      'head',
+      'r3',
+      'r4',
+    ]);
     const ghost = f2?.cells[0].lines[0];
     expect(ghost?.segments[0].pos).toBeUndefined(); // not caret-addressable
     expect(ghost?.from).toBeUndefined();
@@ -423,7 +491,10 @@ describe('layoutBlocks', () => {
     // content 60; a paragraph line (16) leaves 44px. The single row holds
     // 6 lines (96px) — taller than even a FULL page, so Word starts it in the
     // leftover space instead of abandoning it as a blank gap.
-    const para6: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const para6: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+    };
     const tallCell: FlowTableCell = {
       colspan: 1,
       rowspan: 1,
@@ -435,22 +506,28 @@ describe('layoutBlocks', () => {
     expect(pages).toHaveLength(3);
     // page 1: the paragraph + the row's first 2 lines fill the 44px leftover.
     const f1 = pages[0].tables?.[0];
-    expect(f1?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l1', 'l2']);
+    expect(f1?.cells[0].lines.map((l) => l.segments[0].text)).toEqual([
+      'l1',
+      'l2',
+    ]);
     expect(f1?.y).toBe(36); // right below the paragraph, no blank gap
     // pages 2–3: the re-stacked remainder continues from each page top.
-    expect(pages[1].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual([
-      'l3',
-      'l4',
-      'l5',
-    ]);
-    expect(pages[2].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l6']);
+    expect(
+      pages[1].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text),
+    ).toEqual(['l3', 'l4', 'l5']);
+    expect(
+      pages[2].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text),
+    ).toEqual(['l6']);
   });
 
   it('splits an ordinary tall row in the leftover space (Word default)', () => {
     // content 60; paragraph (16) leaves 44px; one row of 3 lines (48px) does
     // not fit the leftover. Word's default lets rows break across pages, so
     // the row starts here (2 lines) and continues on page 2 — no blank gap.
-    const para1: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const para1: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+    };
     const rowCell: FlowTableCell = {
       colspan: 1,
       rowspan: 1,
@@ -460,21 +537,31 @@ describe('layoutBlocks', () => {
     const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell] }] };
     const { pages } = layoutBlocks([para1, t], config({ height: 100 }));
     expect(pages).toHaveLength(2);
-    expect(pages[0].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l1', 'l2']);
-    expect(pages[1].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l3']);
+    expect(
+      pages[0].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text),
+    ).toEqual(['l1', 'l2']);
+    expect(
+      pages[1].tables?.[0]?.cells[0].lines.map((l) => l.segments[0].text),
+    ).toEqual(['l3']);
   });
 
   it('moves a w:cantSplit row whole when it fits a fresh page', () => {
     // Same geometry, but the row is marked cantSplit → the old behavior:
     // leave the gap, start the intact row on page 2.
-    const para1: FlowBlock = { type: 'paragraph', runs: [{ text: 'hi', font: font() }] };
+    const para1: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+    };
     const rowCell: FlowTableCell = {
       colspan: 1,
       rowspan: 1,
       colwidth: null,
       content: Array.from({ length: 3 }, (_, i) => para(`l${i + 1}`)),
     };
-    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell], cantSplit: true }] };
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [rowCell], cantSplit: true }],
+    };
     const { pages } = layoutBlocks([para1, t], config({ height: 100 }));
     expect(pages).toHaveLength(2);
     expect(pages[0].tables ?? []).toHaveLength(0); // gap left intentionally
@@ -485,9 +572,13 @@ describe('layoutBlocks', () => {
     const side = { width: 1, style: 'solid', color: '#000000' } as const;
     const t: FlowBlock = {
       type: 'table',
-      rows: [[cell('r1')], [cell('r2')], [cell('r3')], [cell('r4')], [cell('r5')]].map(
-        (cells) => ({ cells }),
-      ),
+      rows: [
+        [cell('r1')],
+        [cell('r2')],
+        [cell('r3')],
+        [cell('r4')],
+        [cell('r5')],
+      ].map((cells) => ({ cells })),
       borders: { top: side, insideH: side },
     };
     const { pages } = layoutBlocks([t], config({ height: 100 }));
@@ -512,10 +603,17 @@ describe('layoutBlocks', () => {
     expect(pages).toHaveLength(2);
     // page 1: the first 3 lines fit in the 60px band (cut at the line boundary).
     const f1 = pages[0].tables?.[0];
-    expect(f1?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l1', 'l2', 'l3']);
+    expect(f1?.cells[0].lines.map((l) => l.segments[0].text)).toEqual([
+      'l1',
+      'l2',
+      'l3',
+    ]);
     // page 2: remaining lines re-stack from the page top; the next row follows.
     const f2 = pages[1].tables?.[0];
-    expect(f2?.cells[0].lines.map((l) => l.segments[0].text)).toEqual(['l4', 'l5']);
+    expect(f2?.cells[0].lines.map((l) => l.segments[0].text)).toEqual([
+      'l4',
+      'l5',
+    ]);
     expect(f2?.cells[0].lines[0]).toMatchObject({ y: 20 });
     expect(f2?.cells[1].lines[0].segments[0].text).toBe('after');
     expect(f2?.cells[1].y).toBeCloseTo(52); // 20 + continuation row (32)
@@ -570,28 +668,51 @@ describe('layoutBlocks', () => {
 
   it('breaks a word at character level when the band cannot fit it (narrow cell)', () => {
     // "STT" in a header cell narrower than one word: Word stacks S/T/T.
-    const cellPara: FlowBlock = { type: 'paragraph', runs: [{ text: 'STT', font: font(), pos: 10 }], pos: 9 };
+    const cellPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'STT', font: font(), pos: 10 }],
+      pos: 9,
+    };
     const table: FlowBlock = {
       type: 'table',
       // colwidth 26 − 2×7.2 padding → 11.6px band: one 10px char per line.
-      rows: [{ cells: [{ colspan: 1, rowspan: 1, colwidth: [26], content: [cellPara] }] }],
+      rows: [
+        {
+          cells: [
+            { colspan: 1, rowspan: 1, colwidth: [26], content: [cellPara] },
+          ],
+        },
+      ],
     };
     const { pages } = layoutBlocks([table], config());
     const cell = pages[0].tables?.[0].cells[0];
-    expect(cell?.lines.map((l) => l.segments[0]?.text)).toEqual(['S', 'T', 'T']);
+    expect(cell?.lines.map((l) => l.segments[0]?.text)).toEqual([
+      'S',
+      'T',
+      'T',
+    ]);
     // PM positions follow the split characters (caret/selection stay usable).
     expect(cell?.lines.map((l) => l.segments[0]?.pos)).toEqual([10, 11, 12]);
   });
 
   it('applies paragraph spacing (before/after gaps + line multiplier)', () => {
-    const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
-    const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    const a: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a', font: font() }],
+    };
     const b: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: 'b', font: font() }],
       spacing: { before: 10, after: 6, line: 2, lineRule: 'auto' },
     };
-    const c: FlowBlock = { type: 'paragraph', runs: [{ text: 'c', font: font() }] };
+    const c: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'c', font: font() }],
+    };
     const { pages } = layoutBlocks([a, b, c], cfg);
     const [la, lb, lc] = pages[0].lines;
     expect(la.y).toBe(20); // top margin
@@ -618,15 +739,25 @@ describe('layoutBlocks', () => {
   });
 
   it('starts a pageBreakBefore paragraph on a new page', () => {
-    const a: FlowBlock = { type: 'paragraph', runs: [{ text: 'a', font: font() }] };
-    const b: FlowBlock = { type: 'paragraph', runs: [{ text: 'b', font: font() }], pageBreakBefore: true };
+    const a: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a', font: font() }],
+    };
+    const b: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      pageBreakBefore: true,
+    };
     const { pages } = layoutBlocks([a, b], config());
     expect(pages).toHaveLength(2);
     expect(pages[1].lines[0].segments[0].text).toBe('b');
   });
 
   it('uses injected font metrics for the line box and baseline', () => {
-    const cfg: LayoutConfig = { ...config(), measureMetrics: () => ({ ascent: 12, descent: 4 }) };
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
     const { pages } = layoutBlocks([para('hi')], cfg);
     const [line] = pages[0].lines;
     expect(line.height).toBe(16); // ascent + descent
@@ -677,11 +808,17 @@ describe('layoutBlocks', () => {
     };
     const { pages } = layoutBlocks([block], { ...config(), tabWidth: 50 });
     // past the stop → default grid: next multiple of 50 from 20 → 170.
-    expect(pages[0].lines[0].segments.at(-1)).toMatchObject({ text: 'b', x: 170 });
+    expect(pages[0].lines[0].segments.at(-1)).toMatchObject({
+      text: 'b',
+      x: 170,
+    });
   });
 
   it('advances a tab to the next tab stop', () => {
-    const block: FlowBlock = { type: 'paragraph', runs: [{ text: 'a\tb', font: font() }] };
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a\tb', font: font() }],
+    };
     const { pages } = layoutBlocks([block], { ...config(), tabWidth: 50 });
     const segs = pages[0].lines[0].segments;
     // 'a'@20 (10px) → tab from x=30 to the next stop (20 + 50 = 70) → 'b'@70.
@@ -694,7 +831,11 @@ describe('toFlowBlocks', () => {
   const schema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
       image: {
         inline: true,
@@ -705,7 +846,11 @@ describe('toFlowBlocks', () => {
       table_row: { content: 'table_cell+' },
       table_cell: {
         content: 'block+',
-        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } },
+        attrs: {
+          colspan: { default: 1 },
+          rowspan: { default: 1 },
+          colwidth: { default: null },
+        },
       },
     },
     marks: { strong: {}, fontSize: { attrs: { size: {} } } },
@@ -741,12 +886,15 @@ describe('toFlowBlocks', () => {
     expect(block.runs).toHaveLength(2);
     const img = block.runs[1];
     expect('src' in img).toBe(true);
-    if ('src' in img) expect(img).toMatchObject({ src: 'u', width: 40, height: 20 });
+    if ('src' in img)
+      expect(img).toMatchObject({ src: 'u', width: 40, height: 20 });
   });
 
   it('carries the list marker', () => {
     const doc = schema.node('doc', null, [
-      schema.node('paragraph', { list: { marker: '1.' } }, [schema.text('item')]),
+      schema.node('paragraph', { list: { marker: '1.' } }, [
+        schema.text('item'),
+      ]),
     ]);
     const block = toFlowBlocks(doc)[0];
     expect(block.type === 'paragraph' && block.marker).toBe('1.');
@@ -785,7 +933,10 @@ describe('toFlowBlocks', () => {
       schema.node('table_cell', attrs, [p(t)]);
     const doc = schema.node('doc', null, [
       schema.node('table', null, [
-        schema.node('table_row', null, [td('a', { colwidth: [80] }), td('b', { colwidth: [120] })]),
+        schema.node('table_row', null, [
+          td('a', { colwidth: [80] }),
+          td('b', { colwidth: [120] }),
+        ]),
         schema.node('table_row', null, [td('c'), td('d', { colspan: 1 })]),
       ]),
     ]);
@@ -806,7 +957,11 @@ describe('floats in table cells', () => {
   const schema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
       image: {
         inline: true,
@@ -823,7 +978,11 @@ describe('floats in table cells', () => {
       table_row: { content: 'table_cell+' },
       table_cell: {
         content: 'block+',
-        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } },
+        attrs: {
+          colspan: { default: 1 },
+          rowspan: { default: 1 },
+          colwidth: { default: null },
+        },
       },
     },
   });
@@ -839,7 +998,12 @@ describe('floats in table cells', () => {
                 src: '',
                 width: 18,
                 height: 16,
-                float: { wrap: 'square', hOffset: 30, vOffset: 5, vRel: 'paragraph' },
+                float: {
+                  wrap: 'square',
+                  hOffset: 30,
+                  vOffset: 5,
+                  vRel: 'paragraph',
+                },
                 shape: { kind: 'rect', stroke: '#4472C4', strokeWidth: 2 },
               }),
             ]),
@@ -852,7 +1016,10 @@ describe('floats in table cells', () => {
     const para = block.rows[0].cells[0].content[0];
     if (para.type !== 'paragraph') throw new Error('expected paragraph');
     expect(para.floats).toHaveLength(1);
-    expect(para.floats?.[0]).toMatchObject({ width: 18, shape: { kind: 'rect' } });
+    expect(para.floats?.[0]).toMatchObject({
+      width: 18,
+      shape: { kind: 'rect' },
+    });
     // The carrying image node's PM position rides along (resize hit-testing).
     expect(typeof para.floats?.[0].pos).toBe('number');
     expect(para.runs.filter((r) => 'src' in r)).toHaveLength(0); // not inline
@@ -877,7 +1044,13 @@ describe('floats in table cells', () => {
     };
     const table: FlowBlock = {
       type: 'table',
-      rows: [{ cells: [{ colspan: 1, rowspan: 1, colwidth: [120], content: [cellPara] }] }],
+      rows: [
+        {
+          cells: [
+            { colspan: 1, rowspan: 1, colwidth: [120], content: [cellPara] },
+          ],
+        },
+      ],
     };
     const { pages } = layoutBlocks([table], config());
     const cell = pages[0].tables?.[0].cells[0];
@@ -905,7 +1078,9 @@ describe('floats in table cells', () => {
         }),
       ]),
     ]);
-    const body = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('body')])]);
+    const body = schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text('body')]),
+    ]);
     const resolved = layout(body, config(), undefined, { header });
     const f = resolved.pageHeader?.floats?.[0];
     // Chrome pins at 48: y = 48 + paragraph top (0) + vOffset; x = left 20 − 10.
@@ -919,7 +1094,10 @@ describe('rotated inline images', () => {
     // 100×20 image rotated 90°: the painted box is 20 wide × 100 tall around
     // the same center, so the line needs ascent 60 (h/2 + rotH/2) and descent
     // 40 — but the token still advances 100 horizontally (no re-wrap).
-    const metrics = (f: FontSpec) => ({ ascent: sizeAscent(f), descent: sizeDescent(f) });
+    const metrics = (f: FontSpec) => ({
+      ascent: sizeAscent(f),
+      descent: sizeDescent(f),
+    });
     const sizeAscent = (f: FontSpec) => f.sizePt * (96 / 72) * 0.8;
     const sizeDescent = (f: FontSpec) => f.sizePt * (96 / 72) * 0.25;
     const cfg: LayoutConfig = { ...config(), measureMetrics: metrics };
@@ -979,7 +1157,9 @@ describe('textbox floats', () => {
     expect(f).toMatchObject({ x: 60, y: 30, width: 120, height: 60, pos: 42 });
     // Lines are box-local: x from the interior inset, y from the box top.
     expect(f?.lines).toHaveLength(2);
-    expect(f?.lines?.[0].segments.map((s) => s.text).join('')).toBe('aaaa bbbb');
+    expect(f?.lines?.[0].segments.map((s) => s.text).join('')).toBe(
+      'aaaa bbbb',
+    );
     expect(f?.lines?.[0].segments[0].x).toBe(10);
     expect(f?.lines?.[0].y).toBe(5);
     expect(f?.lines?.[1].segments.map((s) => s.text)).toEqual(['cccc']);
@@ -990,14 +1170,17 @@ describe('textbox floats', () => {
 });
 
 describe('floating images', () => {
-  const words = (n: number, len = 9) => Array.from({ length: n }, () => 'a'.repeat(len)).join(' ');
+  const words = (n: number, len = 9) =>
+    Array.from({ length: n }, () => 'a'.repeat(len)).join(' ');
 
   it('narrows lines beside a right-aligned square float, resumes below it', () => {
     // content [20,220]; float 80×40 at right → rect x 140..220, y 20..60.
     const block: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: words(8), font: font() }],
-      floats: [{ src: 'f', width: 80, height: 40, wrap: 'square', hAlign: 'right' }],
+      floats: [
+        { src: 'f', width: 80, height: 40, wrap: 'square', hAlign: 'right' },
+      ],
     };
     const { pages } = layoutBlocks([block], config());
     const lines = pages[0].lines;
@@ -1009,14 +1192,28 @@ describe('floating images', () => {
     for (const l of narrowed) expect(l.width).toBeCloseTo(120); // 140 − 20
     for (const l of full) expect(l.width).toBeCloseTo(200);
     // The float itself lands on the page for the painter.
-    expect(pages[0].floats?.[0]).toMatchObject({ x: 140, y: 20, width: 80, height: 40 });
+    expect(pages[0].floats?.[0]).toMatchObject({
+      x: 140,
+      y: 20,
+      width: 80,
+      height: 40,
+    });
   });
 
   it('honors text-to-image gaps (distL)', () => {
     const block: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: words(6), font: font() }],
-      floats: [{ src: 'f', width: 80, height: 40, wrap: 'square', hAlign: 'right', distL: 10 }],
+      floats: [
+        {
+          src: 'f',
+          width: 80,
+          height: 40,
+          wrap: 'square',
+          hAlign: 'right',
+          distL: 10,
+        },
+      ],
     };
     const { pages } = layoutBlocks([block], config());
     expect(pages[0].lines[0].width).toBeCloseTo(110); // band ends 10px before the image
@@ -1038,10 +1235,15 @@ describe('floating images', () => {
     const p1: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: 'short', font: font() }],
-      floats: [{ src: 'f', width: 80, height: 100, wrap: 'square', hAlign: 'right' }],
+      floats: [
+        { src: 'f', width: 80, height: 100, wrap: 'square', hAlign: 'right' },
+      ],
     };
     // Para 2: no floats of its own — would normally take the drafts fast path.
-    const p2: FlowBlock = { type: 'paragraph', runs: [{ text: words(8), font: font() }] };
+    const p2: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: words(8), font: font() }],
+    };
     const { pages } = layoutBlocks([p1, p2], config());
     const p2Lines = pages[0].lines.slice(1);
     const narrowed = p2Lines.filter((l) => l.y < 120);
@@ -1053,7 +1255,9 @@ describe('floating images', () => {
     const block: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: words(4), font: font() }],
-      floats: [{ src: 'f', width: 80, height: 40, wrap: 'none', hAlign: 'right' }],
+      floats: [
+        { src: 'f', width: 80, height: 40, wrap: 'none', hAlign: 'right' },
+      ],
     };
     const { pages } = layoutBlocks([block], config());
     expect(pages[0].floats).toHaveLength(1);
@@ -1065,12 +1269,17 @@ describe('layout with page chrome (header/footer)', () => {
   const schema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
     marks: {},
   });
-  const p = (text: string) => schema.node('paragraph', null, [schema.text(text)]);
+  const p = (text: string) =>
+    schema.node('paragraph', null, [schema.text(text)]);
   const docOf = (...texts: string[]) => schema.node('doc', null, texts.map(p));
 
   it('pins the header/footer bands and shrinks the body band', () => {
@@ -1095,9 +1304,18 @@ describe('layout with page chrome (header/footer)', () => {
     const fieldSchema = new Schema({
       nodes: {
         doc: { content: 'block+' },
-        paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+        paragraph: {
+          group: 'block',
+          content: 'inline*',
+          attrs: { list: { default: null } },
+        },
         text: { group: 'inline' },
-        page_field: { inline: true, group: 'inline', atom: true, attrs: { kind: {} } },
+        page_field: {
+          inline: true,
+          group: 'inline',
+          atom: true,
+          attrs: { kind: {} },
+        },
       },
       marks: {},
     });
@@ -1111,9 +1329,13 @@ describe('layout with page chrome (header/footer)', () => {
     const body = fieldSchema.node(
       'doc',
       null,
-      Array.from({ length: 30 }, (_, i) => fieldSchema.node('paragraph', null, [fieldSchema.text(`p${i}`)])),
+      Array.from({ length: 30 }, (_, i) =>
+        fieldSchema.node('paragraph', null, [fieldSchema.text(`p${i}`)]),
+      ),
     );
-    const resolved = layout(body, { ...config({ height: 300 }) }, undefined, { footer });
+    const resolved = layout(body, { ...config({ height: 300 }) }, undefined, {
+      footer,
+    });
     const segs = resolved.pageFooter?.lines[0].segments ?? [];
     const fieldSeg = segs.find((s) => s.field);
     expect(fieldSeg?.field).toBe('pageNumber');
@@ -1126,7 +1348,11 @@ describe('layout with page chrome (header/footer)', () => {
   it('paginates against the shrunken body band', () => {
     // content band: top 64, bottom 300−48−16 = 236 → 172px ≈ 10 lines of 16.
     const cfg = { ...config({ height: 300 }) };
-    const body = schema.node('doc', null, Array.from({ length: 12 }, (_, i) => p(`p${i}`)));
+    const body = schema.node(
+      'doc',
+      null,
+      Array.from({ length: 12 }, (_, i) => p(`p${i}`)),
+    );
     const resolved = layout(body, cfg, undefined, {
       header: docOf('head'),
       footer: docOf('foot'),
@@ -1139,7 +1365,11 @@ describe('layout with page chrome (header/footer)', () => {
 
   it('lays out first/even chrome variants and records the selection', () => {
     const cfg = { ...config({ height: 400 }) };
-    const body = schema.node('doc', null, Array.from({ length: 20 }, (_, i) => p(`p${i}`)));
+    const body = schema.node(
+      'doc',
+      null,
+      Array.from({ length: 20 }, (_, i) => p(`p${i}`)),
+    );
     const resolved = layout(body, cfg, undefined, {
       header: docOf('def'),
       headerFirst: docOf('first'),
@@ -1158,12 +1388,20 @@ describe('layout with footnotes', () => {
   const fnSchema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
-    marks: { footnote: { attrs: { num: {} } }, vertAlign: { attrs: { value: {} } } },
+    marks: {
+      footnote: { attrs: { num: {} } },
+      vertAlign: { attrs: { value: {} } },
+    },
   });
-  const p = (text: string) => fnSchema.node('paragraph', null, [fnSchema.text(text)]);
+  const p = (text: string) =>
+    fnSchema.node('paragraph', null, [fnSchema.text(text)]);
   // A paragraph ending in a footnote reference (superscript number + mark).
   const refPara = (text: string, num: number) =>
     fnSchema.node('paragraph', null, [
@@ -1177,8 +1415,13 @@ describe('layout with footnotes', () => {
 
   it('reserves bottom space and lays the note body there', () => {
     const cfg = config({ height: 300 }); // body band [20, 280]
-    const body = fnSchema.node('doc', null, [refPara('See', 1), ...Array.from({ length: 8 }, (_, i) => p(`p${i}`))]);
-    const resolved = layout(body, cfg, undefined, undefined, { 1: noteDoc('Note one') });
+    const body = fnSchema.node('doc', null, [
+      refPara('See', 1),
+      ...Array.from({ length: 8 }, (_, i) => p(`p${i}`)),
+    ]);
+    const resolved = layout(body, cfg, undefined, undefined, {
+      1: noteDoc('Note one'),
+    });
 
     const fn = resolved.pages[0].footnotes;
     expect(fn).toBeDefined();
@@ -1187,9 +1430,11 @@ describe('layout with footnotes', () => {
     const lastBody = resolved.pages[0].lines.at(-1);
     const noteText = (noteLine?.segments ?? []).map((s) => s.text).join('');
     expect(noteText).toContain('Note one');
-    expect(noteLine?.y ?? 0).toBeGreaterThan((lastBody?.y ?? 0));
+    expect(noteLine?.y ?? 0).toBeGreaterThan(lastBody?.y ?? 0);
     // …and within the page (above the bottom margin).
-    expect((noteLine?.y ?? 0) + (noteLine?.height ?? 0)).toBeLessThanOrEqual(280.01);
+    expect((noteLine?.y ?? 0) + (noteLine?.height ?? 0)).toBeLessThanOrEqual(
+      280.01,
+    );
     // the separator rule sits above the first note line.
     expect(fn?.separatorY ?? Infinity).toBeLessThan(noteLine?.y ?? 0);
     // footnote lines belong to a separate story — never caret-addressable.
@@ -1199,13 +1444,20 @@ describe('layout with footnotes', () => {
 
   it('shrinks the body band so fewer lines fit the reference page', () => {
     const cfg = config({ height: 300 });
-    const body = fnSchema.node('doc', null, [refPara('See', 1), ...Array.from({ length: 40 }, (_, i) => p(`p${i}`))]);
+    const body = fnSchema.node('doc', null, [
+      refPara('See', 1),
+      ...Array.from({ length: 40 }, (_, i) => p(`p${i}`)),
+    ]);
     const without = layout(body, cfg);
-    const withFn = layout(body, cfg, undefined, undefined, { 1: noteDoc('Note one') });
+    const withFn = layout(body, cfg, undefined, undefined, {
+      1: noteDoc('Note one'),
+    });
     expect(withFn.pages[0].footnotes).toBeDefined();
     expect(without.pages[0].footnotes).toBeUndefined();
     // the reserved footnote area pushes a body line off page 1.
-    expect(withFn.pages[0].lines.length).toBeLessThan(without.pages[0].lines.length);
+    expect(withFn.pages[0].lines.length).toBeLessThan(
+      without.pages[0].lines.length,
+    );
   });
 
   it('leaves pages free of footnotes when none are passed', () => {
@@ -1217,35 +1469,72 @@ describe('layout with footnotes', () => {
   const tblSchema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
-      table: { group: 'block', content: 'table_row+', attrs: { cellPadding: { default: null }, borders: { default: null }, align: { default: null } } },
-      table_row: { content: 'table_cell+', attrs: { header: { default: false }, height: { default: null } } },
+      table: {
+        group: 'block',
+        content: 'table_row+',
+        attrs: {
+          cellPadding: { default: null },
+          borders: { default: null },
+          align: { default: null },
+        },
+      },
+      table_row: {
+        content: 'table_cell+',
+        attrs: { header: { default: false }, height: { default: null } },
+      },
       table_cell: {
         content: 'block+',
-        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null }, background: { default: null }, vAlign: { default: null }, borders: { default: null } },
+        attrs: {
+          colspan: { default: 1 },
+          rowspan: { default: 1 },
+          colwidth: { default: null },
+          background: { default: null },
+          vAlign: { default: null },
+          borders: { default: null },
+        },
       },
     },
-    marks: { footnote: { attrs: { num: {} } }, vertAlign: { attrs: { value: {} } } },
+    marks: {
+      footnote: { attrs: { num: {} } },
+      vertAlign: { attrs: { value: {} } },
+    },
   });
 
   it('reserves a footnote referenced inside a table cell', () => {
     const cellPara = tblSchema.node('paragraph', null, [
       tblSchema.text('Cell '),
-      tblSchema.text('1', [tblSchema.mark('footnote', { num: 1 }), tblSchema.mark('vertAlign', { value: 'super' })]),
+      tblSchema.text('1', [
+        tblSchema.mark('footnote', { num: 1 }),
+        tblSchema.mark('vertAlign', { value: 'super' }),
+      ]),
     ]);
     const doc = tblSchema.node('doc', null, [
       tblSchema.node('table', null, [
-        tblSchema.node('table_row', null, [tblSchema.node('table_cell', null, [cellPara])]),
+        tblSchema.node('table_row', null, [
+          tblSchema.node('table_cell', null, [cellPara]),
+        ]),
       ]),
     ]);
-    const note = tblSchema.node('doc', null, [tblSchema.node('paragraph', null, [tblSchema.text('Table note')])]);
-    const r = layout(doc, config({ height: 300 }), undefined, undefined, { 1: note });
+    const note = tblSchema.node('doc', null, [
+      tblSchema.node('paragraph', null, [tblSchema.text('Table note')]),
+    ]);
+    const r = layout(doc, config({ height: 300 }), undefined, undefined, {
+      1: note,
+    });
     const fn = r.pages[0].footnotes;
     expect(fn).toBeDefined();
-    expect((fn?.lines ?? []).flatMap((l) => l.segments).map((s) => s.text).join('')).toContain(
-      'Table note',
-    );
+    expect(
+      (fn?.lines ?? [])
+        .flatMap((l) => l.segments)
+        .map((s) => s.text)
+        .join(''),
+    ).toContain('Table note');
   });
 });
 
@@ -1290,7 +1579,11 @@ describe('multi-column layout', () => {
   const secSchema = new Schema({
     nodes: {
       doc: { content: 'block+', attrs: { sections: { default: null } } },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
     marks: {},
@@ -1299,7 +1592,9 @@ describe('multi-column layout', () => {
     secSchema.node(
       'doc',
       { sections },
-      Array.from({ length: n }, (_, i) => secSchema.node('paragraph', null, [secSchema.text(`p${i}`)])),
+      Array.from({ length: n }, (_, i) =>
+        secSchema.node('paragraph', null, [secSchema.text(`p${i}`)]),
+      ),
     );
 
   it('switches columns at a continuous section break', () => {
@@ -1336,26 +1631,52 @@ describe('incremental table re-layout', () => {
   const tSchema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
-      table: { group: 'block', content: 'table_row+', attrs: { cellPadding: { default: null }, borders: { default: null }, align: { default: null } } },
-      table_row: { content: 'table_cell+', attrs: { header: { default: false }, height: { default: null } } },
+      table: {
+        group: 'block',
+        content: 'table_row+',
+        attrs: {
+          cellPadding: { default: null },
+          borders: { default: null },
+          align: { default: null },
+        },
+      },
+      table_row: {
+        content: 'table_cell+',
+        attrs: { header: { default: false }, height: { default: null } },
+      },
       table_cell: {
         content: 'block+',
-        attrs: { colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null }, background: { default: null }, vAlign: { default: null }, borders: { default: null } },
+        attrs: {
+          colspan: { default: 1 },
+          rowspan: { default: 1 },
+          colwidth: { default: null },
+          background: { default: null },
+          vAlign: { default: null },
+          borders: { default: null },
+        },
       },
     },
     marks: {},
   });
-  const para = (t: string) => tSchema.node('paragraph', null, [tSchema.text(t)]);
+  const para = (t: string) =>
+    tSchema.node('paragraph', null, [tSchema.text(t)]);
   const cell = (t: string) => tSchema.node('table_cell', null, [para(t)]);
   // ONE table node reused across layouts (PM keeps unchanged nodes identical).
-  const tableNode = tSchema.node('table', null, [tSchema.node('table_row', null, [cell('ZZZ'), cell('ZZZ')])]);
+  const tableNode = tSchema.node('table', null, [
+    tSchema.node('table_row', null, [cell('ZZZ'), cell('ZZZ')]),
+  ]);
   const firstCellFrom = (r: ReturnType<typeof layout>) => {
-    for (const pg of r.pages) for (const t of pg.tables ?? []) {
-      const l = t.cells[0]?.lines[0];
-      if (l?.from != null) return l.from;
-    }
+    for (const pg of r.pages)
+      for (const t of pg.tables ?? []) {
+        const l = t.cells[0]?.lines[0];
+        if (l?.from != null) return l.from;
+      }
     return -1;
   };
 
@@ -1371,15 +1692,27 @@ describe('incremental table re-layout', () => {
     const first = zzz;
     expect(first).toBeGreaterThan(0);
     // Edit elsewhere: a new paragraph before the SAME table node.
-    layout(tSchema.node('doc', null, [para('a'), para('b'), tableNode]), cfg, cache);
+    layout(
+      tSchema.node('doc', null, [para('a'), para('b'), tableNode]),
+      cfg,
+      cache,
+    );
     expect(zzz).toBe(first); // table cells were NOT re-measured
   });
 
   it("shifts a cached table's PM positions when it moves", () => {
     const cfg = config();
     const cache = createLayoutCache();
-    const r1 = layout(tSchema.node('doc', null, [para('a'), tableNode]), cfg, cache);
-    const r2 = layout(tSchema.node('doc', null, [para('aa'), para('bb'), tableNode]), cfg, cache);
+    const r1 = layout(
+      tSchema.node('doc', null, [para('a'), tableNode]),
+      cfg,
+      cache,
+    );
+    const r2 = layout(
+      tSchema.node('doc', null, [para('aa'), para('bb'), tableNode]),
+      cfg,
+      cache,
+    );
     expect(firstCellFrom(r2)).toBeGreaterThan(firstCellFrom(r1)); // moved down → positions shifted
   });
 
@@ -1391,8 +1724,14 @@ describe('incremental table re-layout', () => {
     };
     const cfg = { ...config(), measureText: measure };
     const cache = createLayoutCache();
-    const listCell = tSchema.node('table_cell', null, [tSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [tSchema.text('item')])]);
-    const listTable = tSchema.node('table', null, [tSchema.node('table_row', null, [listCell])]);
+    const listCell = tSchema.node('table_cell', null, [
+      tSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [
+        tSchema.text('item'),
+      ]),
+    ]);
+    const listTable = tSchema.node('table', null, [
+      tSchema.node('table_row', null, [listCell]),
+    ]);
     const doc = tSchema.node('doc', null, [listTable]);
     layout(doc, cfg, cache);
     const first = measures;
@@ -1405,7 +1744,11 @@ describe('layout with comments', () => {
   const cSchema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
     marks: { comment: { attrs: { ids: {} } } },
@@ -1426,18 +1769,27 @@ describe('layout with comments', () => {
 
 describe('live list numbering', () => {
   const numbering = {
-    '1': { key: 'a0', levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } } },
+    '1': {
+      key: 'a0',
+      levels: { 0: { numFmt: 'decimal', lvlText: '%1.', start: 1 } },
+    },
   };
   const listSchema = new Schema({
     nodes: {
       doc: { content: 'block+', attrs: { numbering: { default: null } } },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
     marks: {},
   });
   const li = (text: string) =>
-    listSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [listSchema.text(text)]);
+    listSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [
+      listSchema.text(text),
+    ]);
   const markersOf = (resolved: ReturnType<typeof layout>) =>
     resolved.pages[0].lines.map((l) => l.segments[0]?.text);
 
@@ -1451,7 +1803,11 @@ describe('live list numbering', () => {
     // Insert a new first item; a and b keep node identity (cache hits) but
     // their markers shift — the cache must not serve the stale '1.'/'2.'.
     const doc2 = listSchema.node('doc', { numbering }, [li('zero'), a, b]);
-    expect(markersOf(layout(doc2, config(), cache))).toEqual(['1.', '2.', '3.']);
+    expect(markersOf(layout(doc2, config(), cache))).toEqual([
+      '1.',
+      '2.',
+      '3.',
+    ]);
   });
 });
 
@@ -1459,12 +1815,17 @@ describe('layout with LayoutCache', () => {
   const schema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
     marks: {},
   });
-  const p = (text: string) => schema.node('paragraph', null, [schema.text(text)]);
+  const p = (text: string) =>
+    schema.node('paragraph', null, [schema.text(text)]);
 
   /** MeasureText that records every measured string. */
   const counting = () => {
