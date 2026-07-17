@@ -160,7 +160,10 @@ export const schema = new Schema({
       parseDOM: [{ tag: 'img[src]', getAttrs: pastedImageAttrs }],
       toDOM(node) {
         const a = node.attrs;
-        const attrs: Record<string, string> = { src: a['src'] as string, alt: a['alt'] as string };
+        const attrs: Record<string, string> = {
+          src: a['src'] as string,
+          alt: a['alt'] as string,
+        };
         if (a['width'] != null) attrs['width'] = String(a['width']);
         if (a['height'] != null) attrs['height'] = String(a['height']);
         return ['img', attrs];
@@ -199,7 +202,11 @@ export const schema = new Schema({
         align: { default: null },
       },
       parseDOM: [{ tag: 'table' }],
-      toDOM: (node) => ['table', node.attrs['borders'] ? { 'data-borders': '1' } : {}, ['tbody', 0]],
+      toDOM: (node) => [
+        'table',
+        node.attrs['borders'] ? { 'data-borders': '1' } : {},
+        ['tbody', 0],
+      ],
     },
     table_row: {
       content: 'table_cell+',
@@ -214,7 +221,8 @@ export const schema = new Schema({
       // No getAttrs (same rationale as paragraph): the importer sets attrs
       // directly; revisit when HTML paste lands.
       parseDOM: [{ tag: 'tr' }],
-      toDOM: (node) => (node.attrs['header'] ? ['tr', { 'data-header': 'true' }, 0] : ['tr', 0]),
+      toDOM: (node) =>
+        node.attrs['header'] ? ['tr', { 'data-header': 'true' }, 0] : ['tr', 0],
     },
     table_cell: {
       content: 'block+',
@@ -230,9 +238,12 @@ export const schema = new Schema({
       parseDOM: [{ tag: 'td' }, { tag: 'th' }],
       toDOM(node) {
         const attrs: Record<string, string> = {};
-        if (node.attrs['colspan'] !== 1) attrs['colspan'] = String(node.attrs['colspan']);
-        if (node.attrs['rowspan'] !== 1) attrs['rowspan'] = String(node.attrs['rowspan']);
-        if (node.attrs['background']) attrs['style'] = `background-color: ${node.attrs['background']}`;
+        if (node.attrs['colspan'] !== 1)
+          attrs['colspan'] = String(node.attrs['colspan']);
+        if (node.attrs['rowspan'] !== 1)
+          attrs['rowspan'] = String(node.attrs['rowspan']);
+        if (node.attrs['background'])
+          attrs['style'] = `background-color: ${node.attrs['background']}`;
         return ['td', attrs, 0];
       },
     },
@@ -263,9 +274,15 @@ export const schema = new Schema({
     // w:color — hex "#RRGGBB"
     textColor: {
       attrs: { color: {} },
-      parseDOM: [{ style: 'color', getAttrs: (value) => ({ color: value as string }) }],
+      parseDOM: [
+        { style: 'color', getAttrs: (value) => ({ color: value as string }) },
+      ],
       toDOM(mark) {
-        return ['span', { style: `color: ${mark.attrs['color'] as string}` }, 0];
+        return [
+          'span',
+          { style: `color: ${mark.attrs['color'] as string}` },
+          0,
+        ];
       },
     },
     // w:sz — size in points
@@ -281,7 +298,11 @@ export const schema = new Schema({
         },
       ],
       toDOM(mark) {
-        return ['span', { style: `font-size: ${mark.attrs['size'] as number}pt` }, 0];
+        return [
+          'span',
+          { style: `font-size: ${mark.attrs['size'] as number}pt` },
+          0,
+        ];
       },
     },
     // w:vertAlign — superscript / subscript
@@ -297,18 +318,34 @@ export const schema = new Schema({
     highlight: {
       attrs: { color: {} },
       parseDOM: [
-        { style: 'background-color', getAttrs: (value) => ({ color: value as string }) },
+        {
+          style: 'background-color',
+          getAttrs: (value) => ({ color: value as string }),
+        },
       ],
       toDOM(mark) {
-        return ['span', { style: `background-color: ${mark.attrs['color'] as string}` }, 0];
+        return [
+          'span',
+          { style: `background-color: ${mark.attrs['color'] as string}` },
+          0,
+        ];
       },
     },
     // w:rFonts — font family
     fontFamily: {
       attrs: { family: {} },
-      parseDOM: [{ style: 'font-family', getAttrs: (value) => ({ family: value as string }) }],
+      parseDOM: [
+        {
+          style: 'font-family',
+          getAttrs: (value) => ({ family: value as string }),
+        },
+      ],
       toDOM(mark) {
-        return ['span', { style: `font-family: ${mark.attrs['family'] as string}` }, 0];
+        return [
+          'span',
+          { style: `font-family: ${mark.attrs['family'] as string}` },
+          0,
+        ];
       },
     },
     // w:hyperlink — external URL or "#anchor"
@@ -317,7 +354,15 @@ export const schema = new Schema({
       inclusive: false,
       parseDOM: [{ tag: 'a[href]', getAttrs: pastedLinkAttrs }],
       toDOM(mark) {
-        return ['a', { href: mark.attrs['href'] as string, rel: 'noopener', target: '_blank' }, 0];
+        return [
+          'a',
+          {
+            href: mark.attrs['href'] as string,
+            rel: 'noopener',
+            target: '_blank',
+          },
+          0,
+        ];
       },
     },
     // w:footnoteReference — the carrier text is the superscript number; `num`
@@ -331,12 +376,21 @@ export const schema = new Schema({
           // `el` is an HTMLElement at runtime; this package has no DOM lib, so
           // narrow structurally rather than naming the type.
           getAttrs: (el) => ({
-            num: Number((el as { getAttribute(n: string): string | null }).getAttribute('data-footnote')) || 0,
+            num:
+              Number(
+                (el as { getAttribute(n: string): string | null }).getAttribute(
+                  'data-footnote',
+                ),
+              ) || 0,
           }),
         },
       ],
       toDOM(mark) {
-        return ['sup', { 'data-footnote': String(mark.attrs['num'] as number) }, 0];
+        return [
+          'sup',
+          { 'data-footnote': String(mark.attrs['num'] as number) },
+          0,
+        ];
       },
     },
     // The `comment` mark (w:commentRangeStart/End) is contributed by the comment
@@ -359,7 +413,12 @@ export type BapbongSchema = typeof schema;
 export const commentSchema = new Schema({
   nodes: {
     doc: { content: 'block+' },
-    paragraph: { group: 'block', content: 'inline*', parseDOM: [{ tag: 'p' }], toDOM: () => ['p', 0] },
+    paragraph: {
+      group: 'block',
+      content: 'inline*',
+      parseDOM: [{ tag: 'p' }],
+      toDOM: () => ['p', 0],
+    },
     text: { group: 'inline' },
     // @mention: an inline atom carrying the mentioned user's id + display name.
     // `leafText` lets textContent include "@Name" (search / plain-text preview).
@@ -379,8 +438,14 @@ export const commentSchema = new Schema({
         {
           tag: 'span.mention',
           getAttrs: (el: unknown) => {
-            const e = el as { getAttribute(n: string): string | null; textContent: string | null };
-            return { id: e.getAttribute('data-id'), label: (e.textContent ?? '').replace(/^@/, '') };
+            const e = el as {
+              getAttribute(n: string): string | null;
+              textContent: string | null;
+            };
+            return {
+              id: e.getAttribute('data-id'),
+              label: (e.textContent ?? '').replace(/^@/, ''),
+            };
           },
         },
       ],
@@ -437,7 +502,8 @@ function paragraphStyle(attrs: ParagraphAttrs): string {
   if (sp) {
     if (sp.before) parts.push(`margin-top: ${sp.before}px`);
     if (sp.after) parts.push(`margin-bottom: ${sp.after}px`);
-    if (sp.line && sp.lineRule === 'auto') parts.push(`line-height: ${sp.line}`);
+    if (sp.line && sp.lineRule === 'auto')
+      parts.push(`line-height: ${sp.line}`);
     else if (sp.line) parts.push(`line-height: ${sp.line}px`);
   }
   return parts.join('; ');

@@ -1,4 +1,8 @@
-import { DOMParser as PMDOMParser, Node as ProseMirrorNode, Schema } from 'prosemirror-model';
+import {
+  DOMParser as PMDOMParser,
+  Node as ProseMirrorNode,
+  Schema,
+} from 'prosemirror-model';
 import type { EditorView } from 'prosemirror-view';
 import { imagePasteHandler, insertImageBlobs } from './paste-images';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
@@ -46,7 +50,11 @@ export interface SectionBoundary {
 // The plugin contract's canonical home is `contracts`; re-export it here so a
 // plugin author can `import { EditorPlugin, PluginContext, EditorChange } from
 // '@shadow-garden/bapbong-editor'`.
-export type { EditorChange, EditorPlugin, PluginContext } from '@shadow-garden/bapbong-contracts';
+export type {
+  EditorChange,
+  EditorPlugin,
+  PluginContext,
+} from '@shadow-garden/bapbong-contracts';
 // The render core is shared with the read-only viewer; re-export so a host can
 // reach it (and `BapbongView`) without a separate import.
 export { RenderCore } from '@shadow-garden/bapbong-view';
@@ -57,7 +65,11 @@ import { Collection } from '@shadow-garden/bapbong-contracts';
 import { defaultCommands } from '@shadow-garden/bapbong-commands';
 import type { FindPlugin } from './find-plugin';
 import type { TableSelectionPlugin } from './table-selection-plugin';
-export type { TableSelectionPlugin, CellBlock, SelectedCell } from './table-selection-plugin';
+export type {
+  TableSelectionPlugin,
+  CellBlock,
+  SelectedCell,
+} from './table-selection-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
 
 const CARET_BLINK_MS = 530;
@@ -170,9 +182,12 @@ export class BapbongEditor {
 
     // Plugins: build their context and run setup (teardowns collected for destroy).
     // Internal (built-in) plugins first, then external/host-provided plugins.
-    this.plugins = new Collection<EditorPlugin>([...createBuiltins(), ...(opts.plugins ?? [])], {
-      idProperty: 'name',
-    });
+    this.plugins = new Collection<EditorPlugin>(
+      [...createBuiltins(), ...(opts.plugins ?? [])],
+      {
+        idProperty: 'name',
+      },
+    );
     this.pointerPlugins = [...this.plugins].some((p) => p.onPointer);
     this.pluginCtx = this.makePluginContext();
     for (const p of this.plugins) {
@@ -189,20 +204,28 @@ export class BapbongEditor {
       caretRect: (pos: number) => this.core.caretRect(pos),
       pageToCanvas: (p: PagePoint) => this.core.pageToCanvas(p),
       setSelection: (from: number, to?: number) => this.setSelection(from, to),
-      scrollToPos: (pos: number, topMargin?: number) => this.core.scrollToPos(pos, topMargin),
+      scrollToPos: (pos: number, topMargin?: number) =>
+        this.core.scrollToPos(pos, topMargin),
       requestPaint: () => this.core.paintContent(this.currentOverlay()),
       setCursor: (cursor: string | null) => {
         this.stack.style.cursor = cursor ?? '';
       },
       setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
       setHighlight: (rects: OverlayRect[] | null) => this.setHighlight(rects),
-      setActionButton: (at: PagePoint | null, onActivate?: () => void) => this.setActionButton(at, onActivate),
+      setActionButton: (at: PagePoint | null, onActivate?: () => void) =>
+        this.setActionButton(at, onActivate),
       setFrame: (frame: OverlayFrame | null) => this.setFrame(frame),
     };
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
-    Object.defineProperty(ctx, 'state', { enumerable: true, get: () => this.state });
-    Object.defineProperty(ctx, 'layout', { enumerable: true, get: () => this.core.layout });
+    Object.defineProperty(ctx, 'state', {
+      enumerable: true,
+      get: () => this.state,
+    });
+    Object.defineProperty(ctx, 'layout', {
+      enumerable: true,
+      get: () => this.core.layout,
+    });
     return ctx as PluginContext;
   }
 
@@ -240,7 +263,9 @@ export class BapbongEditor {
   /** Import a .docx, lay it out, and paint the first frame. Resolves with the
    *  imported page-chrome keys (the rest of the import rides on the doc model
    *  exposed via `state`). */
-  async loadDocx(bytes: ArrayBuffer): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
+  async loadDocx(
+    bytes: ArrayBuffer,
+  ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
     // Compose the doc schema from model's base + any plugin schema
     // contributions, and import against it (so plugin-owned marks/nodes parse).
     const composed = composeSchema(baseSchema, this.plugins);
@@ -310,7 +335,10 @@ export class BapbongEditor {
         newPage: sections[b + 1].newPage,
         columns: sections[b + 1].columns.count,
         pos,
-        rect: cr && page ? { pageIndex: cr.pageIndex, x: 0, y: cr.y, width: page.width } : null,
+        rect:
+          cr && page
+            ? { pageIndex: cr.pageIndex, x: 0, y: cr.y, width: page.width }
+            : null,
       });
     }
     return out;
@@ -411,14 +439,17 @@ export class BapbongEditor {
         // live div) no eager <img src> network fetches while parsing.
         const dom = new DOMParser().parseFromString(html, 'text/html').body;
         if ((dom.textContent ?? '').trim()) {
-          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
+          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(
+            dom,
+          );
           view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
           return true;
         }
       }
       for (const item of items) {
         const type = item.types.find((t) => t.startsWith('image/'));
-        if (type && (await insertImageBlobs(view, [await item.getType(type)]))) return true;
+        if (type && (await insertImageBlobs(view, [await item.getType(type)])))
+          return true;
       }
       const text = await navigator.clipboard.readText();
       if (text) {
@@ -427,7 +458,10 @@ export class BapbongEditor {
       }
       return false;
     } catch (err) {
-      console.warn('[bapbong] Clipboard API paste unavailable, falling back:', err);
+      console.warn(
+        '[bapbong] Clipboard API paste unavailable, falling back:',
+        err,
+      );
       return false;
     }
   }
@@ -439,15 +473,22 @@ export class BapbongEditor {
       if (!data) return false;
       // Same preference order as the Clipboard API path.
       if (data.html) {
-        const dom = new DOMParser().parseFromString(data.html, 'text/html').body;
+        const dom = new DOMParser().parseFromString(
+          data.html,
+          'text/html',
+        ).body;
         if ((dom.textContent ?? '').trim()) {
-          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
+          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(
+            dom,
+          );
           view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
           return true;
         }
       }
       if (data.image?.length) {
-        const blob = new Blob([data.image as BlobPart], { type: data.imageMime ?? 'image/png' });
+        const blob = new Blob([data.image as BlobPart], {
+          type: data.imageMime ?? 'image/png',
+        });
         if (await insertImageBlobs(view, [blob])) return true;
       }
       if (data.text) {
@@ -471,7 +512,8 @@ export class BapbongEditor {
     if (this.readClipboardFallback) {
       try {
         const data = await this.readClipboardFallback();
-        if (data?.text) view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
+        if (data?.text)
+          view.dispatch(view.state.tr.insertText(data.text).scrollIntoView());
       } catch (err) {
         console.warn('[bapbong] host clipboard fallback failed:', err);
       }
@@ -548,7 +590,9 @@ export class BapbongEditor {
   private render(state: EditorState, contentDirty: boolean): void {
     const sel = state.selection;
     this.lastCaret = this.core.caretRect(sel.head);
-    this.lastSelection = sel.empty ? [] : this.core.selectionRects(sel.from, sel.to);
+    this.lastSelection = sel.empty
+      ? []
+      : this.core.selectionRects(sel.from, sel.to);
 
     // While dragging the caret stays solid and the timer rests; otherwise every
     // interaction restarts the blink phase.
@@ -567,16 +611,30 @@ export class BapbongEditor {
     // (pageToCanvas returns container-relative coords, where the editor lives).
     const caret = this.lastCaret;
     if (caret && this.bridge) {
-      const pt = this.core.pageToCanvas({ pageIndex: caret.pageIndex, x: caret.x, y: caret.y });
+      const pt = this.core.pageToCanvas({
+        pageIndex: caret.pageIndex,
+        x: caret.x,
+        y: caret.y,
+      });
       if (pt) this.bridge.place(pt.x, pt.y, caret.height);
     }
 
-    this.emitChange({ state, pageCount: this.core.pageCount, docChanged: contentDirty });
+    this.emitChange({
+      state,
+      pageCount: this.core.pageCount,
+      docChanged: contentDirty,
+    });
   }
 
   /** The caret/selection overlay in the current blink phase. */
-  private currentOverlay(): { caret: CaretRect | null; selection: SelectionRect[] } {
-    return { caret: this.caretVisible ? this.lastCaret : null, selection: this.lastSelection };
+  private currentOverlay(): {
+    caret: CaretRect | null;
+    selection: SelectionRect[];
+  } {
+    return {
+      caret: this.caretVisible ? this.lastCaret : null,
+      selection: this.lastSelection,
+    };
   }
 
   /** Each plugin's doc-range decorations (the core resolves them to rects). */
@@ -672,7 +730,8 @@ export class BapbongEditor {
    *  gesture), so plugins never steal keys from other inputs on the page. */
   private onKeyDown = (ev: KeyboardEvent): void => {
     const target = ev.target as Node | null;
-    if (target && target !== document.body && !this.stack.contains(target)) return;
+    if (target && target !== document.body && !this.stack.contains(target))
+      return;
     const offered: EditorKeyEvent = {
       key: ev.key,
       ctrlKey: ev.ctrlKey,
@@ -713,7 +772,10 @@ export class BapbongEditor {
     this.lastCaret = this.core.caretRect(this.dragHead);
     this.lastSelection = from === to ? [] : this.core.selectionRects(from, to);
     this.caretVisible = true;
-    this.core.paintOverlay({ caret: this.lastCaret, selection: this.lastSelection });
+    this.core.paintOverlay({
+      caret: this.lastCaret,
+      selection: this.lastSelection,
+    });
   }
 
   private onPointerUp = (ev: PointerEvent): void => {
@@ -723,7 +785,11 @@ export class BapbongEditor {
       return;
     }
     // Commit the dragged selection to the model exactly once.
-    if (this.dragAnchor != null && this.dragHead != null && this.dragHead !== this.dragAnchor) {
+    if (
+      this.dragAnchor != null &&
+      this.dragHead != null &&
+      this.dragHead !== this.dragAnchor
+    ) {
       this.bridge?.setSelection(this.dragAnchor, this.dragHead);
     }
     this.dragAnchor = null;
@@ -745,7 +811,10 @@ export class BapbongEditor {
 
   /** Offer a pointer event to plugins; returns true if one claimed it. `pos` is
    *  resolved for down/up/contextmenu only (move fires on every hover). */
-  private offerPointer(type: EditorPointerEvent['type'], ev: PointerEvent | MouseEvent): boolean {
+  private offerPointer(
+    type: EditorPointerEvent['type'],
+    ev: PointerEvent | MouseEvent,
+  ): boolean {
     if (!this.pointerPlugins || !this.core.layout) return false;
     const point = this.core.clientToPage(ev.clientX, ev.clientY);
     const pos = type === 'move' || !point ? null : this.core.posAtPoint(point);
@@ -782,8 +851,16 @@ export class BapbongEditor {
         'position:absolute;width:0;border-left:2px dashed #378add;pointer-events:none;z-index:5;';
       this.stack.appendChild(this.guideEl);
     }
-    const top = this.core.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y });
-    const bottom = this.core.pageToCanvas({ pageIndex: guide.pageIndex, x: guide.x, y: guide.y + guide.height });
+    const top = this.core.pageToCanvas({
+      pageIndex: guide.pageIndex,
+      x: guide.x,
+      y: guide.y,
+    });
+    const bottom = this.core.pageToCanvas({
+      pageIndex: guide.pageIndex,
+      x: guide.x,
+      y: guide.y + guide.height,
+    });
     if (!top || !bottom) {
       this.guideEl.style.display = 'none';
       return;
@@ -805,9 +882,11 @@ export class BapbongEditor {
     }
     if (!this.frameEl) {
       const el = document.createElement('div');
-      el.style.cssText = 'position:absolute;pointer-events:none;z-index:6;transform-origin:center;';
+      el.style.cssText =
+        'position:absolute;pointer-events:none;z-index:6;transform-origin:center;';
       const border = document.createElement('div');
-      border.style.cssText = 'position:absolute;inset:-1px;border:1.5px solid #378add;';
+      border.style.cssText =
+        'position:absolute;inset:-1px;border:1.5px solid #378add;';
       el.appendChild(border);
       const handle = (left: string, top: string) => {
         const h = document.createElement('div');
@@ -839,7 +918,11 @@ export class BapbongEditor {
       this.stack.appendChild(el);
       this.frameEl = el;
     }
-    const tl = this.core.pageToCanvas({ pageIndex: frame.pageIndex, x: frame.x, y: frame.y });
+    const tl = this.core.pageToCanvas({
+      pageIndex: frame.pageIndex,
+      x: frame.x,
+      y: frame.y,
+    });
     const br = this.core.pageToCanvas({
       pageIndex: frame.pageIndex,
       x: frame.x + frame.width,
@@ -876,8 +959,15 @@ export class BapbongEditor {
     }
     this.highlightEls.forEach((el, i) => {
       const r = list[i];
-      const tl = r && this.core.pageToCanvas({ pageIndex: r.pageIndex, x: r.x, y: r.y });
-      const br = r && this.core.pageToCanvas({ pageIndex: r.pageIndex, x: r.x + r.width, y: r.y + r.height });
+      const tl =
+        r && this.core.pageToCanvas({ pageIndex: r.pageIndex, x: r.x, y: r.y });
+      const br =
+        r &&
+        this.core.pageToCanvas({
+          pageIndex: r.pageIndex,
+          x: r.x + r.width,
+          y: r.y + r.height,
+        });
       if (!tl || !br) {
         el.style.display = 'none';
         return;
@@ -932,7 +1022,10 @@ export class BapbongEditor {
  * contribution (extra marks/nodes appended). Returns `null` when no plugin
  * contributes anything, so callers can keep using the base schema unchanged.
  */
-export function composeSchema(base: Schema, plugins: Iterable<EditorPlugin>): Schema | null {
+export function composeSchema(
+  base: Schema,
+  plugins: Iterable<EditorPlugin>,
+): Schema | null {
   let nodes = base.spec.nodes;
   let marks = base.spec.marks;
   let changed = false;

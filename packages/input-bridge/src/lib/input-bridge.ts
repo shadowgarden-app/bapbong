@@ -2,7 +2,14 @@ import { baseKeymap } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
-import { EditorState, Plugin, PluginKey, TextSelection, type Command, type Transaction } from 'prosemirror-state';
+import {
+  EditorState,
+  Plugin,
+  PluginKey,
+  TextSelection,
+  type Command,
+  type Transaction,
+} from 'prosemirror-state';
 import { canSplit } from 'prosemirror-transform';
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 
@@ -43,7 +50,10 @@ export const splitListItem: Command = (state, dispatch) => {
   if (parent.content.size === 0) {
     // Empty item: leave the list instead of adding another empty marker.
     dispatch?.(
-      state.tr.setNodeMarkup($from.before(), null, { ...parent.attrs, list: null }),
+      state.tr.setNodeMarkup($from.before(), null, {
+        ...parent.attrs,
+        list: null,
+      }),
     );
     return true;
   }
@@ -61,7 +71,10 @@ const WORD_CHAR = /[\p{L}\p{N}_]/u;
 /** The word range around `pos` (for double-click selection), or null when the
  *  position isn't inside a textblock or doesn't touch a word character.
  *  Unicode-aware: Vietnamese diacritics count as word characters. */
-export function wordRangeAt(doc: PMNode, pos: number): { from: number; to: number } | null {
+export function wordRangeAt(
+  doc: PMNode,
+  pos: number,
+): { from: number; to: number } | null {
   if (pos < 0 || pos > doc.content.size) return null;
   const $pos = doc.resolve(pos);
   const parent = $pos.parent;
@@ -92,7 +105,10 @@ export interface InputBridgeOptions {
 }
 
 /** Editing state with history + base keymap; exported for headless tests. */
-export function createEditingState(doc: PMNode, keys: Record<string, Command> = {}): EditorState {
+export function createEditingState(
+  doc: PMNode,
+  keys: Record<string, Command> = {},
+): EditorState {
   return EditorState.create({
     doc,
     plugins: [
@@ -182,7 +198,10 @@ export class InputBridge {
   setSelection(anchor: number, head: number = anchor): void {
     const { doc } = this.view.state;
     const clamp = (p: number) => Math.max(0, Math.min(p, doc.content.size));
-    const sel = TextSelection.between(doc.resolve(clamp(anchor)), doc.resolve(clamp(head)));
+    const sel = TextSelection.between(
+      doc.resolve(clamp(anchor)),
+      doc.resolve(clamp(head)),
+    );
     this.view.dispatch(this.view.state.tr.setSelection(sel));
   }
 
@@ -248,9 +267,16 @@ function placeholderPlugin(text: string): Plugin {
       decorations(state) {
         const doc = state.doc;
         const first = doc.firstChild;
-        if (doc.childCount === 1 && first?.isTextblock && first.content.size === 0) {
+        if (
+          doc.childCount === 1 &&
+          first?.isTextblock &&
+          first.content.size === 0
+        ) {
           return DecorationSet.create(doc, [
-            Decoration.node(0, first.nodeSize, { class: 'is-empty', 'data-placeholder': text }),
+            Decoration.node(0, first.nodeSize, {
+              class: 'is-empty',
+              'data-placeholder': text,
+            }),
           ]);
         }
         return null;
@@ -269,7 +295,12 @@ function mentionPlugin(handlers: MentionHandlers): Plugin<MentionState> {
         const sel = tr.selection;
         if (!sel.empty) return INACTIVE;
         const $from = sel.$from;
-        const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '￼');
+        const textBefore = $from.parent.textBetween(
+          0,
+          $from.parentOffset,
+          '\n',
+          '￼',
+        );
         const m = MENTION_RE.exec(textBefore);
         if (!m) return INACTIVE;
         const query = m[1];
@@ -281,7 +312,10 @@ function mentionPlugin(handlers: MentionHandlers): Plugin<MentionState> {
         const st = mentionKey.getState(view.state);
         if (!st?.active) return handlers.query(null);
         const c = view.coordsAtPos(view.state.selection.from);
-        handlers.query({ query: st.query, coords: { left: c.left, top: c.top, bottom: c.bottom } });
+        handlers.query({
+          query: st.query,
+          coords: { left: c.left, top: c.top, bottom: c.bottom },
+        });
       };
       emit(editorView);
       return { update: emit, destroy: () => handlers.query(null) };
@@ -324,12 +358,17 @@ export class CommentComposer {
     mount: HTMLElement,
     initialDoc?: unknown,
     mention?: MentionHandlers,
-    opts?: { onEnter?: () => void; onEscape?: () => void; placeholder?: string },
+    opts?: {
+      onEnter?: () => void;
+      onEscape?: () => void;
+      placeholder?: string;
+    },
   ) {
     const doc = initialDoc ? schema.nodeFromJSON(initialDoc) : undefined;
     const plugins = [history()];
     if (opts?.placeholder) plugins.push(placeholderPlugin(opts.placeholder));
-    if (mention && schema.nodes['mention']) plugins.push(mentionPlugin(mention));
+    if (mention && schema.nodes['mention'])
+      plugins.push(mentionPlugin(mention));
     const keys: Record<string, Command> = {};
     if (opts?.onEnter) {
       keys['Enter'] = () => (opts.onEnter?.(), true);
@@ -337,7 +376,10 @@ export class CommentComposer {
     }
     if (opts?.onEscape) keys['Escape'] = () => (opts.onEscape?.(), true);
     if (Object.keys(keys).length) plugins.push(keymap(keys));
-    plugins.push(keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }), keymap(baseKeymap));
+    plugins.push(
+      keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo }),
+      keymap(baseKeymap),
+    );
     this.view = new EditorView(mount, {
       state: EditorState.create({ ...(doc ? { doc } : { schema }), plugins }),
     });
@@ -348,8 +390,14 @@ export class CommentComposer {
     const st = mentionKey.getState(this.view.state);
     if (!st?.active) return;
     const to = this.view.state.selection.from;
-    const node = this.schema.nodes['mention'].create({ id: user.id, label: user.label });
-    const tr = this.view.state.tr.replaceWith(st.from, to, [node, this.schema.text(' ')]);
+    const node = this.schema.nodes['mention'].create({
+      id: user.id,
+      label: user.label,
+    });
+    const tr = this.view.state.tr.replaceWith(st.from, to, [
+      node,
+      this.schema.text(' '),
+    ]);
     tr.setSelection(TextSelection.create(tr.doc, st.from + 2)); // after mention + space
     this.view.dispatch(tr);
     this.view.focus();
@@ -367,7 +415,10 @@ export class CommentComposer {
 
   /** Reset to an empty document. */
   clear(): void {
-    const empty = EditorState.create({ schema: this.schema, plugins: this.view.state.plugins });
+    const empty = EditorState.create({
+      schema: this.schema,
+      plugins: this.view.state.plugins,
+    });
     this.view.updateState(empty);
   }
 

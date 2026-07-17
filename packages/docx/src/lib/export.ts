@@ -1,7 +1,13 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { commentSchema } from '@shadow-garden/bapbong-model';
-import type { BorderStyle, CommentNode, SectionConfig, ShapeSpec, TableBorders } from '@shadow-garden/bapbong-contracts';
+import type {
+  BorderStyle,
+  CommentNode,
+  SectionConfig,
+  ShapeSpec,
+  TableBorders,
+} from '@shadow-garden/bapbong-contracts';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -12,11 +18,14 @@ import type { BorderStyle, CommentNode, SectionConfig, ShapeSpec, TableBorders }
  */
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const R_NS =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const WP_NS =
+  'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
-const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+const WPS_NS =
+  'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
 const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
 const CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
@@ -46,13 +55,20 @@ interface ExportCtx {
 }
 
 const commentIdsOf = (node: PMNode): number[] =>
-  (node.marks.find((m) => m.type.name === 'comment')?.attrs['ids'] as number[] | undefined) ?? [];
+  (node.marks.find((m) => m.type.name === 'comment')?.attrs['ids'] as
+    | number[]
+    | undefined) ?? [];
 
 /** Is this an inline leaf the comment-range index counts (text / image / break)? */
-const isInlineLeaf = (node: PMNode): boolean => node.isText || node.type.name === 'image' || node.type.name === 'hard_break';
+const isInlineLeaf = (node: PMNode): boolean =>
+  node.isText || node.type.name === 'image' || node.type.name === 'hard_break';
 
 function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
+  return s.replace(
+    /[&<>"]/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string,
+  );
 }
 
 const MIME_EXT: Record<string, string> = {
@@ -80,17 +96,34 @@ function runProps(marks: readonly Mark[]): string {
   const size = byName.get('fontSize')?.attrs['size'] as number | undefined;
   if (size != null) out.push(`<w:sz w:val="${Math.round(size * 2)}"/>`);
   const hl = byName.get('highlight')?.attrs['color'] as string | undefined;
-  if (hl) out.push(`<w:shd w:val="clear" w:color="auto" w:fill="${hl.replace(/^#/, '')}"/>`);
+  if (hl)
+    out.push(
+      `<w:shd w:val="clear" w:color="auto" w:fill="${hl.replace(/^#/, '')}"/>`,
+    );
   const va = byName.get('vertAlign')?.attrs['value'] as string | undefined;
-  if (va) out.push(`<w:vertAlign w:val="${va === 'sub' ? 'subscript' : 'superscript'}"/>`);
+  if (va)
+    out.push(
+      `<w:vertAlign w:val="${va === 'sub' ? 'subscript' : 'superscript'}"/>`,
+    );
   return out.length ? `<w:rPr>${out.join('')}</w:rPr>` : '';
 }
 
 /** Float attrs → the wp:anchor wrapper (position + wrap) around a graphic. */
-function anchorXml(float: Record<string, unknown>, cx: number, cy: number, n: number, graphic: string): string {
+function anchorXml(
+  float: Record<string, unknown>,
+  cx: number,
+  cy: number,
+  n: number,
+  graphic: string,
+): string {
   const dist = (k: string) => pxToEmu((float[k] as number) ?? 0);
   const hRel = float['hRel'] === 'page' ? 'page' : 'column';
-  const vRel = float['vRel'] === 'page' ? 'page' : float['vRel'] === 'margin' ? 'margin' : 'paragraph';
+  const vRel =
+    float['vRel'] === 'page'
+      ? 'page'
+      : float['vRel'] === 'margin'
+        ? 'margin'
+        : 'paragraph';
   const posH = float['hAlign']
     ? `<wp:align>${float['hAlign']}</wp:align>`
     : `<wp:posOffset>${pxToEmu((float['hOffset'] as number) ?? 0)}</wp:posOffset>`;
@@ -128,15 +161,18 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const n = ctx.nextId++;
   const cx = pxToEmu((node.attrs['width'] as number) ?? 0);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 0);
-  const fill = s.fill ? `<a:solidFill><a:srgbClr val="${s.fill.replace(/^#/, '')}"/></a:solidFill>` : '<a:noFill/>';
+  const fill = s.fill
+    ? `<a:solidFill><a:srgbClr val="${s.fill.replace(/^#/, '')}"/></a:solidFill>`
+    : '<a:noFill/>';
   const ln = s.stroke
     ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill></a:ln>`
     : '<a:ln><a:noFill/></a:ln>';
   // Textbox paragraphs ride the node as PM JSON; re-emit them as txbxContent
   // so the text survives the round-trip.
-  const tb = node.attrs['textbox'] as
-    | { paragraphs: unknown[]; inset?: { l: number; t: number; r: number; b: number } }
-    | null;
+  const tb = node.attrs['textbox'] as {
+    paragraphs: unknown[];
+    inset?: { l: number; t: number; r: number; b: number };
+  } | null;
   const txbx = tb
     ? `<wps:txbx><w:txbxContent>${tb.paragraphs
         .map((json) => paragraphXml(node.type.schema.nodeFromJSON(json), ctx))
@@ -168,7 +204,9 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   const n = ctx.nextId++;
   const rid = `rId${n}`;
   ctx.media.push({ path: `word/media/image${n}.${ext}`, base64: m[2] });
-  ctx.rels.push(`<Relationship Id="${rid}" Type="${R_NS}/image" Target="media/image${n}.${ext}"/>`);
+  ctx.rels.push(
+    `<Relationship Id="${rid}" Type="${R_NS}/image" Target="media/image${n}.${ext}"/>`,
+  );
   const cx = pxToEmu((node.attrs['width'] as number) ?? 96);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 96);
   return (
@@ -189,14 +227,17 @@ function inlineXml(node: PMNode, ctx: ExportCtx): string {
   if (node.type.name === 'image') return imageXml(node, ctx);
   if (node.isText) {
     const fn = node.marks.find((m) => m.type.name === 'footnote');
-    if (fn) return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${fn.attrs['num']}"/></w:r>`;
+    if (fn)
+      return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${fn.attrs['num']}"/></w:r>`;
     return `<w:r>${runProps(node.marks)}<w:t xml:space="preserve">${esc(node.text ?? '')}</w:t></w:r>`;
   }
   return '';
 }
 
 const linkHref = (node: PMNode): string | null =>
-  (node.marks.find((m) => m.type.name === 'link')?.attrs['href'] as string | undefined) ?? null;
+  (node.marks.find((m) => m.type.name === 'link')?.attrs['href'] as
+    | string
+    | undefined) ?? null;
 
 /** Inline content of a paragraph/cell, grouping consecutive link runs into one
  *  w:hyperlink (external → rel + r:id; "#anchor" → w:anchor). */
@@ -205,9 +246,12 @@ function inlineUnit(node: PMNode, ctx: ExportCtx): string {
   const inner = inlineXml(node, ctx);
   const href = linkHref(node);
   if (!href || !inner) return inner;
-  if (href.startsWith('#')) return `<w:hyperlink w:anchor="${esc(href.slice(1))}">${inner}</w:hyperlink>`;
+  if (href.startsWith('#'))
+    return `<w:hyperlink w:anchor="${esc(href.slice(1))}">${inner}</w:hyperlink>`;
   const n = ctx.nextId++;
-  ctx.rels.push(`<Relationship Id="rId${n}" Type="${R_NS}/hyperlink" Target="${esc(href)}" TargetMode="External"/>`);
+  ctx.rels.push(
+    `<Relationship Id="rId${n}" Type="${R_NS}/hyperlink" Target="${esc(href)}" TargetMode="External"/>`,
+  );
   return `<w:hyperlink r:id="rId${n}">${inner}</w:hyperlink>`;
 }
 
@@ -259,33 +303,51 @@ function paraProps(node: PMNode): string {
   const heading = a['heading'] as number | null;
   const styleId = a['styleId'] as string | null;
   if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
-  else if (styleId === 'Title' || styleId === 'Subtitle') out.push(`<w:pStyle w:val="${styleId}"/>`);
+  else if (styleId === 'Title' || styleId === 'Subtitle')
+    out.push(`<w:pStyle w:val="${styleId}"/>`);
   if (a['pageBreakBefore']) out.push('<w:pageBreakBefore/>');
   const list = a['list'] as { numId: string; level: number } | null;
-  if (list) out.push(`<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(list.numId)}"/></w:numPr>`);
-  const sp = a['spacing'] as { before?: number; after?: number; line?: number; lineRule?: string } | null;
+  if (list)
+    out.push(
+      `<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(list.numId)}"/></w:numPr>`,
+    );
+  const sp = a['spacing'] as {
+    before?: number;
+    after?: number;
+    line?: number;
+    lineRule?: string;
+  } | null;
   if (sp) {
     const at: string[] = [];
     if (sp.before != null) at.push(`w:before="${pxToTwips(sp.before)}"`);
     if (sp.after != null) at.push(`w:after="${pxToTwips(sp.after)}"`);
     if (sp.line != null) {
       const auto = sp.lineRule === 'auto' || sp.lineRule == null;
-      at.push(`w:line="${auto ? Math.round(sp.line * 240) : pxToTwips(sp.line)}"`);
+      at.push(
+        `w:line="${auto ? Math.round(sp.line * 240) : pxToTwips(sp.line)}"`,
+      );
       at.push(`w:lineRule="${sp.lineRule ?? 'auto'}"`);
     }
     if (at.length) out.push(`<w:spacing ${at.join(' ')}/>`);
   }
-  const ind = a['indent'] as { left?: number; right?: number; firstLine?: number; hanging?: number } | null;
+  const ind = a['indent'] as {
+    left?: number;
+    right?: number;
+    firstLine?: number;
+    hanging?: number;
+  } | null;
   if (ind) {
     const at: string[] = [];
     if (ind.left != null) at.push(`w:left="${pxToTwips(ind.left)}"`);
     if (ind.right != null) at.push(`w:right="${pxToTwips(ind.right)}"`);
     if (ind.hanging != null) at.push(`w:hanging="${pxToTwips(ind.hanging)}"`);
-    else if (ind.firstLine != null) at.push(`w:firstLine="${pxToTwips(ind.firstLine)}"`);
+    else if (ind.firstLine != null)
+      at.push(`w:firstLine="${pxToTwips(ind.firstLine)}"`);
     if (at.length) out.push(`<w:ind ${at.join(' ')}/>`);
   }
   const align = a['align'] as string | null;
-  if (align) out.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`);
+  if (align)
+    out.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`);
   return out.join('');
 }
 
@@ -298,7 +360,14 @@ function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
 
 // ── tables ──────────────────────────────────────────────────────────
 
-const TABLE_SIDES = ['top', 'bottom', 'left', 'right', 'insideH', 'insideV'] as const;
+const TABLE_SIDES = [
+  'top',
+  'bottom',
+  'left',
+  'right',
+  'insideH',
+  'insideV',
+] as const;
 const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
 
 const BORDER_STYLE_OUT: Record<BorderStyle, string> = {
@@ -308,14 +377,19 @@ const BORDER_STYLE_OUT: Record<BorderStyle, string> = {
   double: 'double',
 };
 
-function bordersXml(tag: string, borders: TableBorders, sides: readonly string[]): string {
+function bordersXml(
+  tag: string,
+  borders: TableBorders,
+  sides: readonly string[],
+): string {
   const inner = sides
     .filter((s) => s in borders)
     .map((s) => {
       const side = borders[s as keyof TableBorders];
       if (!side) return `<w:${s} w:val="nil"/>`;
       const sz = Math.max(2, Math.round(side.width * 6)); // px → eighths of a point
-      const color = side.color === '#b0b0b0' ? 'auto' : side.color.replace(/^#/, '');
+      const color =
+        side.color === '#b0b0b0' ? 'auto' : side.color.replace(/^#/, '');
       return `<w:${s} w:val="${BORDER_STYLE_OUT[side.style] ?? 'single'}" w:sz="${sz}" w:space="0" w:color="${color}"/>`;
     })
     .join('');
@@ -326,12 +400,19 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
   const a = cell.attrs;
   const pr: string[] = [];
   const colwidth = a['colwidth'] as number[] | null;
-  if (colwidth?.length) pr.push(`<w:tcW w:w="${pxToTwips(colwidth.reduce((x, y) => x + y, 0))}" w:type="dxa"/>`);
-  if ((a['colspan'] as number) > 1) pr.push(`<w:gridSpan w:val="${a['colspan']}"/>`);
+  if (colwidth?.length)
+    pr.push(
+      `<w:tcW w:w="${pxToTwips(colwidth.reduce((x, y) => x + y, 0))}" w:type="dxa"/>`,
+    );
+  if ((a['colspan'] as number) > 1)
+    pr.push(`<w:gridSpan w:val="${a['colspan']}"/>`);
   const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tcBorders', borders, CELL_SIDES));
   const bg = a['background'] as string | null;
-  if (bg) pr.push(`<w:shd w:val="clear" w:color="auto" w:fill="${bg.replace(/^#/, '')}"/>`);
+  if (bg)
+    pr.push(
+      `<w:shd w:val="clear" w:color="auto" w:fill="${bg.replace(/^#/, '')}"/>`,
+    );
   const vAlign = a['vAlign'] as string | null;
   if (vAlign) pr.push(`<w:vAlign w:val="${vAlign}"/>`);
   let content = '';
@@ -345,7 +426,10 @@ function rowXml(row: PMNode, ctx: ExportCtx): string {
   if (row.attrs['header']) pr.push('<w:tblHeader/>');
   if (row.attrs['cantSplit']) pr.push('<w:cantSplit/>');
   const h = row.attrs['height'] as { value: number; exact: boolean } | null;
-  if (h) pr.push(`<w:trHeight w:val="${pxToTwips(h.value)}" w:hRule="${h.exact ? 'exact' : 'atLeast'}"/>`);
+  if (h)
+    pr.push(
+      `<w:trHeight w:val="${pxToTwips(h.value)}" w:hRule="${h.exact ? 'exact' : 'atLeast'}"/>`,
+    );
   const trPr = pr.length ? `<w:trPr>${pr.join('')}</w:trPr>` : '';
   let cells = '';
   row.forEach((c) => (cells += cellXml(c, ctx)));
@@ -358,7 +442,12 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
   if (a['align']) pr.push(`<w:jc w:val="${a['align']}"/>`);
   const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tblBorders', borders, TABLE_SIDES));
-  const pad = a['cellPadding'] as { left?: number; right?: number; top?: number; bottom?: number } | null;
+  const pad = a['cellPadding'] as {
+    left?: number;
+    right?: number;
+    top?: number;
+    bottom?: number;
+  } | null;
   if (pad) {
     const m = (['top', 'left', 'bottom', 'right'] as const)
       .filter((s) => pad[s] != null)
@@ -369,8 +458,12 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
   // Grid columns from the first row's cell widths (flattened across spans).
   const firstRow = node.firstChild;
   const grid: number[] = [];
-  firstRow?.forEach((c) => (c.attrs['colwidth'] as number[] | null)?.forEach((w) => grid.push(w)));
-  const gridXml = grid.length ? `<w:tblGrid>${grid.map((w) => `<w:gridCol w:w="${pxToTwips(w)}"/>`).join('')}</w:tblGrid>` : '';
+  firstRow?.forEach((c) =>
+    (c.attrs['colwidth'] as number[] | null)?.forEach((w) => grid.push(w)),
+  );
+  const gridXml = grid.length
+    ? `<w:tblGrid>${grid.map((w) => `<w:gridCol w:w="${pxToTwips(w)}"/>`).join('')}</w:tblGrid>`
+    : '';
   let rows = '';
   node.forEach((r) => (rows += rowXml(r, ctx)));
   return `<w:tbl><w:tblPr>${pr.join('')}</w:tblPr>${gridXml}${rows}</w:tbl>`;
@@ -418,16 +511,26 @@ function commentBodyXml(body: unknown, firstParaId: string): string {
   doc.forEach((p, _o, i) => {
     let runs = '';
     p.forEach((inline) => {
-      if (inline.isText) runs += `<w:r><w:t xml:space="preserve">${esc(inline.text ?? '')}</w:t></w:r>`;
-      else if (inline.type.name === 'mention') runs += `<w:r><w:t xml:space="preserve">@${esc(String(inline.attrs['label'] ?? ''))}</w:t></w:r>`;
+      if (inline.isText)
+        runs += `<w:r><w:t xml:space="preserve">${esc(inline.text ?? '')}</w:t></w:r>`;
+      else if (inline.type.name === 'mention')
+        runs += `<w:r><w:t xml:space="preserve">@${esc(String(inline.attrs['label'] ?? ''))}</w:t></w:r>`;
     });
-    ps.push(`<w:p${i === 0 ? ` w14:paraId="${firstParaId}"` : ''}>${runs}</w:p>`);
+    ps.push(
+      `<w:p${i === 0 ? ` w14:paraId="${firstParaId}"` : ''}>${runs}</w:p>`,
+    );
   });
   return ps.join('') || `<w:p w14:paraId="${firstParaId}"/>`;
 }
 
 const initialsOf = (name: string): string =>
-  name.trim().split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 3).toUpperCase();
+  name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0] ?? '')
+    .join('')
+    .slice(0, 3)
+    .toUpperCase();
 
 function commentsXml(comments: CommentNode[]): string {
   const body = comments
@@ -443,7 +546,8 @@ function commentsXml(comments: CommentNode[]): string {
 function commentsExtendedXml(comments: CommentNode[]): string {
   const body = comments
     .map((c) => {
-      const parent = c.parentId != null ? ` w15:paraIdParent="${paraId(c.parentId)}"` : '';
+      const parent =
+        c.parentId != null ? ` w15:paraIdParent="${paraId(c.parentId)}"` : '';
       return `<w15:commentEx w15:paraId="${paraId(c.id)}"${parent} w15:done="${c.resolved ? 1 : 0}"/>`;
     })
     .join('');
@@ -512,7 +616,10 @@ function stylesXml(used: Set<string>): string {
 function mergeStyles(xml: string, used: Set<string>): string {
   const missing = [...used].filter((id) => !xml.includes(`w:styleId="${id}"`));
   if (!missing.length) return xml;
-  return xml.replace('</w:styles>', `${missing.map((id) => STYLE_DEFS[id]).join('')}</w:styles>`);
+  return xml.replace(
+    '</w:styles>',
+    `${missing.map((id) => STYLE_DEFS[id]).join('')}</w:styles>`,
+  );
 }
 
 function contentTypes(exts: Set<string>, hasComments: boolean): string {
@@ -520,27 +627,53 @@ function contentTypes(exts: Set<string>, hasComments: boolean): string {
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
     '<Default Extension="xml" ContentType="application/xml"/>',
   ];
-  for (const ext of exts) parts.push(`<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`);
-  parts.push('<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>');
-  parts.push('<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>');
+  for (const ext of exts)
+    parts.push(
+      `<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`,
+    );
+  parts.push(
+    '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>',
+  );
+  parts.push(
+    '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>',
+  );
   if (hasComments) {
-    parts.push('<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>');
-    parts.push('<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>');
+    parts.push(
+      '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>',
+    );
+    parts.push(
+      '<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>',
+    );
   }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="${CT_NS}">${parts.join('')}</Types>`;
 }
 
 /** Ensure image content-type defaults + comment overrides exist in an original
  *  [Content_Types].xml (E4 merge). */
-function mergeContentTypes(xml: string, exts: Set<string>, hasComments: boolean): string {
+function mergeContentTypes(
+  xml: string,
+  exts: Set<string>,
+  hasComments: boolean,
+): string {
   let out = xml;
   const add = (frag: string, key: string) => {
-    if (!out.includes(`"${key}"`)) out = out.replace('</Types>', `${frag}</Types>`);
+    if (!out.includes(`"${key}"`))
+      out = out.replace('</Types>', `${frag}</Types>`);
   };
-  for (const ext of exts) add(`<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`, ext);
+  for (const ext of exts)
+    add(
+      `<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`,
+      ext,
+    );
   if (hasComments) {
-    add('<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>', '/word/comments.xml');
-    add('<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>', '/word/commentsExtended.xml');
+    add(
+      '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>',
+      '/word/comments.xml',
+    );
+    add(
+      '<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>',
+      '/word/commentsExtended.xml',
+    );
   }
   return out;
 }
@@ -550,18 +683,26 @@ function mergeContentTypes(xml: string, exts: Set<string>, hasComments: boolean)
  *  paragraph + any section-break sectPr), so re-attaching it keeps page setup
  *  and headers/footers — whose parts + rels are carried — wired up. */
 function extractBodySectPr(xml: string): string {
-  const all = xml.match(/<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g);
+  const all = xml.match(
+    /<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g,
+  );
   return all ? all[all.length - 1] : '';
 }
 
 /** Original document rels minus any comment(sExtended) rels (regenerated),
  *  plus the freshly-emitted rels (E4 merge). */
 function mergeRels(xml: string | undefined, newRels: string[]): string {
-  const base = (xml ?? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}"></Relationships>`).replace(
+  const base = (
+    xml ??
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}"></Relationships>`
+  ).replace(
     /<Relationship\b[^>]*Target="comments(?:Extended)?\.xml"[^>]*\/>/g,
     '',
   );
-  return base.replace('</Relationships>', `${newRels.join('')}</Relationships>`);
+  return base.replace(
+    '</Relationships>',
+    `${newRels.join('')}</Relationships>`,
+  );
 }
 
 /**
@@ -573,7 +714,10 @@ function mergeRels(xml: string | undefined, newRels: string[]): string {
  * comment parts are regenerated. Without it, a minimal package is built from
  * scratch (E1–E3 content only).
  */
-export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise<Uint8Array> {
+export async function exportDocx(
+  doc: PMNode,
+  opts?: { carry?: JSZip },
+): Promise<Uint8Array> {
   const comments = (doc.attrs['comments'] as CommentNode[] | null) ?? [];
   // Precompute the last inline-leaf index each comment id covers, in document
   // order, so inlineContent can close the range at the right run.
@@ -582,7 +726,8 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
   let idx = 0;
   doc.descendants((n) => {
     if (!isInlineLeaf(n)) return;
-    for (const id of commentIdsOf(n)) if (knownComments.has(id)) lastRun.set(id, idx);
+    for (const id of commentIdsOf(n))
+      if (knownComments.has(id)) lastRun.set(id, idx);
     idx++;
   });
 
@@ -598,12 +743,18 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
   };
   const boundaries = sectionBoundaries(doc);
   let body = '';
-  doc.forEach((block, _offset, i) => (body += blockXml(block, ctx, boundaries.get(i))));
+  doc.forEach(
+    (block, _offset, i) => (body += blockXml(block, ctx, boundaries.get(i))),
+  );
 
   const hasComments = comments.length > 0;
   if (hasComments) {
-    ctx.rels.push(`<Relationship Id="rIdComments" Type="${R_NS}/comments" Target="comments.xml"/>`);
-    ctx.rels.push(`<Relationship Id="rIdCommentsExt" Type="${R_NS}/commentsExtended" Target="commentsExtended.xml"/>`);
+    ctx.rels.push(
+      `<Relationship Id="rIdComments" Type="${R_NS}/comments" Target="comments.xml"/>`,
+    );
+    ctx.rels.push(
+      `<Relationship Id="rIdCommentsExt" Type="${R_NS}/commentsExtended" Target="commentsExtended.xml"/>`,
+    );
   }
 
   const zip = new JSZip();
@@ -616,21 +767,34 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
       if (!f.dir) zip.file(path, await f.async('uint8array'));
     }
     const ct = await carry.file('[Content_Types].xml')?.async('string');
-    zip.file('[Content_Types].xml', ct ? mergeContentTypes(ct, ctx.exts, hasComments) : contentTypes(ctx.exts, hasComments));
+    zip.file(
+      '[Content_Types].xml',
+      ct
+        ? mergeContentTypes(ct, ctx.exts, hasComments)
+        : contentTypes(ctx.exts, hasComments),
+    );
     // Styles referenced by pStyle but never defined by the source (headings /
     // Title / Subtitle authored in bapbong) get their defs appended.
     const carriedStyles = await carry.file('word/styles.xml')?.async('string');
-    if (carriedStyles) zip.file('word/styles.xml', mergeStyles(carriedStyles, styleIds));
-    const rels = await carry.file('word/_rels/document.xml.rels')?.async('string');
+    if (carriedStyles)
+      zip.file('word/styles.xml', mergeStyles(carriedStyles, styleIds));
+    const rels = await carry
+      .file('word/_rels/document.xml.rels')
+      ?.async('string');
     zip.file('word/_rels/document.xml.rels', mergeRels(rels, ctx.rels));
     const origDoc = await carry.file('word/document.xml')?.async('string');
     if (origDoc) sectPr = extractBodySectPr(origDoc);
   } else {
-    ctx.rels.push(`<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`);
+    ctx.rels.push(
+      `<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`,
+    );
     zip.file('word/styles.xml', stylesXml(styleIds));
     zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
     zip.file('_rels/.rels', ROOT_RELS);
-    zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`);
+    zip.file(
+      'word/_rels/document.xml.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`,
+    );
   }
 
   const documentXml =
@@ -642,6 +806,7 @@ export async function exportDocx(doc: PMNode, opts?: { carry?: JSZip }): Promise
     zip.file('word/comments.xml', commentsXml(comments));
     zip.file('word/commentsExtended.xml', commentsExtendedXml(comments));
   }
-  for (const { path, base64 } of ctx.media) zip.file(path, base64, { base64: true });
+  for (const { path, base64 } of ctx.media)
+    zip.file(path, base64, { base64: true });
   return zip.generateAsync({ type: 'uint8array' });
 }

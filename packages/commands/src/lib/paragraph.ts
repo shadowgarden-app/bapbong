@@ -33,7 +33,8 @@ export function setAlign(align: Align | null): Command {
       const tr = state.tr;
       let changed = false;
       state.doc.nodesBetween(from, to, (node, pos) => {
-        if (node.type.name !== 'paragraph' || node.attrs['align'] === align) return;
+        if (node.type.name !== 'paragraph' || node.attrs['align'] === align)
+          return;
         tr.setNodeAttribute(pos, 'align', align);
         changed = true;
       });
@@ -45,7 +46,9 @@ export function setAlign(align: Align | null): Command {
 }
 
 /** Every paragraph the selection touches (heading toggle target). */
-function selectedParagraphs(state: EditorState): { pos: number; node: import('prosemirror-model').Node }[] {
+function selectedParagraphs(
+  state: EditorState,
+): { pos: number; node: import('prosemirror-model').Node }[] {
   const { from, to } = state.selection;
   const out: { pos: number; node: import('prosemirror-model').Node }[] = [];
   state.doc.nodesBetween(from, to, (node, pos) => {
@@ -68,7 +71,9 @@ export function toggleHeading(level: number): Command {
       const paras = selectedParagraphs(state);
       if (paras.length === 0) return false;
       if (dispatch) {
-        const allThisLevel = paras.every((p) => p.node.attrs['heading'] === level);
+        const allThisLevel = paras.every(
+          (p) => p.node.attrs['heading'] === level,
+        );
         const next = allThisLevel ? null : level;
         const tr = state.tr;
         for (const p of paras) tr.setNodeAttribute(p.pos, 'heading', next);
@@ -78,18 +83,30 @@ export function toggleHeading(level: number): Command {
     },
     isActive: (state) => {
       const paras = selectedParagraphs(state);
-      return paras.length > 0 && paras.every((p) => p.node.attrs['heading'] === level);
+      return (
+        paras.length > 0 &&
+        paras.every((p) => p.node.attrs['heading'] === level)
+      );
     },
     isEnabled: (state) => selectedParagraphs(state).length > 0,
   };
 }
 
 /** The six named paragraph styles the toolbar dropdown offers. */
-export type ParagraphStyleKey = 'normal' | 'title' | 'subtitle' | 'h1' | 'h2' | 'h3';
+export type ParagraphStyleKey =
+  | 'normal'
+  | 'title'
+  | 'subtitle'
+  | 'h1'
+  | 'h2'
+  | 'h3';
 
 /** heading/styleId attr pair for each dropdown key — the single source of the
  *  "styleId set ⇒ heading null" invariant. */
-const STYLE_ATTRS: Record<ParagraphStyleKey, { heading: number | null; styleId: string | null }> = {
+const STYLE_ATTRS: Record<
+  ParagraphStyleKey,
+  { heading: number | null; styleId: string | null }
+> = {
   normal: { heading: null, styleId: null },
   title: { heading: null, styleId: 'Title' },
   subtitle: { heading: null, styleId: 'Subtitle' },
@@ -128,10 +145,14 @@ export function setParagraphStyle(key: ParagraphStyleKey): Command {
 /** The dropdown's current value: the shared style of every selected paragraph,
  *  or null when the selection is empty / mixed / on an unlisted style (H4–H6).
  *  O(selection) — it only walks the selected range (called per transaction). */
-export function activeParagraphStyle(state: EditorState): ParagraphStyleKey | null {
+export function activeParagraphStyle(
+  state: EditorState,
+): ParagraphStyleKey | null {
   const paras = selectedParagraphs(state);
   if (paras.length === 0) return null;
-  const keyOf = (node: (typeof paras)[number]['node']): ParagraphStyleKey | null => {
+  const keyOf = (
+    node: (typeof paras)[number]['node'],
+  ): ParagraphStyleKey | null => {
     const styleId = node.attrs['styleId'];
     if (styleId === 'Title') return 'title';
     if (styleId === 'Subtitle') return 'subtitle';

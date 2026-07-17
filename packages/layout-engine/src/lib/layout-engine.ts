@@ -39,12 +39,24 @@ import type {
   TabStop,
 } from '@shadow-garden/bapbong-contracts';
 
-const DEFAULT_FONT: FontSpec = { family: 'Arial', sizePt: 11, bold: false, italic: false };
+const DEFAULT_FONT: FontSpec = {
+  family: 'Arial',
+  sizePt: 11,
+  bold: false,
+  italic: false,
+};
 const PT_TO_PX = 96 / 72;
 
 /** Default point size per heading level (the run base for a heading paragraph;
  *  explicit fontSize marks — e.g. on imported headings — still override). */
-const HEADING_PT: Record<number, number> = { 1: 24, 2: 18, 3: 14, 4: 12, 5: 11, 6: 11 };
+const HEADING_PT: Record<number, number> = {
+  1: 24,
+  2: 18,
+  3: 14,
+  4: 12,
+  5: 11,
+  6: 11,
+};
 const LINE_HEIGHT_FACTOR = 1.2;
 const BASELINE_FACTOR = 0.8;
 const DEFAULT_TAB_WIDTH = 48; // 0.5in, Word's default tab interval
@@ -180,9 +192,13 @@ function paragraphToFlow(
   const runs: FlowInline[] = [];
   const floats: FlowFloat[] = [];
   node.forEach((child, offset) => {
-    if (child.isText) runs.push(resolveRun(child, runBase, contentStart + offset));
+    if (child.isText)
+      runs.push(resolveRun(child, runBase, contentStart + offset));
     else if (child.type.name === 'image') {
-      const float = child.attrs['float'] as Omit<FlowFloat, 'src' | 'width' | 'height'> | null;
+      const float = child.attrs['float'] as Omit<
+        FlowFloat,
+        'src' | 'width' | 'height'
+      > | null;
       if (float && allowFloats) {
         const f: FlowFloat = {
           ...float,
@@ -190,14 +206,19 @@ function paragraphToFlow(
           width: Number(child.attrs['width']) || 0,
           height: Number(child.attrs['height']) || 0,
           pos: contentStart + offset,
-          ...(child.attrs['shape'] ? { shape: child.attrs['shape'] as FlowFloat['shape'] } : {}),
-          ...(Number(child.attrs['rotation']) ? { rotation: Number(child.attrs['rotation']) } : {}),
+          ...(child.attrs['shape']
+            ? { shape: child.attrs['shape'] as FlowFloat['shape'] }
+            : {}),
+          ...(Number(child.attrs['rotation'])
+            ? { rotation: Number(child.attrs['rotation']) }
+            : {}),
         };
         // Textbox paragraphs ride the image node as PM JSON; rebuild them and
         // flatten like any other flow (no nested floats inside the box).
-        const tb = child.attrs['textbox'] as
-          | { paragraphs: unknown[]; inset?: { l: number; t: number; r: number; b: number } }
-          | null;
+        const tb = child.attrs['textbox'] as {
+          paragraphs: unknown[];
+          inset?: { l: number; t: number; r: number; b: number };
+        } | null;
         if (tb && tb.paragraphs.length > 0) {
           const schema = child.type.schema;
           f.content = tb.paragraphs.map((json, i) =>
@@ -211,7 +232,8 @@ function paragraphToFlow(
       }
     } else if (child.type.name === 'page_field')
       runs.push(resolveField(child, runBase, contentStart + offset));
-    else if (child.type.name === 'hard_break') runs.push({ break: true, pos: contentStart + offset });
+    else if (child.type.name === 'hard_break')
+      runs.push({ break: true, pos: contentStart + offset });
   });
   const list = node.attrs['list'] as { marker?: string } | null;
   const align = node.attrs['align'] as Align | null | undefined;
@@ -245,8 +267,15 @@ function nodeHasFloats(node: PMNode): boolean {
 
 /** The live marker for a list paragraph: counted from the doc's numbering
  *  defs, falling back to a legacy pre-resolved marker on the attr. */
-function markerFor(node: PMNode, counter: NumberingCounter | undefined): string | undefined {
-  const list = node.attrs['list'] as { numId: string; level: number; marker?: string } | null;
+function markerFor(
+  node: PMNode,
+  counter: NumberingCounter | undefined,
+): string | undefined {
+  const list = node.attrs['list'] as {
+    numId: string;
+    level: number;
+    marker?: string;
+  } | null;
   if (!list) return undefined;
   return (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
 }
@@ -261,8 +290,15 @@ function nodeToBlock(
   counter?: NumberingCounter,
 ): FlowBlock | null {
   if (node.type.name === 'paragraph')
-    return paragraphToFlow(node, base, nodePos, allowFloats, markerFor(node, counter));
-  if (node.type.name === 'table') return tableToFlow(node, base, nodePos, counter);
+    return paragraphToFlow(
+      node,
+      base,
+      nodePos,
+      allowFloats,
+      markerFor(node, counter),
+    );
+  if (node.type.name === 'table')
+    return tableToFlow(node, base, nodePos, counter);
   return null;
 }
 
@@ -283,7 +319,13 @@ function tableToFlow(
       cellNode.forEach((child, childOffset) => {
         // Cells keep anchored floats: layoutFlow positions them inside the
         // cell box (painted at their offsets; text doesn't wrap around them).
-        const block = nodeToBlock(child, base, cellPos + 1 + childOffset, true, counter);
+        const block = nodeToBlock(
+          child,
+          base,
+          cellPos + 1 + childOffset,
+          true,
+          counter,
+        );
         if (block) content.push(block);
       });
       const a = cellNode.attrs;
@@ -300,7 +342,10 @@ function tableToFlow(
     const row: FlowTableRow = { cells };
     if (rowNode.attrs['header'] === true) row.header = true;
     if (rowNode.attrs['cantSplit'] === true) row.cantSplit = true;
-    const height = rowNode.attrs['height'] as { value: number; exact: boolean } | null;
+    const height = rowNode.attrs['height'] as {
+      value: number;
+      exact: boolean;
+    } | null;
     if (height) row.height = height;
     rows.push(row);
   });
@@ -321,7 +366,9 @@ export function toFlowBlocks(
   allowFloats = true,
 ): FlowBlock[] {
   const base: FontSpec = { ...DEFAULT_FONT, ...defaultFont };
-  const counter = createNumberingCounter(doc.attrs['numbering'] as NumberingDefs | null);
+  const counter = createNumberingCounter(
+    doc.attrs['numbering'] as NumberingDefs | null,
+  );
   const blocks: FlowBlock[] = [];
   doc.forEach((node, offset) => {
     const block = nodeToBlock(node, base, offset, allowFloats, counter);
@@ -365,7 +412,16 @@ interface Token {
  *  images. Tab widths are placeholders, resolved against tab stops at layout. */
 function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
   if ('break' in inline) {
-    return [{ isBreak: true, font: ctx.base, width: 0, isSpace: false, pos: inline.pos, size: 1 }];
+    return [
+      {
+        isBreak: true,
+        font: ctx.base,
+        width: 0,
+        isSpace: false,
+        pos: inline.pos,
+        size: 1,
+      },
+    ];
   }
   if ('src' in inline) {
     return [
@@ -450,10 +506,12 @@ function draftToLine(d: LineDraft, y: number, dx = 0): LayoutLine {
     width: d.width,
     height: d.height,
     baseline: d.baseline,
-    segments: dx === 0 ? d.segments : d.segments.map((s) => ({ ...s, x: s.x + dx })),
+    segments:
+      dx === 0 ? d.segments : d.segments.map((s) => ({ ...s, x: s.x + dx })),
   };
   if (d.images.length > 0) {
-    line.images = dx === 0 ? d.images : d.images.map((im) => ({ ...im, x: im.x + dx }));
+    line.images =
+      dx === 0 ? d.images : d.images.map((im) => ({ ...im, x: im.x + dx }));
   }
   if (d.from != null) line.from = d.from;
   if (d.to != null) line.to = d.to;
@@ -478,7 +536,8 @@ function wrapParagraph(
   const indentLeft = indent?.left ?? 0;
   const indentRight = indent?.right ?? 0;
   // hanging outdents the first line; firstLine indents it. Mutually exclusive.
-  const firstLineDelta = indent?.hanging != null ? -indent.hanging : indent?.firstLine ?? 0;
+  const firstLineDelta =
+    indent?.hanging != null ? -indent.hanging : (indent?.firstLine ?? 0);
   const align: Align = block.align ?? 'left';
 
   const tokens = block.runs.flatMap((inline) => tokenizeInline(inline, ctx));
@@ -529,8 +588,15 @@ function wrapParagraph(
   };
 
   // ── Custom tab stops (w:tabs) ─────────────────────────────────────
-  const tabStops = block.tabs ? [...block.tabs].sort((a, b) => a.pos - b.pos) : [];
-  const LEADER_CHARS = { dot: '.', hyphen: '-', underscore: '_', middleDot: '·' } as const;
+  const tabStops = block.tabs
+    ? [...block.tabs].sort((a, b) => a.pos - b.pos)
+    : [];
+  const LEADER_CHARS = {
+    dot: '.',
+    hyphen: '-',
+    underscore: '_',
+    middleDot: '·',
+  } as const;
   const MIN_TAB = 2;
 
   /** The "tab group": tokens after `ti` up to the next tab, whose total width
@@ -544,7 +610,8 @@ function wrapParagraph(
       if (t.isTab) break;
       if (decimalPrefix === null && t.text != null && !t.field) {
         const m = /[.,]/.exec(t.text);
-        if (m) decimalPrefix = width + measure(t.text.slice(0, m.index), t.font);
+        if (m)
+          decimalPrefix = width + measure(t.text.slice(0, m.index), t.font);
       }
       width += t.width;
     }
@@ -613,7 +680,9 @@ function wrapParagraph(
     let x = startX;
     let extraPerGap = 0;
     if (align === 'justify' && !isLast) {
-      const gaps = lineTokens.slice(0, end).filter((t) => t.isSpace && !t.isTab).length;
+      const gaps = lineTokens
+        .slice(0, end)
+        .filter((t) => t.isSpace && !t.isTab).length;
       if (gaps > 0) extraPerGap = (avail - contentWidth) / gaps;
     } else if (align === 'center') {
       x += Math.max(0, (avail - contentWidth) / 2);
@@ -689,12 +758,27 @@ function wrapParagraph(
     const sp = block.spacing;
     if (sp?.line) {
       const target =
-        sp.lineRule === 'exact' ? sp.line : sp.lineRule === 'atLeast' ? Math.max(height, sp.line) : height * sp.line;
-      baseline += Math.max(0, target - height) * (sp.lineRule === 'exact' ? baseline / height : 1);
+        sp.lineRule === 'exact'
+          ? sp.line
+          : sp.lineRule === 'atLeast'
+            ? Math.max(height, sp.line)
+            : height * sp.line;
+      baseline +=
+        Math.max(0, target - height) *
+        (sp.lineRule === 'exact' ? baseline / height : 1);
       height = target;
     }
     const painted = firstLine && marker ? [marker, ...segments] : segments;
-    emit({ x: startX, width: lineRight - startX, height, baseline, segments: painted, images, from, to });
+    emit({
+      x: startX,
+      width: lineRight - startX,
+      height,
+      baseline,
+      segments: painted,
+      images,
+      from,
+      to,
+    });
     prevTo = to;
 
     lineTokens = [];
@@ -720,7 +804,10 @@ function wrapParagraph(
   let clusterWidth = 0;
   let clusterFont: FontSpec | null = null;
   const sameFont = (a: FontSpec, b: FontSpec) =>
-    a.family === b.family && a.sizePt === b.sizePt && a.bold === b.bold && a.italic === b.italic;
+    a.family === b.family &&
+    a.sizePt === b.sizePt &&
+    a.bold === b.bold &&
+    a.italic === b.italic;
   const resetCluster = () => {
     clusterText = '';
     clusterWidth = 0;
@@ -747,18 +834,31 @@ function wrapParagraph(
       continue;
     }
     // Skip leading spaces on wrapped lines (a leading tab always indents).
-    if (token.isSpace && !token.isTab && lineTokens.length === 0 && softWrapped) continue;
+    if (token.isSpace && !token.isTab && lineTokens.length === 0 && softWrapped)
+      continue;
     if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
-    if (clusterable(token) && clusterFont && sameFont(clusterFont, token.font)) {
-      token.width = Math.max(0, measure(clusterText + token.text, token.font) - clusterWidth);
+    if (
+      clusterable(token) &&
+      clusterFont &&
+      sameFont(clusterFont, token.font)
+    ) {
+      token.width = Math.max(
+        0,
+        measure(clusterText + token.text, token.font) - clusterWidth,
+      );
     }
     const cursor = lineStart() + lineWidth;
-    if (!token.isSpace && lineTokens.length > 0 && cursor + token.width > lineRight) {
+    if (
+      !token.isSpace &&
+      lineTokens.length > 0 &&
+      cursor + token.width > lineRight
+    ) {
       flushLine(false);
       resetCluster(); // the wrapped token starts a fresh glyph run
       softWrapped = true;
       if (token.isTab) resolveTab(token, lineStart() + lineWidth, ti);
-      else if (clusterable(token)) token.width = measure(token.text as string, token.font);
+      else if (clusterable(token))
+        token.width = measure(token.text as string, token.font);
     }
     // A single word wider than the whole band (narrow table cells): break it
     // at character level, Word-style — fit what we can (at least one char),
@@ -771,9 +871,18 @@ function wrapParagraph(
     ) {
       const avail = lineRight - lineStart();
       let n = 1;
-      while (n < token.text!.length && measure(token.text!.slice(0, n + 1), token.font) <= avail) n++;
+      while (
+        n < token.text!.length &&
+        measure(token.text!.slice(0, n + 1), token.font) <= avail
+      )
+        n++;
       const restText = token.text!.slice(n);
-      const rest: Token = { ...token, text: restText, width: measure(restText, token.font), size: restText.length };
+      const rest: Token = {
+        ...token,
+        text: restText,
+        width: measure(restText, token.font),
+        size: restText.length,
+      };
       if (token.pos != null) rest.pos = token.pos + n;
       token.text = token.text!.slice(0, n);
       token.size = n;
@@ -798,7 +907,10 @@ function wrapParagraph(
       const rotH = rotatedBoxHeight(token.image);
       maxImagePx = Math.max(maxImagePx, rotH);
       maxAscent = Math.max(maxAscent, token.image.height / 2 + rotH / 2);
-      maxDescent = Math.max(maxDescent, Math.max(0, (rotH - token.image.height) / 2));
+      maxDescent = Math.max(
+        maxDescent,
+        Math.max(0, (rotH - token.image.height) / 2),
+      );
     } else {
       maxFontPx = Math.max(maxFontPx, sizePx(token.font));
       if (metrics) {
@@ -813,10 +925,16 @@ function wrapParagraph(
 
 /** Height of the axis-aligned box containing an image after its paint-only
  *  rotation (identity when unrotated). */
-function rotatedBoxHeight(img: { width: number; height: number; rotation?: number }): number {
+function rotatedBoxHeight(img: {
+  width: number;
+  height: number;
+  rotation?: number;
+}): number {
   if (!img.rotation) return img.height;
   const rad = (img.rotation * Math.PI) / 180;
-  return Math.abs(img.width * Math.sin(rad)) + Math.abs(img.height * Math.cos(rad));
+  return (
+    Math.abs(img.width * Math.sin(rad)) + Math.abs(img.height * Math.cos(rad))
+  );
 }
 
 /** Wrap one paragraph into line drafts within [contentLeft, contentRight].
@@ -828,8 +946,11 @@ function layoutParagraph(
   ctx: Ctx,
 ): LineDraft[] {
   const drafts: LineDraft[] = [];
-  wrapParagraph(block, ctx, () => ({ left: contentLeft, right: contentRight }), (d) =>
-    drafts.push(d),
+  wrapParagraph(
+    block,
+    ctx,
+    () => ({ left: contentLeft, right: contentRight }),
+    (d) => drafts.push(d),
   );
   return drafts;
 }
@@ -872,8 +993,19 @@ const TEXTBOX_INSET = { l: 10, t: 5, r: 10, b: 5 };
 /** ResolvedFloat for `f` pinned at (x, y). A textbox's paragraphs are flowed
  *  inside the shape's box, in box-local coordinates (the painter translates
  *  by the float's origin) — never caret-addressable, positions stripped. */
-function resolveFloat(f: FlowFloat, x: number, y: number, ctx: Ctx): ResolvedFloat {
-  const rf: ResolvedFloat = { x, y, width: f.width, height: f.height, src: f.src };
+function resolveFloat(
+  f: FlowFloat,
+  x: number,
+  y: number,
+  ctx: Ctx,
+): ResolvedFloat {
+  const rf: ResolvedFloat = {
+    x,
+    y,
+    width: f.width,
+    height: f.height,
+    src: f.src,
+  };
   if (f.pos != null) rf.pos = f.pos;
   if (f.rotation) rf.rotation = f.rotation;
   if (f.shape) rf.shape = f.shape;
@@ -898,7 +1030,12 @@ function layoutFlow(
   contentLeft: number,
   contentRight: number,
   ctx: Ctx,
-): { lines: LayoutLine[]; tables: ResolvedTable[]; floats: ResolvedFloat[]; height: number } {
+): {
+  lines: LayoutLine[];
+  tables: ResolvedTable[];
+  floats: ResolvedFloat[];
+  height: number;
+} {
   const lines: LayoutLine[] = [];
   const tables: ResolvedTable[] = [];
   const floats: ResolvedFloat[] = [];
@@ -951,7 +1088,8 @@ function eachCell(
     for (const cell of rows[r].cells) {
       while (col < ncols && spanned[col] > 0) col++; // skip columns held by a rowspan above
       visit(r, cell, col);
-      for (let k = 0; k < cell.colspan && col + k < ncols; k++) spanned[col + k] = cell.rowspan;
+      for (let k = 0; k < cell.colspan && col + k < ncols; k++)
+        spanned[col + k] = cell.rowspan;
       col += cell.colspan;
     }
     for (let i = 0; i < ncols; i++) if (spanned[i] > 0) spanned[i]--; // one row consumed
@@ -971,7 +1109,11 @@ function layoutTable(
   const avail = contentRight - contentLeft;
   const nrows = table.rows.length;
   const ncols = table.rows.reduce(
-    (m, r) => Math.max(m, r.cells.reduce((s, c) => s + c.colspan, 0)),
+    (m, r) =>
+      Math.max(
+        m,
+        r.cells.reduce((s, c) => s + c.colspan, 0),
+      ),
     0,
   );
 
@@ -980,7 +1122,8 @@ function layoutTable(
   eachCell(table.rows, ncols, (_r, cell, startCol) => {
     if (cell.colwidth && cell.colwidth.length === cell.colspan) {
       for (let k = 0; k < cell.colspan && startCol + k < ncols; k++) {
-        if (colWidths[startCol + k] === 0) colWidths[startCol + k] = cell.colwidth[k];
+        if (colWidths[startCol + k] === 0)
+          colWidths[startCol + k] = cell.colwidth[k];
       }
     }
   });
@@ -988,7 +1131,8 @@ function layoutTable(
   const unknown = colWidths.filter((w) => w === 0).length;
   if (unknown > 0) {
     const share = Math.max(0, (avail - known) / unknown);
-    for (let i = 0; i < ncols; i++) if (colWidths[i] === 0) colWidths[i] = share;
+    for (let i = 0; i < ncols; i++)
+      if (colWidths[i] === 0) colWidths[i] = share;
   }
   // A tblGrid wider than the available width (e.g. a full-page table dropped
   // into a narrow column) would otherwise overflow into the next column's
@@ -1037,9 +1181,15 @@ function layoutTable(
   const cellDrafts: CellDraft[] = [];
   eachCell(table.rows, ncols, (r, cell, col) => {
     let cellWidth = 0;
-    for (let k = 0; k < cell.colspan && col + k < ncols; k++) cellWidth += colWidths[col + k];
+    for (let k = 0; k < cell.colspan && col + k < ncols; k++)
+      cellWidth += colWidths[col + k];
     const cellLeft = colX[col];
-    const flow = layoutFlow(cell.content, cellLeft + pad.left, cellLeft + cellWidth - pad.right, ctx);
+    const flow = layoutFlow(
+      cell.content,
+      cellLeft + pad.left,
+      cellLeft + cellWidth - pad.right,
+      ctx,
+    );
     cellDrafts.push({
       startRow: r,
       startCol: col,
@@ -1062,14 +1212,18 @@ function layoutTable(
   const rowHeight = new Array<number>(nrows).fill(0);
   for (const c of cellDrafts) {
     if (c.rowspan === 1) {
-      rowHeight[c.startRow] = Math.max(rowHeight[c.startRow], c.contentHeight + pad.top + pad.bottom);
+      rowHeight[c.startRow] = Math.max(
+        rowHeight[c.startRow],
+        c.contentHeight + pad.top + pad.bottom,
+      );
     }
   }
   for (const c of cellDrafts) {
     if (c.rowspan > 1) {
       const need = c.contentHeight + pad.top + pad.bottom;
       let span = 0;
-      for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++) span += rowHeight[r];
+      for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++)
+        span += rowHeight[r];
       if (need > span) {
         const last = Math.min(c.startRow + c.rowspan - 1, nrows - 1);
         rowHeight[last] += need - span;
@@ -1087,10 +1241,12 @@ function layoutTable(
   // Position cells and shift their content into place.
   const cells: ResolvedCell[] = cellDrafts.map((c) => {
     let height = 0;
-    for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++) height += rowHeight[r];
+    for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++)
+      height += rowHeight[r];
     // w:vAlign: distribute the slack above/centered for non-top cells.
     const slack = Math.max(0, height - pad.top - pad.bottom - c.contentHeight);
-    const vOffset = c.vAlign === 'bottom' ? slack : c.vAlign === 'center' ? slack / 2 : 0;
+    const vOffset =
+      c.vAlign === 'bottom' ? slack : c.vAlign === 'center' ? slack / 2 : 0;
     const dy = rowY[c.startRow] + pad.top + vOffset;
     const lines = c.lines.map((ln) => ({ ...ln, y: ln.y + dy }));
     c.tables.forEach((t) => offsetTable(t, dy));
@@ -1106,11 +1262,18 @@ function layoutTable(
     if (c.background) cell.background = c.background;
     if (c.borders) cell.borders = c.borders;
     if (c.tables.length > 0) cell.tables = c.tables;
-    if (c.floats.length > 0) cell.floats = c.floats.map((f) => ({ ...f, y: f.y + dy }));
+    if (c.floats.length > 0)
+      cell.floats = c.floats.map((f) => ({ ...f, y: f.y + dy }));
     return cell;
   });
 
-  const resolved: ResolvedTable = { x: contentLeft + xShift, y: 0, width: tableWidth, height: rowY[nrows], cells };
+  const resolved: ResolvedTable = {
+    x: contentLeft + xShift,
+    y: 0,
+    width: tableWidth,
+    height: rowY[nrows],
+    cells,
+  };
   if (table.borders) resolved.borders = table.borders;
 
   // Repeating header band: contiguous header rows from the top, provided no
@@ -1119,11 +1282,15 @@ function layoutTable(
   while (headerRows < nrows && table.rows[headerRows].header) headerRows++;
   if (headerRows > 0 && headerRows < nrows) {
     const headerBottom = rowY[headerRows];
-    const spansOut = cells.some((c) => c.y < headerBottom && c.y + c.height > headerBottom);
+    const spansOut = cells.some(
+      (c) => c.y < headerBottom && c.y + c.height > headerBottom,
+    );
     if (!spansOut) resolved.headerBottom = headerBottom;
   }
   const cantSplitBands = table.rows
-    .map((row, r) => (row.cantSplit ? { top: rowY[r], bottom: rowY[r + 1] } : null))
+    .map((row, r) =>
+      row.cantSplit ? { top: rowY[r], bottom: rowY[r + 1] } : null,
+    )
     .filter((b): b is { top: number; bottom: number } => b !== null);
   if (cantSplitBands.length > 0) resolved.cantSplitBands = cantSplitBands;
   return resolved;
@@ -1197,7 +1364,10 @@ function cloneTable(t: ResolvedTable): ResolvedTable {
 }
 
 function cloneCell(cell: ResolvedCell): ResolvedCell {
-  const copy: ResolvedCell = { ...cell, lines: cell.lines.map((l) => ({ ...l })) };
+  const copy: ResolvedCell = {
+    ...cell,
+    lines: cell.lines.map((l) => ({ ...l })),
+  };
   if (cell.tables) copy.tables = cell.tables.map(cloneTable);
   if (cell.floats) copy.floats = cell.floats.map((f) => ({ ...f }));
   return copy;
@@ -1213,7 +1383,10 @@ function cloneCell(cell: ResolvedCell): ResolvedCell {
  * straddling the boundary moves down whole). Rows after the split row follow
  * beneath the continuation row.
  */
-function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; rest: ResolvedTable } {
+function splitTableAt(
+  table: ResolvedTable,
+  cut: number,
+): { top: ResolvedTable; rest: ResolvedTable } {
   interface Cont {
     cell: ResolvedCell;
     remLines: LayoutLine[];
@@ -1236,8 +1409,12 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
     const first = firstY === Infinity ? cut : firstY;
     const extent =
       Math.max(
-        remLines.length ? Math.max(...remLines.map((l) => l.y + l.height)) : first,
-        remTables.length ? Math.max(...remTables.map((t) => t.y + t.height)) : first,
+        remLines.length
+          ? Math.max(...remLines.map((l) => l.y + l.height))
+          : first,
+        remTables.length
+          ? Math.max(...remTables.map((t) => t.y + t.height))
+          : first,
       ) - first;
     contHeight = Math.max(contHeight, extent);
     straddlers.set(cell, { cell, remLines, remTables, firstY: first });
@@ -1255,11 +1432,19 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
     } else {
       const c = straddlers.get(cell) as Cont;
       const topLines = cell.lines.filter((l) => l.y + l.height <= cut);
-      const topTables = (cell.tables ?? []).filter((t) => t.y + t.height <= cut);
-      const topCell: ResolvedCell = { ...cell, height: cut - cell.y, lines: topLines };
+      const topTables = (cell.tables ?? []).filter(
+        (t) => t.y + t.height <= cut,
+      );
+      const topCell: ResolvedCell = {
+        ...cell,
+        height: cut - cell.y,
+        lines: topLines,
+      };
       if (topTables.length > 0) topCell.tables = topTables;
       else delete topCell.tables;
-      const topFloats = (cell.floats ?? []).filter((f) => f.y + f.height <= cut);
+      const topFloats = (cell.floats ?? []).filter(
+        (f) => f.y + f.height <= cut,
+      );
       if (topFloats.length > 0) topCell.floats = topFloats;
       else delete topCell.floats;
       topCells.push(topCell);
@@ -1286,7 +1471,13 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
     }
   }
 
-  const top: ResolvedTable = { x: table.x, y: 0, width: table.width, height: cut, cells: topCells };
+  const top: ResolvedTable = {
+    x: table.x,
+    y: 0,
+    width: table.width,
+    height: cut,
+    cells: topCells,
+  };
   const rest: ResolvedTable = {
     x: table.x,
     y: 0,
@@ -1304,7 +1495,10 @@ function splitTableAt(table: ResolvedTable, cut: number): { top: ResolvedTable; 
 /** Ghost copies of the header-band cells for a continuation fragment. PM
  *  positions are stripped so selection and hit-testing only ever target the
  *  original header; returns null when the band is too complex to repeat. */
-function cloneHeaderCells(table: ResolvedTable, headerBottom: number): ResolvedCell[] | null {
+function cloneHeaderCells(
+  table: ResolvedTable,
+  headerBottom: number,
+): ResolvedCell[] | null {
   const band = table.cells.filter((c) => c.y + c.height <= headerBottom);
   if (band.some((c) => c.tables && c.tables.length > 0)) return null;
   return band.map((cell) => ({
@@ -1312,10 +1506,14 @@ function cloneHeaderCells(table: ResolvedTable, headerBottom: number): ResolvedC
     tables: undefined,
     floats: cell.floats?.map((f) => ({ ...f })),
     lines: cell.lines.map((l) => {
-      const line: LayoutLine = { ...l, segments: l.segments.map((s) => ({ ...s, pos: undefined })) };
+      const line: LayoutLine = {
+        ...l,
+        segments: l.segments.map((s) => ({ ...s, pos: undefined })),
+      };
       delete line.from;
       delete line.to;
-      if (line.images) line.images = line.images.map((im) => ({ ...im, pos: undefined }));
+      if (line.images)
+        line.images = line.images.map((im) => ({ ...im, pos: undefined }));
       return line;
     }),
   }));
@@ -1385,14 +1583,20 @@ function placeBlocks(
   const pageFnSet = new Set<number>();
   const noteHeight = (n: number) => footnotes?.get(n)?.height ?? 0;
   const reservedFor = (nums: number[]) =>
-    nums.length === 0 ? 0 : FOOTNOTE_AREA_GAP + nums.reduce((s, n) => s + noteHeight(n), 0);
+    nums.length === 0
+      ? 0
+      : FOOTNOTE_AREA_GAP + nums.reduce((s, n) => s + noteHeight(n), 0);
   /** Bottom of the body band, lowered by the footnotes committed to this page. */
   const limit = () => bottom - reservedFor(pageFnNums);
   /** Footnote numbers a draft line references that have a known body. */
   const lineFnNums = (segs: LayoutSegment[]): number[] => {
     const out: number[] = [];
     for (const s of segs) {
-      if (s.footnoteRef != null && footnotes?.has(s.footnoteRef) && !out.includes(s.footnoteRef)) {
+      if (
+        s.footnoteRef != null &&
+        footnotes?.has(s.footnoteRef) &&
+        !out.includes(s.footnoteRef)
+      ) {
         out.push(s.footnoteRef);
       }
     }
@@ -1410,7 +1614,9 @@ function placeBlocks(
   /** Extra bottom space new footnotes would add beyond what's reserved. */
   const addedReserve = (nums: number[]) => {
     const fresh = nums.filter((n) => !pageFnSet.has(n));
-    return fresh.length === 0 ? 0 : reservedFor([...pageFnNums, ...fresh]) - reservedFor(pageFnNums);
+    return fresh.length === 0
+      ? 0
+      : reservedFor([...pageFnNums, ...fresh]) - reservedFor(pageFnNums);
   };
   /** Fresh footnote numbers referenced in a table's cells above `maxY` (cell-y
    *  relative to the table top) — so a placed fragment reserves its notes. */
@@ -1420,13 +1626,20 @@ function placeBlocks(
       for (const l of ls)
         for (const s of l.segments) {
           const n = s.footnoteRef;
-          if (n != null && footnotes?.has(n) && !pageFnSet.has(n) && !out.includes(n)) out.push(n);
+          if (
+            n != null &&
+            footnotes?.has(n) &&
+            !pageFnSet.has(n) &&
+            !out.includes(n)
+          )
+            out.push(n);
         }
     };
     for (const c of t.cells) {
       if (c.y >= maxY) continue;
       scan(c.lines);
-      if (c.tables) for (const nt of c.tables) for (const nc of nt.cells) scan(nc.lines);
+      if (c.tables)
+        for (const nt of c.tables) for (const nc of nt.cells) scan(nc.lines);
     }
     return out;
   };
@@ -1451,7 +1664,9 @@ function placeBlocks(
     }
     const pageColH = limit() - bandTop;
     balanceTarget =
-      sectionRemaining <= colCount * pageColH ? Math.max(1, sectionRemaining / colCount) : null;
+      sectionRemaining <= colCount * pageColH
+        ? Math.max(1, sectionRemaining / colCount)
+        : null;
   };
 
   /** Lay the page's reserved footnote bodies out at the bottom, above the
@@ -1470,10 +1685,16 @@ function placeBlocks(
   };
 
   const finalizePage = () => {
-    const resolved: ResolvedPage = { index: pages.length, width: page.width, height: page.height, lines };
+    const resolved: ResolvedPage = {
+      index: pages.length,
+      width: page.width,
+      height: page.height,
+      lines,
+    };
     if (tables.length > 0) resolved.tables = tables;
     if (pageFloats.length > 0) resolved.floats = pageFloats;
-    if (pageFnNums.length > 0) resolved.footnotes = buildFootnoteArea(pageFnNums);
+    if (pageFnNums.length > 0)
+      resolved.footnotes = buildFootnoteArea(pageFnNums);
     pages.push(resolved);
     lines = [];
     tables = [];
@@ -1508,7 +1729,8 @@ function placeBlocks(
    *  balance target. */
   const emitLine = (draft: LineDraft) => {
     let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
-    const floor = () => Math.min(colBottom(), bottom - reservedFor([...pageFnNums, ...add]));
+    const floor = () =>
+      Math.min(colBottom(), bottom - reservedFor([...pageFnNums, ...add]));
     if (y + draft.height > floor() && colDirty) {
       breakBand(); // next column, or next page; footnotes ride the page
       add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
@@ -1522,7 +1744,8 @@ function placeBlocks(
   };
 
   /** Whether the current page already holds content (so a break is meaningful). */
-  const pageHasContent = () => lines.length > 0 || tables.length > 0 || pageFloats.length > 0;
+  const pageHasContent = () =>
+    lines.length > 0 || tables.length > 0 || pageFloats.length > 0;
 
   /** Pin a paragraph's floats relative to its start; register text exclusions. */
   const registerFloats = (flow: FlowParagraph, yPara: number) => {
@@ -1565,7 +1788,10 @@ function placeBlocks(
 
   /** Widest text band at [yy, yy+h) after carving out the exclusions; null
    *  when nothing usable remains (the caller skips below the blocker). */
-  const bandAt = (yy: number, h: number): { left: number; right: number } | null => {
+  const bandAt = (
+    yy: number,
+    h: number,
+  ): { left: number; right: number } | null => {
     let L = colX0();
     let R = colX1();
     for (const ex of exclusions) {
@@ -1592,7 +1818,9 @@ function placeBlocks(
           }
           const b = bandAt(y, estH);
           if (b) return b;
-          const blockers = exclusions.filter((ex) => ex.top < y + estH && ex.bottom > y);
+          const blockers = exclusions.filter(
+            (ex) => ex.top < y + estH && ex.bottom > y,
+          );
           if (blockers.length === 0) return { left: colX0(), right: colX1() };
           y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
         }
@@ -1643,7 +1871,9 @@ function placeBlocks(
       }
       const drafts = item.para.drafts;
       const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
-      const floatsAhead = exclusions.some((ex) => ex.bottom > y && ex.top < y + draftsHeight);
+      const floatsAhead = exclusions.some(
+        (ex) => ex.bottom > y && ex.top < y + draftsHeight,
+      );
       if (drafts && !floatsAhead) {
         for (const d of drafts) emitLine(d);
       } else {
@@ -1677,7 +1907,8 @@ function placeBlocks(
         }
         // The header band repeats only while it leaves reasonable band room.
         const hb =
-          table.headerBottom != null && table.headerBottom < (limit() - bandTop) / 2
+          table.headerBottom != null &&
+          table.headerBottom < (limit() - bandTop) / 2
             ? table.headerBottom
             : 0;
         // Prefer the lowest row boundary that still fits (never inside the header).
@@ -1753,7 +1984,10 @@ function placeBlocks(
 
 /** Lay out already-flattened blocks into paginated pages. Pure (no DOM);
  *  measurement is injected. */
-export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): ResolvedLayout {
+export function layoutBlocks(
+  blocks: FlowBlock[],
+  config: LayoutConfig,
+): ResolvedLayout {
   const ctx = buildCtx(config);
   const left = config.page.margin.left;
   const right = config.page.width - config.page.margin.right;
@@ -1767,7 +2001,9 @@ export function layoutBlocks(blocks: FlowBlock[], config: LayoutConfig): Resolve
         ? {
             para: {
               getFlow: () => block,
-              drafts: block.floats?.length ? null : layoutParagraph(block, left, colRight, ctx),
+              drafts: block.floats?.length
+                ? null
+                : layoutParagraph(block, left, colRight, ctx),
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
@@ -1797,8 +2033,12 @@ function shiftDrafts(drafts: LineDraft[], delta: number): LineDraft[] {
     ...d,
     from: d.from != null ? d.from + delta : d.from,
     to: d.to != null ? d.to + delta : d.to,
-    segments: d.segments.map((s) => (s.pos != null ? { ...s, pos: s.pos + delta } : s)),
-    images: d.images.map((im) => (im.pos != null ? { ...im, pos: im.pos + delta } : im)),
+    segments: d.segments.map((s) =>
+      s.pos != null ? { ...s, pos: s.pos + delta } : s,
+    ),
+    images: d.images.map((im) =>
+      im.pos != null ? { ...im, pos: im.pos + delta } : im,
+    ),
   }));
 }
 
@@ -1827,9 +2067,14 @@ interface TableCacheEntry {
 function cloneLineShifted(l: LayoutLine, delta: number): LayoutLine {
   const out: LayoutLine = {
     ...l,
-    segments: l.segments.map((s) => (s.pos != null ? { ...s, pos: s.pos + delta } : { ...s })),
+    segments: l.segments.map((s) =>
+      s.pos != null ? { ...s, pos: s.pos + delta } : { ...s },
+    ),
   };
-  if (l.images) out.images = l.images.map((im) => (im.pos != null ? { ...im, pos: im.pos + delta } : { ...im }));
+  if (l.images)
+    out.images = l.images.map((im) =>
+      im.pos != null ? { ...im, pos: im.pos + delta } : { ...im },
+    );
   if (l.from != null) out.from = l.from + delta;
   if (l.to != null) out.to = l.to + delta;
   return out;
@@ -1911,7 +2156,10 @@ interface ChromeBands {
   first?: ResolvedChrome;
   even?: ResolvedChrome;
 }
-function layVariants(docs: ChromeDocs, fn: (doc: PMNode) => ResolvedChrome): ChromeBands {
+function layVariants(
+  docs: ChromeDocs,
+  fn: (doc: PMNode) => ResolvedChrome,
+): ChromeBands {
   const out: ChromeBands = {};
   if (docs.default) out.default = fn(docs.default);
   if (docs.first) out.first = fn(docs.first);
@@ -1920,7 +2168,12 @@ function layVariants(docs: ChromeDocs, fn: (doc: PMNode) => ResolvedChrome): Chr
 }
 /** Tallest band among present variants (sizes the body band conservatively). */
 function maxBandHeight(bands: ChromeBands): number {
-  return Math.max(0, ...[bands.default, bands.first, bands.even].filter(Boolean).map((b) => b!.height));
+  return Math.max(
+    0,
+    ...[bands.default, bands.first, bands.even]
+      .filter(Boolean)
+      .map((b) => b!.height),
+  );
 }
 function anyBandHasFields(bands: ChromeBands): boolean {
   return [bands.default, bands.first, bands.even].some(
@@ -1959,9 +2212,17 @@ function layoutChrome(
   const lines = flow.lines.map((l) => ({ ...l, y: l.y + topY }));
   flow.tables.forEach((t) => offsetTable(t, topY));
   stripPositions(lines, flow.tables);
-  const band: ResolvedChrome = { lines, tables: flow.tables, height: flow.height };
+  const band: ResolvedChrome = {
+    lines,
+    tables: flow.tables,
+    height: flow.height,
+  };
   if (flow.floats.length > 0)
-    band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY, pos: undefined }));
+    band.floats = flow.floats.map((f) => ({
+      ...f,
+      y: f.y + topY,
+      pos: undefined,
+    }));
   return band;
 }
 
@@ -1981,15 +2242,29 @@ function layoutFooterChrome(
     height: flow.height,
   };
   band.tables.forEach((t) => offsetTable(t, topY));
-  if (flow.floats) band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY }));
+  if (flow.floats)
+    band.floats = flow.floats.map((f) => ({ ...f, y: f.y + topY }));
   return band;
 }
 
 /** Lay out one footnote body (reduced font) flat from y = 0, stripping PM
  *  positions (it belongs to a separate note story — never caret-addressable). */
-function layoutFootnoteBody(doc: PMNode, left: number, right: number, ctx: Ctx): FootnoteBody {
-  const fnCtx: Ctx = { ...ctx, base: { ...ctx.base, sizePt: ctx.base.sizePt * FOOTNOTE_FONT_SCALE } };
-  const flow = layoutFlow(toFlowBlocks(doc, fnCtx.base, false), left, right, fnCtx);
+function layoutFootnoteBody(
+  doc: PMNode,
+  left: number,
+  right: number,
+  ctx: Ctx,
+): FootnoteBody {
+  const fnCtx: Ctx = {
+    ...ctx,
+    base: { ...ctx.base, sizePt: ctx.base.sizePt * FOOTNOTE_FONT_SCALE },
+  };
+  const flow = layoutFlow(
+    toFlowBlocks(doc, fnCtx.base, false),
+    left,
+    right,
+    fnCtx,
+  );
   stripPositions(flow.lines, flow.tables);
   return { lines: flow.lines, height: flow.height };
 }
@@ -2015,10 +2290,24 @@ export function layout(
   // Page chrome first — a tall header/footer pushes the body band inward. The
   // first/even variants are laid out alongside the default; the band shrinks by
   // the TALLEST variant so no page's content overlaps its chrome.
-  const headerDocs: ChromeDocs = { default: chrome?.header, first: chrome?.headerFirst, even: chrome?.headerEven };
-  const footerDocs: ChromeDocs = { default: chrome?.footer, first: chrome?.footerFirst, even: chrome?.footerEven };
-  const layHeaders = (c: Ctx) => layVariants(headerDocs, (d) => layoutChrome(d, CHROME_DISTANCE, left, right, c));
-  const layFooters = (c: Ctx) => layVariants(footerDocs, (d) => layoutFooterChrome(d, page.height, left, right, c));
+  const headerDocs: ChromeDocs = {
+    default: chrome?.header,
+    first: chrome?.headerFirst,
+    even: chrome?.headerEven,
+  };
+  const footerDocs: ChromeDocs = {
+    default: chrome?.footer,
+    first: chrome?.footerFirst,
+    even: chrome?.footerEven,
+  };
+  const layHeaders = (c: Ctx) =>
+    layVariants(headerDocs, (d) =>
+      layoutChrome(d, CHROME_DISTANCE, left, right, c),
+    );
+  const layFooters = (c: Ctx) =>
+    layVariants(footerDocs, (d) =>
+      layoutFooterChrome(d, page.height, left, right, c),
+    );
   let headers = layHeaders(ctx);
   let footers = layFooters(ctx);
   let top = page.margin.top;
@@ -2027,32 +2316,57 @@ export function layout(
     top = Math.max(top, CHROME_DISTANCE + maxBandHeight(headers));
   }
   if (footers.default || footers.first || footers.even) {
-    bottom = Math.min(bottom, page.height - CHROME_DISTANCE - maxBandHeight(footers));
+    bottom = Math.min(
+      bottom,
+      page.height - CHROME_DISTANCE - maxBandHeight(footers),
+    );
   }
 
   // Markers are recounted on every layout, so list edits renumber live. The
   // counter advances for every list paragraph — including cache hits.
-  const counter = createNumberingCounter(doc.attrs['numbering'] as NumberingDefs | null);
+  const counter = createNumberingCounter(
+    doc.attrs['numbering'] as NumberingDefs | null,
+  );
 
   // Section column flow: each block carries its section's columns and whether
   // it opens a section. Absent → one implicit single-column section.
   const sections = (doc.attrs['sections'] as SectionConfig[] | null) ?? [
-    { blockCount: doc.childCount, columns: { count: 1, gap: 0 }, newPage: true },
+    {
+      blockCount: doc.childCount,
+      columns: { count: 1, gap: 0 },
+      newPage: true,
+    },
   ];
-  const blockSection: { columns: ColumnConfig; start: boolean; newPage: boolean }[] = [];
+  const blockSection: {
+    columns: ColumnConfig;
+    start: boolean;
+    newPage: boolean;
+  }[] = [];
   for (const sec of sections) {
     for (let k = 0; k < sec.blockCount; k++) {
-      blockSection.push({ columns: sec.columns, start: k === 0, newPage: sec.newPage });
+      blockSection.push({
+        columns: sec.columns,
+        start: k === 0,
+        newPage: sec.newPage,
+      });
     }
   }
   const lastSec = sections[sections.length - 1];
   while (blockSection.length < doc.childCount) {
-    blockSection.push({ columns: lastSec.columns, start: false, newPage: lastSec.newPage });
+    blockSection.push({
+      columns: lastSec.columns,
+      start: false,
+      newPage: lastSec.newPage,
+    });
   }
 
   const items: BlockItem[] = [];
   doc.forEach((node, offset, index) => {
-    const bs = blockSection[index] ?? { columns: { count: 1, gap: 0 }, start: false, newPage: true };
+    const bs = blockSection[index] ?? {
+      columns: { count: 1, gap: 0 },
+      start: false,
+      newPage: true,
+    };
     // Blocks wrap at their section's column width; the placer shifts each into
     // its column. `right` (cache key) is the column's right edge.
     const colRight = left + columnWidth(right - left, bs.columns);
@@ -2062,7 +2376,8 @@ export function layout(
     };
     if (node.type.name === 'paragraph') {
       const marker = markerFor(node, counter);
-      const getFlow = () => paragraphToFlow(node, ctx.base, offset, true, marker);
+      const getFlow = () =>
+        paragraphToFlow(node, ctx.base, offset, true, marker);
       const sp = node.attrs['spacing'] as ParagraphSpacing | null;
       const para = (drafts: LineDraft[] | null) => ({
         getFlow,
@@ -2079,7 +2394,12 @@ export function layout(
       }
       const contentStart = offset + 1;
       const hit = cache?.paragraphs.get(node);
-      if (hit && hit.left === left && hit.right === colRight && hit.marker === marker) {
+      if (
+        hit &&
+        hit.left === left &&
+        hit.right === colRight &&
+        hit.marker === marker
+      ) {
         if (hit.basePos !== contentStart) {
           hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
           hit.basePos = contentStart;
@@ -2089,7 +2409,13 @@ export function layout(
       }
       const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
       const drafts = layoutParagraph(flow, left, colRight, ctx);
-      cache?.paragraphs.set(node, { left, right: colRight, basePos: contentStart, marker, drafts });
+      cache?.paragraphs.set(node, {
+        left,
+        right: colRight,
+        basePos: contentStart,
+        marker,
+        drafts,
+      });
       items.push(tag({ para: { ...para(drafts), getFlow: () => flow } }));
     } else if (node.type.name === 'table') {
       // Cache hit: clone the canonical layout (shifting PM positions if it
@@ -2097,12 +2423,24 @@ export function layout(
       // never cached — they advance the live numbering counter.
       const hit = cache?.tables.get(node);
       if (hit && hit.left === left && hit.right === colRight) {
-        items.push(tag({ table: cloneTableShifted(hit.table, offset - hit.basePos) }));
+        items.push(
+          tag({ table: cloneTableShifted(hit.table, offset - hit.basePos) }),
+        );
         return;
       }
-      const table = layoutTable(tableToFlow(node, ctx.base, offset, counter), left, colRight, ctx);
+      const table = layoutTable(
+        tableToFlow(node, ctx.base, offset, counter),
+        left,
+        colRight,
+        ctx,
+      );
       if (cache && !tableHasList(node)) {
-        cache.tables.set(node, { left, right: colRight, basePos: offset, table });
+        cache.tables.set(node, {
+          left,
+          right: colRight,
+          basePos: offset,
+          table,
+        });
         items.push(tag({ table: cloneTableShifted(table, 0) }));
       } else {
         items.push(tag({ table }));
@@ -2124,7 +2462,10 @@ export function layout(
   // Chrome with page-number fields: re-lay every variant now that the page
   // total is known, so each field slot is as wide as the widest number shown.
   if (anyBandHasFields(headers) || anyBandHasFields(footers)) {
-    const fieldCtx: Ctx = { ...ctx, fieldPlaceholder: String(resolved.pages.length) };
+    const fieldCtx: Ctx = {
+      ...ctx,
+      fieldPlaceholder: String(resolved.pages.length),
+    };
     headers = layHeaders(fieldCtx);
     footers = layFooters(fieldCtx);
   }
@@ -2136,7 +2477,10 @@ export function layout(
   if (footers.first) resolved.pageFooterFirst = footers.first;
   if (footers.even) resolved.pageFooterEven = footers.even;
   if (chrome?.titlePg || chrome?.evenAndOdd) {
-    resolved.chromeSelect = { titlePg: !!chrome.titlePg, evenAndOdd: !!chrome.evenAndOdd };
+    resolved.chromeSelect = {
+      titlePg: !!chrome.titlePg,
+      evenAndOdd: !!chrome.evenAndOdd,
+    };
   }
   return resolved;
 }

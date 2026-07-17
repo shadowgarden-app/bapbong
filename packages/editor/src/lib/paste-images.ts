@@ -27,7 +27,9 @@ export function imageFilesIn(dt: DataTransfer | null): File[] {
 }
 
 /** Read intrinsic size without touching the DOM (no <img> element churn). */
-async function bitmapSize(blob: Blob): Promise<{ width: number; height: number } | null> {
+async function bitmapSize(
+  blob: Blob,
+): Promise<{ width: number; height: number } | null> {
   try {
     const bmp = await createImageBitmap(blob);
     const size = { width: bmp.width, height: bmp.height };
@@ -48,7 +50,10 @@ const toDataURL = (blob: Blob) =>
 
 /** Insert image blobs at the selection as inline image nodes (one
  *  transaction). Resolves true if anything was inserted. */
-export async function insertImageBlobs(view: EditorView, blobs: Blob[]): Promise<boolean> {
+export async function insertImageBlobs(
+  view: EditorView,
+  blobs: Blob[],
+): Promise<boolean> {
   const imageType = view.state.schema.nodes['image'];
   if (!imageType) return false; // schema without images (e.g. comment composer)
 
@@ -78,7 +83,10 @@ export async function insertImageBlobs(view: EditorView, blobs: Blob[]): Promise
  *  ProseMirror's default paste parses it through the schema; but HTML that is
  *  merely an <img> wrapper (how browsers copy a picture) would lose the image
  *  there (remote srcs are rejected by the schema), so the blob is used. */
-export function imagePasteHandler(view: EditorView, event: ClipboardEvent): boolean {
+export function imagePasteHandler(
+  view: EditorView,
+  event: ClipboardEvent,
+): boolean {
   const dt = event.clipboardData;
   const files = imageFilesIn(dt);
   if (!files.length) return false;

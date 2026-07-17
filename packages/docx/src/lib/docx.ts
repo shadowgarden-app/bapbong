@@ -21,7 +21,12 @@ import {
   parseXml,
   RunProps,
 } from './ooxml.js';
-import type { BorderSide, BorderStyle, ShapeSpec, TableBorders } from '@shadow-garden/bapbong-contracts';
+import type {
+  BorderSide,
+  BorderStyle,
+  ShapeSpec,
+  TableBorders,
+} from '@shadow-garden/bapbong-contracts';
 import { buildStyleRegistry, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
@@ -111,7 +116,10 @@ interface NotesRegistry {
  *  comment data from word/commentsExtended.xml (w15): replies link by the
  *  parent paragraph's w14:paraId, and `done` is the resolved flag. */
 interface CommentsRegistry {
-  defs: Map<number, { author: string; date: string; body: OoxmlNode; paraIds: string[] }>;
+  defs: Map<
+    number,
+    { author: string; date: string; body: OoxmlNode; paraIds: string[] }
+  >;
   paraToId: Map<string, number>;
   ext: Map<string, { parentParaId: string | null; done: boolean }>;
   active: Set<number>;
@@ -165,34 +173,49 @@ function mimeOf(path: string): string {
 /** Turn resolved run properties into ProseMirror marks. */
 function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   const marks: Mark[] = [];
-  if (p.bold) marks.push(ctx.schema.marks["strong"].create());
-  if (p.italic) marks.push(ctx.schema.marks["em"].create());
-  if (p.underline) marks.push(ctx.schema.marks["underline"].create());
-  if (p.strike) marks.push(ctx.schema.marks["strike"].create());
-  if (p.color) marks.push(ctx.schema.marks["textColor"].create({ color: p.color }));
-  if (p.sizePt !== undefined) marks.push(ctx.schema.marks["fontSize"].create({ size: p.sizePt }));
-  if (p.fontFamily) marks.push(ctx.schema.marks["fontFamily"].create({ family: p.fontFamily }));
-  if (p.highlight) marks.push(ctx.schema.marks["highlight"].create({ color: p.highlight }));
-  if (p.vertAlign) marks.push(ctx.schema.marks["vertAlign"].create({ value: p.vertAlign }));
+  if (p.bold) marks.push(ctx.schema.marks['strong'].create());
+  if (p.italic) marks.push(ctx.schema.marks['em'].create());
+  if (p.underline) marks.push(ctx.schema.marks['underline'].create());
+  if (p.strike) marks.push(ctx.schema.marks['strike'].create());
+  if (p.color)
+    marks.push(ctx.schema.marks['textColor'].create({ color: p.color }));
+  if (p.sizePt !== undefined)
+    marks.push(ctx.schema.marks['fontSize'].create({ size: p.sizePt }));
+  if (p.fontFamily)
+    marks.push(ctx.schema.marks['fontFamily'].create({ family: p.fontFamily }));
+  if (p.highlight)
+    marks.push(ctx.schema.marks['highlight'].create({ color: p.highlight }));
+  if (p.vertAlign)
+    marks.push(ctx.schema.marks['vertAlign'].create({ value: p.vertAlign }));
   return marks;
 }
 
 /** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode. Unknown codes
  *  map to the raw code point; symbol-font fidelity is out of scope. */
 const SYMBOL_MAP: Record<string, string> = {
-  F0B7: '•', F06C: '●', F0A7: '▪', F0A8: '▫', F0FC: '✔', F0FB: '✗', F0E0: '→',
+  F0B7: '•',
+  F06C: '●',
+  F0A7: '▪',
+  F0A8: '▫',
+  F0FC: '✔',
+  F0FB: '✗',
+  F0E0: '→',
 };
 function symbolChar(code: string | undefined): string {
   if (!code) return '';
   const upper = code.toUpperCase();
   if (SYMBOL_MAP[upper]) return SYMBOL_MAP[upper];
   const n = parseInt(code, 16);
-  return Number.isNaN(n) ? '' : String.fromCodePoint(n >= 0xf000 ? n - 0xf000 + 0x20 : n);
+  return Number.isNaN(n)
+    ? ''
+    : String.fromCodePoint(n >= 0xf000 ? n - 0xf000 + 0x20 : n);
 }
 
 /** Whether a run carries an explicit page break (w:br w:type="page"). */
 function hasPageBreak(run: OoxmlNode): boolean {
-  return run.children.some((n) => n.name === 'w:br' && attrOf(n, 'w:type') === 'page');
+  return run.children.some(
+    (n) => n.name === 'w:br' && attrOf(n, 'w:type') === 'page',
+  );
 }
 
 /** Flatten tracked changes for the "accept all changes" view: w:ins unwraps
@@ -236,7 +259,8 @@ function unwrapSdt(nodes: OoxmlNode[]): OoxmlNode[] {
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   const group = parseGroup(run, ctx);
   if (group) return group;
-  const image = parseImage(run, ctx) ?? parseShape(run, ctx) ?? parseVmlImage(run, ctx);
+  const image =
+    parseImage(run, ctx) ?? parseShape(run, ctx) ?? parseVmlImage(run, ctx);
   if (image) return [image];
 
   const out: PMNode[] = [];
@@ -249,23 +273,29 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     if (node.name === 'w:t') buf += node.text;
     else if (node.name === 'w:tab') buf += '\t';
     else if (node.name === 'w:sym') buf += symbolChar(attrOf(node, 'w:char'));
-    else if (node.name === 'w:footnoteReference' || node.name === 'w:endnoteReference') {
+    else if (
+      node.name === 'w:footnoteReference' ||
+      node.name === 'w:endnoteReference'
+    ) {
       const kind = node.name === 'w:footnoteReference' ? 'footnote' : 'endnote';
       const id = attrOf(node, 'w:id');
       if (id && ctx.notes.bodies[kind].has(id)) {
         flush();
         const num = ctx.notes.ref(kind, id);
-        const refMarks = [...marks, ctx.schema.marks["vertAlign"].create({ value: 'super' })];
+        const refMarks = [
+          ...marks,
+          ctx.schema.marks['vertAlign'].create({ value: 'super' }),
+        ];
         // Footnotes carry a `footnote` mark so the layout engine can match the
         // reference to its page-bottom body; endnotes stay plain superscripts
         // (their bodies are appended at the document end).
-        if (kind === 'footnote') refMarks.push(ctx.schema.marks["footnote"].create({ num }));
+        if (kind === 'footnote')
+          refMarks.push(ctx.schema.marks['footnote'].create({ num }));
         out.push(ctx.schema.text(String(num), refMarks));
       }
-    }
-    else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
+    } else if (node.name === 'w:br' && attrOf(node, 'w:type') !== 'page') {
       flush();
-      out.push(ctx.schema.nodes["hard_break"].create());
+      out.push(ctx.schema.nodes['hard_break'].create());
     }
   }
   flush();
@@ -286,7 +316,9 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
 
   const wrap = child(anchor, 'wp:wrapTopAndBottom')
     ? 'topAndBottom'
-    : child(anchor, 'wp:wrapSquare') || child(anchor, 'wp:wrapTight') || child(anchor, 'wp:wrapThrough')
+    : child(anchor, 'wp:wrapSquare') ||
+        child(anchor, 'wp:wrapTight') ||
+        child(anchor, 'wp:wrapThrough')
       ? 'square'
       : 'none'; // wrapNone / absent: paints without affecting text
 
@@ -295,9 +327,11 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
   const posH = child(anchor, 'wp:positionH');
   if (posH) {
     const align = child(posH, 'wp:align')?.text.trim();
-    if (align === 'left' || align === 'right' || align === 'center') float['hAlign'] = align;
+    if (align === 'left' || align === 'right' || align === 'center')
+      float['hAlign'] = align;
     const off = emuToPxZero(child(posH, 'wp:posOffset')?.text);
-    if (off !== undefined && float['hAlign'] === undefined) float['hOffset'] = off;
+    if (off !== undefined && float['hAlign'] === undefined)
+      float['hOffset'] = off;
     const rel = attrOf(posH, 'relativeFrom');
     float['hRel'] = rel === 'page' ? 'page' : 'margin'; // column/margin/… ≈ margin
   }
@@ -306,7 +340,8 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
     const off = emuToPxZero(child(posV, 'wp:posOffset')?.text);
     if (off !== undefined) float['vOffset'] = off;
     const rel = attrOf(posV, 'relativeFrom');
-    float['vRel'] = rel === 'page' ? 'page' : rel === 'margin' ? 'margin' : 'paragraph';
+    float['vRel'] =
+      rel === 'page' ? 'page' : rel === 'margin' ? 'margin' : 'paragraph';
   }
   // Text-to-image gaps (EMU attrs on the anchor itself).
   for (const side of ['distL', 'distR', 'distT', 'distB'] as const) {
@@ -346,7 +381,8 @@ function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
   if (!wgp) return null;
   const baseFloat = parseAnchorFloat(drawing);
   if (!baseFloat) return null;
-  const num = (n: OoxmlNode | undefined, a: string) => Number(attrOf(n, a) ?? '0');
+  const num = (n: OoxmlNode | undefined, a: string) =>
+    Number(attrOf(n, a) ?? '0');
   const xfrm = child(child(wgp, 'wpg:grpSpPr'), 'a:xfrm');
   const ext = child(xfrm, 'a:ext');
   const chOff = child(xfrm, 'a:chOff');
@@ -377,8 +413,12 @@ function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
         alt: attrOf(findDescendant(pic, 'pic:cNvPr'), 'descr') ?? '',
         float: {
           ...baseFloat,
-          hOffset: ((baseFloat['hOffset'] as number) ?? 0) + emuPx((num(off, 'x') - num(chOff, 'x')) * sx),
-          vOffset: ((baseFloat['vOffset'] as number) ?? 0) + emuPx((num(off, 'y') - num(chOff, 'y')) * sy),
+          hOffset:
+            ((baseFloat['hOffset'] as number) ?? 0) +
+            emuPx((num(off, 'x') - num(chOff, 'x')) * sx),
+          vOffset:
+            ((baseFloat['vOffset'] as number) ?? 0) +
+            emuPx((num(off, 'y') - num(chOff, 'y')) * sy),
         },
       }),
     );
@@ -407,7 +447,7 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const extent = findDescendant(drawing, 'wp:extent');
   const docPr = findDescendant(drawing, 'wp:docPr');
   const float = parseAnchorFloat(drawing);
-  return ctx.schema.nodes["image"].create({
+  return ctx.schema.nodes['image'].create({
     src,
     width: emuToPx(attrOf(extent, 'cx')),
     height: emuToPx(attrOf(extent, 'cy')),
@@ -434,13 +474,18 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (!src) return null;
 
   const style = attrOf(findDescendant(holder, 'v:shape'), 'style') ?? '';
-  const ptToPx = (m: RegExpExecArray | null) => (m ? Math.round((parseFloat(m[1]) * 96) / 72) : null);
+  const ptToPx = (m: RegExpExecArray | null) =>
+    m ? Math.round((parseFloat(m[1]) * 96) / 72) : null;
   const width =
     ptToPx(/(?:^|;)width:([\d.]+)pt/.exec(style)) ??
-    (Number(attrOf(holder, 'w:dxaOrig')) ? twipsToPx(Number(attrOf(holder, 'w:dxaOrig'))) : null);
+    (Number(attrOf(holder, 'w:dxaOrig'))
+      ? twipsToPx(Number(attrOf(holder, 'w:dxaOrig')))
+      : null);
   const height =
     ptToPx(/(?:^|;)height:([\d.]+)pt/.exec(style)) ??
-    (Number(attrOf(holder, 'w:dyaOrig')) ? twipsToPx(Number(attrOf(holder, 'w:dyaOrig'))) : null);
+    (Number(attrOf(holder, 'w:dyaOrig'))
+      ? twipsToPx(Number(attrOf(holder, 'w:dyaOrig')))
+      : null);
 
   return ctx.schema.nodes['image'].create({
     src,
@@ -452,7 +497,10 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
 }
 
 /** Color of a node's <a:solidFill>: srgbClr directly, schemeClr via theme. */
-function solidFillColor(node: OoxmlNode | undefined, ctx: Ctx): string | undefined {
+function solidFillColor(
+  node: OoxmlNode | undefined,
+  ctx: Ctx,
+): string | undefined {
   const fill = child(node, 'a:solidFill');
   if (!fill) return undefined;
   const srgb = attrOf(child(fill, 'a:srgbClr'), 'val');
@@ -496,7 +544,10 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     // shape outlines), else black.
     const lnRef = findDescendant(child(wsp, 'wps:style'), 'a:lnRef');
     const refScheme = attrOf(child(lnRef, 'a:schemeClr'), 'val');
-    shape['stroke'] = solidFillColor(ln, ctx) ?? (refScheme ? ctx.resolveTheme(refScheme) : undefined) ?? '#000000';
+    shape['stroke'] =
+      solidFillColor(ln, ctx) ??
+      (refScheme ? ctx.resolveTheme(refScheme) : undefined) ??
+      '#000000';
   }
   const fill = solidFillColor(spPr, ctx);
   if (fill) shape['fill'] = fill;
@@ -522,14 +573,23 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
 function parseTextbox(
   wsp: OoxmlNode | undefined,
   ctx: Ctx,
-): { paragraphs: unknown[]; inset?: { l: number; t: number; r: number; b: number } } | null {
+): {
+  paragraphs: unknown[];
+  inset?: { l: number; t: number; r: number; b: number };
+} | null {
   const content = child(child(wsp, 'wps:txbx'), 'w:txbxContent');
   if (!content) return null;
-  const paragraphs = children(content, 'w:p').map((p) => parseParagraph(p, ctx).toJSON());
+  const paragraphs = children(content, 'w:p').map((p) =>
+    parseParagraph(p, ctx).toJSON(),
+  );
   if (paragraphs.length === 0) return null;
   const bodyPr = child(wsp, 'wps:bodyPr');
-  const ins = (name: string): number | undefined => emuToPxZero(attrOf(bodyPr, name));
-  const l = ins('lIns'), t = ins('tIns'), r = ins('rIns'), b = ins('bIns');
+  const ins = (name: string): number | undefined =>
+    emuToPxZero(attrOf(bodyPr, name));
+  const l = ins('lIns'),
+    t = ins('tIns'),
+    r = ins('rIns'),
+    b = ins('bIns');
   const inset =
     l !== undefined || t !== undefined || r !== undefined || b !== undefined
       ? { l: l ?? 10, t: t ?? 5, r: r ?? 10, b: b ?? 5 }
@@ -538,7 +598,12 @@ function parseTextbox(
 }
 
 /** Effective marks for a run (docDefaults+paraStyle → run style → inline rPr). */
-function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href: string | null) {
+function runMarks(
+  run: OoxmlNode | undefined,
+  paraBase: RunProps,
+  ctx: Ctx,
+  href: string | null,
+) {
   const rPr = child(run, 'w:rPr');
   const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
   const effective = [
@@ -547,7 +612,7 @@ function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href
     parseRunProps(rPr, ctx.resolveTheme),
   ].reduce(mergeRunProps, {} as RunProps);
   const marks = propsToMarks(effective, ctx);
-  if (href) marks.push(ctx.schema.marks["link"].create({ href }));
+  if (href) marks.push(ctx.schema.marks['link'].create({ href }));
   // Comments active over this run (w:commentRangeStart/End) become a comment
   // mark — only when the schema in use actually has it (the comment plugin
   // contributed it; otherwise comment ranges are silently skipped).
@@ -559,11 +624,18 @@ function runMarks(run: OoxmlNode | undefined, paraBase: RunProps, ctx: Ctx, href
 }
 
 /** Map one w:r into inline nodes (image, hard breaks or marked text). */
-function runToInline(run: OoxmlNode, paraBase: RunProps, ctx: Ctx, href: string | null): PMNode[] {
+function runToInline(
+  run: OoxmlNode,
+  paraBase: RunProps,
+  ctx: Ctx,
+  href: string | null,
+): PMNode[] {
   const marks = runMarks(run, paraBase, ctx, href);
   const nodes = runInlineNodes(run, marks, ctx);
   // A linked image keeps its link mark; image nodes carry no marks otherwise.
-  return href ? nodes.map((n) => (n.type.name === 'image' ? n.mark(marks) : n)) : nodes;
+  return href
+    ? nodes.map((n) => (n.type.name === 'image' ? n.mark(marks) : n))
+    : nodes;
 }
 
 /** PAGE / NUMPAGES from a field instruction, or null for any other field. */
@@ -580,7 +652,9 @@ function pageFieldNode(
   paraBase: RunProps,
   ctx: Ctx,
 ): PMNode {
-  return ctx.schema.nodes["page_field"].create({ kind }).mark(runMarks(formatRun, paraBase, ctx, null));
+  return ctx.schema.nodes['page_field']
+    .create({ kind })
+    .mark(runMarks(formatRun, paraBase, ctx, null));
 }
 
 /** State for a complex field (w:fldChar begin … instrText … separate … end). */
@@ -592,7 +666,10 @@ interface FieldState {
 
 /** Heading level (1–6) for a paragraph, from its style id ("Heading1"…) or an
  *  explicit `w:outlineLvl` (0-based) in the pPr cascade; undefined for body. */
-function headingLevel(pStyleId: string | undefined, pPrChain: (OoxmlNode | undefined)[]): number | undefined {
+function headingLevel(
+  pStyleId: string | undefined,
+  pPrChain: (OoxmlNode | undefined)[],
+): number | undefined {
   if (pStyleId) {
     const m = /^heading\s*([1-9])$/i.exec(pStyleId);
     if (m) return Math.min(6, Number(m[1]));
@@ -632,11 +709,17 @@ function flattenOmml(node: OoxmlNode): string {
     }
     case 'm:sSub': {
       const sub = flat(child(node, 'm:sub'));
-      return flat(child(node, 'm:e')) + (scriptDigits(sub, SUB_DIGITS) ?? `_(${sub})`);
+      return (
+        flat(child(node, 'm:e')) +
+        (scriptDigits(sub, SUB_DIGITS) ?? `_(${sub})`)
+      );
     }
     case 'm:sSup': {
       const sup = flat(child(node, 'm:sup'));
-      return flat(child(node, 'm:e')) + (scriptDigits(sup, SUP_DIGITS) ?? `^(${sup})`);
+      return (
+        flat(child(node, 'm:e')) +
+        (scriptDigits(sup, SUP_DIGITS) ?? `^(${sup})`)
+      );
     }
     case 'm:sSubSup': {
       const sub = flat(child(node, 'm:sub'));
@@ -658,7 +741,11 @@ function flattenOmml(node: OoxmlNode): string {
       const chr = (name: string, dflt: string): string =>
         attrOf(child(pr, name), 'm:val') ?? dflt;
       const args = children(node, 'm:e').map(flat);
-      return chr('m:begChr', '(') + args.join(chr('m:sepChr', ',')) + chr('m:endChr', ')');
+      return (
+        chr('m:begChr', '(') +
+        args.join(chr('m:sepChr', ',')) +
+        chr('m:endChr', ')')
+      );
     }
     default:
       // Property containers hold formatting (and ctrlPr), never content.
@@ -671,7 +758,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const pPr = child(p, 'w:pPr');
   const pStyleId = attrOf(child(pPr, 'w:pStyle'), 'w:val');
   // Base for every run: docDefaults → paragraph style's run properties.
-  const paraBase = mergeRunProps(ctx.styles.docDefaults, ctx.styles.resolveStyle(pStyleId));
+  const paraBase = mergeRunProps(
+    ctx.styles.docDefaults,
+    ctx.styles.resolveStyle(pStyleId),
+  );
   // Paragraph-property cascade, base-most first; later layers win:
   // docDefaults pPrDefault → style chain (w:basedOn ancestors → style)
   // → numbering lvl pPr (the per-level list indent) → inline.
@@ -708,10 +798,13 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
         } else if (fldType === 'end') {
           const kind = fieldKind(field.instr);
           if (kind) {
-            inline.push(pageFieldNode(kind, field.resultRuns[0], paraBase, ctx));
+            inline.push(
+              pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
+            );
           } else {
             // Unknown instruction: keep the cached result text.
-            for (const r of field.resultRuns) inline.push(...runToInline(r, paraBase, ctx, null));
+            for (const r of field.resultRuns)
+              inline.push(...runToInline(r, paraBase, ctx, null));
           }
           field = null;
         } else if (field.phase === 'instr') {
@@ -730,10 +823,13 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       if (kind) {
         inline.push(pageFieldNode(kind, resultRuns[0], paraBase, ctx));
       } else {
-        for (const r of resultRuns) inline.push(...runToInline(r, paraBase, ctx, null));
+        for (const r of resultRuns)
+          inline.push(...runToInline(r, paraBase, ctx, null));
       }
     } else if (node.name === 'w:hyperlink') {
-      const rel = attrOf(node, 'r:id') ? ctx.rels.get(attrOf(node, 'r:id') as string) : undefined;
+      const rel = attrOf(node, 'r:id')
+        ? ctx.rels.get(attrOf(node, 'r:id') as string)
+        : undefined;
       const anchor = attrOf(node, 'w:anchor');
       const href = rel?.target ?? (anchor ? `#${anchor}` : null);
       for (const run of children(node, 'w:r')) {
@@ -745,7 +841,9 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       const text = flattenOmml(node);
       if (text.length > 0) {
         const first = findDescendant(node, 'm:r');
-        inline.push(ctx.schema.text(text, runMarks(first, paraBase, ctx, null)));
+        inline.push(
+          ctx.schema.text(text, runMarks(first, paraBase, ctx, null)),
+        );
       }
     } else if (node.name === 'w:commentRangeStart') {
       const id = Number(attrOf(node, 'w:id'));
@@ -780,7 +878,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
   if (pageBreak) attrs.pageBreakBefore = true;
-  return ctx.schema.nodes["paragraph"].create(attrs, inline);
+  return ctx.schema.nodes['paragraph'].create(attrs, inline);
 }
 
 /** Custom tab stops from the cascade: the most-derived w:tabs list wins
@@ -799,12 +897,19 @@ function resolveTabs(
     if (pos === undefined) continue;
     const stop: { pos: number; val: string; leader?: string } = {
       pos: twipsToPx(Number(pos)),
-      val: val === 'right' || val === 'center' || val === 'decimal' ? val : 'left',
+      val:
+        val === 'right' || val === 'center' || val === 'decimal' ? val : 'left',
     };
     const leader = attrOf(tab, 'w:leader');
     if (leader && leader !== 'none') {
       stop.leader =
-        leader === 'hyphen' ? 'hyphen' : leader === 'underscore' ? 'underscore' : leader === 'middleDot' ? 'middleDot' : 'dot';
+        leader === 'hyphen'
+          ? 'hyphen'
+          : leader === 'underscore'
+            ? 'underscore'
+            : leader === 'middleDot'
+              ? 'middleDot'
+              : 'dot';
     }
     stops.push(stop);
   }
@@ -812,7 +917,10 @@ function resolveTabs(
 }
 
 /** The last (most-derived) pPr layer that carries `childName`, if any. */
-function lastWith(chain: (OoxmlNode | undefined)[], childName: string): OoxmlNode | undefined {
+function lastWith(
+  chain: (OoxmlNode | undefined)[],
+  childName: string,
+): OoxmlNode | undefined {
   for (let i = chain.length - 1; i >= 0; i--) {
     if (child(chain[i], childName)) return chain[i];
   }
@@ -878,7 +986,8 @@ function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
     if (line !== undefined) {
       const lineRule = rule === 'exact' || rule === 'atLeast' ? rule : 'auto';
       out.lineRule = lineRule;
-      out.line = lineRule === 'auto' ? Number(line) / 240 : twipsToPx(Number(line));
+      out.line =
+        lineRule === 'auto' ? Number(line) / 240 : twipsToPx(Number(line));
     }
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -926,7 +1035,9 @@ interface LogicalCell {
 }
 
 function emptyCell(ctx: Ctx): PMNode {
-  return ctx.schema.nodes["table_cell"].create(null, [ctx.schema.nodes["paragraph"].create()]);
+  return ctx.schema.nodes['table_cell'].create(null, [
+    ctx.schema.nodes['paragraph'].create(),
+  ]);
 }
 
 /** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults.
@@ -943,7 +1054,8 @@ function parseCellMargins(
     const w = attrOf(el, 'w:w');
     return w === undefined ? undefined : twipsToPx(Number(w));
   };
-  const out: { left?: number; right?: number; top?: number; bottom?: number } = {};
+  const out: { left?: number; right?: number; top?: number; bottom?: number } =
+    {};
   const left = side('w:left') ?? side('w:start');
   const right = side('w:right') ?? side('w:end');
   const top = side('w:top');
@@ -976,13 +1088,19 @@ function parseBorderSide(el: OoxmlNode): BorderSide | false {
   const width = Math.max(0.75, (sz / 8) * (96 / 72));
   const style = BORDER_STYLE_IN[val ?? 'single'] ?? 'solid';
   const colorAttr = attrOf(el, 'w:color');
-  const color = colorAttr && colorAttr !== 'auto' ? normalizeHex(colorAttr) ?? '#b0b0b0' : '#b0b0b0';
+  const color =
+    colorAttr && colorAttr !== 'auto'
+      ? (normalizeHex(colorAttr) ?? '#b0b0b0')
+      : '#b0b0b0';
   return { width, style, color };
 }
 
 /** Per-side border appearance from a w:tblBorders / w:tcBorders node. An absent
  *  side is omitted (inherits); a present side is a {@link BorderSide} or false. */
-function parseBordersEl(bordersEl: OoxmlNode | undefined, sides: readonly string[]): TableBorders | null {
+function parseBordersEl(
+  bordersEl: OoxmlNode | undefined,
+  sides: readonly string[],
+): TableBorders | null {
   if (!bordersEl) return null;
   const out: TableBorders = {};
   for (const side of sides) {
@@ -993,7 +1111,14 @@ function parseBordersEl(bordersEl: OoxmlNode | undefined, sides: readonly string
   return Object.keys(out).length > 0 ? out : null;
 }
 
-const TABLE_SIDES = ['top', 'bottom', 'left', 'right', 'insideH', 'insideV'] as const;
+const TABLE_SIDES = [
+  'top',
+  'bottom',
+  'left',
+  'right',
+  'insideH',
+  'insideV',
+] as const;
 const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
 
 /** Border visibility from a w:tblBorders node (direct tblPr or table style).
@@ -1001,7 +1126,8 @@ const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
 function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): TableBorders | null {
   const tblPr = child(tbl, 'w:tblPr');
   const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
-  const bordersEl = child(tblPr, 'w:tblBorders') ?? ctx.styles.resolveTableBorders(styleId);
+  const bordersEl =
+    child(tblPr, 'w:tblBorders') ?? ctx.styles.resolveTableBorders(styleId);
   const out = parseBordersEl(bordersEl, TABLE_SIDES);
   // Only treat the table as bordered if at least one side is actually visible.
   return out && Object.values(out).some(Boolean) ? out : null;
@@ -1019,21 +1145,36 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     let col = 0;
     for (const tc of children(tr, 'w:tc')) {
       const tcPr = child(tc, 'w:tcPr');
-      const colspan = Number(attrOf(child(tcPr, 'w:gridSpan'), 'w:val') ?? '1') || 1;
+      const colspan =
+        Number(attrOf(child(tcPr, 'w:gridSpan'), 'w:val') ?? '1') || 1;
       const vMergeEl = child(tcPr, 'w:vMerge');
       const vMerge = !vMergeEl
         ? null
         : attrOf(vMergeEl, 'w:val') === 'restart'
           ? 'restart'
           : 'continue'; // omitted w:val defaults to continue
-      const widths = grid.length ? grid.slice(col, col + colspan).map(twipsToPx) : [];
-      const background = normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
+      const widths = grid.length
+        ? grid.slice(col, col + colspan).map(twipsToPx)
+        : [];
+      const background =
+        normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
-      const vAlign = vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
+      const vAlign =
+        vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
       const borders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
       const content = parseBlocks(tc, ctx);
-      if (content.length === 0) content.push(ctx.schema.nodes["paragraph"].create());
-      cells.push({ startCol: col, colspan, vMerge, colwidth: widths.length ? widths : null, background, vAlign, borders, content });
+      if (content.length === 0)
+        content.push(ctx.schema.nodes['paragraph'].create());
+      cells.push({
+        startCol: col,
+        colspan,
+        vMerge,
+        colwidth: widths.length ? widths : null,
+        background,
+        vAlign,
+        borders,
+        content,
+      });
       col += colspan;
     }
     return cells;
@@ -1043,17 +1184,28 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const rowProps = children(tbl, 'w:tr').map((tr) => {
     const trPr = child(tr, 'w:trPr');
     const hdr = child(trPr, 'w:tblHeader');
-    const header = hdr ? attrOf(hdr, 'w:val') !== 'false' && attrOf(hdr, 'w:val') !== '0' : false;
+    const header = hdr
+      ? attrOf(hdr, 'w:val') !== 'false' && attrOf(hdr, 'w:val') !== '0'
+      : false;
     const trH = child(trPr, 'w:trHeight');
     const hv = attrOf(trH, 'w:val');
     const height =
-      hv !== undefined ? { value: twipsToPx(Number(hv)), exact: attrOf(trH, 'w:hRule') === 'exact' } : null;
+      hv !== undefined
+        ? {
+            value: twipsToPx(Number(hv)),
+            exact: attrOf(trH, 'w:hRule') === 'exact',
+          }
+        : null;
     const cs = child(trPr, 'w:cantSplit');
-    const cantSplit = cs ? attrOf(cs, 'w:val') !== 'false' && attrOf(cs, 'w:val') !== '0' : false;
+    const cantSplit = cs
+      ? attrOf(cs, 'w:val') !== 'false' && attrOf(cs, 'w:val') !== '0'
+      : false;
     return { header, height, cantSplit };
   });
 
-  const colIndex = logicalRows.map((cells) => new Map(cells.map((c) => [c.startCol, c])));
+  const colIndex = logicalRows.map(
+    (cells) => new Map(cells.map((c) => [c.startCol, c])),
+  );
 
   // Phase 2: drop continue cells; non-continue cells absorb the continues
   // directly below them in the same column as rowspan.
@@ -1068,7 +1220,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         else break;
       }
       emitted.push(
-        ctx.schema.nodes["table_cell"].create(
+        ctx.schema.nodes['table_cell'].create(
           {
             colspan: cell.colspan,
             rowspan,
@@ -1086,7 +1238,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     if (rp.header) rowAttrs['header'] = true;
     if (rp.height) rowAttrs['height'] = rp.height;
     if (rp.cantSplit) rowAttrs['cantSplit'] = true;
-    return ctx.schema.nodes["table_row"].create(
+    return ctx.schema.nodes['table_row'].create(
       Object.keys(rowAttrs).length > 0 ? rowAttrs : null,
       emitted.length > 0 ? emitted : [emptyCell(ctx)],
     );
@@ -1098,10 +1250,13 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const attrs: Record<string, unknown> = {};
   if (cellPadding) attrs['cellPadding'] = cellPadding;
   if (borders) attrs['borders'] = borders;
-  if (jc === 'center' || jc === 'right' || jc === 'end') attrs['align'] = jc === 'end' ? 'right' : jc;
-  return ctx.schema.nodes["table"].create(
+  if (jc === 'center' || jc === 'right' || jc === 'end')
+    attrs['align'] = jc === 'end' ? 'right' : jc;
+  return ctx.schema.nodes['table'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
-    rows.length > 0 ? rows : [ctx.schema.nodes["table_row"].create(null, [emptyCell(ctx)])],
+    rows.length > 0
+      ? rows
+      : [ctx.schema.nodes['table_row'].create(null, [emptyCell(ctx)])],
   );
 }
 
@@ -1123,7 +1278,10 @@ interface SectionConfig {
 
 /** Column flow from a section's w:cols (equal-width only). count defaults to 1;
  *  the gap is w:space (twips→px), Word's default 720 twips = 0.5in. */
-function parseColumns(sectPr: OoxmlNode | undefined): { count: number; gap: number } {
+function parseColumns(sectPr: OoxmlNode | undefined): {
+  count: number;
+  gap: number;
+} {
   const cols = sectPr && child(sectPr, 'w:cols');
   const num = Number(attrOf(cols, 'w:num') ?? '1');
   const explicit = cols ? children(cols, 'w:col').length : 0;
@@ -1182,7 +1340,10 @@ async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
 }
 
 /** Rels file that accompanies a part: "word/header1.xml" → "word/_rels/header1.xml.rels". */
-async function readPartRels(zip: JSZip, partPath: string): Promise<OoxmlNode | undefined> {
+async function readPartRels(
+  zip: JSZip,
+  partPath: string,
+): Promise<OoxmlNode | undefined> {
   const slash = partPath.lastIndexOf('/');
   const relsPath = `${partPath.slice(0, slash + 1)}_rels/${partPath.slice(slash + 1)}.rels`;
   const xml = await readPart(zip, relsPath);
@@ -1192,18 +1353,32 @@ async function readPartRels(zip: JSZip, partPath: string): Promise<OoxmlNode | u
 /** Load footnotes.xml / endnotes.xml into a numbering registry. Separator
  *  notes (negative ids / w:type separator) are skipped. */
 async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
-  const bodies = { footnote: new Map<string, OoxmlNode>(), endnote: new Map<string, OoxmlNode>() };
-  const load = async (path: string, root: string, tag: string, into: Map<string, OoxmlNode>) => {
+  const bodies = {
+    footnote: new Map<string, OoxmlNode>(),
+    endnote: new Map<string, OoxmlNode>(),
+  };
+  const load = async (
+    path: string,
+    root: string,
+    tag: string,
+    into: Map<string, OoxmlNode>,
+  ) => {
     const xml = await readPart(zip, path);
     if (!xml) return;
     for (const note of children(child(parseXml(xml), root), tag)) {
       const id = attrOf(note, 'w:id');
       const type = attrOf(note, 'w:type');
-      if (id === undefined || Number(id) < 1 || (type && type !== 'normal')) continue;
+      if (id === undefined || Number(id) < 1 || (type && type !== 'normal'))
+        continue;
       into.set(id, note);
     }
   };
-  await load('word/footnotes.xml', 'w:footnotes', 'w:footnote', bodies.footnote);
+  await load(
+    'word/footnotes.xml',
+    'w:footnotes',
+    'w:footnote',
+    bodies.footnote,
+  );
   await load('word/endnotes.xml', 'w:endnotes', 'w:endnote', bodies.endnote);
   const reg: NotesRegistry = {
     bodies,
@@ -1221,7 +1396,10 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
 /** Load comments.xml (+ commentsExtended.xml) into a registry: bodies/author/
  *  date keyed by id, plus the paraId→id map and the w15 thread/resolved data. */
 async function buildCommentsRegistry(zip: JSZip): Promise<CommentsRegistry> {
-  const defs = new Map<number, { author: string; date: string; body: OoxmlNode; paraIds: string[] }>();
+  const defs = new Map<
+    number,
+    { author: string; date: string; body: OoxmlNode; paraIds: string[] }
+  >();
   const paraToId = new Map<string, number>();
   const xml = await readPart(zip, 'word/comments.xml');
   if (xml) {
@@ -1245,7 +1423,10 @@ async function buildCommentsRegistry(zip: JSZip): Promise<CommentsRegistry> {
   const ext = new Map<string, { parentParaId: string | null; done: boolean }>();
   const extXml = await readPart(zip, 'word/commentsExtended.xml');
   if (extXml) {
-    for (const ex of children(child(parseXml(extXml), 'w15:commentsEx'), 'w15:commentEx')) {
+    for (const ex of children(
+      child(parseXml(extXml), 'w15:commentsEx'),
+      'w15:commentEx',
+    )) {
       const paraId = attrOf(ex, 'w15:paraId');
       if (!paraId) continue;
       const done = attrOf(ex, 'w15:done');
@@ -1269,7 +1450,13 @@ function buildCommentsList(ctx: Ctx): CommentData[] {
   const out: CommentData[] = [];
   for (const id of ctx.comments.used) {
     const def = ctx.comments.defs.get(id);
-    if (def) out.push({ id, author: def.author, date: def.date, text: collectText(def.body).trim() });
+    if (def)
+      out.push({
+        id,
+        author: def.author,
+        date: def.date,
+        text: collectText(def.body).trim(),
+      });
   }
   return out;
 }
@@ -1278,9 +1465,15 @@ function buildCommentsList(ctx: Ctx): CommentData[] {
 function commentBodyJSON(comment: OoxmlNode): unknown {
   const paras = children(comment, 'w:p').map((p) => {
     const text = collectText(p);
-    return commentSchema.node('paragraph', null, text ? [commentSchema.text(text)] : []);
+    return commentSchema.node(
+      'paragraph',
+      null,
+      text ? [commentSchema.text(text)] : [],
+    );
   });
-  return commentSchema.node('doc', null, paras.length ? paras : [commentSchema.node('paragraph')]).toJSON();
+  return commentSchema
+    .node('doc', null, paras.length ? paras : [commentSchema.node('paragraph')])
+    .toJSON();
 }
 
 /** Referenced comments as authoring thread nodes for doc.attrs.comments. OOXML
@@ -1295,24 +1488,37 @@ function buildCommentNodes(ctx: Ctx): CommentNode[] {
   const resolvedOf = new Map<number, boolean>();
   for (const [id, def] of defs) {
     const exEntry = def.paraIds.map((p) => ext.get(p)).find(Boolean);
-    const pid = exEntry?.parentParaId != null ? paraToId.get(exEntry.parentParaId) ?? null : null;
+    const pid =
+      exEntry?.parentParaId != null
+        ? (paraToId.get(exEntry.parentParaId) ?? null)
+        : null;
     parentOf.set(id, pid === id ? null : pid); // guard self-parent
     resolvedOf.set(id, exEntry?.done ?? false);
   }
   // Replies aren't referenced in the body (only the root's range is), so include
   // any comment whose thread root is referenced — walk up the parent chain.
   const referenced = (id: number): boolean => {
-    for (let cur: number | null = id, n = 0; cur != null && n < 100; cur = parentOf.get(cur) ?? null, n++)
+    for (
+      let cur: number | null = id, n = 0;
+      cur != null && n < 100;
+      cur = parentOf.get(cur) ?? null, n++
+    )
       if (usedSet.has(cur)) return true;
     return false;
   };
   // Roots in body-appearance order, then the remaining replies in id order.
-  const ids = [...used.filter((id) => defs.has(id)), ...[...defs.keys()].filter((id) => !usedSet.has(id))];
+  const ids = [
+    ...used.filter((id) => defs.has(id)),
+    ...[...defs.keys()].filter((id) => !usedSet.has(id)),
+  ];
   const out: CommentNode[] = [];
   for (const id of ids) {
     const def = defs.get(id);
     if (!def || !referenced(id)) continue;
-    const user: IUser = { id: def.author || 'unknown', name: def.author || 'Unknown' };
+    const user: IUser = {
+      id: def.author || 'unknown',
+      name: def.author || 'Unknown',
+    };
     out.push({
       id,
       parentId: parentOf.get(id) ?? null,
@@ -1330,14 +1536,16 @@ function buildCommentNodes(ctx: Ctx): CommentNode[] {
  *  endnote section and the page-bottom footnote map. */
 function noteBlocks(note: OoxmlNode, num: number, ctx: Ctx): PMNode[] {
   const blocks = parseBlocks(note, ctx);
-  const marker = ctx.schema.text(`${num}. `, [ctx.schema.marks["vertAlign"].create({ value: 'super' })]);
+  const marker = ctx.schema.text(`${num}. `, [
+    ctx.schema.marks['vertAlign'].create({ value: 'super' }),
+  ]);
   const first = blocks[0];
   if (first && first.type.name === 'paragraph') {
     const kids: PMNode[] = [marker];
     first.forEach((k) => kids.push(k));
-    blocks[0] = ctx.schema.nodes["paragraph"].create(first.attrs, kids);
+    blocks[0] = ctx.schema.nodes['paragraph'].create(first.attrs, kids);
   } else {
-    blocks.unshift(ctx.schema.nodes["paragraph"].create(null, [marker]));
+    blocks.unshift(ctx.schema.nodes['paragraph'].create(null, [marker]));
   }
   return blocks;
 }
@@ -1362,8 +1570,8 @@ function buildNotesSection(ctx: Ctx): PMNode[] {
   const endnotes = ctx.notes.refs.filter((r) => r.kind === 'endnote');
   if (endnotes.length === 0) return [];
   const out: PMNode[] = [
-    ctx.schema.nodes["paragraph"].create({ spacing: { before: 12 } }, [
-      ctx.schema.text('Ghi chú cuối', [ctx.schema.marks["strong"].create()]),
+    ctx.schema.nodes['paragraph'].create({ spacing: { before: 12 } }, [
+      ctx.schema.text('Ghi chú cuối', [ctx.schema.marks['strong'].create()]),
     ]),
   ];
   for (const { id, num } of endnotes) {
@@ -1387,9 +1595,9 @@ function storyDoc(
   if (numbering) attrs['numbering'] = numbering;
   if (sections) attrs['sections'] = sections;
   if (comments && comments.length > 0) attrs['comments'] = comments;
-  return ctx.schema.nodes["doc"].create(
+  return ctx.schema.nodes['doc'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
-    blocks.length > 0 ? blocks : [ctx.schema.nodes["paragraph"].create()],
+    blocks.length > 0 ? blocks : [ctx.schema.nodes['paragraph'].create()],
   );
 }
 
@@ -1399,7 +1607,10 @@ async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
     if (!path.startsWith('word/media/')) continue;
     const entry = zip.file(path);
     if (!entry || entry.dir) continue;
-    media.set(path, `data:${mimeOf(path)};base64,${await entry.async('base64')}`);
+    media.set(
+      path,
+      `data:${mimeOf(path)};base64,${await entry.async('base64')}`,
+    );
   }
   return media;
 }
@@ -1429,8 +1640,13 @@ export async function importDocx(
   const themeXml = await readPart(zip, 'word/theme/theme1.xml');
 
   // Stateless/shared pieces; numbering counters are per-story (built fresh below).
-  const resolveTheme = buildThemeResolver(themeXml ? parseXml(themeXml) : undefined);
-  const styles = buildStyleRegistry(stylesXml ? parseXml(stylesXml) : undefined, resolveTheme);
+  const resolveTheme = buildThemeResolver(
+    themeXml ? parseXml(themeXml) : undefined,
+  );
+  const styles = buildStyleRegistry(
+    stylesXml ? parseXml(stylesXml) : undefined,
+    resolveTheme,
+  );
   const numberingRoot = numberingXml ? parseXml(numberingXml) : undefined;
   const media = await extractMedia(zip);
   const notes = await buildNotesRegistry(zip);
@@ -1450,7 +1666,9 @@ export async function importDocx(
   const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
 
   const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
-  const parsed = body ? parseBodyBlocks(body, ctx) : { blocks: [], sections: [] };
+  const parsed = body
+    ? parseBodyBlocks(body, ctx)
+    : { blocks: [], sections: [] };
   // References are now assigned (in document order); footnotes go to the page
   // bottom, endnotes stay appended (and fall into the last section).
   const footnotes = buildFootnotesMap(ctx);
@@ -1460,7 +1678,8 @@ export async function importDocx(
     sections[sections.length - 1].blockCount += endnoteBlocks.length;
   }
   // Only ride the sections attr when it changes layout (>1 section, or columns).
-  const multiSection = sections.length > 1 || sections.some((s) => s.columns.count > 1);
+  const multiSection =
+    sections.length > 1 || sections.some((s) => s.columns.count > 1);
   // Comment threads only ride the doc when the schema carries the comment mark
   // (the comment plugin is present); otherwise comment values are filtered out.
   const hasComments = !!ctx.schema.marks['comment'];
@@ -1477,7 +1696,11 @@ export async function importDocx(
   const footers: Record<string, PMNode> = {};
   const sectPr = body ? child(body, 'w:sectPr') : undefined;
   if (sectPr) {
-    const collect = async (refName: string, store: Record<string, PMNode>, root: string) => {
+    const collect = async (
+      refName: string,
+      store: Record<string, PMNode>,
+      root: string,
+    ) => {
       for (const ref of children(sectPr, refName)) {
         const type = attrOf(ref, 'w:type') ?? 'default';
         const rId = attrOf(ref, 'r:id');
@@ -1488,7 +1711,11 @@ export async function importDocx(
         if (!xml) continue;
         const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
         const el = child(parseXml(xml), root);
-        store[type] = storyDoc(partCtx, el ? parseBlocks(el, partCtx) : [], ctx.numbering.defs);
+        store[type] = storyDoc(
+          partCtx,
+          el ? parseBlocks(el, partCtx) : [],
+          ctx.numbering.defs,
+        );
       }
     };
     await collect('w:headerReference', headers, 'w:hdr');
@@ -1499,8 +1726,12 @@ export async function importDocx(
   // (document settings) → even pages use the "even" chrome.
   const titlePg = sectPr ? isToggleOn(child(sectPr, 'w:titlePg')) : false;
   const settingsXml = await readPart(zip, 'word/settings.xml');
-  const settings = settingsXml ? child(parseXml(settingsXml), 'w:settings') : undefined;
-  const evenAndOdd = settings ? isToggleOn(child(settings, 'w:evenAndOddHeaders')) : false;
+  const settings = settingsXml
+    ? child(parseXml(settingsXml), 'w:settings')
+    : undefined;
+  const evenAndOdd = settings
+    ? isToggleOn(child(settings, 'w:evenAndOddHeaders'))
+    : false;
 
   return {
     doc,
