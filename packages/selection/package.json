@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-selection",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "bapbong — caret/selection math over ResolvedLayout (hit-test, caret rect, selection rects)",
   "license": "MIT",
   "repository": {
