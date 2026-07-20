@@ -1,14 +1,26 @@
 import { Node as ProseMirrorNode, Schema } from 'prosemirror-model';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
-import { importDocx, exportDocx, type DocxImport } from '@shadow-garden/bapbong-docx';
-import { createLayoutCache, layout } from '@shadow-garden/bapbong-layout-engine';
+import {
+  importDocx,
+  exportDocx,
+  type DocxImport,
+} from '@shadow-garden/bapbong-docx';
+import {
+  createLayoutCache,
+  layout,
+} from '@shadow-garden/bapbong-layout-engine';
 import {
   createCanvasMeasurer,
   createCanvasMetrics,
   ensureFontsLoaded,
 } from '@shadow-garden/bapbong-measuring';
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
-import { caretRect, hitTest, selectionRects, verticalCaret } from '@shadow-garden/bapbong-selection';
+import {
+  caretRect,
+  hitTest,
+  selectionRects,
+  verticalCaret,
+} from '@shadow-garden/bapbong-selection';
 import { A11yMirror } from '@shadow-garden/bapbong-a11y';
 import type {
   CaretRect,
@@ -116,12 +128,16 @@ export class RenderCore {
 
   constructor(stack: HTMLElement, opts: RenderCoreOptions = {}) {
     this.stack = stack;
-    this.viewport = opts.viewport ?? (stack.closest('.canvas-wrap') as HTMLElement | null);
+    this.viewport =
+      opts.viewport ?? (stack.closest('.canvas-wrap') as HTMLElement | null);
     this.painter = new CanvasPainter(stack);
     this.measureText = opts.measureText ?? createCanvasMeasurer();
     this.measureMetrics = opts.measureMetrics ?? createCanvasMetrics();
     this.zoomFactor = opts.zoom ?? 1;
-    this.a11y = opts.a11y === false ? null : new A11yMirror(stack, { label: opts.a11yLabel });
+    this.a11y =
+      opts.a11y === false
+        ? null
+        : new A11yMirror(stack, { label: opts.a11yLabel });
 
     this.viewport?.addEventListener('scroll', this.onScroll);
     // Fonts that finish loading later invalidate every measurement.
@@ -166,11 +182,16 @@ export class RenderCore {
   async loadDocx(
     bytes: ArrayBuffer,
     opts: { schema?: Schema; paint?: boolean } = {},
-  ): Promise<{ doc: ProseMirrorNode; headerKeys: string[]; footerKeys: string[] }> {
-    const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } = await importDocx(
-      bytes,
-      opts.schema ? { schema: opts.schema } : undefined,
-    );
+  ): Promise<{
+    doc: ProseMirrorNode;
+    headerKeys: string[];
+    footerKeys: string[];
+  }> {
+    const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } =
+      await importDocx(
+        bytes,
+        opts.schema ? { schema: opts.schema } : undefined,
+      );
     this.docSchema = opts.schema ?? baseSchema;
     this.importedRaw = raw; // carried on export so unmodelled parts survive
     this.chromeHeaders = headers;
@@ -180,19 +201,30 @@ export class RenderCore {
     this.footnotes = footnotes;
     this.page = page;
     // Measure with the real fonts, not their fallbacks.
-    const families = collectFontFamilies(doc, ...Object.values(headers), ...Object.values(footers));
+    const families = collectFontFamilies(
+      doc,
+      ...Object.values(headers),
+      ...Object.values(footers),
+    );
     this.docFamilies = new Set(families.map(normalizeFamily));
     await ensureFontsLoaded(families);
     this.layoutDoc(doc);
     if (opts.paint !== false) this.paintContent();
-    return { doc, headerKeys: Object.keys(headers), footerKeys: Object.keys(footers) };
+    return {
+      doc,
+      headerKeys: Object.keys(headers),
+      footerKeys: Object.keys(footers),
+    };
   }
 
   /** Export the current document to .docx bytes, carrying the imported source
    *  package so unmodelled parts survive the round-trip. */
   async exportDocx(): Promise<Uint8Array> {
     if (!this.doc) throw new Error('RenderCore: no document loaded');
-    return exportDocx(this.doc, this.importedRaw ? { carry: this.importedRaw } : undefined);
+    return exportDocx(
+      this.doc,
+      this.importedRaw ? { carry: this.importedRaw } : undefined,
+    );
   }
 
   // ── Layout / paint ──────────────────────────────────────────────────
@@ -204,7 +236,11 @@ export class RenderCore {
     this.a11y?.update(doc);
     this.resolved = layout(
       doc,
-      { page: this.page, measureText: this.measureText, measureMetrics: this.measureMetrics },
+      {
+        page: this.page,
+        measureText: this.measureText,
+        measureMetrics: this.measureMetrics,
+      },
       this.layoutCache,
       {
         header: this.chromeHeaders['default'],
@@ -239,7 +275,10 @@ export class RenderCore {
   paintOverlay(overlay: Overlay): void {
     if (!this.resolved) return;
     this.lastOverlay = normalizeOverlay(overlay);
-    this.painter.paintOverlay({ caret: this.lastOverlay.caret, selection: this.lastOverlay.selection });
+    this.painter.paintOverlay({
+      caret: this.lastOverlay.caret,
+      selection: this.lastOverlay.selection,
+    });
   }
 
   /** Set the zoom factor (1 = 100%) and repaint content at the new scale. */
@@ -254,28 +293,43 @@ export class RenderCore {
   }
 
   /**
-   * Print the whole document. The live canvas is virtualized (only visible
-   * pages exist), so this renders **every** page with a throwaway painter,
-   * snapshots each to a PNG, and prints one image per sheet via a hidden iframe
-   * (clean pagination, the live view untouched).
+   * Full-resolution snapshots of every page, in order. The live canvas is
+   * virtualized (only visible pages exist), so this renders **every** page
+   * with a throwaway painter, untouched by the live view. `width`/`height`
+   * are CSS px (layout px at zoom 1); the PNG bitmap itself is
+   * devicePixelRatio-scaled for crispness.
    */
-  async print(): Promise<void> {
+  pageSnapshots(): { png: string; width: number; height: number }[] {
     const layout = this.resolved;
-    if (!layout) return;
+    if (!layout) return [];
     const holder = document.createElement('div');
-    holder.style.cssText = 'position:absolute;left:-99999px;top:0;pointer-events:none;';
+    holder.style.cssText =
+      'position:absolute;left:-99999px;top:0;pointer-events:none;';
     document.body.appendChild(holder);
     try {
       // No viewport → the painter mounts a canvas for every page at full size.
       new CanvasPainter(holder).paint(layout, { zoom: 1 });
       const canvases = Array.from(holder.querySelectorAll('canvas')).sort(
-        (a, b) => parseFloat(a.style.top || '0') - parseFloat(b.style.top || '0'),
+        (a, b) =>
+          parseFloat(a.style.top || '0') - parseFloat(b.style.top || '0'),
       );
-      const sources = canvases.map((c) => c.toDataURL('image/png'));
-      await printImages(sources);
+      return canvases.map((c) => ({
+        png: c.toDataURL('image/png'),
+        width: parseFloat(c.style.width) || c.width,
+        height: parseFloat(c.style.height) || c.height,
+      }));
     } finally {
       holder.remove();
     }
+  }
+
+  /** Print the whole document — one page snapshot per sheet via a hidden
+   *  iframe (clean pagination). Hosts whose webview lacks `window.print()`
+   *  (WKWebView) print through their own channel instead — see the editor's
+   *  `printFallback` option. */
+  async print(): Promise<void> {
+    const sources = this.pageSnapshots().map((p) => p.png);
+    await printImages(sources);
   }
 
   /** Gather decorations from the provider and resolve each doc range to
@@ -284,7 +338,12 @@ export class RenderCore {
     if (!this.resolved || !this.decorationProvider) return [];
     const out: PaintDecoration[] = [];
     for (const d of this.decorationProvider()) {
-      const rects = selectionRects(this.resolved, d.from, d.to, this.measureText);
+      const rects = selectionRects(
+        this.resolved,
+        d.from,
+        d.to,
+        this.measureText,
+      );
       if (rects.length) out.push({ rects, kind: d.kind, color: d.color });
     }
     return out;
@@ -294,17 +353,23 @@ export class RenderCore {
 
   /** Caret geometry at a doc position (page-local), or null. */
   caretRect(pos: number): CaretRect | null {
-    return this.resolved ? caretRect(this.resolved, pos, this.measureText) : null;
+    return this.resolved
+      ? caretRect(this.resolved, pos, this.measureText)
+      : null;
   }
 
   /** Selection highlight rects for a doc range (page-local). */
   selectionRects(from: number, to: number): SelectionRect[] {
-    return this.resolved ? selectionRects(this.resolved, from, to, this.measureText) : [];
+    return this.resolved
+      ? selectionRects(this.resolved, from, to, this.measureText)
+      : [];
   }
 
   /** The doc position one line above/below `head` at horizontal `x`, or null. */
   verticalCaret(head: number, dir: -1 | 1, x: number): number | null {
-    return this.resolved ? verticalCaret(this.resolved, head, dir, x, this.measureText) : null;
+    return this.resolved
+      ? verticalCaret(this.resolved, head, dir, x, this.measureText)
+      : null;
   }
 
   /** Map client (viewport) coords to a page-local point, or null. */
@@ -318,7 +383,9 @@ export class RenderCore {
 
   /** The doc position under a page-local point, or null. */
   posAtPoint(point: PagePoint): number | null {
-    return this.resolved ? hitTest(this.resolved, point, this.measureText) : null;
+    return this.resolved
+      ? hitTest(this.resolved, point, this.measureText)
+      : null;
   }
 
   /** The doc position under a pointer/mouse event, or null. */
@@ -335,8 +402,11 @@ export class RenderCore {
   /** Scroll the viewport so the caret at `pos` sits `topMargin` px from the top. */
   scrollToPos(pos: number, topMargin = 80): void {
     const cr = this.caretRect(pos);
-    const pt = cr && this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
-    if (pt && this.viewport) this.viewport.scrollTop = Math.max(0, pt.y - topMargin);
+    const pt =
+      cr &&
+      this.painter.pageToCanvas({ pageIndex: cr.pageIndex, x: cr.x, y: cr.y });
+    if (pt && this.viewport)
+      this.viewport.scrollTop = Math.max(0, pt.y - topMargin);
   }
 
   /** The viewport's window onto the page stack, in container CSS px. */
@@ -386,7 +456,10 @@ export class RenderCore {
     // (Families set at loadDocx; a family added by later edits isn't tracked
     // yet — neither is its ensureFontsLoaded, a pre-existing gap.)
     const faces = (ev as { fontfaces?: { family: string }[] }).fontfaces ?? [];
-    if (faces.length > 0 && !faces.some((f) => this.docFamilies.has(normalizeFamily(f.family)))) {
+    if (
+      faces.length > 0 &&
+      !faces.some((f) => this.docFamilies.has(normalizeFamily(f.family)))
+    ) {
       return;
     }
     // Coalesce the burst: one re-layout after the last batch settles.
@@ -418,7 +491,8 @@ function printImages(sources: string[]): Promise<void> {
     }
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    iframe.style.cssText =
+      'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
     document.body.appendChild(iframe);
     const cw = iframe.contentWindow;
     const doc = iframe.contentDocument;
@@ -467,11 +541,16 @@ function printImages(sources: string[]): Promise<void> {
 
 /** Font-family names as `document.fonts` reports them: unquoted, lowercase. */
 function normalizeFamily(family: string): string {
-  return family.replace(/^["']|["']$/g, '').trim().toLowerCase();
+  return family
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 /** Every fontFamily mark in the given documents, plus the engine default. */
-export function collectFontFamilies(...docs: (ProseMirrorNode | undefined)[]): string[] {
+export function collectFontFamilies(
+  ...docs: (ProseMirrorNode | undefined)[]
+): string[] {
   const families = new Set<string>(['Arial']);
   for (const doc of docs) {
     doc?.descendants((node) => {

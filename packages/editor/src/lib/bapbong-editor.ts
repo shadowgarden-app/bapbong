@@ -96,6 +96,12 @@ export interface BapbongEditorOptions {
     image?: Uint8Array;
     imageMime?: string;
   } | null>;
+  /** Print channel for hosts whose webview lacks `window.print()` (WKWebView
+   *  is a silent no-op). Receives every page as a PNG data URL + its sheet
+   *  size in PDF points; resolve true when the host handled the print. */
+  printFallback?: (
+    pages: { png: string; widthPt: number; heightPt: number }[],
+  ) => Promise<boolean>;
 }
 
 /**
@@ -153,10 +159,12 @@ export class BapbongEditor {
   readonly commands: Collection<EditorCommand> = defaultCommands();
 
   private readonly readClipboardFallback?: BapbongEditorOptions['readClipboardFallback'];
+  private readonly printFallback?: BapbongEditorOptions['printFallback'];
 
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
     this.readClipboardFallback = opts.readClipboardFallback;
+    this.printFallback = opts.printFallback;
     this.core = new RenderCore(stack, {
       viewport: opts.viewport,
       measureText: opts.measureText,
@@ -369,9 +377,30 @@ export class BapbongEditor {
     return this.core.getZoom();
   }
 
-  /** Print the whole document — renders every page (not just the visible ones)
-   *  and prints one image per sheet. */
-  print(): Promise<void> {
+  /** Print the whole document — renders every page (not just the visible
+   *  ones) and prints one image per sheet. Prefers the host's print channel
+   *  (`printFallback`) when provided; falls back to the iframe +
+   *  `window.print()` path browsers support. */
+  async print(): Promise<void> {
+    if (this.printFallback) {
+      // CSS px (96/in) → PDF points (72/in): the sheet keeps its physical size.
+      const toPt = (px: number) => (px * 72) / 96;
+      const pages = this.core.pageSnapshots().map((p) => ({
+        png: p.png,
+        widthPt: toPt(p.width),
+        heightPt: toPt(p.height),
+      }));
+      if (pages.length) {
+        try {
+          if (await this.printFallback(pages)) return;
+        } catch (err) {
+          console.warn(
+            '[bapbong] host print channel failed, falling back:',
+            err,
+          );
+        }
+      }
+    }
     return this.core.print();
   }
 
