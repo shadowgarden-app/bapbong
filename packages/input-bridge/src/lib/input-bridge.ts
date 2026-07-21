@@ -1,4 +1,4 @@
-import { baseKeymap } from 'prosemirror-commands';
+import { baseKeymap, chainCommands } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
@@ -168,9 +168,28 @@ export class InputBridge {
     } satisfies Partial<CSSStyleDeclaration>);
     this.dom.appendChild(this.host);
 
+    // The keymap only sees Enter as a clean keydown. When an IME composition
+    // is active (Vietnamese Telex composes on EVERY letter), the committing
+    // Enter arrives with isComposing=true, the keymap skips it, and the
+    // browser applies its NATIVE insertParagraph to the hidden contenteditable
+    // — WebKit's DOM edit re-parses into a paragraph OUTSIDE isolating nodes
+    // (caret jumps below the table it was typing in). Claim the beforeinput
+    // and run the same Enter chain the keymap would have.
+    const enterChain = chainCommands(
+      options.keys?.['Enter'] ?? (() => false),
+      baseKeymap['Enter'],
+    );
     this.view = new EditorView(this.host, {
       state: createEditingState(options.doc, options.keys),
       handlePaste: options.handlePaste,
+      handleDOMEvents: {
+        beforeinput: (view, event) => {
+          if (event.inputType !== 'insertParagraph') return false;
+          event.preventDefault();
+          enterChain(view.state, view.dispatch);
+          return true;
+        },
+      },
       dispatchTransaction: (tr) => {
         const state = this.view.state.apply(tr);
         this.view.updateState(state);
