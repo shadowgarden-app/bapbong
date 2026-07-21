@@ -1,5 +1,9 @@
 import type { Collection, Command } from '@shadow-garden/bapbong-contracts';
-import { type EditorHandle, type EditorStateOf, injectStyle } from './internal.js';
+import {
+  type EditorHandle,
+  type EditorStateOf,
+  injectStyle,
+} from './internal.js';
 
 /** Presentation for one toolbar button — the headless {@link Command} carries
  *  no UI, so labels/icons live here. */
@@ -67,7 +71,12 @@ export interface ToolbarHandle {
 const alignSvg = (spans: Array<[number, number]>) =>
   `<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">` +
   `<g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">` +
-  spans.map(([x1, x2], i) => `<line x1="${x1}" y1="${4 + i * 4}" x2="${x2}" y2="${4 + i * 4}"/>`).join('') +
+  spans
+    .map(
+      ([x1, x2], i) =>
+        `<line x1="${x1}" y1="${4 + i * 4}" x2="${x2}" y2="${4 + i * 4}"/>`,
+    )
+    .join('') +
   `</g></svg>`;
 
 const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
@@ -95,10 +104,38 @@ const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
     title: 'Subscript',
     svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><text x="0" y="11.5" font-size="10.5" font-family="serif">x</text><text x="8.5" y="15.5" font-size="7" font-family="serif">2</text></svg>',
   },
-  'align-left': { title: 'Align left', svg: alignSvg([[2, 14], [2, 9], [2, 12]]) },
-  'align-center': { title: 'Center', svg: alignSvg([[2, 14], [4, 12], [3, 13]]) },
-  'align-right': { title: 'Align right', svg: alignSvg([[2, 14], [7, 14], [4, 14]]) },
-  'align-justify': { title: 'Justify', svg: alignSvg([[2, 14], [2, 14], [2, 14]]) },
+  'align-left': {
+    title: 'Align left',
+    svg: alignSvg([
+      [2, 14],
+      [2, 9],
+      [2, 12],
+    ]),
+  },
+  'align-center': {
+    title: 'Center',
+    svg: alignSvg([
+      [2, 14],
+      [4, 12],
+      [3, 13],
+    ]),
+  },
+  'align-right': {
+    title: 'Align right',
+    svg: alignSvg([
+      [2, 14],
+      [7, 14],
+      [4, 14],
+    ]),
+  },
+  'align-justify': {
+    title: 'Justify',
+    svg: alignSvg([
+      [2, 14],
+      [2, 14],
+      [2, 14],
+    ]),
+  },
   'bullet-list': {
     title: 'Bullet list',
     svg: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 4h8M6 8h8M6 12h8"/><circle cx="3" cy="4" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r="1" fill="currentColor" stroke="none"/></svg>',
@@ -127,7 +164,7 @@ const STYLE = `
 .bb-toolbar-color{position:relative}
 .bb-toolbar-color .bb-color-glyph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;line-height:1;font-size:13px}
 .bb-toolbar-color .bb-color-bar{width:16px;height:3px;border-radius:1px;background:currentColor}
-.bb-color-pop{position:absolute;z-index:1200;top:33px;left:0;display:grid;grid-template-columns:repeat(8,16px);gap:4px;padding:8px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16)}
+.bb-color-pop{position:absolute;z-index:1200;display:grid;grid-template-columns:repeat(8,16px);gap:4px;padding:8px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16)}
 .bb-color-pop[hidden]{display:none}
 .bb-color-swatch{width:16px;height:16px;padding:0;border:1px solid rgba(0,0,0,.18);border-radius:3px;cursor:pointer}
 .bb-color-none{grid-column:1/-1;font:inherit;font-size:12px;padding:3px 0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:5px;background:var(--bb-ui-bg,#fff);cursor:pointer}
@@ -139,7 +176,9 @@ const STYLE = `
  * Default grouping: every non-`align-*` command, then the `align-*` commands —
  * derived from the registry so new commands appear without config.
  */
-export function defaultToolbarGroups(commands: Collection<Command>): string[][] {
+export function defaultToolbarGroups(
+  commands: Collection<Command>,
+): string[][] {
   const names = [...commands].map((c) => c.name);
   const aligns = names.filter((n) => n.startsWith('align-'));
   const rest = names.filter((n) => !n.startsWith('align-'));
@@ -175,7 +214,9 @@ export function mountToolbar(
 
   for (const group of groups) {
     // Keep command entries only if the command exists; controls always render.
-    const entries = group.filter((e) => typeof e !== 'string' || editor.commands.has(e));
+    const entries = group.filter(
+      (e) => typeof e !== 'string' || editor.commands.has(e),
+    );
     if (entries.length === 0) continue;
     const groupEl = document.createElement('div');
     groupEl.className = 'bb-toolbar-group';
@@ -202,8 +243,8 @@ export function mountToolbar(
         continue;
       }
       if (typeof entry !== 'string' && entry.kind === 'color') {
-        const wrap = document.createElement('div');
-        wrap.className = 'bb-toolbar-color';
+        const colorWrap = document.createElement('div');
+        colorWrap.className = 'bb-toolbar-color';
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'bb-toolbar-btn';
@@ -246,11 +287,31 @@ export function mountToolbar(
         btn.addEventListener('mousedown', (e) => e.preventDefault());
         btn.addEventListener('click', () => {
           const open = pop.hidden;
-          root.querySelectorAll('.bb-color-pop').forEach((p) => ((p as HTMLElement).hidden = true));
+          wrap
+            .querySelectorAll('.bb-color-pop')
+            .forEach((p) => ((p as HTMLElement).hidden = true));
           pop.hidden = !open;
           if (!pop.hidden) {
+            // Position under the button, relative to the outer wrap — the pop
+            // lives OUTSIDE the overflow-hidden .bb-toolbar row (which would
+            // clip it entirely; the "⋮" popover escapes the same way), and the
+            // button itself may sit in the row or in the folded popover.
+            const wrapRect = wrap.getBoundingClientRect();
+            const btnRect = btn.getBoundingClientRect();
+            pop.style.top = `${btnRect.bottom - wrapRect.top + 4}px`;
+            const left = Math.max(
+              0,
+              Math.min(
+                btnRect.left - wrapRect.left,
+                wrap.clientWidth - pop.offsetWidth - 4,
+              ),
+            );
+            pop.style.left = `${left}px`;
             const onDoc = (ev: Event) => {
-              if (!wrap.contains(ev.target as Node)) {
+              if (
+                !colorWrap.contains(ev.target as Node) &&
+                !pop.contains(ev.target as Node)
+              ) {
                 pop.hidden = true;
                 document.removeEventListener('pointerdown', onDoc, true);
               }
@@ -258,15 +319,17 @@ export function mountToolbar(
             document.addEventListener('pointerdown', onDoc, true);
           }
         });
-        wrap.append(btn, pop);
-        groupEl.appendChild(wrap);
+        colorWrap.appendChild(btn);
+        wrap.appendChild(pop);
+        groupEl.appendChild(colorWrap);
         colors.push({ spec: entry, bar });
         continue;
       }
       const item = items[entry] ?? { title: entry };
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'bb-toolbar-btn' + (item.className ? ` ${item.className}` : '');
+      btn.className =
+        'bb-toolbar-btn' + (item.className ? ` ${item.className}` : '');
       btn.title = item.title;
       btn.setAttribute('aria-label', item.title);
       if (item.svg) btn.innerHTML = item.svg;
@@ -325,9 +388,16 @@ export function mountToolbar(
     while (pop.firstChild) root.insertBefore(pop.firstChild, moreBtn);
     moreBtn.style.display = 'none';
     closePop();
+    // Refolding moves the anchor buttons — an open color pop would float
+    // detached from its button, so close them all.
+    wrap
+      .querySelectorAll('.bb-color-pop')
+      .forEach((p) => ((p as HTMLElement).hidden = true));
     if (fits()) return;
     moreBtn.style.display = '';
-    const groupEls = Array.from(root.children).filter((el) => el.classList.contains('bb-toolbar-group'));
+    const groupEls = Array.from(root.children).filter((el) =>
+      el.classList.contains('bb-toolbar-group'),
+    );
     for (let i = groupEls.length - 1; i >= 0 && !fits(); i--) {
       pop.insertBefore(groupEls[i], pop.firstChild);
     }
@@ -356,7 +426,8 @@ export function mountToolbar(
     }
     for (const { spec, el } of selects) el.value = spec.value(state);
     // Empty → CSS `currentColor` (the button's text colour) shows in the bar.
-    for (const { spec, bar } of colors) bar.style.background = spec.value(state) ?? '';
+    for (const { spec, bar } of colors)
+      bar.style.background = spec.value(state) ?? '';
   };
 
   const off = editor.onChange((c) => refresh(c.state));
