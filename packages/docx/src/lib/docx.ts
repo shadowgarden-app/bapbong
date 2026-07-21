@@ -399,7 +399,10 @@ function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
     const rel = embed ? ctx.rels.get(embed) : undefined;
     if (!rel) continue;
     const target = rel.target.replace(/^\/+/, '');
-    const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
+    const src =
+      ctx.media.get(`word/${target}`) ??
+      ctx.media.get(target) ??
+      (/^https?:\/\//i.test(rel.target) ? rel.target : undefined);
     if (!src) continue;
     const picXfrm = child(child(pic, 'pic:spPr'), 'a:xfrm');
     const off = child(picXfrm, 'a:off');
@@ -441,7 +444,12 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const rel = embed ? ctx.rels.get(embed) : undefined;
   if (!rel) return null;
   const target = rel.target.replace(/^\/+/, '');
-  const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
+  // Externally-linked picture (TargetMode="External"): no media part — the
+  // rel target IS the image URL.
+  const src =
+    ctx.media.get(`word/${target}`) ??
+    ctx.media.get(target) ??
+    (/^https?:\/\//i.test(rel.target) ? rel.target : undefined);
   if (!src) return null;
 
   const extent = findDescendant(drawing, 'wp:extent');

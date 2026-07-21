@@ -71,12 +71,31 @@ function esc(s: string): string {
   );
 }
 
+// Every MIME the importer accepts (docx.ts mimeOf) must map here — an
+// unmapped type would fall back to a .png extension around foreign bytes,
+// and Word shows a missing-image box for the mislabelled part.
 const MIME_EXT: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpeg',
   'image/jpg': 'jpeg',
   'image/gif': 'gif',
   'image/bmp': 'bmp',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+  'image/tiff': 'tiff',
+  'image/avif': 'avif',
+};
+
+/** [Content_Types].xml Default per media extension (inverse of MIME_EXT). */
+const EXT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  tiff: 'image/tiff',
+  avif: 'image/avif',
 };
 
 // ── runs ────────────────────────────────────────────────────────────
@@ -198,23 +217,39 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   if (node.attrs['shape']) return shapeXml(node, ctx);
   const src = String(node.attrs['src'] ?? '');
   const m = /^data:([^;]+);base64,(.+)$/.exec(src);
-  if (!m) return '';
-  const ext = MIME_EXT[m[1].toLowerCase()] ?? 'png';
-  ctx.exts.add(ext);
-  const n = ctx.nextId++;
-  const rid = `rId${n}`;
-  ctx.media.push({ path: `word/media/image${n}.${ext}`, base64: m[2] });
-  ctx.rels.push(
-    `<Relationship Id="${rid}" Type="${R_NS}/image" Target="media/image${n}.${ext}"/>`,
-  );
+  let n: number;
+  let name: string;
+  let blip: string;
+  if (m) {
+    const ext = MIME_EXT[m[1].toLowerCase()] ?? 'png';
+    ctx.exts.add(ext);
+    n = ctx.nextId++;
+    name = `image${n}.${ext}`;
+    ctx.media.push({ path: `word/media/${name}`, base64: m[2] });
+    ctx.rels.push(
+      `<Relationship Id="rId${n}" Type="${R_NS}/image" Target="media/${name}"/>`,
+    );
+    blip = `<a:blip r:embed="rId${n}"/>`;
+  } else if (/^https?:\/\//i.test(src)) {
+    // "Insert image from URL": no bytes on hand — write an externally-linked
+    // picture rather than silently dropping the node.
+    n = ctx.nextId++;
+    name = `image${n}`;
+    ctx.rels.push(
+      `<Relationship Id="rId${n}" Type="${R_NS}/image" Target="${esc(src)}" TargetMode="External"/>`,
+    );
+    blip = `<a:blip r:link="rId${n}"/>`;
+  } else {
+    return ''; // blob:/object URL — its bytes are unreachable at export time
+  }
   const cx = pxToEmu((node.attrs['width'] as number) ?? 96);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 96);
   return (
     `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
     `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Picture ${n}"/>` +
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
-    `<pic:nvPicPr><pic:cNvPr id="${n}" name="image${n}.${ext}"/><pic:cNvPicPr/></pic:nvPicPr>` +
-    `<pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill>${blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
     `<pic:spPr><a:xfrm${rotAttr(node)}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
     `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
@@ -629,7 +664,7 @@ function contentTypes(exts: Set<string>, hasComments: boolean): string {
   ];
   for (const ext of exts)
     parts.push(
-      `<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`,
+      `<Default Extension="${ext}" ContentType="${EXT_MIME[ext] ?? `image/${ext}`}"/>`,
     );
   parts.push(
     '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>',
@@ -662,7 +697,7 @@ function mergeContentTypes(
   };
   for (const ext of exts)
     add(
-      `<Default Extension="${ext}" ContentType="image/${ext === 'jpg' ? 'jpeg' : ext}"/>`,
+      `<Default Extension="${ext}" ContentType="${EXT_MIME[ext] ?? `image/${ext}`}"/>`,
       ext,
     );
   if (hasComments) {

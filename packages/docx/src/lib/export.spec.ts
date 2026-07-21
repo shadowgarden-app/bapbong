@@ -213,6 +213,47 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(String(img?.attrs['src'])).toBe(src);
   });
 
+  it('embeds a webp data-URL image with the right extension + content type', async () => {
+    // Regression: unmapped MIME types used to be written as image<n>.png —
+    // foreign bytes behind a .png label, which Word renders as a missing box.
+    const src = `data:image/webp;base64,${PNG_1PX}`;
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', { src, width: 50, height: 40 }),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(bytes.slice().buffer);
+    expect(zip.file(/word\/media\/image\d+\.webp/)).toHaveLength(1);
+    const ct = await zip.file('[Content_Types].xml')!.async('string');
+    expect(ct).toContain('Extension="webp" ContentType="image/webp"');
+    const { doc: back } = await importDocx(bytes);
+    const img = [...range(back.child(0))].find((n) => n.type.name === 'image');
+    expect(String(img?.attrs['src'])).toBe(src);
+  });
+
+  it('round-trips an http-src image as an externally-linked picture', async () => {
+    // Regression: non-data-URL srcs used to be silently dropped on export.
+    const src = 'https://example.com/pic.png';
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', { src, width: 50, height: 40 }),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(bytes.slice().buffer);
+    const rels = await zip
+      .file('word/_rels/document.xml.rels')!
+      .async('string');
+    expect(rels).toContain(`Target="${src}" TargetMode="External"`);
+    const docXml = await zip.file('word/document.xml')!.async('string');
+    expect(docXml).toContain('r:link=');
+    const { doc: back } = await importDocx(bytes);
+    const img = [...range(back.child(0))].find((n) => n.type.name === 'image');
+    expect(String(img?.attrs['src'])).toBe(src);
+    expect(img?.attrs['width']).toBe(50);
+  });
+
   it('round-trips w:cantSplit on table rows', async () => {
     const doc = schema.node('doc', null, [
       schema.node('table', null, [

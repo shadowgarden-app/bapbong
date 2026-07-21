@@ -1,6 +1,17 @@
-import { Component, ElementRef, OnDestroy, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  OnDestroy,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { DOMSerializer, Node as ProseMirrorNode } from 'prosemirror-model';
-import { BapbongEditor, type CellBlock, type EditorChange, type SelectedCell } from '@shadow-garden/bapbong-editor';
+import {
+  BapbongEditor,
+  type CellBlock,
+  type EditorChange,
+  type SelectedCell,
+} from '@shadow-garden/bapbong-editor';
 import {
   activeFontFamily,
   activeFontSize,
@@ -23,7 +34,11 @@ import {
   setLink,
   setTextColor,
 } from '@shadow-garden/bapbong-commands';
-import type { BorderSide, Command, EditorPointerEvent } from '@shadow-garden/bapbong-contracts';
+import type {
+  BorderSide,
+  Command,
+  EditorPointerEvent,
+} from '@shadow-garden/bapbong-contracts';
 import {
   createCanvasMeasurer,
   createCanvasMetrics,
@@ -59,7 +74,12 @@ function borderSidesFor(
   cell: SelectedCell,
   block: CellBlock,
   on: BorderSide,
-): { top: BorderSide | false; right: BorderSide | false; bottom: BorderSide | false; left: BorderSide | false } {
+): {
+  top: BorderSide | false;
+  right: BorderSide | false;
+  bottom: BorderSide | false;
+  left: BorderSide | false;
+} {
   const off = false as const;
   const topRow = cell.row === 0;
   const bottomRow = cell.row === block.rows - 1;
@@ -71,9 +91,19 @@ function borderSidesFor(
     case 'none':
       return { top: off, right: off, bottom: off, left: off };
     case 'outside':
-      return { top: topRow ? on : off, right: rightCol ? on : off, bottom: bottomRow ? on : off, left: leftCol ? on : off };
+      return {
+        top: topRow ? on : off,
+        right: rightCol ? on : off,
+        bottom: bottomRow ? on : off,
+        left: leftCol ? on : off,
+      };
     case 'inside':
-      return { top: topRow ? off : on, right: rightCol ? off : on, bottom: bottomRow ? off : on, left: leftCol ? off : on };
+      return {
+        top: topRow ? off : on,
+        right: rightCol ? off : on,
+        bottom: bottomRow ? off : on,
+        left: leftCol ? off : on,
+      };
     case 'top':
       return { top: topRow ? on : off, right: off, bottom: off, left: off };
     case 'bottom':
@@ -83,9 +113,19 @@ function borderSidesFor(
     case 'right':
       return { top: off, right: rightCol ? on : off, bottom: off, left: off };
     case 'insideH':
-      return { top: topRow ? off : on, right: off, bottom: bottomRow ? off : on, left: off };
+      return {
+        top: topRow ? off : on,
+        right: off,
+        bottom: bottomRow ? off : on,
+        left: off,
+      };
     case 'insideV':
-      return { top: off, right: rightCol ? off : on, bottom: off, left: leftCol ? off : on };
+      return {
+        top: off,
+        right: rightCol ? off : on,
+        bottom: off,
+        left: leftCol ? off : on,
+      };
   }
 }
 
@@ -108,15 +148,20 @@ export class EditorPlayground implements OnDestroy {
   protected readonly loading = signal(false);
   protected readonly pageCount = signal(0);
 
-  private readonly previewHost = viewChild<ElementRef<HTMLDivElement>>('preview');
+  private readonly previewHost =
+    viewChild<ElementRef<HTMLDivElement>>('preview');
   // The editor fills this container with one <canvas> per page (virtualized).
-  private readonly stackHost = viewChild<ElementRef<HTMLDivElement>>('canvasStack');
+  private readonly stackHost =
+    viewChild<ElementRef<HTMLDivElement>>('canvasStack');
   // The scroll viewport the page stack lives in (handed to the editor).
-  private readonly wrapHost = viewChild<ElementRef<HTMLDivElement>>('canvasWrap');
+  private readonly wrapHost =
+    viewChild<ElementRef<HTMLDivElement>>('canvasWrap');
   // Menubar / toolbar hosts — bapbong-ui renders + wires them. The find panel
   // is a body-level dialog (no host slot), opened from Edit ▸ Find and replace.
-  private readonly editorMenubar = viewChild<ElementRef<HTMLDivElement>>('editorMenubar');
-  private readonly editorToolbar = viewChild<ElementRef<HTMLDivElement>>('editorToolbar');
+  private readonly editorMenubar =
+    viewChild<ElementRef<HTMLDivElement>>('editorMenubar');
+  private readonly editorToolbar =
+    viewChild<ElementRef<HTMLDivElement>>('editorToolbar');
   private menubar: MenubarHandle | null = null;
   private toolbar: ToolbarHandle | null = null;
   private findDialog: FindDialogHandle | null = null;
@@ -165,7 +210,9 @@ export class EditorPlayground implements OnDestroy {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = (this.fileName() ?? 'document').replace(/\.docx$/i, '') + '-export.docx';
+      a.download =
+        (this.fileName() ?? 'document').replace(/\.docx$/i, '') +
+        '-export.docx';
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -225,14 +272,19 @@ export class EditorPlayground implements OnDestroy {
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
     // Cell-block action icon → cell-properties dialog (applied to the block).
-    editor.tableSelection.onAction((block) => this.openCellPropsForBlock(block));
+    editor.tableSelection.onAction((block) =>
+      this.openCellPropsForBlock(block),
+    );
     // Menubar / toolbar / find-bar: hand bapbong-ui the host elements + the
     // editor; it renders from editor.commands / editor.find and wires everything
     // itself. The menubar tree mixes registry commands with host actions (open
     // file, comment view, find, shortcuts) and a table-size widget — see
     // buildMenus().
     const menubarHost = this.editorMenubar()?.nativeElement;
-    if (menubarHost) this.menubar = mountMenubar(menubarHost, editor, { menus: this.buildMenus() });
+    if (menubarHost)
+      this.menubar = mountMenubar(menubarHost, editor, {
+        menus: this.buildMenus(),
+      });
     const toolbarHost = this.editorToolbar()?.nativeElement;
     if (toolbarHost)
       this.toolbar = mountToolbar(toolbarHost, editor, {
@@ -245,7 +297,15 @@ export class EditorPlayground implements OnDestroy {
               width: 132,
               options: [
                 { label: 'Phông chữ', value: '' },
-                ...['Arial', 'Times New Roman', 'Georgia', 'Calibri', 'Courier New', 'Verdana', 'Tahoma'].map((f) => ({
+                ...[
+                  'Arial',
+                  'Times New Roman',
+                  'Georgia',
+                  'Calibri',
+                  'Courier New',
+                  'Verdana',
+                  'Tahoma',
+                ].map((f) => ({
                   label: f,
                   value: f,
                 })),
@@ -259,7 +319,9 @@ export class EditorPlayground implements OnDestroy {
               width: 66,
               options: [
                 { label: 'Cỡ chữ', value: '' },
-                ...[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map((n) => ({ label: String(n), value: String(n) })),
+                ...[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map(
+                  (n) => ({ label: String(n), value: String(n) }),
+                ),
               ],
               value: (s) => {
                 const sz = activeFontSize(s);
@@ -281,8 +343,22 @@ export class EditorPlayground implements OnDestroy {
               glyph: 'A',
               allowNone: true,
               swatches: [
-                '#000000', '#5f5e5a', '#888780', '#b4b2a9', '#e24b4a', '#d85a30', '#ba7517', '#639922',
-                '#1d9e75', '#0f6e56', '#378add', '#185fa5', '#534ab7', '#993556', '#d4537e', '#ffffff',
+                '#000000',
+                '#5f5e5a',
+                '#888780',
+                '#b4b2a9',
+                '#e24b4a',
+                '#d85a30',
+                '#ba7517',
+                '#639922',
+                '#1d9e75',
+                '#0f6e56',
+                '#378add',
+                '#185fa5',
+                '#534ab7',
+                '#993556',
+                '#d4537e',
+                '#ffffff',
               ],
               value: (s) => activeTextColor(s),
               onSelect: (c) => this.exec(setTextColor(c)),
@@ -294,8 +370,18 @@ export class EditorPlayground implements OnDestroy {
                 '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h10"/><path d="M5 11l-1 1 2 0 6.5-6.5a1.5 1.5 0 0 0-2-2L4 10z"/></svg>',
               allowNone: true,
               swatches: [
-                '#fff59d', '#ffe082', '#ffcc80', '#ef9a9a', '#f48fb1', '#ce93d8',
-                '#90caf9', '#a5d6a7', '#80deea', '#e6ee9c', '#bcaaa4', '#eeeeee',
+                '#fff59d',
+                '#ffe082',
+                '#ffcc80',
+                '#ef9a9a',
+                '#f48fb1',
+                '#ce93d8',
+                '#90caf9',
+                '#a5d6a7',
+                '#80deea',
+                '#e6ee9c',
+                '#bcaaa4',
+                '#eeeeee',
               ],
               value: (s) => activeHighlight(s),
               onSelect: (c) => this.exec(setHighlight(c)),
@@ -309,7 +395,10 @@ export class EditorPlayground implements OnDestroy {
               kind: 'select',
               title: 'Zoom',
               width: 72,
-              options: [50, 75, 90, 100, 125, 150, 200].map((n) => ({ label: `${n}%`, value: String(n) })),
+              options: [50, 75, 90, 100, 125, 150, 200].map((n) => ({
+                label: `${n}%`,
+                value: String(n),
+              })),
               // Zoom lives on the render core, not in editor state — read it from
               // the editor (the toolbar re-reads on every change anyway).
               value: () => String(Math.round(editor.getZoom() * 100)),
@@ -322,7 +411,8 @@ export class EditorPlayground implements OnDestroy {
     // pinned to the canvas viewport's top-right (like Google Docs). Uses the
     // lib's English defaults.
     this.findDialog = createFindDialog(editor.find, {
-      anchor: () => this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
+      anchor: () =>
+        this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
     });
     this.editor = editor;
     return editor;
@@ -349,7 +439,8 @@ export class EditorPlayground implements OnDestroy {
     const boundaries = this.showSections() ? ed.sectionBoundaries() : [];
     while (this.sectionMarkerEls.length < boundaries.length) {
       const line = document.createElement('div');
-      line.style.cssText = 'position:absolute;z-index:7;border-top:1px dashed #378add;pointer-events:none;';
+      line.style.cssText =
+        'position:absolute;z-index:7;border-top:1px dashed #378add;pointer-events:none;';
       const x = document.createElement('button');
       x.type = 'button';
       x.setAttribute('aria-label', 'Xoá section break');
@@ -367,8 +458,16 @@ export class EditorPlayground implements OnDestroy {
     }
     this.sectionMarkerEls.forEach((line, i) => {
       const rect = boundaries[i]?.rect;
-      const tl = rect && ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.x, y: rect.y });
-      const tr = rect && ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.x + rect.width, y: rect.y });
+      const tl =
+        rect &&
+        ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.x, y: rect.y });
+      const tr =
+        rect &&
+        ed.pageToCanvas({
+          pageIndex: rect.pageIndex,
+          x: rect.x + rect.width,
+          y: rect.y,
+        });
       if (!rect || !tl || !tr) {
         line.style.display = 'none';
         return;
@@ -401,7 +500,9 @@ export class EditorPlayground implements OnDestroy {
     const host = this.previewHost()?.nativeElement;
     if (!host) return;
     const serializer = DOMSerializer.fromSchema(doc.type.schema);
-    host.replaceChildren(serializer.serializeFragment(doc.content, { document }));
+    host.replaceChildren(
+      serializer.serializeFragment(doc.content, { document }),
+    );
   }
 
   // ── Menubar config ───────────────────────────────────────────────
@@ -413,10 +514,21 @@ export class EditorPlayground implements OnDestroy {
       {
         label: 'File',
         entries: [
-          { label: 'Open…', run: () => this.openFilePicker('.docx', (f) => this.loadFile(f)) },
-          { label: 'Download .docx', run: () => void this.downloadDocx(), isEnabled: () => this.pageCount() > 0 },
+          {
+            label: 'Open…',
+            run: () => this.openFilePicker('.docx', (f) => this.loadFile(f)),
+          },
+          {
+            label: 'Download .docx',
+            run: () => void this.downloadDocx(),
+            isEnabled: () => this.pageCount() > 0,
+          },
           'separator',
-          { label: 'Print', run: () => void this.editor?.print(), isEnabled: () => this.pageCount() > 0 },
+          {
+            label: 'Print',
+            run: () => void this.editor?.print(),
+            isEnabled: () => this.pageCount() > 0,
+          },
         ],
       },
       {
@@ -425,12 +537,34 @@ export class EditorPlayground implements OnDestroy {
           { command: 'undo', label: 'Undo' },
           { command: 'redo', label: 'Redo' },
           'separator',
-          { label: 'Cut', shortcut: '⌘X', isEnabled: () => this.hasSelection(), run: () => this.editor?.cut() },
-          { label: 'Copy', shortcut: '⌘C', isEnabled: () => this.hasSelection(), run: () => this.editor?.copy() },
-          { label: 'Paste', shortcut: '⌘V', run: () => void this.editor?.paste() },
-          { label: 'Paste without formatting', shortcut: '⇧⌘V', run: () => void this.editor?.pasteText() },
+          {
+            label: 'Cut',
+            shortcut: '⌘X',
+            isEnabled: () => this.hasSelection(),
+            run: () => this.editor?.cut(),
+          },
+          {
+            label: 'Copy',
+            shortcut: '⌘C',
+            isEnabled: () => this.hasSelection(),
+            run: () => this.editor?.copy(),
+          },
+          {
+            label: 'Paste',
+            shortcut: '⌘V',
+            run: () => void this.editor?.paste(),
+          },
+          {
+            label: 'Paste without formatting',
+            shortcut: '⇧⌘V',
+            run: () => void this.editor?.pasteText(),
+          },
           'separator',
-          { label: 'Find and replace', run: () => this.findDialog?.open(), shortcut: '⌘F' },
+          {
+            label: 'Find and replace',
+            run: () => this.findDialog?.open(),
+            shortcut: '⌘F',
+          },
         ],
       },
       {
@@ -452,10 +586,16 @@ export class EditorPlayground implements OnDestroy {
           {
             label: 'Image',
             submenu: [
-              { label: 'Upload…', run: () => this.openFilePicker('image/*', (f) => this.insertImageFile(f)) },
+              {
+                label: 'Upload…',
+                run: () =>
+                  this.openFilePicker('image/*', (f) =>
+                    this.insertImageFile(f),
+                  ),
+              },
               {
                 label: 'From URL…',
-                run: () => this.execPrompt('Insert image from URL', 'https://…', (url) => insertImage(url)),
+                run: () => void this.insertImageFromUrl(),
               },
             ],
           },
@@ -469,14 +609,23 @@ export class EditorPlayground implements OnDestroy {
                 },
               }),
           },
-          { label: 'Link…', run: () => this.execPrompt('Insert link', 'https://…', (href) => setLink(href)) },
+          {
+            label: 'Link…',
+            run: () =>
+              this.execPrompt('Insert link', 'https://…', (href) =>
+                setLink(href),
+              ),
+          },
           {
             label: 'Remove link',
             isEnabled: () => {
               const ed = this.editor;
               if (!ed) return false;
               const cmd = setLink(null);
-              return (cmd.isEnabled?.(ed.state) ?? true) && (cmd.isActive?.(ed.state) ?? false);
+              return (
+                (cmd.isEnabled?.(ed.state) ?? true) &&
+                (cmd.isActive?.(ed.state) ?? false)
+              );
             },
             run: () => this.exec(setLink(null)),
           },
@@ -484,8 +633,14 @@ export class EditorPlayground implements OnDestroy {
             label: 'Break',
             submenu: [
               { command: 'page-break', label: 'Page break' },
-              { command: 'section-break-next-page', label: 'Section break (next page)' },
-              { command: 'section-break-continuous', label: 'Section break (continuous)' },
+              {
+                command: 'section-break-next-page',
+                label: 'Section break (next page)',
+              },
+              {
+                command: 'section-break-continuous',
+                label: 'Section break (continuous)',
+              },
             ],
           },
         ],
@@ -539,7 +694,12 @@ export class EditorPlayground implements OnDestroy {
           },
         ],
       },
-      { label: 'Help', entries: [{ label: 'Keyboard shortcuts', run: () => this.showShortcuts() }] },
+      {
+        label: 'Help',
+        entries: [
+          { label: 'Keyboard shortcuts', run: () => this.showShortcuts() },
+        ],
+      },
     ];
   }
 
@@ -549,30 +709,65 @@ export class EditorPlayground implements OnDestroy {
     const ed = this.editor;
     if (!ed) return;
     const sel = ed.state.selection;
-    const insideSel = !sel.empty && ev.pos != null && ev.pos >= sel.from && ev.pos <= sel.to;
+    const insideSel =
+      !sel.empty && ev.pos != null && ev.pos >= sel.from && ev.pos <= sel.to;
     if (ev.pos != null && !insideSel) ed.setSelection(ev.pos);
 
     const hasSelection = !ed.state.selection.empty;
     const entries: ContextMenuEntry[] = [
-      { label: 'Cut', shortcut: '⌘X', enabled: hasSelection, run: () => ed.cut() },
-      { label: 'Copy', shortcut: '⌘C', enabled: hasSelection, run: () => ed.copy() },
+      {
+        label: 'Cut',
+        shortcut: '⌘X',
+        enabled: hasSelection,
+        run: () => ed.cut(),
+      },
+      {
+        label: 'Copy',
+        shortcut: '⌘C',
+        enabled: hasSelection,
+        run: () => ed.copy(),
+      },
       { label: 'Paste', shortcut: '⌘V', run: () => void ed.paste() },
-      { label: 'Paste without formatting', shortcut: '⇧⌘V', run: () => void ed.pasteText() },
-      { label: 'Delete', enabled: hasSelection, run: () => this.exec(deleteSelectionCommand()) },
+      {
+        label: 'Paste without formatting',
+        shortcut: '⇧⌘V',
+        run: () => void ed.pasteText(),
+      },
+      {
+        label: 'Delete',
+        enabled: hasSelection,
+        run: () => this.exec(deleteSelectionCommand()),
+      },
     ];
     const cell = cellAt(ed.state);
     if (cell) {
       // Act on the selected block if there is one, else the clicked cell (1×1).
-      const block = ed.tableSelection.block() ?? { cells: [{ pos: cell.pos, row: 0, col: 0 }], rows: 1, cols: 1 };
-      entries.push('separator', { label: 'Cell properties…', run: () => this.openCellPropsForBlock(block) });
+      const block = ed.tableSelection.block() ?? {
+        cells: [{ pos: cell.pos, row: 0, col: 0 }],
+        rows: 1,
+        cols: 1,
+      };
+      entries.push('separator', {
+        label: 'Cell properties…',
+        run: () => this.openCellPropsForBlock(block),
+      });
       if (block.cells.length > 1) {
-        entries.push({ label: 'Merge cells', run: () => this.exec(mergeCells(block.cells, block.rows, block.cols)) });
+        entries.push({
+          label: 'Merge cells',
+          run: () => this.exec(mergeCells(block.cells, block.rows, block.cols)),
+        });
       }
       entries.push(
         { label: 'Insert row above', run: () => this.exec(insertRow(false)) },
         { label: 'Insert row below', run: () => this.exec(insertRow(true)) },
-        { label: 'Insert column left', run: () => this.exec(insertColumn(false)) },
-        { label: 'Insert column right', run: () => this.exec(insertColumn(true)) },
+        {
+          label: 'Insert column left',
+          run: () => this.exec(insertColumn(false)),
+        },
+        {
+          label: 'Insert column right',
+          run: () => this.exec(insertColumn(true)),
+        },
         'separator',
         { label: 'Delete row', run: () => this.exec(deleteRow()) },
         { label: 'Delete column', run: () => this.exec(deleteColumn()) },
@@ -599,16 +794,29 @@ export class EditorPlayground implements OnDestroy {
       singleCell: block.rows === 1 && block.cols === 1,
       onApply: (result) => {
         const on: BorderSide | null = result.border
-          ? { width: result.border.width, style: result.border.style, color: result.border.color }
+          ? {
+              width: result.border.width,
+              style: result.border.style,
+              color: result.border.color,
+            }
           : null;
         let tr = ed.state.tr;
         for (const cell of block.cells) {
-          if (ed.state.doc.nodeAt(cell.pos)?.type.name !== 'table_cell') continue;
+          if (ed.state.doc.nodeAt(cell.pos)?.type.name !== 'table_cell')
+            continue;
           tr = tr
             .setNodeAttribute(cell.pos, 'background', result.background)
-            .setNodeAttribute(cell.pos, 'vAlign', result.vAlign === 'top' ? null : result.vAlign);
+            .setNodeAttribute(
+              cell.pos,
+              'vAlign',
+              result.vAlign === 'top' ? null : result.vAlign,
+            );
           if (result.border && on) {
-            tr = tr.setNodeAttribute(cell.pos, 'borders', borderSidesFor(result.border.preset, cell, block, on));
+            tr = tr.setNodeAttribute(
+              cell.pos,
+              'borders',
+              borderSidesFor(result.border.preset, cell, block, on),
+            );
           }
         }
         if (tr.docChanged) ed.dispatch(tr);
@@ -630,7 +838,11 @@ export class EditorPlayground implements OnDestroy {
   }
 
   /** Ask for a value via a bapbong-ui dialog, then run the command it builds. */
-  private async execPrompt(title: string, placeholder: string, build: (value: string) => Command): Promise<void> {
+  private async execPrompt(
+    title: string,
+    placeholder: string,
+    build: (value: string) => Command,
+  ): Promise<void> {
     const value = await promptDialog({ title, placeholder });
     if (value) this.exec(build(value));
   }
@@ -655,6 +867,31 @@ export class EditorPlayground implements OnDestroy {
     const reader = new FileReader();
     reader.onload = () => this.exec(insertImage(String(reader.result)));
     reader.readAsDataURL(file);
+  }
+
+  /** Insert-from-URL: fetch the bytes up front and embed a data URL, so the
+   *  image survives export. Only when the fetch fails (CORS/offline) does the
+   *  raw URL go in — exported as an externally-linked picture. */
+  private async insertImageFromUrl(): Promise<void> {
+    const url = await promptDialog({
+      title: 'Insert image from URL',
+      placeholder: 'https://…',
+    });
+    if (!url) return;
+    const dataUrl = await fetch(url)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        if (!blob.type.startsWith('image/')) return null;
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+      })
+      .catch(() => null);
+    this.exec(insertImage(dataUrl ?? url));
   }
 
   /** A keyboard-shortcuts list shown in a bapbong-ui Dialog. */
