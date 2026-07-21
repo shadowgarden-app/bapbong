@@ -298,6 +298,16 @@ export class BapbongEditor {
     this.bridge?.dispatch(tr);
   }
 
+  /** Insert an image blob at the selection, measured to its intrinsic size
+   *  (display-capped) exactly like a paste. Prefer this over a bare
+   *  insertImage command from host insert flows — a node without
+   *  width/height lays out as an invisible 0×0 box. Resolves false when no
+   *  document is mounted or the blob can't be decoded. */
+  insertImageBlob(blob: Blob): Promise<boolean> {
+    const view = this.bridge?.view;
+    return view ? insertImageBlobs(view, [blob]) : Promise.resolve(false);
+  }
+
   /** Subscribe to layout/paint cycles. Returns an unsubscribe fn. */
   onChange(cb: (c: EditorChange) => void): () => void {
     this.changeListeners.add(cb);

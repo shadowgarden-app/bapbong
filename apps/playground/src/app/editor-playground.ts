@@ -864,34 +864,28 @@ export class EditorPlayground implements OnDestroy {
   }
 
   private insertImageFile(file: File): void {
-    const reader = new FileReader();
-    reader.onload = () => this.exec(insertImage(String(reader.result)));
-    reader.readAsDataURL(file);
+    void this.editor?.insertImageBlob(file);
   }
 
-  /** Insert-from-URL: fetch the bytes up front and embed a data URL, so the
-   *  image survives export. Only when the fetch fails (CORS/offline) does the
-   *  raw URL go in — exported as an externally-linked picture. */
+  /** Insert-from-URL: fetch the bytes up front and embed them (measured, like
+   *  a paste) so the image survives export. Only when the fetch fails
+   *  (CORS/offline) does the raw URL go in — exported as an externally-linked
+   *  picture, laid out at the 96px fallback box. */
   private async insertImageFromUrl(): Promise<void> {
     const url = await promptDialog({
       title: 'Insert image from URL',
       placeholder: 'https://…',
     });
     if (!url) return;
-    const dataUrl = await fetch(url)
+    const blob = await fetch(url)
       .then(async (res) => {
         if (!res.ok) return null;
-        const blob = await res.blob();
-        if (!blob.type.startsWith('image/')) return null;
-        return await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(blob);
-        });
+        const b = await res.blob();
+        return b.type.startsWith('image/') ? b : null;
       })
       .catch(() => null);
-    this.exec(insertImage(dataUrl ?? url));
+    if (blob && (await this.editor?.insertImageBlob(blob))) return;
+    this.exec(insertImage(url));
   }
 
   /** A keyboard-shortcuts list shown in a bapbong-ui Dialog. */

@@ -153,10 +153,14 @@ function resolveField(node: PMNode, base: FontSpec, pos: number): InlineField {
 function resolveImage(node: PMNode, pos: number): InlineImage {
   const a = node.attrs;
   const link = findMark(node.marks, 'link');
+  // A sizeless bitmap (inserted without a measured size) still needs a visible
+  // box — 96px square, matching the exporter's default extent. Shapes keep 0
+  // (a horizontal line legitimately has zero height).
+  const fallback = a['shape'] ? 0 : 96;
   return {
     src: String(a['src'] ?? ''),
-    width: Number(a['width']) || 0,
-    height: Number(a['height']) || 0,
+    width: Number(a['width']) || fallback,
+    height: Number(a['height']) || fallback,
     link: link ? String(link.attrs['href']) : undefined,
     ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
     ...(Number(a['rotation']) ? { rotation: Number(a['rotation']) } : {}),
@@ -200,11 +204,12 @@ function paragraphToFlow(
         'src' | 'width' | 'height'
       > | null;
       if (float && allowFloats) {
+        const floatFallback = child.attrs['shape'] ? 0 : 96;
         const f: FlowFloat = {
           ...float,
           src: String(child.attrs['src'] ?? ''),
-          width: Number(child.attrs['width']) || 0,
-          height: Number(child.attrs['height']) || 0,
+          width: Number(child.attrs['width']) || floatFallback,
+          height: Number(child.attrs['height']) || floatFallback,
           pos: contentStart + offset,
           ...(child.attrs['shape']
             ? { shape: child.attrs['shape'] as FlowFloat['shape'] }
