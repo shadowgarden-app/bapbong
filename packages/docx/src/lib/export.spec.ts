@@ -254,6 +254,28 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(img?.attrs['width']).toBe(50);
   });
 
+  it('round-trips paragraph borders (w:pBdr) and cell margins (w:tcMar)', async () => {
+    const side = { width: 1.5, style: 'solid' as const, color: '#CCCCCC' };
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', { borders: { top: side } }, [
+        schema.text('ruled'),
+      ]),
+      schema.node('table', null, [
+        schema.node('table_row', null, [
+          schema.node('table_cell', { padding: { top: 4, left: 5 } }, [
+            schema.node('paragraph', null, [schema.text('c')]),
+          ]),
+        ]),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).attrs['borders']).toEqual({ top: side });
+    expect(back.child(1).child(0).child(0).attrs['padding']).toEqual({
+      top: 4,
+      left: 5,
+    });
+  });
+
   it('round-trips w:cantSplit on table rows', async () => {
     const doc = schema.node('doc', null, [
       schema.node('table', null, [

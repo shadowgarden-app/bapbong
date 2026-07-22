@@ -97,6 +97,9 @@ export const schema = new Schema({
         spacing: { default: null },
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
+        // w:pBdr — { top?, bottom?, left?, right? } of BorderSide, or null.
+        // Importer-set; painted as a box around the paragraph's lines.
+        borders: { default: null },
       },
       // HTML paste path: recover heading level from h1–h6 and alignment from
       // inline style. Other attrs (list/indent/tabs/spacing) stay importer-only
@@ -234,6 +237,7 @@ export const schema = new Schema({
         background: { default: null }, // w:shd w:fill — cell fill "#RRGGBB"
         vAlign: { default: null }, // w:vAlign — 'center' | 'bottom' (top default)
         borders: { default: null }, // w:tcBorders per-side visibility override
+        padding: { default: null }, // w:tcMar per-side margin override (px)
       },
       parseDOM: [{ tag: 'td' }, { tag: 'th' }],
       toDOM(node) {

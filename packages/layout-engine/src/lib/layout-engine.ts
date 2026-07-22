@@ -25,6 +25,8 @@ import type {
   LayoutSegment,
   MeasureMetrics,
   MeasureText,
+  ParagraphBorderBox,
+  ParagraphBorders,
   ParagraphIndent,
   ParagraphSpacing,
   ResolvedCell,
@@ -258,6 +260,8 @@ function paragraphToFlow(
   const spacing = node.attrs['spacing'] as ParagraphSpacing | null;
   if (spacing) flow.spacing = spacing;
   if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
+  const pBorders = node.attrs['borders'] as ParagraphBorders | null;
+  if (pBorders) flow.borders = pBorders;
   return flow;
 }
 
@@ -341,6 +345,7 @@ function tableToFlow(
         background: (a['background'] as string | null) ?? undefined,
         vAlign: (a['vAlign'] as 'center' | 'bottom' | null) ?? undefined,
         borders: (a['borders'] as TableBorders | null) ?? undefined,
+        padding: (a['padding'] as CellPadding | null) ?? undefined,
         content,
       });
     });
@@ -1149,6 +1154,14 @@ function layoutTable(
     for (let i = 0; i < ncols; i++) colWidths[i] *= scale;
   }
   const tableWidth = colWidths.reduce((s, w) => s + w, 0);
+  // Per-table cell margins (w:tblCellMar) override the Word defaults; a cell
+  // may override again with w:tcMar.
+  const pad = {
+    left: table.cellPadding?.left ?? CELL_PAD_X,
+    right: table.cellPadding?.right ?? CELL_PAD_X,
+    top: table.cellPadding?.top ?? CELL_PAD_Y,
+    bottom: table.cellPadding?.bottom ?? CELL_PAD_Y,
+  };
   // Table alignment (w:jc) shifts the whole grid within the content area.
   const xShift =
     table.align === 'center'
@@ -1156,7 +1169,11 @@ function layoutTable(
       : table.align === 'right'
         ? Math.max(0, avail - tableWidth)
         : 0;
-  const colX = new Array<number>(ncols + 1).fill(contentLeft + xShift);
+  // Word's implicit table indent: a left-aligned table's grid shifts LEFT by
+  // the left cell margin, so the first cell's CONTENT (grid + padding) lines
+  // up with the body text margin — Word letterheads rely on this.
+  const indent = table.align ? 0 : -pad.left;
+  const colX = new Array<number>(ncols + 1).fill(contentLeft + indent + xShift);
   for (let i = 0; i < ncols; i++) colX[i + 1] = colX[i] + colWidths[i];
 
   // Lay out each cell's content; remember where it sits in the grid.
@@ -1174,14 +1191,8 @@ function layoutTable(
     background?: string;
     vAlign?: 'center' | 'bottom';
     borders?: TableBorders;
+    pad: { left: number; right: number; top: number; bottom: number };
   }
-  // Per-table cell margins (w:tblCellMar) override the Word defaults.
-  const pad = {
-    left: table.cellPadding?.left ?? CELL_PAD_X,
-    right: table.cellPadding?.right ?? CELL_PAD_X,
-    top: table.cellPadding?.top ?? CELL_PAD_Y,
-    bottom: table.cellPadding?.bottom ?? CELL_PAD_Y,
-  };
 
   const cellDrafts: CellDraft[] = [];
   eachCell(table.rows, ncols, (r, cell, col) => {
@@ -1189,10 +1200,17 @@ function layoutTable(
     for (let k = 0; k < cell.colspan && col + k < ncols; k++)
       cellWidth += colWidths[col + k];
     const cellLeft = colX[col];
+    // w:tcMar overrides the table's margins per cell, per side.
+    const cellPad = {
+      left: cell.padding?.left ?? pad.left,
+      right: cell.padding?.right ?? pad.right,
+      top: cell.padding?.top ?? pad.top,
+      bottom: cell.padding?.bottom ?? pad.bottom,
+    };
     const flow = layoutFlow(
       cell.content,
-      cellLeft + pad.left,
-      cellLeft + cellWidth - pad.right,
+      cellLeft + cellPad.left,
+      cellLeft + cellWidth - cellPad.right,
       ctx,
     );
     cellDrafts.push({
@@ -1209,6 +1227,7 @@ function layoutTable(
       background: cell.background,
       vAlign: cell.vAlign,
       borders: cell.borders,
+      pad: cellPad,
     });
   });
 
@@ -1219,13 +1238,13 @@ function layoutTable(
     if (c.rowspan === 1) {
       rowHeight[c.startRow] = Math.max(
         rowHeight[c.startRow],
-        c.contentHeight + pad.top + pad.bottom,
+        c.contentHeight + c.pad.top + c.pad.bottom,
       );
     }
   }
   for (const c of cellDrafts) {
     if (c.rowspan > 1) {
-      const need = c.contentHeight + pad.top + pad.bottom;
+      const need = c.contentHeight + c.pad.top + c.pad.bottom;
       let span = 0;
       for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++)
         span += rowHeight[r];
@@ -1249,10 +1268,13 @@ function layoutTable(
     for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++)
       height += rowHeight[r];
     // w:vAlign: distribute the slack above/centered for non-top cells.
-    const slack = Math.max(0, height - pad.top - pad.bottom - c.contentHeight);
+    const slack = Math.max(
+      0,
+      height - c.pad.top - c.pad.bottom - c.contentHeight,
+    );
     const vOffset =
       c.vAlign === 'bottom' ? slack : c.vAlign === 'center' ? slack / 2 : 0;
-    const dy = rowY[c.startRow] + pad.top + vOffset;
+    const dy = rowY[c.startRow] + c.pad.top + vOffset;
     const lines = c.lines.map((ln) => ({ ...ln, y: ln.y + dy }));
     c.tables.forEach((t) => offsetTable(t, dy));
     const cell: ResolvedCell = {
@@ -1273,7 +1295,7 @@ function layoutTable(
   });
 
   const resolved: ResolvedTable = {
-    x: contentLeft + xShift,
+    x: colX[0],
     y: 0,
     width: tableWidth,
     height: rowY[nrows],
@@ -1312,6 +1334,8 @@ type ParaItem = {
   before?: number;
   after?: number;
   pageBreakBefore?: boolean;
+  /** w:pBdr — a border box painted around the paragraph's lines. */
+  borders?: ParagraphBorders;
 };
 type SectionMarker = ColumnConfig & { newPage: boolean; height?: number };
 type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
@@ -1556,6 +1580,31 @@ function placeBlocks(
   let exclusions: Exclusion[] = []; // floats die at their page's end
   let y = top;
 
+  // w:pBdr tracking: while a bordered paragraph places its lines, a fragment
+  // accumulates; a column/page break flushes it as a box (top edge only on
+  // the first fragment, bottom only on the last).
+  let paraBorderBoxes: ParagraphBorderBox[] = [];
+  let activePBdr: {
+    borders: ParagraphBorders;
+    startedEarlier: boolean;
+    frag: { x0: number; x1: number; y0: number; y1: number } | null;
+  } | null = null;
+  const flushPBdrFrag = (isLast: boolean) => {
+    const a = activePBdr;
+    if (!a?.frag) return;
+    paraBorderBoxes.push({
+      x: a.frag.x0,
+      y: a.frag.y0,
+      width: a.frag.x1 - a.frag.x0,
+      height: a.frag.y1 - a.frag.y0,
+      borders: a.borders,
+      drawTop: !a.startedEarlier,
+      drawBottom: isLast,
+    });
+    a.startedEarlier = true;
+    a.frag = null;
+  };
+
   // Multi-column flow. A section's blocks fill column 0 top→bottom, then column
   // 1, etc.; the page finalizes only when the last column overflows. `bandTop`
   // is where columns start on the current page (top, or the handoff y after a
@@ -1690,6 +1739,7 @@ function placeBlocks(
   };
 
   const finalizePage = () => {
+    flushPBdrFrag(false); // a bordered paragraph continuing → open-bottom box
     const resolved: ResolvedPage = {
       index: pages.length,
       width: page.width,
@@ -1700,6 +1750,8 @@ function placeBlocks(
     if (pageFloats.length > 0) resolved.floats = pageFloats;
     if (pageFnNums.length > 0)
       resolved.footnotes = buildFootnoteArea(pageFnNums);
+    if (paraBorderBoxes.length > 0) resolved.paraBorders = paraBorderBoxes;
+    paraBorderBoxes = [];
     pages.push(resolved);
     lines = [];
     tables = [];
@@ -1718,6 +1770,7 @@ function placeBlocks(
    *  the last column is full. */
   const breakBand = () => {
     bump();
+    flushPBdrFrag(false); // fragment ends at the column/page boundary
     if (colIndex < colCount - 1) {
       colIndex++;
       colDirty = false;
@@ -1741,6 +1794,12 @@ function placeBlocks(
       add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     }
     lines.push(draftToLine(draft, y, xShift()));
+    if (activePBdr) {
+      if (!activePBdr.frag) {
+        activePBdr.frag = { x0: colX0(), x1: colX1(), y0: y, y1: y };
+      }
+      activePBdr.frag.y1 = y + draft.height;
+    }
     colDirty = true;
     y += draft.height;
     sectionRemaining -= draft.height;
@@ -1874,6 +1933,13 @@ function placeBlocks(
         y += item.para.before;
         sectionRemaining -= item.para.before;
       }
+      if (item.para.borders) {
+        activePBdr = {
+          borders: item.para.borders,
+          startedEarlier: false,
+          frag: null,
+        };
+      }
       const drafts = item.para.drafts;
       const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
       const floatsAhead = exclusions.some(
@@ -1883,6 +1949,10 @@ function placeBlocks(
         for (const d of drafts) emitLine(d);
       } else {
         placeParaBanded(item.para.getFlow());
+      }
+      if (activePBdr) {
+        flushPBdrFrag(true); // last fragment closes the box's bottom edge
+        activePBdr = null;
       }
       if (item.para.after) {
         y += item.para.after; // space-after gap
@@ -2045,6 +2115,7 @@ export function layoutBlocks(
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
+              borders: block.borders,
             },
           }
         : { table: layoutTable(block, left, colRight, ctx) };
@@ -2418,12 +2489,14 @@ export function layout(
       const getFlow = () =>
         paragraphToFlow(node, ctx.base, offset, true, marker);
       const sp = node.attrs['spacing'] as ParagraphSpacing | null;
-      const para = (drafts: LineDraft[] | null) => ({
+      const para = (drafts: LineDraft[] | null): ParaItem => ({
         getFlow,
         drafts,
         before: sp?.before,
         after: sp?.after,
         pageBreakBefore: node.attrs['pageBreakBefore'] === true,
+        borders:
+          (node.attrs['borders'] as ParagraphBorders | null) ?? undefined,
       });
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land) — never cached.

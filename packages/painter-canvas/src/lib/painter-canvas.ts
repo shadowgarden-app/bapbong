@@ -348,6 +348,25 @@ export class CanvasPainter {
       }
     }
 
+    // Paragraph borders (w:pBdr) under the text, over backgrounds.
+    for (const b of page.paraBorders ?? []) {
+      const y0 = yOffset + b.y;
+      const y1 = yOffset + b.y + b.height;
+      if (b.drawTop && b.borders.top)
+        this.strokeBorder(b.borders.top, b.x, y0, b.x + b.width, y0);
+      if (b.drawBottom && b.borders.bottom)
+        this.strokeBorder(b.borders.bottom, b.x, y1, b.x + b.width, y1);
+      if (b.borders.left) this.strokeBorder(b.borders.left, b.x, y0, b.x, y1);
+      if (b.borders.right)
+        this.strokeBorder(
+          b.borders.right,
+          b.x + b.width,
+          y0,
+          b.x + b.width,
+          y1,
+        );
+    }
+
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
     for (const table of page.tables ?? [])
       this.paintTable(table, yOffset, o, pageInfo);

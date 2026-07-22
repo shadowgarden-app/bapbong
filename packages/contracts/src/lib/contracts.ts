@@ -110,7 +110,13 @@ export interface ShapeSpec {
   /** Preset geometry. Names mirror OOXML prstGeom tokens: 'line' is a
    *  corner-to-corner straight connector; 'rightArrow' a block arrow;
    *  'horizontalScroll' paints as a stylized banner with rolled ends. */
-  kind: 'rect' | 'line' | 'ellipse' | 'roundRect' | 'rightArrow' | 'horizontalScroll';
+  kind:
+    | 'rect'
+    | 'line'
+    | 'ellipse'
+    | 'roundRect'
+    | 'rightArrow'
+    | 'horizontalScroll';
   /** Stroke color; absent = no stroke (a:noFill on the outline). */
   stroke?: string;
   /** Stroke width in px (defaults to 1 when a stroke is drawn). */
@@ -245,6 +251,17 @@ export interface FlowParagraph {
   floats?: FlowFloat[];
   /** Custom tab stops; tabs past the last stop use the default grid. */
   tabs?: TabStop[];
+  /** Paragraph box borders (w:pBdr) — the four outer sides. */
+  borders?: ParagraphBorders;
+}
+
+/** Paragraph box borders (w:pBdr). Only visible sides are present; the
+ *  `between` edge is not modelled. */
+export interface ParagraphBorders {
+  top?: BorderSide;
+  bottom?: BorderSide;
+  left?: BorderSide;
+  right?: BorderSide;
 }
 
 /** A table cell, holding nested flow content (paragraphs / tables). */
@@ -259,6 +276,9 @@ export interface FlowTableCell {
   vAlign?: 'center' | 'bottom';
   /** Per-cell border overrides (w:tcBorders); each side overrides the table. */
   borders?: TableBorders;
+  /** Per-cell margin overrides (w:tcMar); each side overrides the table's
+   *  cellPadding (and that the Word defaults). */
+  padding?: CellPadding;
   content: FlowBlock[];
 }
 
@@ -471,6 +491,21 @@ export interface ResolvedPage {
   /** Footnote bodies whose references fall on this page, laid out at the
    *  bottom above the footer. Absent when the page has no footnotes. */
   footnotes?: ResolvedFootnotes;
+  /** Paragraph border boxes (w:pBdr) on this page, painted under the text. */
+  paraBorders?: ParagraphBorderBox[];
+}
+
+/** One paragraph's border box on a page (page-local px). A paragraph split
+ *  across pages emits one box per fragment: `drawTop` only on the first,
+ *  `drawBottom` only on the last. */
+export interface ParagraphBorderBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  borders: ParagraphBorders;
+  drawTop: boolean;
+  drawBottom: boolean;
 }
 
 /** Footnote bodies reserved at the bottom of a page. `separatorY` is where the

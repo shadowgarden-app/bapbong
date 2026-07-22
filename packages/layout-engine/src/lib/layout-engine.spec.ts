@@ -217,6 +217,8 @@ describe('layoutBlocks', () => {
 
   it('lays out a grid with column widths and row heights', () => {
     // content box [20,220] (200px). Columns 80 + 120 from row-0 colwidths.
+    // Word's implicit indent shifts the grid left by the default cell margin
+    // (7.2px) so the first cell's TEXT lands on the margin.
     const t = table([
       [cell('a', { colwidth: [80] }), cell('b', { colwidth: [120] })],
       [cell('cc'), cell('dd')],
@@ -224,17 +226,23 @@ describe('layoutBlocks', () => {
     const { pages } = layoutBlocks([t], config());
     expect(pages).toHaveLength(1);
     const [resolved] = pages[0].tables ?? [];
-    expect(resolved).toMatchObject({ x: 20, y: 20, width: 200 });
+    expect(resolved.x).toBeCloseTo(12.8); // 20 − 7.2 implicit indent
+    expect(resolved).toMatchObject({ y: 20 });
+    expect(resolved.width).toBeCloseTo(200);
     expect(resolved.height).toBeCloseTo(32); // 2 rows × 16px (float)
     expect(resolved.cells).toHaveLength(4);
-    // top-left cell sits at the table origin; its text starts there too.
-    expect(resolved.cells[0]).toMatchObject({ x: 20, y: 20, width: 80 });
+    // top-left cell sits at the table origin; its text lands on the margin.
+    expect(resolved.cells[0].x).toBeCloseTo(12.8);
+    expect(resolved.cells[0]).toMatchObject({ y: 20, width: 80 });
     expect(resolved.cells[0].height).toBeCloseTo(16);
     expect(resolved.cells[0].lines[0]).toMatchObject({ y: 20 });
     expect(resolved.cells[0].lines[0].segments[0].text).toBe('a');
-    // second column starts at 20 + 80 = 100; second row at 20 + 16 = 36.
-    expect(resolved.cells[1]).toMatchObject({ x: 100, y: 20, width: 120 });
-    expect(resolved.cells[2]).toMatchObject({ x: 20, y: 36, width: 80 });
+    expect(resolved.cells[0].lines[0].segments[0].x).toBeCloseTo(20);
+    // second column at 12.8 + 80 = 92.8; second row at 20 + 16 = 36.
+    expect(resolved.cells[1].x).toBeCloseTo(92.8);
+    expect(resolved.cells[1]).toMatchObject({ y: 20, width: 120 });
+    expect(resolved.cells[2].x).toBeCloseTo(12.8);
+    expect(resolved.cells[2]).toMatchObject({ y: 36, width: 80 });
   });
 
   it('scales a tblGrid wider than the column down to fit (no overflow)', () => {
@@ -244,9 +252,11 @@ describe('layoutBlocks', () => {
     ]);
     const [resolved] = layoutBlocks([t], config()).pages[0].tables ?? [];
     expect(resolved.width).toBeCloseTo(200); // 400 → scaled to the 200px box
-    // each column halved (200 → 100); right edge stays within the content box.
-    expect(resolved.cells[0]).toMatchObject({ x: 20, width: 100 });
-    expect(resolved.cells[1]).toMatchObject({ x: 120, width: 100 });
+    // each column halved (200 → 100); grid shifted by the implicit indent.
+    expect(resolved.cells[0].x).toBeCloseTo(12.8);
+    expect(resolved.cells[0].width).toBeCloseTo(100);
+    expect(resolved.cells[1].x).toBeCloseTo(112.8);
+    expect(resolved.cells[1].width).toBeCloseTo(100);
   });
 
   it('reduces super/subscript font size and flags the segment', () => {
@@ -300,7 +310,8 @@ describe('layoutBlocks', () => {
     const t = table([[cell('a', { colwidth: [100] })]]);
     const { pages } = layoutBlocks([t], config());
     const line = pages[0].tables?.[0]?.cells[0].lines[0];
-    expect(line?.segments[0].x).toBeCloseTo(20 + 7.2); // cell.x + 108 twips
+    // Implicit indent (−7.2) + left padding (+7.2): text sits ON the margin.
+    expect(line?.segments[0].x).toBeCloseTo(20);
     expect(line?.width).toBeCloseTo(100 - 2 * 7.2);
   });
 
@@ -332,10 +343,65 @@ describe('layoutBlocks', () => {
     const { pages } = layoutBlocks([t], config());
     const resolved = pages[0].tables?.[0];
     const line = resolved?.cells[0].lines[0];
-    expect(line?.segments[0].x).toBeCloseTo(20 + 20); // custom left
+    // Implicit indent (−20, the custom left margin) + left padding (+20).
+    expect(line?.segments[0].x).toBeCloseTo(20);
     expect(line?.width).toBeCloseTo(100 - 20 - 4); // custom left + right
     expect(line?.y).toBeCloseTo(20 + 6); // custom top
     expect(resolved?.cells[0].height).toBeCloseTo(16 + 6); // top + content (+ bottom default 0)
+  });
+
+  it('honors per-cell margin overrides (w:tcMar)', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        {
+          cells: [
+            { ...cell('a', { colwidth: [100] }), padding: { left: 2, top: 3 } },
+          ],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([t], config());
+    const resolved = pages[0].tables?.[0];
+    const line = resolved?.cells[0].lines[0];
+    // Table-level pad stays default (7.2 → implicit indent −7.2); the CELL
+    // overrides left to 2px, so its text sits at 12.8 + 2.
+    expect(line?.segments[0].x).toBeCloseTo(12.8 + 2);
+    expect(line?.y).toBeCloseTo(20 + 3); // custom top
+    expect(resolved?.cells[0].height).toBeCloseTo(16 + 3);
+  });
+
+  it('emits paragraph border boxes (w:pBdr) around the placed lines', () => {
+    const side = { width: 1, style: 'solid' as const, color: '#CCCCCC' };
+    const bordered: FlowBlock = { ...para('one two'), borders: { top: side } };
+    const { pages } = layoutBlocks([para('lead'), bordered], config());
+    const boxes = pages[0].paraBorders ?? [];
+    expect(boxes).toHaveLength(1);
+    expect(boxes[0].borders.top).toEqual(side);
+    expect(boxes[0].drawTop).toBe(true);
+    expect(boxes[0].drawBottom).toBe(true);
+    expect(boxes[0].x).toBe(20); // content left
+    expect(boxes[0].width).toBe(200); // content width
+    expect(boxes[0].y).toBe(36); // below the 16px lead line
+    expect(boxes[0].height).toBe(16); // one line
+  });
+
+  it('splits a bordered paragraph across pages: top edge only on the first', () => {
+    // page height 80, margins 20 → 2 lines per page; 4 lines span 2 pages.
+    const side = { width: 1, style: 'solid' as const, color: '#000000' };
+    const bordered: FlowBlock = {
+      ...para(
+        'aaaa bbbb cccc dddd eeee gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq',
+      ),
+      borders: { top: side, bottom: side },
+    };
+    const cfg = config({ height: 80 });
+    const { pages } = layoutBlocks([bordered], cfg);
+    expect(pages.length).toBeGreaterThan(1);
+    const first = pages[0].paraBorders?.[0];
+    const last = pages[pages.length - 1].paraBorders?.[0];
+    expect(first).toMatchObject({ drawTop: true, drawBottom: false });
+    expect(last).toMatchObject({ drawTop: false, drawBottom: true });
   });
 
   it('measures same-font adjacent tokens cumulatively (cross-run kerning)', () => {
@@ -376,7 +442,8 @@ describe('layoutBlocks', () => {
     ]);
     const { pages } = layoutBlocks([t], config());
     const [resolved] = pages[0].tables ?? [];
-    expect(resolved.cells[0]).toMatchObject({ x: 20, width: 200, colspan: 2 });
+    expect(resolved.cells[0].x).toBeCloseTo(12.8); // implicit indent
+    expect(resolved.cells[0]).toMatchObject({ width: 200, colspan: 2 });
   });
 
   it('reserves a rowspan cell’s column so the row below shifts right', () => {
@@ -394,15 +461,16 @@ describe('layoutBlocks', () => {
     const { pages } = layoutBlocks([t], config());
     const cells = pages[0].tables?.[0].cells ?? [];
     expect(cells).toHaveLength(8); // 3 + 3 + 2
-    // colX = [20, 100, 160, 220]; the merged cell holds col 0 (x=20).
-    expect(cells[3]).toMatchObject({ x: 20, rowspan: 2 });
-    // third row: b2 → col 1 (x=100), c2 → col 2 (x=160). (Before the fix these
-    // were x=20 / x=100, overlapping the merge and leaving col 2 empty.)
+    // colX = [12.8, 92.8, 152.8] (implicit indent); merged cell holds col 0.
+    expect(cells[3].x).toBeCloseTo(12.8);
+    expect(cells[3]).toMatchObject({ rowspan: 2 });
+    // third row: b2 → col 1, c2 → col 2. (Before the fix these overlapped the
+    // merge and left col 2 empty.)
     const b2 = cells[6];
     const c2 = cells[7];
-    expect(b2).toMatchObject({ x: 100 });
+    expect(b2.x).toBeCloseTo(92.8);
     expect(b2.lines[0].segments[0].text).toBe('b2');
-    expect(c2).toMatchObject({ x: 160 });
+    expect(c2.x).toBeCloseTo(152.8);
     expect(c2.lines[0].segments[0].text).toBe('c2');
   });
 

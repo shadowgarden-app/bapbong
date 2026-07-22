@@ -376,6 +376,25 @@ describe('importDocx', () => {
     expect(row.child(1).attrs.colwidth).toEqual([421]); // 70% of 602
   });
 
+  it('imports w:pBdr paragraph borders and w:tcMar cell margins', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:pPr><w:pBdr><w:top w:val="single" w:color="cccccc" w:sz="12"/></w:pBdr></w:pPr>
+        <w:r><w:t>ruled</w:t></w:r>
+      </w:p>
+      <w:tbl><w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid><w:tr><w:tc>
+        <w:tcPr><w:tcMar><w:top w:type="dxa" w:w="60"/><w:left w:type="dxa" w:w="75"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:t>c</w:t></w:r></w:p>
+      </w:tc></w:tr></w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    expect(doc.child(0).attrs.borders).toEqual({
+      top: { width: 2, style: 'solid', color: '#CCCCCC' }, // sz 12 → 1.5pt → 2px
+    });
+    const cell = doc.child(1).child(0).child(0);
+    expect(cell.attrs.padding).toEqual({ top: 4, left: 5 }); // 60tw, 75tw
+  });
+
   it('collapses vertical merges (w:vMerge) into rowspan', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

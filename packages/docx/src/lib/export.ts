@@ -346,6 +346,12 @@ function paraProps(node: PMNode): string {
     out.push(
       `<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(list.numId)}"/></w:numPr>`,
     );
+  // w:pBdr sits between numPr and spacing in the pPr sequence.
+  const pBdr = a['borders'] as TableBorders | null;
+  if (pBdr) {
+    const box = bordersXml('w:pBdr', pBdr, CELL_SIDES);
+    if (box) out.push(box);
+  }
   const sp = a['spacing'] as {
     before?: number;
     after?: number;
@@ -450,6 +456,22 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
     );
   const vAlign = a['vAlign'] as string | null;
   if (vAlign) pr.push(`<w:vAlign w:val="${vAlign}"/>`);
+  const padding = a['padding'] as {
+    left?: number;
+    right?: number;
+    top?: number;
+    bottom?: number;
+  } | null;
+  if (padding) {
+    const sides = (['top', 'left', 'bottom', 'right'] as const)
+      .filter((s) => padding[s] != null)
+      .map(
+        (s) =>
+          `<w:${s} w:type="dxa" w:w="${pxToTwips(padding[s] as number)}"/>`,
+      )
+      .join('');
+    if (sides) pr.push(`<w:tcMar>${sides}</w:tcMar>`);
+  }
   let content = '';
   cell.forEach((b) => (content += blockXml(b, ctx)));
   if (!content) content = '<w:p/>'; // a cell must contain at least one block

@@ -867,6 +867,20 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       if (!Number.isNaN(id)) ctx.comments.active.delete(id);
     }
   }
+  // w:pBdr from the most-derived cascade layer: keep visible sides only
+  // ('between' isn't modelled; w:val="none" sides drop out).
+  const pBdrLayer = lastWith(pPrChain, 'w:pBdr');
+  const pBdrSides = pBdrLayer
+    ? parseBordersEl(child(pBdrLayer, 'w:pBdr'), CELL_SIDES)
+    : null;
+  const paraBorders: Record<string, BorderSide> = {};
+  if (pBdrSides) {
+    for (const side of CELL_SIDES) {
+      const s = pBdrSides[side];
+      if (s) paraBorders[side] = s;
+    }
+  }
+
   const attrs: {
     list?: ListInfo;
     align?: Align;
@@ -876,6 +890,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     pageBreakBefore?: boolean;
     heading?: number;
     styleId?: string;
+    borders?: Record<string, BorderSide>;
   } = {};
   if (list) attrs.list = list;
   if (align) attrs.align = align;
@@ -889,6 +904,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
   if (pageBreak) attrs.pageBreakBefore = true;
+  if (Object.keys(paraBorders).length > 0) attrs.borders = paraBorders;
   return ctx.schema.nodes['paragraph'].create(attrs, inline);
 }
 
@@ -1042,6 +1058,12 @@ interface LogicalCell {
   background: string | null;
   vAlign: string | null;
   borders: TableBorders | null;
+  padding: {
+    left?: number;
+    right?: number;
+    top?: number;
+    bottom?: number;
+  } | null;
   content: PMNode[];
 }
 
@@ -1051,12 +1073,11 @@ function emptyCell(ctx: Ctx): PMNode {
   ]);
 }
 
-/** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults.
+/** Four-side margins (px) from a w:tblCellMar / w:tcMar element, or null.
  *  type="nil" forces 0; only "dxa" widths are interpreted. */
-function parseCellMargins(
-  tbl: OoxmlNode,
+function parseMarginsEl(
+  mar: OoxmlNode | undefined,
 ): { left?: number; right?: number; top?: number; bottom?: number } | null {
-  const mar = child(child(tbl, 'w:tblPr'), 'w:tblCellMar');
   if (!mar) return null;
   const side = (name: string): number | undefined => {
     const el = child(mar, name);
@@ -1076,6 +1097,13 @@ function parseCellMargins(
   if (top !== undefined) out.top = top;
   if (bottom !== undefined) out.bottom = bottom;
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults. */
+function parseCellMargins(
+  tbl: OoxmlNode,
+): { left?: number; right?: number; top?: number; bottom?: number } | null {
+  return parseMarginsEl(child(child(tbl, 'w:tblPr'), 'w:tblCellMar'));
 }
 
 /** OOXML w:val border styles → our {@link BorderStyle} (unknowns → solid). */
@@ -1221,6 +1249,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       const vAlign =
         vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
       const borders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
+      const padding = parseMarginsEl(child(tcPr, 'w:tcMar'));
       const content = parseBlocks(tc, ctx);
       if (content.length === 0)
         content.push(ctx.schema.nodes['paragraph'].create());
@@ -1232,6 +1261,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         background,
         vAlign,
         borders,
+        padding,
         content,
       });
       col += colspan;
@@ -1287,6 +1317,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
             background: cell.background,
             vAlign: cell.vAlign,
             borders: cell.borders,
+            padding: cell.padding,
           },
           cell.content,
         ),
