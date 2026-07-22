@@ -42,7 +42,10 @@ function closeCurrent(): void {
  * Escape, or scroll. Only one is open at a time. Reusable for any right-click
  * surface — the editor's pointer hook gives the host the position + target.
  */
-export function showContextMenu(entries: ContextMenuEntry[], at: { x: number; y: number }): ContextMenuHandle {
+export function showContextMenu(
+  entries: ContextMenuEntry[],
+  at: { x: number; y: number },
+): ContextMenuHandle {
   injectStyle('bb-ui-contextmenu-styles', STYLE);
   closeCurrent();
 
@@ -82,12 +85,33 @@ export function showContextMenu(entries: ContextMenuEntry[], at: { x: number; y:
   }
   document.body.appendChild(el);
 
-  // Clamp into the viewport (flip when overflowing right/bottom).
+  // Connected positioning (CDK-style pairs) against the rendered size:
+  // below-right of the anchor point first, FLIP above/left when the viewport
+  // runs out — the menu never slides over its own anchor. Slide-clamp only
+  // when neither side of a pair fits.
   const r = el.getBoundingClientRect();
-  el.style.left = `${Math.max(4, Math.min(at.x, window.innerWidth - r.width - 4))}px`;
-  el.style.top = `${Math.max(4, Math.min(at.y, window.innerHeight - r.height - 4))}px`;
+  const pad = 4;
+  const fitsX = (v: number) =>
+    v >= pad && v + r.width <= window.innerWidth - pad;
+  const fitsY = (v: number) =>
+    v >= pad && v + r.height <= window.innerHeight - pad;
+  const x = fitsX(at.x)
+    ? at.x
+    : fitsX(at.x - r.width)
+      ? at.x - r.width
+      : Math.max(pad, Math.min(at.x, window.innerWidth - r.width - pad));
+  const y = fitsY(at.y)
+    ? at.y
+    : fitsY(at.y - r.height)
+      ? at.y - r.height
+      : Math.max(pad, Math.min(at.y, window.innerHeight - r.height - pad));
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
 
-  const items = () => Array.from(el.querySelectorAll<HTMLButtonElement>('.bb-ctx-item:not(:disabled)'));
+  const items = () =>
+    Array.from(
+      el.querySelectorAll<HTMLButtonElement>('.bb-ctx-item:not(:disabled)'),
+    );
   const onDown = (e: Event) => {
     if (!el.contains(e.target as Node)) closeCurrent();
   };
@@ -97,7 +121,10 @@ export function showContextMenu(entries: ContextMenuEntry[], at: { x: number; y:
       e.preventDefault();
       const list = items();
       const i = list.indexOf(document.activeElement as HTMLButtonElement);
-      const next = e.key === 'ArrowDown' ? (i + 1) % list.length : (i - 1 + list.length) % list.length;
+      const next =
+        e.key === 'ArrowDown'
+          ? (i + 1) % list.length
+          : (i - 1 + list.length) % list.length;
       list[next]?.focus();
     }
   };
