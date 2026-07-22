@@ -53,22 +53,40 @@ interface RotateState {
 
 /** `point` mapped into the frame's unrotated local space (inverse-rotate
  *  around the rect center). Handle/knob hit-tests run in this space. */
-export function toLocal(x: number, y: number, rect: Rect, rotation: number): { x: number; y: number } {
+export function toLocal(
+  x: number,
+  y: number,
+  rect: Rect,
+  rotation: number,
+): { x: number; y: number } {
   if (!rotation) return { x, y };
   const rad = (-rotation * Math.PI) / 180;
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
   const dx = x - cx;
   const dy = y - cy;
-  return { x: cx + dx * Math.cos(rad) - dy * Math.sin(rad), y: cy + dx * Math.sin(rad) + dy * Math.cos(rad) };
+  return {
+    x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+    y: cy + dx * Math.sin(rad) + dy * Math.cos(rad),
+  };
 }
 
 /** Resize cursor for a handle, accounting for the frame's rotation: each
  *  handle points at a compass angle (n = 0°, e = 90°, …); adding the rotation
  *  and quantizing to 45° picks among the four bidirectional resize cursors. */
 export function cursorFor(handle: Handle, rotation: number): string {
-  const DIR: Record<Handle, number> = { n: 0, ne: 45, e: 90, se: 135, s: 180, sw: 225, w: 270, nw: 315 };
-  const idx = Math.round((((DIR[handle] + rotation) % 360) + 360) % 360 / 45) % 4;
+  const DIR: Record<Handle, number> = {
+    n: 0,
+    ne: 45,
+    e: 90,
+    se: 135,
+    s: 180,
+    sw: 225,
+    w: 270,
+    nw: 315,
+  };
+  const idx =
+    Math.round(((((DIR[handle] + rotation) % 360) + 360) % 360) / 45) % 4;
   return ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'][idx];
 }
 
@@ -76,7 +94,7 @@ export function cursorFor(handle: Handle, rotation: number): string {
  *  steps. Result normalized to [0, 360). */
 export function snapAngle(deg: number, shift: boolean): number {
   let d = ((deg % 360) + 360) % 360;
-  if (shift) return Math.round(d / 15) * 15 % 360;
+  if (shift) return (Math.round(d / 15) * 15) % 360;
   for (const c of [0, 90, 180, 270, 360]) {
     if (Math.abs(d - c) <= SNAP_TOL) {
       d = c % 360;
@@ -88,15 +106,29 @@ export function snapAngle(deg: number, shift: boolean): number {
 
 /** The handle under a page point, testing each handle's center on `rect`. */
 function handleAt(rect: Rect, x: number, y: number): Handle | null {
-  const xs: Record<'w' | 'c' | 'e', number> = { w: rect.x, c: rect.x + rect.width / 2, e: rect.x + rect.width };
-  const ys: Record<'n' | 'm' | 's', number> = { n: rect.y, m: rect.y + rect.height / 2, s: rect.y + rect.height };
+  const xs: Record<'w' | 'c' | 'e', number> = {
+    w: rect.x,
+    c: rect.x + rect.width / 2,
+    e: rect.x + rect.width,
+  };
+  const ys: Record<'n' | 'm' | 's', number> = {
+    n: rect.y,
+    m: rect.y + rect.height / 2,
+    s: rect.y + rect.height,
+  };
   const H: [Handle, number, number][] = [
-    ['nw', xs.w, ys.n], ['n', xs.c, ys.n], ['ne', xs.e, ys.n],
-    ['w', xs.w, ys.m], ['e', xs.e, ys.m],
-    ['sw', xs.w, ys.s], ['s', xs.c, ys.s], ['se', xs.e, ys.s],
+    ['nw', xs.w, ys.n],
+    ['n', xs.c, ys.n],
+    ['ne', xs.e, ys.n],
+    ['w', xs.w, ys.m],
+    ['e', xs.e, ys.m],
+    ['sw', xs.w, ys.s],
+    ['s', xs.c, ys.s],
+    ['se', xs.e, ys.s],
   ];
   for (const [h, hx, hy] of H) {
-    if (Math.abs(x - hx) <= HANDLE_TOL && Math.abs(y - hy) <= HANDLE_TOL) return h;
+    if (Math.abs(x - hx) <= HANDLE_TOL && Math.abs(y - hy) <= HANDLE_TOL)
+      return h;
   }
   return null;
 }
@@ -104,19 +136,33 @@ function handleAt(rect: Rect, x: number, y: number): Handle | null {
 /** New rect for dragging `handle` by (dx, dy) from `base`: the opposite
  *  edge/corner stays anchored; corners keep the aspect ratio (edges are free)
  *  unless Shift flips the mode; both dimensions clamp to MIN_SIZE. */
-export function resizeRect(base: Rect, handle: Handle, dx: number, dy: number, shift: boolean): Rect {
+export function resizeRect(
+  base: Rect,
+  handle: Handle,
+  dx: number,
+  dy: number,
+  shift: boolean,
+): Rect {
   const west = handle.includes('w');
   const north = handle.includes('n');
   const horiz = handle !== 'n' && handle !== 's';
   const vert = handle !== 'e' && handle !== 'w';
-  let w = horiz ? Math.max(MIN_SIZE, base.width + (west ? -dx : dx)) : base.width;
-  let h = vert ? Math.max(MIN_SIZE, base.height + (north ? -dy : dy)) : base.height;
+  let w = horiz
+    ? Math.max(MIN_SIZE, base.width + (west ? -dx : dx))
+    : base.width;
+  let h = vert
+    ? Math.max(MIN_SIZE, base.height + (north ? -dy : dy))
+    : base.height;
   const corner = horiz && vert;
   if (corner !== shift && base.width > 0 && base.height > 0) {
     // Keep aspect: follow whichever axis moved more (relative to the base).
     const sw = w / base.width;
     const sh = h / base.height;
-    const s = Math.max(Math.abs(sw - 1) >= Math.abs(sh - 1) ? sw : sh, MIN_SIZE / base.width, MIN_SIZE / base.height);
+    const s = Math.max(
+      Math.abs(sw - 1) >= Math.abs(sh - 1) ? sw : sh,
+      MIN_SIZE / base.width,
+      MIN_SIZE / base.height,
+    );
     w = base.width * s;
     h = base.height * s;
   }
@@ -130,7 +176,10 @@ export function resizeRect(base: Rect, handle: Handle, dx: number, dy: number, s
 
 /** The page-local frame for the image node at `pos`, from the current layout —
  *  or null when the node isn't laid out (page not built, image removed). */
-function frameForPos(layout: ResolvedLayout | null, pos: number): OverlayFrame | null {
+function frameForPos(
+  layout: ResolvedLayout | null,
+  pos: number,
+): OverlayFrame | null {
   if (!layout) return null;
   for (const page of layout.pages) {
     const floats = [...(page.floats ?? [])];
@@ -221,8 +270,13 @@ export function imageResizePlugin(): EditorPlugin {
     if (!sel || !imageNodeAt(c.state, sel.pos)) return;
     const w = Math.round(d.rect.width);
     const h = Math.round(d.rect.height);
-    if (w === Math.round(d.base.width) && h === Math.round(d.base.height)) return;
-    c.dispatch(c.state.tr.setNodeAttribute(sel.pos, 'width', w).setNodeAttribute(sel.pos, 'height', h));
+    if (w === Math.round(d.base.width) && h === Math.round(d.base.height))
+      return;
+    c.dispatch(
+      c.state.tr
+        .setNodeAttribute(sel.pos, 'width', w)
+        .setNodeAttribute(sel.pos, 'height', h),
+    );
   };
 
   /** Commit the rotate gesture's final angle — likewise one transaction. */
@@ -257,7 +311,27 @@ export function imageResizePlugin(): EditorPlugin {
     },
     onKey(ev) {
       const c = ctx;
-      if (ev.key !== 'Escape' || !c) return false;
+      if (!c) return false;
+      // Backspace/Delete on a selected image removes the node. The selection
+      // lives in THIS plugin (not a PM NodeSelection), so without claiming
+      // the key here the hidden editor would backspace at its own caret and
+      // leave the image standing.
+      if (
+        (ev.key === 'Backspace' || ev.key === 'Delete') &&
+        sel &&
+        !drag &&
+        !rot
+      ) {
+        if (!imageNodeAt(c.state, sel.pos)) return false;
+        const node = c.state.doc.nodeAt(sel.pos);
+        if (!node) return false;
+        c.dispatch(c.state.tr.delete(sel.pos, sel.pos + node.nodeSize));
+        sel = null;
+        c.setFrame(null);
+        setCursor(c, null);
+        return true;
+      }
+      if (ev.key !== 'Escape') return false;
       // Mid-gesture: abandon the preview, snap the frame back to the layout
       // (nothing was dispatched, so there is nothing to undo).
       if (drag || rot) {
@@ -282,7 +356,10 @@ export function imageResizePlugin(): EditorPlugin {
       if (ev.type === 'move') {
         if (rot) {
           if (ev.point) {
-            rot.rotation = snapAngle(angleAround(rot.base, ev.point.x, ev.point.y) + rot.grip, ev.shiftKey);
+            rot.rotation = snapAngle(
+              angleAround(rot.base, ev.point.x, ev.point.y) + rot.grip,
+              ev.shiftKey,
+            );
             // DOM-only preview: the frame's CSS transform follows the pointer.
             c.setFrame({
               pageIndex: rot.pageIndex,
@@ -298,8 +375,19 @@ export function imageResizePlugin(): EditorPlugin {
             // Deltas map into the image's local axes, so dragging a rotated
             // image's corner still grows it along its own edges.
             const d = toLocal(ev.point.x, ev.point.y, drag.base, drag.rotation);
-            const s = toLocal(drag.startX, drag.startY, drag.base, drag.rotation);
-            drag.rect = resizeRect(drag.base, drag.handle, d.x - s.x, d.y - s.y, ev.shiftKey);
+            const s = toLocal(
+              drag.startX,
+              drag.startY,
+              drag.base,
+              drag.rotation,
+            );
+            drag.rect = resizeRect(
+              drag.base,
+              drag.handle,
+              d.x - s.x,
+              d.y - s.y,
+              ev.shiftKey,
+            );
             // DOM-only preview: frame + size readout follow the pointer; the
             // document, layout, and content canvas stay untouched.
             c.setFrame({
@@ -312,11 +400,21 @@ export function imageResizePlugin(): EditorPlugin {
           return true;
         }
         // Hover feedback over the selection's handles / rotate knob.
-        if (ev.buttons === 0 && ev.point && sel && imageNodeAt(c.state, sel.pos)) {
+        if (
+          ev.buttons === 0 &&
+          ev.point &&
+          sel &&
+          imageNodeAt(c.state, sel.pos)
+        ) {
           const frame = frameForPos(c.layout, sel.pos);
           if (frame && frame.pageIndex === ev.point.pageIndex) {
             const rotation = rotationAt(c.state, sel.pos);
-            const base = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+            const base = {
+              x: frame.x,
+              y: frame.y,
+              width: frame.width,
+              height: frame.height,
+            };
             const local = toLocal(ev.point.x, ev.point.y, base, rotation);
             if (
               Math.abs(local.x - (base.x + base.width / 2)) <= KNOB_TOL &&
@@ -340,11 +438,19 @@ export function imageResizePlugin(): EditorPlugin {
           const frame = frameForPos(c.layout, sel.pos);
           if (frame && frame.pageIndex === ev.point.pageIndex) {
             const rotation = rotationAt(c.state, sel.pos);
-            const base = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+            const base = {
+              x: frame.x,
+              y: frame.y,
+              width: frame.width,
+              height: frame.height,
+            };
             const local = toLocal(ev.point.x, ev.point.y, base, rotation);
             const knobX = base.x + base.width / 2;
             const knobY = base.y - KNOB_OFFSET;
-            if (Math.abs(local.x - knobX) <= KNOB_TOL && Math.abs(local.y - knobY) <= KNOB_TOL) {
+            if (
+              Math.abs(local.x - knobX) <= KNOB_TOL &&
+              Math.abs(local.y - knobY) <= KNOB_TOL
+            ) {
               rot = {
                 base,
                 pageIndex: frame.pageIndex,
@@ -376,7 +482,9 @@ export function imageResizePlugin(): EditorPlugin {
           c.setFrame({
             pageIndex: hit.pageIndex,
             ...hit.rect,
-            ...(rotationAt(c.state, hit.pos) ? { rotation: rotationAt(c.state, hit.pos) } : {}),
+            ...(rotationAt(c.state, hit.pos)
+              ? { rotation: rotationAt(c.state, hit.pos) }
+              : {}),
           });
           return true; // claim: keep the caret where it is
         }
