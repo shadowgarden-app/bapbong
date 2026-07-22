@@ -1,4 +1,7 @@
-import type { EditorPlugin, PluginContext } from '@shadow-garden/bapbong-contracts';
+import type {
+  EditorPlugin,
+  PluginContext,
+} from '@shadow-garden/bapbong-contracts';
 
 /** The `link` mark href covering doc position `pos`, or null. */
 function linkHrefAt(state: PluginContext['state'], pos: number): string | null {
@@ -10,15 +13,20 @@ function linkHrefAt(state: PluginContext['state'], pos: number): string | null {
   const after = $pos.nodeAfter;
   const before = $pos.nodeBefore;
   const mark =
-    (after && linkType.isInSet(after.marks)) || (before && linkType.isInSet(before.marks)) || null;
+    (after && linkType.isInSet(after.marks)) ||
+    (before && linkType.isInSet(before.marks)) ||
+    null;
   return mark ? (mark.attrs['href'] as string) : null;
 }
 
 /** Open an external hyperlink in a new tab. In-document anchors (`#…`) are left
- *  to a future "scroll to bookmark" follow-up. */
+ *  to a future "scroll to bookmark" follow-up. Scheme-less hrefs (a stored
+ *  "www.google.com") get https:// — window.open would treat them as relative
+ *  paths and silently 404 inside the app. */
 function openHref(href: string): void {
   if (!href || href.startsWith('#')) return;
-  window.open(href, '_blank', 'noopener,noreferrer');
+  const url = /^[a-z][a-z0-9+.-]*:/i.test(href) ? href : `https://${href}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 /**

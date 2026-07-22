@@ -62,6 +62,9 @@ type ResolvedOptions = Required_<
 /** Extra band (layout px) mounted above/below the viewport so slow scrolls
  *  reveal content instead of blank page. */
 const VIEWPORT_MARGIN = 200;
+
+/** Word's hyperlink blue — used for linked runs with no explicit color. */
+const LINK_COLOR = '#0563c1';
 /** Idle page canvases kept for reuse rather than discarded on scroll. */
 const POOL_LIMIT = 8;
 
@@ -84,7 +87,9 @@ const fontCss = (f: FontSpec) =>
   `${f.italic ? 'italic ' : ''}${f.bold ? '700' : '400'} ${f.sizePt}pt ${f.family}`;
 
 const defaultDpr = () =>
-  typeof globalThis.devicePixelRatio === 'number' ? Math.min(globalThis.devicePixelRatio, 2) : 1;
+  typeof globalThis.devicePixelRatio === 'number'
+    ? Math.min(globalThis.devicePixelRatio, 2)
+    : 1;
 
 /** One mounted page: its own `<canvas>` element + 2D context. */
 interface PageSlot {
@@ -117,10 +122,11 @@ export class CanvasPainter {
   private lastLayout: ResolvedLayout | null = null;
   /** Last paint options, minus caret/selection (those live in lastOverlay). */
   private lastOptions: PaintOptions = {};
-  private lastOverlay: { caret: CaretRect | null; selection: SelectionRect[] } = {
-    caret: null,
-    selection: [],
-  };
+  private lastOverlay: { caret: CaretRect | null; selection: SelectionRect[] } =
+    {
+      caret: null,
+      selection: [],
+    };
   private lastFrame: { o: ResolvedOptions; dpr: number } | null = null;
   /** Top edge (layout px) of each page in the stacked document. */
   private pageY: number[] = [];
@@ -162,7 +168,9 @@ export class CanvasPainter {
     // Which pages to keep mounted: those intersecting the viewport (+ margin).
     const vp = options.viewport;
     const vTop = vp ? vp.top / o.zoom - VIEWPORT_MARGIN : -Infinity;
-    const vBottom = vp ? (vp.top + vp.height) / o.zoom + VIEWPORT_MARGIN : Infinity;
+    const vBottom = vp
+      ? (vp.top + vp.height) / o.zoom + VIEWPORT_MARGIN
+      : Infinity;
     const desired = new Set<number>();
     layout.pages.forEach((page, i) => {
       const top = this.pageY[i];
@@ -174,14 +182,21 @@ export class CanvasPainter {
     }
     this.overlayPages = new Set();
     for (const i of desired) this.drawPage(i, o, dpr);
-    if (this.lastOverlay.caret) this.overlayPages.add(this.lastOverlay.caret.pageIndex);
-    for (const r of this.lastOverlay.selection) this.overlayPages.add(r.pageIndex);
+    if (this.lastOverlay.caret)
+      this.overlayPages.add(this.lastOverlay.caret.pageIndex);
+    for (const r of this.lastOverlay.selection)
+      this.overlayPages.add(r.pageIndex);
   }
 
   /** Redraw just the pages whose caret/selection changed — the cheap path for
    *  blink and drag (one page for a blink, a handful for a drag). */
-  paintOverlay(overlay: { caret?: CaretRect | null; selection?: SelectionRect[] } = {}): void {
-    this.lastOverlay = { caret: overlay.caret ?? null, selection: overlay.selection ?? [] };
+  paintOverlay(
+    overlay: { caret?: CaretRect | null; selection?: SelectionRect[] } = {},
+  ): void {
+    this.lastOverlay = {
+      caret: overlay.caret ?? null,
+      selection: overlay.selection ?? [],
+    };
     const frame = this.lastFrame;
     if (!frame || !this.lastLayout) return;
     const next = new Set<number>();
@@ -207,10 +222,16 @@ export class CanvasPainter {
     this.ctx.clearRect(0, 0, page.width, page.height);
     this.ctx.textBaseline = 'alphabetic';
 
-    const pageInfo = { page: page.index + 1, pages: this.lastLayout?.pages.length ?? 1 };
+    const pageInfo = {
+      page: page.index + 1,
+      pages: this.lastLayout?.pages.length ?? 1,
+    };
     // Each canvas is page-local, so everything draws at yOffset 0.
     this.paintPage(page, 0, o, pageInfo);
-    for (const chrome of [this.chromeFor(i, 'header'), this.chromeFor(i, 'footer')]) {
+    for (const chrome of [
+      this.chromeFor(i, 'header'),
+      this.chromeFor(i, 'footer'),
+    ]) {
       if (!chrome) continue;
       for (const line of chrome.lines) this.paintLine(line, 0, o, pageInfo);
       for (const table of chrome.tables) this.paintTable(table, 0, o, pageInfo);
@@ -222,11 +243,18 @@ export class CanvasPainter {
    *  titlePg is set, the even variant on even pages when evenAndOdd is set, else
    *  the default. A selected-but-absent variant means a blank band (no fallback
    *  to the default — that's Word's behavior for title/even pages). */
-  private chromeFor(i: number, kind: 'header' | 'footer'): ResolvedChrome | undefined {
+  private chromeFor(
+    i: number,
+    kind: 'header' | 'footer',
+  ): ResolvedChrome | undefined {
     const L = this.lastLayout;
     if (!L) return undefined;
     const s = L.chromeSelect;
-    const pick = (def?: ResolvedChrome, first?: ResolvedChrome, even?: ResolvedChrome) => {
+    const pick = (
+      def?: ResolvedChrome,
+      first?: ResolvedChrome,
+      even?: ResolvedChrome,
+    ) => {
       if (s?.titlePg && i === 0) return first;
       if (s?.evenAndOdd && (i + 1) % 2 === 0) return even;
       return def;
@@ -244,7 +272,10 @@ export class CanvasPainter {
     if (!slot) {
       const canvas = this.createCanvas();
       const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('bapbong-painter-canvas: 2D canvas context unavailable');
+      if (!ctx)
+        throw new Error(
+          'bapbong-painter-canvas: 2D canvas context unavailable',
+        );
       canvas.style.position = 'absolute';
       canvas.style.left = '0';
       canvas.style.display = 'block';
@@ -269,7 +300,13 @@ export class CanvasPainter {
 
   /** Only resize when needed: assigning width/height — even the same value —
    *  clears and reallocates the backing store. */
-  private sizeCanvas(c: HTMLCanvasElement, width: number, height: number, zoom: number, dpr: number): void {
+  private sizeCanvas(
+    c: HTMLCanvasElement,
+    width: number,
+    height: number,
+    zoom: number,
+    dpr: number,
+  ): void {
     const deviceW = Math.max(1, Math.round(width * zoom * dpr));
     const deviceH = Math.max(1, Math.round(height * zoom * dpr));
     if (c.width !== deviceW) c.width = deviceW;
@@ -278,7 +315,12 @@ export class CanvasPainter {
     c.style.height = `${Math.round(height * zoom)}px`;
   }
 
-  private paintPage(page: ResolvedPage, yOffset: number, o: ResolvedOptions, pageInfo?: PageInfo): void {
+  private paintPage(
+    page: ResolvedPage,
+    yOffset: number,
+    o: ResolvedOptions,
+    pageInfo?: PageInfo,
+  ): void {
     const ctx = this.ctx;
     ctx.fillStyle = o.pageBackground;
     ctx.fillRect(0, yOffset, page.width, page.height);
@@ -292,7 +334,8 @@ export class CanvasPainter {
     // Selection sits under the text.
     ctx.fillStyle = o.selectionColor;
     for (const r of this.lastOverlay.selection) {
-      if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+      if (r.pageIndex === page.index)
+        ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
     }
 
     // Plugin background decorations (comment tint, find highlight…) behind text.
@@ -300,12 +343,14 @@ export class CanvasPainter {
       if (d.kind !== 'background') continue;
       ctx.fillStyle = d.color;
       for (const r of d.rects) {
-        if (r.pageIndex === page.index) ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
+        if (r.pageIndex === page.index)
+          ctx.fillRect(r.x, yOffset + r.y, r.width, r.height);
       }
     }
 
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
-    for (const table of page.tables ?? []) this.paintTable(table, yOffset, o, pageInfo);
+    for (const table of page.tables ?? [])
+      this.paintTable(table, yOffset, o, pageInfo);
 
     // Plugin underline/strike decorations over the text.
     for (const d of o.decorations) {
@@ -314,7 +359,10 @@ export class CanvasPainter {
       for (const r of d.rects) {
         if (r.pageIndex !== page.index) continue;
         const thickness = Math.max(1, r.height * 0.06);
-        const y = d.kind === 'underline' ? yOffset + r.y + r.height - thickness : yOffset + r.y + r.height / 2;
+        const y =
+          d.kind === 'underline'
+            ? yOffset + r.y + r.height - thickness
+            : yOffset + r.y + r.height / 2;
         ctx.fillRect(r.x, y, r.width, thickness);
       }
     }
@@ -343,7 +391,14 @@ export class CanvasPainter {
 
   /** Run `draw` rotated `deg` clockwise around the center of the given box —
    *  the paint-only rotation of images/shapes (the layout box stays put). */
-  private withRotation(deg: number | undefined, x: number, y: number, w: number, h: number, draw: () => void): void {
+  private withRotation(
+    deg: number | undefined,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    draw: () => void,
+  ): void {
     if (!deg) {
       draw();
       return;
@@ -360,7 +415,12 @@ export class CanvasPainter {
   /** One anchored float: vector shape or bitmap, then any textbox text laid
    *  out inside it (box-local lines — translate to the float's origin, and
    *  clip to the box the way Word hides textbox overflow). */
-  private paintFloat(f: ResolvedFloat, yOffset: number, o: ResolvedOptions, pageInfo?: PageInfo): void {
+  private paintFloat(
+    f: ResolvedFloat,
+    yOffset: number,
+    o: ResolvedOptions,
+    pageInfo?: PageInfo,
+  ): void {
     this.withRotation(f.rotation, f.x, yOffset + f.y, f.width, f.height, () => {
       if (f.shape) {
         this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
@@ -402,7 +462,10 @@ export class CanvasPainter {
     }
     for (const seg of line.segments) {
       ctx.font = fontCss(seg.font);
-      ctx.fillStyle = seg.color ?? o.textColor;
+      // Hyperlinks without an explicit color get Word's hyperlink look
+      // (blue + underline) — otherwise a fresh link paints like plain text
+      // and inserting one reads as "nothing happened".
+      ctx.fillStyle = seg.color ?? (seg.link ? LINK_COLOR : o.textColor);
       // Page-number fields render the live value for the page being painted.
       const text =
         seg.field && pageInfo
@@ -411,37 +474,74 @@ export class CanvasPainter {
       // Super/subscript shift the (already-reduced) glyphs off the baseline.
       const em = seg.font.sizePt * (96 / 72);
       const segY =
-        seg.vertAlign === 'super' ? baselineY - em * 0.5 : seg.vertAlign === 'sub' ? baselineY + em * 0.2 : baselineY;
+        seg.vertAlign === 'super'
+          ? baselineY - em * 0.5
+          : seg.vertAlign === 'sub'
+            ? baselineY + em * 0.2
+            : baselineY;
       ctx.fillText(text, seg.x, segY);
       // Text decorations use the width measured at layout time — the painter
       // never measures.
-      if ((seg.underline || seg.strike) && seg.width) {
+      const underline = seg.underline || (!!seg.link && !seg.color);
+      if ((underline || seg.strike) && seg.width) {
         const em = seg.font.sizePt * (96 / 72);
         const thickness = Math.max(1, em * 0.05);
-        if (seg.underline) ctx.fillRect(seg.x, baselineY + Math.max(1, em * 0.1), seg.width, thickness);
-        if (seg.strike) ctx.fillRect(seg.x, baselineY - em * 0.27, seg.width, thickness);
+        if (underline)
+          ctx.fillRect(
+            seg.x,
+            baselineY + Math.max(1, em * 0.1),
+            seg.width,
+            thickness,
+          );
+        if (seg.strike)
+          ctx.fillRect(seg.x, baselineY - em * 0.27, seg.width, thickness);
       }
     }
     for (const img of line.images ?? []) {
-      this.withRotation(img.rotation, img.x, baselineY - img.height, img.width, img.height, () => {
-        if (img.shape) {
-          // Same box the bitmap would occupy: bottom edge on the baseline.
-          this.drawShape(img.shape, img.x, baselineY - img.height, img.width, img.height);
-          return;
-        }
-        const el = this.requestImage(img.src);
-        if (el?.complete && el.naturalWidth > 0) {
-          // The image's bottom edge sits on the baseline (matches the layout).
-          ctx.drawImage(el, img.x, baselineY - img.height, img.width, img.height);
-        }
-      });
+      this.withRotation(
+        img.rotation,
+        img.x,
+        baselineY - img.height,
+        img.width,
+        img.height,
+        () => {
+          if (img.shape) {
+            // Same box the bitmap would occupy: bottom edge on the baseline.
+            this.drawShape(
+              img.shape,
+              img.x,
+              baselineY - img.height,
+              img.width,
+              img.height,
+            );
+            return;
+          }
+          const el = this.requestImage(img.src);
+          if (el?.complete && el.naturalWidth > 0) {
+            // The image's bottom edge sits on the baseline (matches the layout).
+            ctx.drawImage(
+              el,
+              img.x,
+              baselineY - img.height,
+              img.width,
+              img.height,
+            );
+          }
+        },
+      );
     }
   }
 
   /** Vector shape in an image box, per ShapeSpec.kind. The path is built with
    *  primitive calls (no Path2D) and filled then stroked; strokes stay inside
    *  the box so thick outlines don't bleed into text. */
-  private drawShape(s: ShapeSpec, x: number, y: number, w: number, h: number): void {
+  private drawShape(
+    s: ShapeSpec,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
     const ctx = this.ctx;
     const lw = s.strokeWidth || 1;
     const fillStroke = () => {
@@ -464,7 +564,12 @@ export class CanvasPainter {
         if (s.stroke) {
           ctx.strokeStyle = s.stroke;
           ctx.lineWidth = lw;
-          ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0, w - lw), Math.max(0, h - lw));
+          ctx.strokeRect(
+            x + lw / 2,
+            y + lw / 2,
+            Math.max(0, w - lw),
+            Math.max(0, h - lw),
+          );
         }
         return;
       }
@@ -485,14 +590,27 @@ export class CanvasPainter {
       }
       case 'ellipse': {
         ctx.beginPath();
-        ctx.ellipse(x + w / 2, y + h / 2, Math.max(0, (w - lw) / 2), Math.max(0, (h - lw) / 2), 0, 0, Math.PI * 2);
+        ctx.ellipse(
+          x + w / 2,
+          y + h / 2,
+          Math.max(0, (w - lw) / 2),
+          Math.max(0, (h - lw) / 2),
+          0,
+          0,
+          Math.PI * 2,
+        );
         fillStroke();
         return;
       }
       case 'roundRect': {
         // OOXML default corner adj 16667/100000 of the shorter side.
         const r = Math.min(0.16667 * Math.min(w, h), w / 2, h / 2);
-        const [x0, y0, x1, y1] = [x + lw / 2, y + lw / 2, x + w - lw / 2, y + h - lw / 2];
+        const [x0, y0, x1, y1] = [
+          x + lw / 2,
+          y + lw / 2,
+          x + w - lw / 2,
+          y + h - lw / 2,
+        ];
         ctx.beginPath();
         ctx.moveTo(x0 + r, y0);
         ctx.lineTo(x1 - r, y0);
@@ -533,7 +651,15 @@ export class CanvasPainter {
         fillStroke();
         for (const cx of [x + r, x + w - r]) {
           ctx.beginPath();
-          ctx.ellipse(cx, y + h / 2, r, Math.max(0, (h - lw) / 2), 0, 0, Math.PI * 2);
+          ctx.ellipse(
+            cx,
+            y + h / 2,
+            r,
+            Math.max(0, (h - lw) / 2),
+            0,
+            0,
+            Math.PI * 2,
+          );
           fillStroke();
         }
         return;
@@ -569,7 +695,8 @@ export class CanvasPainter {
         ctx.clip();
       }
       for (const line of cell.lines) this.paintLine(line, yOffset, o, pageInfo);
-      for (const nested of cell.tables ?? []) this.paintTable(nested, yOffset, o, pageInfo);
+      for (const nested of cell.tables ?? [])
+        this.paintTable(nested, yOffset, o, pageInfo);
       if (clip) ctx.restore();
     }
     // OOXML tables are borderless unless w:tblBorders (or a table style) says
@@ -585,9 +712,11 @@ export class CanvasPainter {
         const y0 = yOffset + cell.y + 0.5;
         const y1 = yOffset + cell.y + cell.height + 0.5;
         const topOuter = Math.abs(cell.y - table.y) < eps;
-        const bottomOuter = Math.abs(cell.y + cell.height - (table.y + table.height)) < eps;
+        const bottomOuter =
+          Math.abs(cell.y + cell.height - (table.y + table.height)) < eps;
         const leftOuter = Math.abs(cell.x - table.x) < eps;
-        const rightOuter = Math.abs(cell.x + cell.width - (table.x + table.width)) < eps;
+        const rightOuter =
+          Math.abs(cell.x + cell.width - (table.x + table.width)) < eps;
         // Cell border wins; else the table's outer/inside edge. A BorderSide is
         // visible, `false` is explicit-none, absent inherits.
         const top = cb?.top ?? (topOuter ? b?.top : b?.insideH);
@@ -604,13 +733,20 @@ export class CanvasPainter {
     // Anchored images/shapes positioned in the cells, on top (Word paints
     // non-behindDoc drawings over the table grid).
     for (const cell of table.cells) {
-      for (const f of cell.floats ?? []) this.paintFloat(f, yOffset, o, pageInfo);
+      for (const f of cell.floats ?? [])
+        this.paintFloat(f, yOffset, o, pageInfo);
     }
   }
 
   /** Stroke one border edge with its width / style / colour. The edge is always
    *  horizontal or vertical (table grid lines). */
-  private strokeBorder(side: BorderSide, x1: number, y1: number, x2: number, y2: number): void {
+  private strokeBorder(
+    side: BorderSide,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+  ): void {
     const ctx = this.ctx;
     ctx.strokeStyle = side.color;
     if (side.style === 'double') {
@@ -657,7 +793,11 @@ export class CanvasPainter {
       // Claim half the trailing gap so clicks between pages snap sensibly.
       const claim = page.height + (isLast ? Infinity : gap / 2);
       if (y < yOffset + claim) {
-        return { pageIndex: i, x, y: Math.min(Math.max(y - yOffset, 0), page.height) };
+        return {
+          pageIndex: i,
+          x,
+          y: Math.min(Math.max(y - yOffset, 0), page.height),
+        };
       }
       yOffset += page.height + gap;
     }

@@ -19,6 +19,7 @@ import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import {
   insertImage,
   insertTable,
+  linkInfoAt,
   pageBreakCommand,
   setLink,
 } from './insert.js';
@@ -287,7 +288,7 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(table.firstChild?.childCount).toBe(3); // cells in the first row
   });
 
-  it('insertImage inserts an inline image; setLink needs a range', () => {
+  it('insertImage inserts an inline image; setLink wraps the range', () => {
     const img = findNode(
       apply(paraState(), insertImage('data:img', 'pic')),
       'image',
@@ -296,11 +297,67 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
 
     const linked = apply(paraState(), setLink('https://x.test'));
     expect(linked.doc.rangeHasMark(1, 6, schema.marks['link'])).toBe(true);
+  });
 
-    // empty selection → link disabled
+  it('setLink at a caret types the address as linked text, scheme added', () => {
     const ps = paraState();
     const caret = ps.apply(ps.tr.setSelection(TextSelection.create(ps.doc, 1)));
-    expect(setLink('https://x.test').isEnabled?.(caret)).toBe(false);
+    expect(setLink('google.com').isEnabled?.(caret)).toBe(true);
+    const after = apply(caret, setLink('google.com'));
+    expect(after.doc.textContent).toContain('google.com');
+    expect(after.doc.rangeHasMark(1, 11, schema.marks['link'])).toBe(true);
+    let href = '';
+    after.doc.nodesBetween(1, 11, (n) => {
+      const m = n.marks.find((mk) => mk.type.name === 'link');
+      if (m) href = String(m.attrs['href']);
+    });
+    expect(href).toBe('https://google.com'); // scheme-less input normalized
+  });
+
+  it('setLink at a caret inside a link edits it in place', () => {
+    const linked = apply(paraState(), setLink('https://x.test'));
+    const caret = linked.apply(
+      linked.tr.setSelection(TextSelection.create(linked.doc, 3)),
+    );
+    expect(linkInfoAt(caret)?.href).toBe('https://x.test');
+    // New href, same text → remark only.
+    const rehref = apply(caret, setLink('y.test'));
+    expect(
+      linkInfoAt(
+        rehref.apply(
+          rehref.tr.setSelection(TextSelection.create(rehref.doc, 3)),
+        ),
+      )?.href,
+    ).toBe('https://y.test');
+    // New text too → the linked run is replaced.
+    const retext = apply(caret, setLink('z.test', 'zed'));
+    expect(retext.doc.textContent).toBe('zed');
+    expect(retext.doc.rangeHasMark(1, 4, schema.marks['link'])).toBe(true);
+  });
+
+  it('linkInfoAt is null for a caret inside plain text next to a link', () => {
+    // "hello" linked, then plain " world"; caret INSIDE " world".
+    const doc = n('doc', null, [
+      n('paragraph', null, [
+        schema.text('hello', [schema.marks['link'].create({ href: 'https://x.test' })]),
+        schema.text(' world'),
+      ]),
+    ]);
+    const base = EditorState.create({ schema, doc });
+    const caret = base.apply(base.tr.setSelection(TextSelection.create(doc, 9)));
+    expect(linkInfoAt(caret)).toBeNull();
+    // ...but the boundary position right after the link still counts.
+    const edge = base.apply(base.tr.setSelection(TextSelection.create(doc, 6)));
+    expect(linkInfoAt(edge)?.href).toBe('https://x.test');
+  });
+
+  it('setLink(null) at a caret unlinks the run under it', () => {
+    const linked = apply(paraState(), setLink('https://x.test'));
+    const caret = linked.apply(
+      linked.tr.setSelection(TextSelection.create(linked.doc, 3)),
+    );
+    const after = apply(caret, setLink(null));
+    expect(after.doc.rangeHasMark(1, 6, schema.marks['link'])).toBe(false);
   });
 
   it('insertRow adds a row; insertColumn adds a cell to every row', () => {

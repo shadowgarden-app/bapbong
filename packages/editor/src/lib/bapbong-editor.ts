@@ -298,6 +298,36 @@ export class BapbongEditor {
     this.bridge?.dispatch(tr);
   }
 
+  /** Viewport-space rect of the caret at `pos` (default: the selection head)
+   *  — lets hosts anchor floating UI (e.g. a link panel) at the text cursor
+   *  or at a stable position like a link's start. Null before the first
+   *  layout or when the position is off the built pages. */
+  caretViewportRect(
+    pos?: number,
+  ): { x: number; y: number; height: number } | null {
+    const state = this.bridge?.state;
+    if (!state) return null;
+    const cr = this.core.caretRect(pos ?? state.selection.head);
+    if (!cr) return null;
+    const top = this.core.pageToCanvas({
+      pageIndex: cr.pageIndex,
+      x: cr.x,
+      y: cr.y,
+    });
+    const bottom = this.core.pageToCanvas({
+      pageIndex: cr.pageIndex,
+      x: cr.x,
+      y: cr.y + cr.height,
+    });
+    if (!top || !bottom) return null;
+    const host = this.stack.getBoundingClientRect();
+    return {
+      x: host.left + top.x,
+      y: host.top + top.y,
+      height: bottom.y - top.y,
+    };
+  }
+
   /** Insert an image blob at the selection, measured to its intrinsic size
    *  (display-capped) exactly like a paste. Prefer this over a bare
    *  insertImage command from host insert flows — a node without

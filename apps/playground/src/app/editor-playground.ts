@@ -26,6 +26,7 @@ import {
   insertImage,
   insertRow,
   insertTable,
+  linkInfoAt,
   mergeCells,
   removeSectionBreak,
   setFontFamily,
@@ -55,8 +56,10 @@ import {
   openCellProperties,
   promptDialog,
   showContextMenu,
+  showLinkPanel,
   tableGridPicker,
   type BorderPreset,
+  type LinkPanelHandle,
   type ContextMenuEntry,
   type FindDialogHandle,
   type Menu,
@@ -271,6 +274,19 @@ export class EditorPlayground implements OnDestroy {
     });
     // Shell concerns: page count + the lazy inspection panels.
     editor.onChange((c) => this.onEditorChange(c));
+    // Clicking into a link pops the view panel (copy / edit / unlink) —
+    // Google Docs behavior; deferred a tick so the caret pick settles first.
+    // A caret that MOVES but stays within the same link keeps the panel as
+    // is (it anchors to the link's start, not the cursor) — no repaint.
+    editor.onCaretPick(() => {
+      setTimeout(() => {
+        if (this.editor !== editor || !editor.state.selection.empty) return;
+        if (!linkInfoAt(editor.state)?.href) return;
+        // showLinkPanel dedupes by key: a caret landing in the SAME link
+        // cancels the panel's deferred close and reuses it untouched.
+        this.openLinkPanel();
+      });
+    });
     // Cell-block action icon → cell-properties dialog (applied to the block).
     editor.tableSelection.onAction((block) =>
       this.openCellPropsForBlock(block),
@@ -420,7 +436,14 @@ export class EditorPlayground implements OnDestroy {
 
   private onEditorChange(c: EditorChange): void {
     this.pageCount.set(c.pageCount);
-    if (c.docChanged) this.schedulePanelSync(c.state);
+    if (c.docChanged) {
+      this.schedulePanelSync(c.state);
+      // Typing/edits move the anchor — drop an open link panel rather than
+      // letting it float detached from the caret.
+      this.linkPanel?.close();
+      this.linkPanel = null;
+      this.linkPanelKey = null;
+    }
     this.renderSectionMarkers();
   }
 
@@ -611,10 +634,7 @@ export class EditorPlayground implements OnDestroy {
           },
           {
             label: 'Link…',
-            run: () =>
-              this.execPrompt('Insert link', 'https://…', (href) =>
-                setLink(href),
-              ),
+            run: () => this.openLinkPanel(),
           },
           {
             label: 'Remove link',
@@ -837,16 +857,6 @@ export class EditorPlayground implements OnDestroy {
     this.editor.focus();
   }
 
-  /** Ask for a value via a bapbong-ui dialog, then run the command it builds. */
-  private async execPrompt(
-    title: string,
-    placeholder: string,
-    build: (value: string) => Command,
-  ): Promise<void> {
-    const value = await promptDialog({ title, placeholder });
-    if (value) this.exec(build(value));
-  }
-
   /** Open a transient file picker and hand the chosen file to `onFile`. */
   private openFilePicker(accept: string, onFile: (file: File) => void): void {
     const input = document.createElement('input');
@@ -865,6 +875,38 @@ export class EditorPlayground implements OnDestroy {
 
   private insertImageFile(file: File): void {
     void this.editor?.insertImageBlob(file);
+  }
+
+  /** The open link panel + the link range it was opened for (in-link caret
+   *  moves skip the reopen); closed on doc changes. */
+  private linkPanel: LinkPanelHandle | null = null;
+  private linkPanelKey: string | null = null;
+
+  /** Insert > Link…: floating panel at the caret (view / edit / insert). */
+  private openLinkPanel(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const state = editor.state;
+    const info = state.selection.empty ? linkInfoAt(state) : null;
+    // View mode anchors at the LINK's start (stable across in-link caret
+    // moves); the insert form anchors at the caret itself.
+    const anchor = editor.caretViewportRect(info ? info.from : undefined);
+    if (!anchor) return;
+    this.linkPanelKey = info ? `${info.from}:${info.to}` : null;
+    this.linkPanel = showLinkPanel({
+      anchor,
+      key: this.linkPanelKey ?? undefined,
+      existing: info?.href ? { href: info.href, text: info.text } : null,
+      hasSelection: !state.selection.empty,
+      onApply: (href, text) => {
+        this.exec(setLink(href, text));
+        editor.focus();
+      },
+      onUnlink: () => {
+        this.exec(setLink(null));
+        editor.focus();
+      },
+    });
   }
 
   /** Insert-from-URL: fetch the bytes up front and embed them (measured, like
