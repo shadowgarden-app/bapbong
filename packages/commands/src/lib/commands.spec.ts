@@ -339,12 +339,16 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     // "hello" linked, then plain " world"; caret INSIDE " world".
     const doc = n('doc', null, [
       n('paragraph', null, [
-        schema.text('hello', [schema.marks['link'].create({ href: 'https://x.test' })]),
+        schema.text('hello', [
+          schema.marks['link'].create({ href: 'https://x.test' }),
+        ]),
         schema.text(' world'),
       ]),
     ]);
     const base = EditorState.create({ schema, doc });
-    const caret = base.apply(base.tr.setSelection(TextSelection.create(doc, 9)));
+    const caret = base.apply(
+      base.tr.setSelection(TextSelection.create(doc, 9)),
+    );
     expect(linkInfoAt(caret)).toBeNull();
     // ...but the boundary position right after the link still counts.
     const edge = base.apply(base.tr.setSelection(TextSelection.create(doc, 6)));
