@@ -56,6 +56,24 @@ describe('layoutBlocks', () => {
     expect(pages[0].lines[1].y).toBe(36); // 20 + 16
   });
 
+  it('survives a degenerate page config (NaN margins) without hanging', () => {
+    // Regression: a real-world docx shipped w:pgMar values with unit suffixes
+    // ("20pt") — Number() made them NaN, and NaN margins turned the page-fill
+    // loop infinite (the whole app froze). Sanitized configs must terminate.
+    const cfg = config({
+      margin: { top: NaN, right: NaN, bottom: NaN, left: NaN },
+    });
+    const { pages } = layoutBlocks([para('one'), para('two')], cfg);
+    expect(pages.length).toBeGreaterThan(0);
+    expect(pages[0].lines.length).toBeGreaterThan(0);
+    // Margins that leave no content box degrade rather than loop.
+    const tight = config({
+      height: 50,
+      margin: { top: 40, right: 20, bottom: 40, left: 20 },
+    });
+    expect(layoutBlocks([para('x')], tight).pages.length).toBeGreaterThan(0);
+  });
+
   it('paginates when content exceeds the page height', () => {
     // page height 80, margins 20 → content 20..60 = 40px → 2 lines/page.
     const cfg = config({ height: 80 });

@@ -1,6 +1,10 @@
 import JSZip from 'jszip';
 import { Mark, Schema } from 'prosemirror-model';
-import { createNumberingCounter, schema, type NumberingDefs } from '@shadow-garden/bapbong-model';
+import {
+  createNumberingCounter,
+  schema,
+  type NumberingDefs,
+} from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
 
 // The comment mark lives in the comment plugin, not the base schema. Comment
@@ -14,9 +18,12 @@ const withComments = new Schema({
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
 const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
-const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
-const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const R_NS =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const PKG_REL_NS =
+  'http://schemas.openxmlformats.org/package/2006/relationships';
+const WP_NS =
+  'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
 // 1x1 transparent PNG.
@@ -67,7 +74,9 @@ async function makeDocx(
     }
   }
   if (themeXml) zip.file('word/theme/theme1.xml', themeXml);
-  if (parts) for (const [path, content] of Object.entries(parts)) zip.file(path, content);
+  if (parts)
+    for (const [path, content] of Object.entries(parts))
+      zip.file(path, content);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -77,13 +86,17 @@ function listP(numId: string, ilvl: number, text: string): string {
 }
 
 /** Map a node's marks to `{ name: attrs }` for order-independent assertions. */
-function markMap(marks: readonly Mark[]): Record<string, Record<string, unknown>> {
+function markMap(
+  marks: readonly Mark[],
+): Record<string, Record<string, unknown>> {
   return Object.fromEntries(marks.map((m) => [m.type.name, m.attrs]));
 }
 
 describe('importDocx', () => {
   it('maps paragraphs and runs into the bapbong schema', async () => {
-    const { doc, rawDocumentXml } = await importDocx(await makeDocx(DOCUMENT_XML));
+    const { doc, rawDocumentXml } = await importDocx(
+      await makeDocx(DOCUMENT_XML),
+    );
 
     // Two text paragraphs + one empty (<w:p><w:pPr/></w:p>); sectPr is ignored.
     expect(doc.childCount).toBe(3);
@@ -97,7 +110,12 @@ describe('importDocx', () => {
 
     const p1 = doc.child(1);
     expect(p1.textContent).toBe('Italic underlined');
-    expect(p1.child(0).marks.map((m) => m.type.name).sort()).toEqual(['em', 'underline']);
+    expect(
+      p1
+        .child(0)
+        .marks.map((m) => m.type.name)
+        .sort(),
+    ).toEqual(['em', 'underline']);
 
     expect(doc.child(2).childCount).toBe(0);
     expect(rawDocumentXml).toContain('<w:body>');
@@ -173,7 +191,12 @@ describe('importDocx', () => {
     // Subscripted digits become Unicode subscripts; the run is formatted like
     // the equation's first math run (italic here).
     expect(doc.child(0).textContent).toBe('t₁');
-    expect(doc.child(0).child(0).marks.map((m) => m.type.name)).toContain('em');
+    expect(
+      doc
+        .child(0)
+        .child(0)
+        .marks.map((m) => m.type.name),
+    ).toContain('em');
 
     // Inline equation after plain text: sup, fractions (multi-term numerator
     // gets parens), radical, delimiter.
@@ -200,7 +223,12 @@ describe('importDocx', () => {
 
     // Title: docDefaults(12pt, Calibri) + Heading1(bold, #FF0000, 24pt).
     const title = markMap(doc.child(0).child(0).marks);
-    expect(Object.keys(title).sort()).toEqual(['fontFamily', 'fontSize', 'strong', 'textColor']);
+    expect(Object.keys(title).sort()).toEqual([
+      'fontFamily',
+      'fontSize',
+      'strong',
+      'textColor',
+    ]);
     expect(title.textColor.color).toBe('#FF0000');
     expect(title.fontSize.size).toBe(24);
     expect(title.fontFamily.family).toBe('Calibri');
@@ -240,11 +268,15 @@ describe('importDocx', () => {
       <w:p><w:r><w:t>plain</w:t></w:r></w:p>
     </w:body></w:document>`;
 
-    const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
 
     // Markers are no longer frozen at import — they're recounted from the
     // defs riding the doc (this is what lets edits renumber live).
-    const counter = createNumberingCounter(doc.attrs.numbering as NumberingDefs);
+    const counter = createNumberingCounter(
+      doc.attrs.numbering as NumberingDefs,
+    );
     const markers: (string | null)[] = [];
     doc.forEach((node) => {
       const list = node.attrs.list as { numId: string; level: number } | null;
@@ -268,8 +300,12 @@ describe('importDocx', () => {
       ${listP('11', 0, 'roman two')}
     </w:body></w:document>`;
 
-    const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
-    const counter = createNumberingCounter(doc.attrs.numbering as NumberingDefs);
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
+    const counter = createNumberingCounter(
+      doc.attrs.numbering as NumberingDefs,
+    );
     const marker = (i: number) => {
       const list = doc.child(i).attrs.list as { numId: string; level: number };
       return counter.next(list.numId, list.level);
@@ -318,6 +354,26 @@ describe('importDocx', () => {
     expect(merged.attrs.colspan).toBe(2);
     expect(merged.attrs.colwidth).toEqual([192, 96]);
     expect(merged.textContent).toBe('spanned');
+  });
+
+  it('resolves percentage table widths against the page content width', async () => {
+    // Seen in the wild: w:tblW/w:tcW type="pct" with a PLACEHOLDER tblGrid
+    // (100 twips ≈ 7px per column) — taking the grid literally stacked one
+    // character per line. A4 default content width = 794 − 96 − 96 = 602px.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblW w:type="pct" w:w="100%"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="100"/><w:gridCol w:w="100"/></w:tblGrid>
+        <w:tr>
+          <w:tc><w:tcPr><w:tcW w:type="pct" w:w="30%"/></w:tcPr><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>
+          <w:tc><w:tcPr><w:tcW w:type="pct" w:w="70%"/></w:tcPr><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const row = doc.child(0).child(0);
+    expect(row.child(0).attrs.colwidth).toEqual([181]); // 30% of 602
+    expect(row.child(1).attrs.colwidth).toEqual([421]); // 70% of 602
   });
 
   it('collapses vertical merges (w:vMerge) into rowspan', async () => {
@@ -370,7 +426,9 @@ describe('importDocx', () => {
       ${listP('1', 1, 'nested')}
       <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:ind w:left="2160"/></w:pPr><w:r><w:t>override</w:t></w:r></w:p>
     </w:body></w:document>`;
-    const { doc } = await importDocx(await makeDocx(documentXml, undefined, numberingXml));
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
 
     // The lvl pPr indents flow through the cascade: 720tw=48px, 1440tw=96px.
     expect(doc.child(0).attrs.indent).toEqual({ left: 48, hanging: 24 });
@@ -446,9 +504,35 @@ describe('importDocx', () => {
     });
   });
 
+  it('parses unit-suffixed pgMar values and never yields NaN margins', async () => {
+    // Seen in the wild from non-Word producers: w:pgMar w:top="20pt". A plain
+    // Number() made these NaN, and NaN margins hung pagination forever.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>x</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:pgSz w:w="11906" w:h="16838"/>
+        <w:pgMar w:top="20pt" w:right="40pt" w:bottom="20pt" w:left="1in"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const { page } = await importDocx(await makeDocx(documentXml));
+    expect(page.margin).toEqual({ top: 27, right: 53, bottom: 27, left: 96 });
+    // Garbage falls back to the default instead of NaN.
+    const bad = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>x</w:t></w:r></w:p>
+      <w:sectPr><w:pgMar w:top="wide" w:right="720" w:bottom="720" w:left="720"/></w:sectPr>
+    </w:body></w:document>`;
+    const { page: page2 } = await importDocx(await makeDocx(bad));
+    expect(page2.margin.top).toBe(96);
+    expect(page2.margin.right).toBe(48);
+  });
+
   it('defaults page geometry to A4 when sectPr omits it', async () => {
     const { page } = await importDocx(await makeDocx(DOCUMENT_XML));
-    expect(page).toEqual({ width: 794, height: 1123, margin: { top: 96, right: 96, bottom: 96, left: 96 } });
+    expect(page).toEqual({
+      width: 794,
+      height: 1123,
+      margin: { top: 96, right: 96, bottom: 96, left: 96 },
+    });
   });
 
   it('parses w:spacing (before/after + line rule)', async () => {
@@ -458,7 +542,12 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml));
     // 240tw=16px before, 120tw=8px after, line 360/240 = 1.5× (auto).
-    expect(doc.child(0).attrs.spacing).toEqual({ before: 16, after: 8, line: 1.5, lineRule: 'auto' });
+    expect(doc.child(0).attrs.spacing).toEqual({
+      before: 16,
+      after: 8,
+      line: 1.5,
+      lineRule: 'auto',
+    });
     // exact: 480tw → 32px.
     expect(doc.child(1).attrs.spacing).toEqual({ line: 32, lineRule: 'exact' });
   });
@@ -551,7 +640,9 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image1.png': PNG_1x1 }),
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.png': PNG_1x1,
+      }),
     );
     const img = doc.child(0).child(0);
     expect(img.type.name).toBe('image');
@@ -618,9 +709,17 @@ describe('importDocx', () => {
       <w:footnote w:id="3"><w:p><w:r><w:t>Note beta</w:t></w:r></w:p></w:footnote>
     </w:footnotes>`;
     const { doc, footnotes } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
-        'word/footnotes.xml': footnotesXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/footnotes.xml': footnotesXml,
+        },
+      ),
     );
     // references render as superscript 1, 2 in document order, carrying the
     // footnote mark so the layout engine can match them to their bodies.
@@ -646,9 +745,17 @@ describe('importDocx', () => {
       <w:endnote w:id="2"><w:p><w:r><w:t>End gamma</w:t></w:r></w:p></w:endnote>
     </w:endnotes>`;
     const { doc, footnotes } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
-        'word/endnotes.xml': endnotesXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/endnotes.xml': endnotesXml,
+        },
+      ),
     );
     expect(Object.keys(footnotes)).toHaveLength(0); // endnotes aren't footnotes
     const tail: string[] = [];
@@ -666,7 +773,11 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml));
     const sections = doc.attrs['sections'] as
-      | { blockCount: number; columns: { count: number; gap: number }; newPage: boolean }[]
+      | {
+          blockCount: number;
+          columns: { count: number; gap: number };
+          newPage: boolean;
+        }[]
       | null;
     expect(sections).toHaveLength(2);
     // First section ended by the in-paragraph sectPr: 1 block, continuous, 1 col.
@@ -674,7 +785,10 @@ describe('importDocx', () => {
     expect(sections?.[0].columns.count).toBe(1);
     // Final body sectPr: the remaining 2 blocks, 2 columns, 425 twips ≈ 28px gap.
     expect(sections?.[1].blockCount).toBe(2);
-    expect(sections?.[1].columns).toEqual({ count: 2, gap: Math.round(425 / 15) });
+    expect(sections?.[1].columns).toEqual({
+      count: 2,
+      gap: Math.round(425 / 15),
+    });
   });
 
   it('leaves doc.sections null for a plain single-column document', async () => {
@@ -753,7 +867,11 @@ describe('importDocx', () => {
       </w:tbl>
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml));
-    expect(doc.child(0).attrs.cellPadding).toEqual({ left: 20, right: 10, top: 0 });
+    expect(doc.child(0).attrs.cellPadding).toEqual({
+      left: 20,
+      right: 10,
+      top: 0,
+    });
     expect(doc.child(1).attrs.cellPadding).toBeNull(); // no override → defaults
   });
 
@@ -782,7 +900,9 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId5" Type="${R_NS}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>`;
 
-    const { doc } = await importDocx(await makeDocx(documentXml, undefined, undefined, relsXml));
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml),
+    );
     const p = doc.child(0);
     expect(p.child(0).text).toBe('click here');
     expect(markMap(p.child(0).marks).link.href).toBe('https://example.com/');
@@ -801,7 +921,9 @@ describe('importDocx', () => {
     const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
 
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image1.png': PNG_1x1 }),
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.png': PNG_1x1,
+      }),
     );
     const img = doc.child(0).child(0);
     expect(img.type.name).toBe('image');
@@ -824,7 +946,9 @@ describe('importDocx', () => {
     const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
 
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image1.png': PNG_1x1 }),
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.png': PNG_1x1,
+      }),
     );
     const img = doc.child(0).child(0);
     expect(img.type.name).toBe('image');
@@ -834,7 +958,8 @@ describe('importDocx', () => {
 
   it('imports wps shapes (rect/line) as shape-carrying image nodes', async () => {
     const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
-    const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+    const WPS_NS =
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
       <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
     </a:clrScheme></a:themeElements></a:theme>`;
@@ -860,7 +985,16 @@ describe('importDocx', () => {
       <w:p><w:r>${rect}</w:r><w:r>${line}</w:r></w:p>
     </w:body></w:document>`;
 
-    const { doc } = await importDocx(await makeDocx(documentXml, undefined, undefined, undefined, undefined, themeXml));
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
     const para = doc.child(0);
     expect(para.childCount).toBe(2);
 
@@ -869,18 +1003,32 @@ describe('importDocx', () => {
     expect(rectNode.attrs.src).toBe('');
     expect(rectNode.attrs.width).toBe(18); // 170815 EMU
     expect(rectNode.attrs.height).toBe(16); // 150495 EMU
-    expect(rectNode.attrs.shape).toEqual({ kind: 'rect', strokeWidth: 2, stroke: '#4472C4' });
-    expect(rectNode.attrs.float).toMatchObject({ wrap: 'square', hOffset: 319, vRel: 'paragraph' });
+    expect(rectNode.attrs.shape).toEqual({
+      kind: 'rect',
+      strokeWidth: 2,
+      stroke: '#4472C4',
+    });
+    expect(rectNode.attrs.float).toMatchObject({
+      wrap: 'square',
+      hOffset: 319,
+      vRel: 'paragraph',
+    });
 
     const lineNode = para.child(1);
-    expect(lineNode.attrs.shape).toEqual({ kind: 'line', strokeWidth: 1, stroke: '#C45911', flipV: true });
+    expect(lineNode.attrs.shape).toEqual({
+      kind: 'line',
+      strokeWidth: 1,
+      stroke: '#C45911',
+      flipV: true,
+    });
     expect(lineNode.attrs.width).toBe(100);
     expect(lineNode.attrs.height).toBe(0);
     expect(lineNode.attrs.float).toBeNull();
   });
 
   it('flattens wpg group pictures into per-member floats', async () => {
-    const WPG_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup';
+    const WPG_NS =
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup';
     // Group extent 200×100 px (1905000×952500 EMU), child space 2× that with
     // chOff (100000, -50000) → scale 0.5. Two member pictures.
     const pic = (rid: string, x: number, y: number, cx: number, cy: number) =>
@@ -907,7 +1055,9 @@ describe('importDocx', () => {
     </Relationships>`;
 
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image9.png': PNG_1x1 }),
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image9.png': PNG_1x1,
+      }),
     );
     const para = doc.child(0);
     expect(para.childCount).toBe(2);
@@ -917,7 +1067,11 @@ describe('importDocx', () => {
     expect(m1.attrs.src).toMatch(/^data:image\/png/);
     expect(m1.attrs.width).toBe(100); // 1905000 EMU × 0.5 scale
     expect(m1.attrs.height).toBe(50);
-    expect(m1.attrs.float).toMatchObject({ wrap: 'none', hOffset: 10, vOffset: 20 });
+    expect(m1.attrs.float).toMatchObject({
+      wrap: 'none',
+      hOffset: 10,
+      vOffset: 20,
+    });
     // Member 2 offset (1905000, 952500) in child space → +100, +50 px on page.
     const m2 = para.child(1);
     expect(m2.attrs.float).toMatchObject({ hOffset: 110, vOffset: 70 });
@@ -925,7 +1079,8 @@ describe('importDocx', () => {
 
   it('imports textbox (wps:txbx) paragraphs onto the shape node', async () => {
     const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
-    const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+    const WPS_NS =
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
     const box = `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300">
       <wp:positionH relativeFrom="column"><wp:posOffset>62865</wp:posOffset></wp:positionH>
       <wp:positionV relativeFrom="paragraph"><wp:posOffset>137453</wp:posOffset></wp:positionV>
@@ -973,7 +1128,9 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId9" Type="${R_NS}/image" Target="media/image2.png"/></Relationships>`;
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, { 'image2.png': PNG_1x1 }),
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image2.png': PNG_1x1,
+      }),
     );
     const img = doc.child(0).child(0);
     expect(img.type.name).toBe('image');
@@ -995,11 +1152,22 @@ describe('importDocx', () => {
     </w:body></w:document>`;
 
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, undefined, undefined, themeXml),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
     );
-    expect(markMap(doc.child(0).child(0).marks).textColor.color).toBe('#4472C4');
+    expect(markMap(doc.child(0).child(0).marks).textColor.color).toBe(
+      '#4472C4',
+    );
     // shade 0x80/255 ≈ 0.502 → 4472C4 darkened ≈ 223962
-    expect(markMap(doc.child(1).child(0).marks).textColor.color).toBe('#223962');
+    expect(markMap(doc.child(1).child(0).marks).textColor.color).toBe(
+      '#223962',
+    );
   });
 
   it('parses header/footer parts referenced by sectPr', async () => {
@@ -1018,15 +1186,28 @@ describe('importDocx', () => {
     const footerXml = `<?xml version="1.0"?><w:ftr xmlns:w="${W_NS}"><w:p><w:r><w:t>Footer text</w:t></w:r></w:p></w:ftr>`;
 
     const { doc, headers, footers } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, undefined, undefined, {
-        'word/header1.xml': headerXml,
-        'word/footer1.xml': footerXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        undefined,
+        undefined,
+        {
+          'word/header1.xml': headerXml,
+          'word/footer1.xml': footerXml,
+        },
+      ),
     );
 
     expect(doc.textContent).toBe('body');
     expect(headers.default.textContent).toBe('Header text');
-    expect(headers.default.child(0).child(0).marks.map((m) => m.type.name)).toContain('strong');
+    expect(
+      headers.default
+        .child(0)
+        .child(0)
+        .marks.map((m) => m.type.name),
+    ).toContain('strong');
     expect(footers.default.textContent).toBe('Footer text');
   });
 
@@ -1045,16 +1226,25 @@ describe('importDocx', () => {
       <Relationship Id="rIdHF" Type="${R_NS}/header" Target="header2.xml"/>
       <Relationship Id="rIdHE" Type="${R_NS}/header" Target="header3.xml"/>
     </Relationships>`;
-    const hdr = (t: string) => `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:hdr>`;
+    const hdr = (t: string) =>
+      `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:hdr>`;
     const settingsXml = `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:evenAndOddHeaders/></w:settings>`;
 
     const { headers, titlePg, evenAndOdd } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, undefined, undefined, {
-        'word/header1.xml': hdr('Default hdr'),
-        'word/header2.xml': hdr('First hdr'),
-        'word/header3.xml': hdr('Even hdr'),
-        'word/settings.xml': settingsXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        undefined,
+        undefined,
+        {
+          'word/header1.xml': hdr('Default hdr'),
+          'word/header2.xml': hdr('First hdr'),
+          'word/header3.xml': hdr('Even hdr'),
+          'word/settings.xml': settingsXml,
+        },
+      ),
     );
     expect(headers.default.textContent).toBe('Default hdr');
     expect(headers.first.textContent).toBe('First hdr');
@@ -1078,19 +1268,35 @@ describe('importDocx', () => {
       <w:comment w:id="0" w:author="Reviewer" w:date="2026-01-02"><w:p><w:r><w:t>Note body</w:t></w:r></w:p></w:comment>
     </w:comments>`;
     const { doc, comments } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
-        'word/comments.xml': commentsXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/comments.xml': commentsXml,
+        },
+      ),
       { schema: withComments },
     );
-    expect(comments).toEqual([{ id: 0, author: 'Reviewer', date: '2026-01-02', text: 'Note body' }]);
+    expect(comments).toEqual([
+      { id: 0, author: 'Reviewer', date: '2026-01-02', text: 'Note body' },
+    ]);
     // Only the "commented" run carries the comment mark.
     const p0 = doc.child(0);
     const byText = new Map<string, readonly Mark[]>();
-    p0.forEach((n) => { if (n.isText) byText.set(n.text ?? '', n.marks); });
+    p0.forEach((n) => {
+      if (n.isText) byText.set(n.text ?? '', n.marks);
+    });
     expect(markMap(byText.get('commented') ?? []).comment.ids).toEqual([0]);
-    expect(byText.get('Before ')?.some((m) => m.type.name === 'comment')).toBeFalsy();
-    expect(byText.get(' after')?.some((m) => m.type.name === 'comment')).toBeFalsy();
+    expect(
+      byText.get('Before ')?.some((m) => m.type.name === 'comment'),
+    ).toBeFalsy();
+    expect(
+      byText.get(' after')?.some((m) => m.type.name === 'comment'),
+    ).toBeFalsy();
   });
 
   it('imports threaded + resolved comments from commentsExtended.xml', async () => {
@@ -1111,13 +1317,25 @@ describe('importDocx', () => {
       <w15:commentEx w15:paraId="P1" w15:paraIdParent="P0" w15:done="0"/>
     </w15:commentsEx>`;
     const { doc } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
-        'word/comments.xml': commentsXml,
-        'word/commentsExtended.xml': extXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/comments.xml': commentsXml,
+          'word/commentsExtended.xml': extXml,
+        },
+      ),
       { schema: withComments },
     );
-    const nodes = doc.attrs['comments'] as { id: number; parentId: number | null; resolved: boolean }[];
+    const nodes = doc.attrs['comments'] as {
+      id: number;
+      parentId: number | null;
+      resolved: boolean;
+    }[];
     const byId = new Map(nodes.map((n) => [n.id, n]));
     expect(nodes).toHaveLength(2); // reply included even though it has no body range
     expect(byId.get(0)).toMatchObject({ parentId: null, resolved: true });
@@ -1137,15 +1355,24 @@ describe('importDocx', () => {
       <w:comment w:id="0" w:author="Reviewer" w:date="2026-01-02"><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:comment>
     </w:comments>`;
     const { doc, comments } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, undefined, undefined, undefined, {
-        'word/comments.xml': commentsXml,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/comments.xml': commentsXml,
+        },
+      ),
     ); // ← no { schema } → base schema has no comment mark
     expect(comments).toEqual([]); // flat list filtered
     expect(doc.attrs['comments']).toBeNull(); // no thread data on the doc
     let anyCommentMark = false;
     doc.descendants((n) => {
-      if (n.isText && n.marks.some((m) => m.type.name === 'comment')) anyCommentMark = true;
+      if (n.isText && n.marks.some((m) => m.type.name === 'comment'))
+        anyCommentMark = true;
     });
     expect(anyCommentMark).toBe(false); // text carries no comment mark
   });
@@ -1155,7 +1382,9 @@ describe('importDocx', () => {
       <w:p><w:r><w:t>body</w:t></w:r></w:p>
       <w:sectPr/>
     </w:body></w:document>`;
-    const { titlePg, evenAndOdd } = await importDocx(await makeDocx(documentXml));
+    const { titlePg, evenAndOdd } = await importDocx(
+      await makeDocx(documentXml),
+    );
     expect(titlePg).toBe(false);
     expect(evenAndOdd).toBe(false);
   });
@@ -1182,7 +1411,11 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(xml));
     // 720/15=48, 360/15=24, 240/15=16; hanging present so firstLine dropped.
-    expect(doc.child(0).attrs['indent']).toEqual({ left: 48, right: 24, hanging: 16 });
+    expect(doc.child(0).attrs['indent']).toEqual({
+      left: 48,
+      right: 24,
+      hanging: 16,
+    });
     // w:start aliases w:left; 1440/15=96, 240/15=16.
     expect(doc.child(1).attrs['indent']).toEqual({ left: 96, firstLine: 16 });
     expect(doc.child(2).attrs['indent']).toBeNull();
@@ -1191,8 +1424,8 @@ describe('importDocx', () => {
   it('throws when word/document.xml is missing', async () => {
     const zip = new JSZip();
     zip.file('hello.txt', 'nope');
-    await expect(importDocx(await zip.generateAsync({ type: 'uint8array' }))).rejects.toThrow(
-      /document\.xml/,
-    );
+    await expect(
+      importDocx(await zip.generateAsync({ type: 'uint8array' })),
+    ).rejects.toThrow(/document\.xml/);
   });
 });

@@ -137,6 +137,9 @@ interface Ctx {
   /** Schema the doc nodes/marks are created with (model's by default; the editor
    *  may inject a composed schema so plugin-contributed marks are imported). */
   schema: Schema;
+  /** Page content-box width in px (page minus side margins) — what
+   *  percentage-based table widths (w:tblW/w:tcW type="pct") resolve against. */
+  contentWidth: number;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -1141,10 +1144,60 @@ function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): TableBorders | null {
   return out && Object.values(out).some(Boolean) ? out : null;
 }
 
+/** A pct-typed width (w:tblW / w:tcW w:type="pct") as a percentage, or null.
+ *  The value is either literal ("30%") or OOXML's 50ths-of-a-percent. */
+function pctWidth(el: OoxmlNode | undefined): number | null {
+  if (!el || attrOf(el, 'w:type') !== 'pct') return null;
+  const raw = String(attrOf(el, 'w:w') ?? '').trim();
+  const n = raw.endsWith('%') ? Number(raw.slice(0, -1)) : Number(raw) / 50;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Effective per-grid-column pixel widths. Percentage-sized tables resolve
+ *  against the page content width — their w:tblGrid is often a placeholder
+ *  (e.g. 100 twips per column ≈ 7px, which would stack one character per
+ *  line) — while ordinary tables keep the twips grid. */
+function tableColumnWidths(tbl: OoxmlNode, grid: number[], ctx: Ctx): number[] {
+  const tablePct = pctWidth(child(child(tbl, 'w:tblPr'), 'w:tblW'));
+  const firstRow = children(tbl, 'w:tr')[0];
+  const cells = firstRow
+    ? children(firstRow, 'w:tc').map((tc) => {
+        const tcPr = child(tc, 'w:tcPr');
+        return {
+          pct: pctWidth(child(tcPr, 'w:tcW')),
+          span: Number(attrOf(child(tcPr, 'w:gridSpan'), 'w:val') ?? '1') || 1,
+        };
+      })
+    : [];
+  const spanSum = cells.reduce((s, c) => s + c.span, 0);
+  const cols = grid.length || spanSum;
+  if (tablePct === null && !cells.some((c) => c.pct !== null)) {
+    return grid.map(twipsToPx);
+  }
+  const total = (ctx.contentWidth * (tablePct ?? 100)) / 100;
+  const px = new Array<number>(cols).fill(Math.round(total / (cols || 1)));
+  if (cells.length && cells.every((c) => c.pct !== null) && spanSum === cols) {
+    let i = 0;
+    for (const c of cells) {
+      const w = Math.round((total * (c.pct as number)) / 100 / c.span);
+      for (let k = 0; k < c.span && i < cols; k++) px[i++] = w;
+    }
+  } else if (grid.length) {
+    // Pct table without full cell pcts: keep the grid's PROPORTIONS, scaled
+    // to the pct width.
+    const gsum = grid.reduce((a, b) => a + b, 0);
+    if (gsum > 0)
+      for (let i = 0; i < cols; i++)
+        px[i] = Math.round((grid[i] / gsum) * total);
+  }
+  return px;
+}
+
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const grid = children(child(tbl, 'w:tblGrid'), 'w:gridCol').map((c) =>
     Number(attrOf(c, 'w:w') ?? '0'),
   );
+  const colPx = tableColumnWidths(tbl, grid, ctx);
 
   // Phase 1: logical grid — every w:tc (incl. vMerge-continue placeholders),
   // tracking each cell's starting grid column.
@@ -1161,9 +1214,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         : attrOf(vMergeEl, 'w:val') === 'restart'
           ? 'restart'
           : 'continue'; // omitted w:val defaults to continue
-      const widths = grid.length
-        ? grid.slice(col, col + colspan).map(twipsToPx)
-        : [];
+      const widths = colPx.length ? colPx.slice(col, col + colspan) : [];
       const background =
         normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
@@ -1659,6 +1710,14 @@ export async function importDocx(
   const media = await extractMedia(zip);
   const notes = await buildNotesRegistry(zip);
   const comments = await buildCommentsRegistry(zip);
+  // Page geometry up front: pct-based table widths need the content width
+  // while the body is being parsed.
+  const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
+  const sectPr = body ? child(body, 'w:sectPr') : undefined;
+  const pageGeom = parsePageGeometry(sectPr);
+  const contentWidth =
+    pageGeom.width - pageGeom.margin.left - pageGeom.margin.right;
+
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     styles,
     numbering: buildNumbering(numberingRoot),
@@ -1668,12 +1727,12 @@ export async function importDocx(
     notes,
     comments,
     schema: opts?.schema ?? schema,
+    contentWidth,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
   const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
 
-  const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
   const parsed = body
     ? parseBodyBlocks(body, ctx)
     : { blocks: [], sections: [] };
@@ -1702,7 +1761,6 @@ export async function importDocx(
   // Headers/footers referenced by the section properties.
   const headers: Record<string, PMNode> = {};
   const footers: Record<string, PMNode> = {};
-  const sectPr = body ? child(body, 'w:sectPr') : undefined;
   if (sectPr) {
     const collect = async (
       refName: string,
@@ -1750,7 +1808,7 @@ export async function importDocx(
     titlePg,
     evenAndOdd,
     comments: hasComments ? buildCommentsList(ctx) : [],
-    page: parsePageGeometry(sectPr),
+    page: pageGeom,
     raw: zip,
   };
 }
@@ -1775,9 +1833,24 @@ function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
   if (!sectPr) return A4;
   const pgSz = child(sectPr, 'w:pgSz');
   const pgMar = child(sectPr, 'w:pgMar');
+  // OOXML measurements are plain twips numbers, but non-Word producers ship
+  // unit suffixes in the wild (w:top="20pt") — Number() would go NaN and NaN
+  // margins send pagination into an infinite loop. Parse unit-aware and fall
+  // back on anything unparseable.
   const px = (el: OoxmlNode | undefined, attr: string, fallback: number) => {
     const v = el && attrOf(el, attr);
-    return v === undefined || v === null ? fallback : twipsToPx(Number(v));
+    if (v === undefined || v === null) return fallback;
+    const m = /^(-?\d+(?:\.\d+)?)(pt|in|cm|mm)?$/.exec(String(v).trim());
+    if (!m) return fallback;
+    const n = Number(m[1]);
+    const PX_PER: Record<string, number> = {
+      pt: 96 / 72,
+      in: 96,
+      cm: 96 / 2.54,
+      mm: 96 / 25.4,
+    };
+    const out = m[2] ? Math.round(n * PX_PER[m[2]]) : twipsToPx(n);
+    return Number.isFinite(out) ? out : fallback;
   };
   let width = px(pgSz, 'w:w', A4.width);
   let height = px(pgSz, 'w:h', A4.height);

@@ -1989,10 +1989,43 @@ function placeBlocks(
 
 /** Lay out already-flattened blocks into paginated pages. Pure (no DOM);
  *  measurement is injected. */
+/** A degenerate page config (NaN or absurd values from a hostile import)
+ *  must never reach pagination — a non-finite or negative content box turns
+ *  the page-fill loop infinite and hangs the app. Sanitize per field. */
+function sanitizeConfig(config: LayoutConfig): LayoutConfig {
+  const p = config.page;
+  const num = (v: number, fallback: number) =>
+    Number.isFinite(v) && v >= 0 ? v : fallback;
+  // Small pages are legitimate — only zero/NaN falls back to A4.
+  const width = num(p.width, 794) || 794;
+  const height = num(p.height, 1123) || 1123;
+  let margin = {
+    top: num(p.margin.top, 96),
+    right: num(p.margin.right, 96),
+    bottom: num(p.margin.bottom, 96),
+    left: num(p.margin.left, 96),
+  };
+  // Margins must leave SOME content box on both axes (a zero/negative box
+  // never fits a line and the fill loop can't advance).
+  if (width - margin.left - margin.right < 10)
+    margin = { ...margin, left: 0, right: 0 };
+  if (height - margin.top - margin.bottom < 10)
+    margin = { ...margin, top: 0, bottom: 0 };
+  const same =
+    width === p.width &&
+    height === p.height &&
+    margin.top === p.margin.top &&
+    margin.right === p.margin.right &&
+    margin.bottom === p.margin.bottom &&
+    margin.left === p.margin.left;
+  return same ? config : { ...config, page: { width, height, margin } };
+}
+
 export function layoutBlocks(
   blocks: FlowBlock[],
   config: LayoutConfig,
 ): ResolvedLayout {
+  config = sanitizeConfig(config);
   const ctx = buildCtx(config);
   const left = config.page.margin.left;
   const right = config.page.width - config.page.margin.right;
@@ -2287,6 +2320,7 @@ export function layout(
   chrome?: PageChrome,
   footnotes?: Record<number, PMNode>,
 ): ResolvedLayout {
+  config = sanitizeConfig(config);
   const ctx = buildCtx(config);
   const { page } = config;
   const left = page.margin.left;
