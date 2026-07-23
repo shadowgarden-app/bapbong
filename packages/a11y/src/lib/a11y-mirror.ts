@@ -26,7 +26,6 @@ export interface A11yMirrorOptions {
 const SR_ONLY =
   'position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:normal;contain:strict;';
 
-
 /**
  * An **ARIA shadow-DOM mirror** of a bapbong document. The canvas the editor /
  * viewer paints into is opaque to screen readers; this keeps a parallel,
@@ -84,7 +83,10 @@ export class A11yMirror {
     // Idle debounce, but never let staleness exceed maxWaitMs since the last
     // serialize — as that cap approaches the delay shrinks toward 0.
     const sinceFlush = perf.now() - this.lastFlushAt;
-    const delay = Math.min(this.debounceMs, Math.max(0, this.maxWaitMs - sinceFlush));
+    const delay = Math.min(
+      this.debounceMs,
+      Math.max(0, this.maxWaitMs - sinceFlush),
+    );
     this.timer = setTimeout(() => {
       this.timer = null;
       this.flush();

@@ -661,7 +661,10 @@ export class BapbongEditor {
     // Time spent between the keydown and this edit's layout starting — i.e. the
     // browser's contenteditable update + ProseMirror's input handling/dispatch.
     if (docChanged && this.inputStartedAt != null) {
-      perf.log('key→refresh (PM/input latency)', perf.now() - this.inputStartedAt);
+      perf.log(
+        'key→refresh (PM/input latency)',
+        perf.now() - this.inputStartedAt,
+      );
     }
     perf.span(docChanged ? 'refresh(edit)' : 'refresh(sel)', () => {
       if (docChanged || !this.core.layout) this.core.layoutDoc(state.doc);
@@ -824,8 +827,13 @@ export class BapbongEditor {
     // Stamp the keyboard-event arrival so refresh() can report the full
     // keydown → painted latency. Ignore pure modifier presses (they produce no
     // edit, so their stamp would otherwise inflate the next real keystroke).
-    if (perf.enabled && ev.key !== 'Shift' && ev.key !== 'Control' &&
-        ev.key !== 'Alt' && ev.key !== 'Meta') {
+    if (
+      perf.enabled &&
+      ev.key !== 'Shift' &&
+      ev.key !== 'Control' &&
+      ev.key !== 'Alt' &&
+      ev.key !== 'Meta'
+    ) {
       this.inputStartedAt = perf.now();
     }
     const offered: EditorKeyEvent = {

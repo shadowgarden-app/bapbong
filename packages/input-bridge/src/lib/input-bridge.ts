@@ -1,7 +1,11 @@
 import { baseKeymap, chainCommands } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
-import { DOMSerializer, type Node as PMNode, type Schema } from 'prosemirror-model';
+import {
+  DOMSerializer,
+  type Node as PMNode,
+  type Schema,
+} from 'prosemirror-model';
 import {
   EditorState,
   Plugin,
@@ -248,7 +252,12 @@ function windowDecorations(state: EditorState): DecorationSet {
   doc.forEach((node, offset) => {
     if (segs.some(([a, b]) => idx >= a && idx <= b)) {
       decos.push(
-        Decoration.node(offset, offset + node.nodeSize, {}, { [IN_WINDOW]: true }),
+        Decoration.node(
+          offset,
+          offset + node.nodeSize,
+          {},
+          { [IN_WINDOW]: true },
+        ),
       );
     }
     idx++;
@@ -258,7 +267,9 @@ function windowDecorations(state: EditorState): DecorationSet {
 
 /** Whether the outer decorations mark this block as inside the window. */
 function isInWindow(decorations: readonly Decoration[]): boolean {
-  return decorations.some((d) => (d.spec as Record<string, unknown>)[IN_WINDOW]);
+  return decorations.some(
+    (d) => (d.spec as Record<string, unknown>)[IN_WINDOW],
+  );
 }
 
 /** Node view for top-level blocks: real (default-equivalent, with contentDOM)
@@ -288,7 +299,8 @@ function windowedBlockView(
     if (spec != null) {
       const rendered = DOMSerializer.renderSpec(document, spec);
       dom = rendered.dom as HTMLElement;
-      contentDOM = (rendered.contentDOM as HTMLElement | undefined) ?? undefined;
+      contentDOM =
+        (rendered.contentDOM as HTMLElement | undefined) ?? undefined;
     } else {
       dom = document.createElement('div');
       contentDOM = dom;

@@ -221,7 +221,9 @@ export class RenderCore {
       ...Object.values(footers),
     );
     this.docFamilies = new Set(families.map(normalizeFamily));
-    await perf.spanAsync('ensureFontsLoaded', () => ensureFontsLoaded(families));
+    await perf.spanAsync('ensureFontsLoaded', () =>
+      ensureFontsLoaded(families),
+    );
     // Opening a document can change the chrome above the stack (start screen →
     // editor), shifting the stack's offset — re-measure it on the next paint.
     this.invalidateViewportMetrics();
@@ -512,7 +514,10 @@ export class RenderCore {
     // the page-tall stack (a canvas mounted on the prior frame left layout
     // dirty). currentViewport consumes this cache instead of touching the DOM.
     if (this.viewport)
-      this.lastScrollTop = perf.span('onScroll.read', () => this.viewport!.scrollTop);
+      this.lastScrollTop = perf.span(
+        'onScroll.read',
+        () => this.viewport!.scrollTop,
+      );
     if (this.scrollRaf != null) return;
     this.scrollRaf = requestAnimationFrame(() => {
       this.scrollRaf = null;

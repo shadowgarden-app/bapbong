@@ -855,7 +855,10 @@ export class CanvasPainter {
     const el = new Image();
     const t0 = perf.now();
     el.onload = () => {
-      perf.log(`image.load(${(src.length / 1024).toFixed(0)}KB src)`, perf.now() - t0);
+      perf.log(
+        `image.load(${(src.length / 1024).toFixed(0)}KB src)`,
+        perf.now() - t0,
+      );
       if (this.lastLayout) {
         perf.span('image.onload-repaint', () =>
           this.paint(this.lastLayout!, {
