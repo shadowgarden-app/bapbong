@@ -63,7 +63,7 @@ export { RenderCore } from '@shadow-garden/bapbong-view';
 // Built-in ("internal") plugins ship with the editor (see built-in-plugins.ts)
 // and are exposed as typed handles (e.g. editor.find) — no install needed.
 import { createBuiltins } from './built-in-plugins';
-import { Collection } from '@shadow-garden/bapbong-contracts';
+import { Collection, perf } from '@shadow-garden/bapbong-contracts';
 import { defaultCommands } from '@shadow-garden/bapbong-commands';
 import type { FindPlugin } from './find-plugin';
 import type { TableSelectionPlugin } from './table-selection-plugin';
@@ -135,6 +135,9 @@ export class BapbongEditor {
 
   private readonly changeListeners = new Set<(c: EditorChange) => void>();
   private readonly caretPickListeners = new Set<(pos: number) => void>();
+  // Timestamp of the last keydown on this editor — used to measure the full
+  // keydown → painted latency (perf instrumentation; null once consumed).
+  private inputStartedAt: number | null = null;
 
   /** Plugin registry keyed by name — built-ins (internal) + host (external). */
   private readonly plugins: Collection<EditorPlugin>;
@@ -655,8 +658,23 @@ export class BapbongEditor {
    *  IME → notify. */
   private refresh(state: EditorState, tr?: Transaction): void {
     const docChanged = tr?.docChanged ?? true;
-    if (docChanged || !this.core.layout) this.core.layoutDoc(state.doc);
-    this.render(state, docChanged);
+    // Time spent between the keydown and this edit's layout starting — i.e. the
+    // browser's contenteditable update + ProseMirror's input handling/dispatch.
+    if (docChanged && this.inputStartedAt != null) {
+      perf.log(
+        'key→refresh (PM/input latency)',
+        perf.now() - this.inputStartedAt,
+      );
+    }
+    perf.span(docChanged ? 'refresh(edit)' : 'refresh(sel)', () => {
+      if (docChanged || !this.core.layout) this.core.layoutDoc(state.doc);
+      this.render(state, docChanged);
+    });
+    // Full keydown → canvas-drawn latency (input handling + layout + paint).
+    if (docChanged && this.inputStartedAt != null) {
+      perf.log('key→paint (TOTAL)', perf.now() - this.inputStartedAt);
+      this.inputStartedAt = null;
+    }
   }
 
   /** Compute the caret/selection overlay from `state`, paint it (full content
@@ -792,8 +810,8 @@ export class BapbongEditor {
     } catch {
       // pointer capture is a nicety, not required for selection
     }
-    this.bridge.setSelection(pos); // caret placement (cheap, anchors the IME)
-    this.bridge.focus();
+    perf.span('pointer.setSelection', () => this.bridge!.setSelection(pos)); // anchors the IME
+    perf.span('pointer.focus', () => this.bridge!.focus());
     for (const cb of this.caretPickListeners) cb(pos);
     for (const p of this.plugins) p.onCaretPick?.(pos);
   };
@@ -806,6 +824,18 @@ export class BapbongEditor {
     const target = ev.target as Node | null;
     if (target && target !== document.body && !this.stack.contains(target))
       return;
+    // Stamp the keyboard-event arrival so refresh() can report the full
+    // keydown → painted latency. Ignore pure modifier presses (they produce no
+    // edit, so their stamp would otherwise inflate the next real keystroke).
+    if (
+      perf.enabled &&
+      ev.key !== 'Shift' &&
+      ev.key !== 'Control' &&
+      ev.key !== 'Alt' &&
+      ev.key !== 'Meta'
+    ) {
+      this.inputStartedAt = perf.now();
+    }
     const offered: EditorKeyEvent = {
       key: ev.key,
       ctrlKey: ev.ctrlKey,

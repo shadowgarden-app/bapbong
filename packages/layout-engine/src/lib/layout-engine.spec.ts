@@ -1802,6 +1802,51 @@ describe('incremental table re-layout', () => {
     expect(firstCellFrom(r2)).toBeGreaterThan(firstCellFrom(r1)); // moved down → positions shifted
   });
 
+  const targetLine = (r: ReturnType<typeof layout>, text: string) => {
+    for (const pg of r.pages)
+      for (const l of pg.lines)
+        if (l.segments.some((s) => s.text === text)) return l;
+    return undefined;
+  };
+
+  it('reuses a cached paragraph instead of re-measuring it', () => {
+    let zzz = 0;
+    const measure: MeasureText = (text) => {
+      if (text.includes('ZZZ')) zzz++;
+      return text.length * 10;
+    };
+    const cfg = { ...config(), measureText: measure };
+    const cache = createLayoutCache();
+    const target = para('ZZZ'); // ONE node reused across layouts
+    layout(tSchema.node('doc', null, [para('a'), target]), cfg, cache);
+    const first = zzz;
+    expect(first).toBeGreaterThan(0);
+    layout(
+      tSchema.node('doc', null, [para('a'), para('b'), target]),
+      cfg,
+      cache,
+    );
+    expect(zzz).toBe(first); // cache hit → NOT re-measured
+  });
+
+  it("shifts a cached paragraph's PM positions to match a fresh layout", () => {
+    const cache = createLayoutCache();
+    const target = para('hello'); // reused → cache hit on the 2nd layout
+    // Seed the cache with `target` at one position…
+    layout(tSchema.node('doc', null, [para('a'), target]), config(), cache);
+    // …then grow the preceding paragraph so `target` moves by +4 (cache hit +
+    // in-place draft shift). Its positions must equal a from-scratch layout.
+    const docFinal = tSchema.node('doc', null, [para('aaaaa'), target]);
+    const cached = layout(docFinal, config(), cache);
+    const fresh = layout(docFinal, config()); // no cache → oracle
+    const cl = targetLine(cached, 'hello');
+    const fl = targetLine(fresh, 'hello');
+    expect(fl?.from).toBeDefined();
+    expect(cl!.from).toBe(fl!.from);
+    expect(cl!.to).toBe(fl!.to);
+    expect(cl!.segments[0].pos).toBe(fl!.segments[0].pos);
+  });
+
   it('lays a list-bearing table fresh (no stale numbering)', () => {
     let measures = 0;
     const measure: MeasureText = (t) => {

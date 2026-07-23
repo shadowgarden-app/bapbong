@@ -1,4 +1,5 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
+import { perf } from '@shadow-garden/bapbong-contracts';
 import {
   createNumberingCounter,
   type NumberingCounter,
@@ -2135,20 +2136,25 @@ function columnWidth(totalWidth: number, cols: ColumnConfig): number {
 
 // ── Incremental re-layout (M4+) ─────────────────────────────────────
 
-/** Shift every PM position in the drafts by `delta` (geometry is unchanged —
- *  the paragraph's text and wrap are identical, it just moved in the doc). */
-function shiftDrafts(drafts: LineDraft[], delta: number): LineDraft[] {
-  return drafts.map((d) => ({
-    ...d,
-    from: d.from != null ? d.from + delta : d.from,
-    to: d.to != null ? d.to + delta : d.to,
-    segments: d.segments.map((s) =>
-      s.pos != null ? { ...s, pos: s.pos + delta } : s,
-    ),
-    images: d.images.map((im) =>
-      im.pos != null ? { ...im, pos: im.pos + delta } : im,
-    ),
-  }));
+/** Shift every PM position in the drafts by `delta` **in place** (geometry is
+ *  unchanged — the paragraph's text and wrap are identical, it just moved in the
+ *  doc). Mutating rather than reallocating is the hot-path win for large docs:
+ *  a single keystroke near the top shifts every following block, and cloning
+ *  each line + segment there dominated typing latency.
+ *
+ *  Safety: a draft's segment/image objects can be shared with the *previous*
+ *  frame's `LayoutLine`s (single-column `draftToLine` reuses them). That's fine
+ *  — layout is synchronous and the previous `resolved` is neither read during
+ *  the rebuild nor kept after `layoutDoc` reassigns it; the freshly built layout
+ *  re-materializes lines from these same (now-shifted) drafts. Multi-column
+ *  `draftToLine` clones segments, snapshotting `pos` after this shift. */
+function shiftDraftsInPlace(drafts: LineDraft[], delta: number): void {
+  for (const d of drafts) {
+    if (d.from != null) d.from += delta;
+    if (d.to != null) d.to += delta;
+    for (const s of d.segments) if (s.pos != null) s.pos += delta;
+    for (const im of d.images) if (im.pos != null) im.pos += delta;
+  }
 }
 
 interface ParagraphCacheEntry {
@@ -2158,7 +2164,9 @@ interface ParagraphCacheEntry {
   basePos: number;
   /** List marker the drafts were computed with — renumbering invalidates. */
   marker?: string;
-  drafts: LineDraft[];
+  /** The built block item, reused across frames (its `drafts` are shifted in
+   *  place when the paragraph moves) so pure cache hits allocate nothing. */
+  item: ParaItem;
 }
 
 interface TableCacheEntry {
@@ -2418,8 +2426,8 @@ export function layout(
     layVariants(footerDocs, (d) =>
       layoutFooterChrome(d, page.height, left, right, c),
     );
-  let headers = layHeaders(ctx);
-  let footers = layFooters(ctx);
+  let headers = perf.span('chrome-headers', () => layHeaders(ctx));
+  let footers = perf.span('chrome-footers', () => layFooters(ctx));
   let top = page.margin.top;
   let bottom = page.height - page.margin.bottom;
   if (headers.default || headers.first || headers.even) {
@@ -2471,6 +2479,7 @@ export function layout(
   }
 
   const items: BlockItem[] = [];
+  const buildEnd = perf.begin('build-items');
   doc.forEach((node, offset, index) => {
     const bs = blockSection[index] ?? {
       columns: { count: 1, gap: 0 },
@@ -2485,11 +2494,39 @@ export function layout(
       return item;
     };
     if (node.type.name === 'paragraph') {
-      const marker = markerFor(node, counter);
+      const marker = markerFor(node, counter); // advances numbering every pass
+      const contentStart = offset + 1;
+      // Fast path: an unchanged paragraph reuses its cached item outright, and a
+      // moved one shifts its drafts in place — neither allocates a ParaItem,
+      // closure, or attr read. This is the dominant per-keystroke cost on large
+      // docs (thousands of blocks re-scanned every edit), so it stays lean.
+      // A cache hit also implies the paragraph anchors no floats (float
+      // paragraphs are never cached), so the O(children) `nodeHasFloats` scan is
+      // skipped here and only paid on a miss.
+      const hit = cache?.paragraphs.get(node);
+      if (
+        hit &&
+        hit.left === left &&
+        hit.right === colRight &&
+        hit.marker === marker
+      ) {
+        perf.bump(hit.basePos !== contentStart ? 'para.shift' : 'para.hit');
+        if (hit.basePos !== contentStart) {
+          if (hit.item.drafts)
+            shiftDraftsInPlace(hit.item.drafts, contentStart - hit.basePos);
+          hit.basePos = contentStart;
+        }
+        // Fresh 1-field wrapper so `tag` can add the section marker without
+        // mutating the cached ParaItem.
+        items.push(tag({ para: hit.item }));
+        return;
+      }
+      // Miss (or float-anchoring paragraph, never cached): build fresh.
+      const hasFloats = nodeHasFloats(node);
       const getFlow = () =>
         paragraphToFlow(node, ctx.base, offset, true, marker);
       const sp = node.attrs['spacing'] as ParagraphSpacing | null;
-      const para = (drafts: LineDraft[] | null): ParaItem => ({
+      const mkItem = (drafts: LineDraft[] | null): ParaItem => ({
         getFlow,
         drafts,
         before: sp?.before,
@@ -2499,47 +2536,36 @@ export function layout(
           (node.attrs['borders'] as ParagraphBorders | null) ?? undefined,
       });
       // Float-anchoring paragraphs always wrap at placement time (their band
-      // depends on where they land) — never cached.
-      if (nodeHasFloats(node)) {
-        items.push(tag({ para: para(null) }));
+      // depends on where they land).
+      if (hasFloats) {
+        items.push(tag({ para: mkItem(null) }));
         return;
       }
-      const contentStart = offset + 1;
-      const hit = cache?.paragraphs.get(node);
-      if (
-        hit &&
-        hit.left === left &&
-        hit.right === colRight &&
-        hit.marker === marker
-      ) {
-        if (hit.basePos !== contentStart) {
-          hit.drafts = shiftDrafts(hit.drafts, contentStart - hit.basePos);
-          hit.basePos = contentStart;
-        }
-        items.push(tag({ para: para(hit.drafts) }));
-        return;
-      }
+      perf.bump('para.miss');
       const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
       const drafts = layoutParagraph(flow, left, colRight, ctx);
+      const item: ParaItem = { ...mkItem(drafts), getFlow: () => flow };
       cache?.paragraphs.set(node, {
         left,
         right: colRight,
         basePos: contentStart,
         marker,
-        drafts,
+        item,
       });
-      items.push(tag({ para: { ...para(drafts), getFlow: () => flow } }));
+      items.push(tag({ para: item }));
     } else if (node.type.name === 'table') {
       // Cache hit: clone the canonical layout (shifting PM positions if it
       // moved) instead of re-measuring every cell. List-bearing tables are
       // never cached — they advance the live numbering counter.
       const hit = cache?.tables.get(node);
       if (hit && hit.left === left && hit.right === colRight) {
+        perf.bump(offset !== hit.basePos ? 'table.shift' : 'table.hit');
         items.push(
           tag({ table: cloneTableShifted(hit.table, offset - hit.basePos) }),
         );
         return;
       }
+      perf.bump('table.miss');
       const table = layoutTable(
         tableToFlow(node, ctx.base, offset, counter),
         left,
@@ -2559,6 +2585,15 @@ export function layout(
       }
     }
   });
+  buildEnd();
+  // Miss = re-measured this pass; shift = cache hit but drafts re-positioned
+  // (every block after the edit point); hit = pure cache reuse, no work.
+  perf.counters(
+    (c) =>
+      `blocks: ${c['para.miss'] ?? 0}+${c['table.miss'] ?? 0} miss · ` +
+      `${(c['para.shift'] ?? 0) + (c['table.shift'] ?? 0)} shifted · ` +
+      `${(c['para.hit'] ?? 0) + (c['table.hit'] ?? 0)} pure-hit`,
+  );
   // Pre-lay footnote bodies so the placer knows their heights up front.
   let fnMap: Map<number, FootnoteBody> | undefined;
   if (footnotes) {
@@ -2568,8 +2603,10 @@ export function layout(
       fnMap.set(num, layoutFootnoteBody(footnotes[num], left, right, ctx));
     }
   }
-  assignSectionHeights(items);
-  const resolved = placeBlocks(items, config, ctx, { top, bottom }, fnMap);
+  perf.span('assignSectionHeights', () => assignSectionHeights(items));
+  const resolved = perf.span('placeBlocks', () =>
+    placeBlocks(items, config, ctx, { top, bottom }, fnMap),
+  );
 
   // Chrome with page-number fields: re-lay every variant now that the page
   // total is known, so each field slot is as wide as the widest number shown.
