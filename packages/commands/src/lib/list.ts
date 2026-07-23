@@ -65,37 +65,61 @@ const PRESETS: Record<ListKind, ListPreset[]> = {
     orderedPreset(
       'decimal',
       'bb-ordered',
-      [lvl('decimal', '%1.'), lvl('lowerLetter', '%2.'), lvl('lowerRoman', '%3.')],
+      [
+        lvl('decimal', '%1.'),
+        lvl('lowerLetter', '%2.'),
+        lvl('lowerRoman', '%3.'),
+      ],
       ['1.', 'a.', 'i.'],
     ),
     orderedPreset(
       'paren',
       'bb-ordered-paren',
-      [lvl('decimal', '%1)'), lvl('lowerLetter', '%2)'), lvl('lowerRoman', '%3)')],
+      [
+        lvl('decimal', '%1)'),
+        lvl('lowerLetter', '%2)'),
+        lvl('lowerRoman', '%3)'),
+      ],
       ['1)', 'a)', 'i)'],
     ),
     orderedPreset(
       'multilevel',
       'bb-ordered-multilevel',
-      [lvl('decimal', '%1.'), lvl('decimal', '%1.%2.'), lvl('decimal', '%1.%2.%3.')],
+      [
+        lvl('decimal', '%1.'),
+        lvl('decimal', '%1.%2.'),
+        lvl('decimal', '%1.%2.%3.'),
+      ],
       ['1.', '1.1.', '1.1.1.'],
     ),
     orderedPreset(
       'upper',
       'bb-ordered-upper',
-      [lvl('upperLetter', '%1.'), lvl('lowerLetter', '%2.'), lvl('lowerRoman', '%3.')],
+      [
+        lvl('upperLetter', '%1.'),
+        lvl('lowerLetter', '%2.'),
+        lvl('lowerRoman', '%3.'),
+      ],
       ['A.', 'a.', 'i.'],
     ),
     orderedPreset(
       'roman',
       'bb-ordered-roman',
-      [lvl('upperRoman', '%1.'), lvl('upperLetter', '%2.'), lvl('decimal', '%3.')],
+      [
+        lvl('upperRoman', '%1.'),
+        lvl('upperLetter', '%2.'),
+        lvl('decimal', '%3.'),
+      ],
       ['I.', 'A.', '1.'],
     ),
     orderedPreset(
       'zero',
       'bb-ordered-zero',
-      [lvl('decimalZero', '%1.'), lvl('lowerLetter', '%2.'), lvl('lowerRoman', '%3.')],
+      [
+        lvl('decimalZero', '%1.'),
+        lvl('lowerLetter', '%2.'),
+        lvl('lowerRoman', '%3.'),
+      ],
       ['01.', 'a.', 'i.'],
     ),
   ],
@@ -120,7 +144,9 @@ function defOf(preset: ListPreset): Defs[string] {
 }
 
 /** Top-level-ish paragraphs overlapping the selection (the toggle targets). */
-function paragraphsInSelection(state: EditorState): { pos: number; node: ProseMirrorNode }[] {
+function paragraphsInSelection(
+  state: EditorState,
+): { pos: number; node: ProseMirrorNode }[] {
   const { from, to } = state.selection;
   const out: { pos: number; node: ProseMirrorNode }[] = [];
   state.doc.nodesBetween(from, to, (node, pos) => {
@@ -159,7 +185,8 @@ function applyPreset(
     tr = tr.setDocAttribute('numbering', defs);
   }
   for (const p of paras) {
-    const level = (p.node.attrs['list'] as { level?: number } | null)?.level ?? 0;
+    const level =
+      (p.node.attrs['list'] as { level?: number } | null)?.level ?? 0;
     tr = tr.setNodeAttribute(p.pos, 'list', { numId: preset.numId, level });
   }
   return tr;
@@ -208,7 +235,8 @@ export function toggleList(kind: ListKind): Command {
 /** Set the selected paragraphs to a specific marker preset (switching style in
  *  place — never toggling off; the plain button does that). */
 export function applyListPreset(kind: ListKind, presetId: string): Command {
-  const preset = PRESETS[kind].find((p) => p.id === presetId) ?? PRESETS[kind][0];
+  const preset =
+    PRESETS[kind].find((p) => p.id === presetId) ?? PRESETS[kind][0];
   return {
     name: `${kind === 'bullet' ? 'bullet-list' : 'ordered-list'}:${preset.id}`,
     run(state, dispatch) {

@@ -128,8 +128,7 @@ export function shiftListLevel(delta: 1 | -1): Command {
       const max = defined.length > 0 ? Math.max(...defined) : MAX_LEVEL;
       const level = Math.max(0, Math.min(max, (list.level ?? 0) + delta));
       if (level === (list.level ?? 0)) continue;
-      const indent =
-        (node.attrs['indent'] as { left?: number } | null) ?? null;
+      const indent = (node.attrs['indent'] as { left?: number } | null) ?? null;
       const left = Math.max(0, (indent?.left ?? 0) + delta * LEVEL_INDENT);
       const nextIndent = { ...indent, left };
       if (left === 0) delete (nextIndent as { left?: number }).left;

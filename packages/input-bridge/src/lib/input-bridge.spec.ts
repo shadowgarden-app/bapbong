@@ -22,7 +22,9 @@ const schema = new Schema({
   marks: {},
 });
 
-const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('hello')])]);
+const doc = schema.node('doc', null, [
+  schema.node('paragraph', null, [schema.text('hello')]),
+]);
 
 describe('createEditingState', () => {
   it('applies text insertions', () => {
@@ -42,7 +44,9 @@ describe('createEditingState', () => {
 
   it('keeps the selection mapped through edits', () => {
     let state = createEditingState(doc);
-    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 3)));
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 3)),
+    );
     state = state.apply(state.tr.insertText('xy', 1));
     expect(state.selection.head).toBe(5); // shifted by the 2 inserted chars
   });
@@ -51,7 +55,9 @@ describe('createEditingState', () => {
 describe('moveCaretCommand', () => {
   it('collapses by default and extends from the anchor with extend=true', () => {
     let state = createEditingState(doc); // 'hello'
-    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 2)));
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 2)),
+    );
 
     moveCaretCommand(() => 4)(state, (tr) => (state = state.apply(tr)));
     expect(state.selection.empty).toBe(true);
@@ -70,7 +76,11 @@ describe('splitListItem', () => {
   const listSchema = new Schema({
     nodes: {
       doc: { content: 'block+' },
-      paragraph: { group: 'block', content: 'inline*', attrs: { list: { default: null } } },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null } },
+      },
       text: { group: 'inline' },
     },
     marks: {},
@@ -82,7 +92,9 @@ describe('splitListItem', () => {
       listSchema.node('paragraph', listAttrs, [listSchema.text('item')]),
     ]);
     let state = createEditingState(d);
-    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 5))); // end of "item"
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 5)),
+    ); // end of "item"
     const handled = splitListItem(state, (tr) => (state = state.apply(tr)));
     expect(handled).toBe(true);
     expect(state.doc.childCount).toBe(2);
@@ -90,14 +102,20 @@ describe('splitListItem', () => {
   });
 
   it('exits the list on an empty item, and defers outside lists', () => {
-    const d = listSchema.node('doc', null, [listSchema.node('paragraph', listAttrs)]);
+    const d = listSchema.node('doc', null, [
+      listSchema.node('paragraph', listAttrs),
+    ]);
     let state = createEditingState(d);
-    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1)));
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 1)),
+    );
     expect(splitListItem(state, (tr) => (state = state.apply(tr)))).toBe(true);
     expect(state.doc.child(0).attrs['list']).toBeNull(); // left the list
 
     const plain = createEditingState(
-      listSchema.node('doc', null, [listSchema.node('paragraph', null, [listSchema.text('x')])]),
+      listSchema.node('doc', null, [
+        listSchema.node('paragraph', null, [listSchema.text('x')]),
+      ]),
     );
     expect(splitListItem(plain, () => undefined)).toBe(false); // base keymap's turn
   });
@@ -116,7 +134,10 @@ describe('backspaceOutdent', () => {
     },
     marks: {},
   });
-  const listAttrs = { list: { numId: '1', level: 0 }, indent: { left: 48, hanging: 24 } };
+  const listAttrs = {
+    list: { numId: '1', level: 0 },
+    indent: { left: 48, hanging: 24 },
+  };
 
   it('outdents in steps: drop marker → clear indent → defer to join', () => {
     const d = listSchema.node('doc', null, [
@@ -124,18 +145,24 @@ describe('backspaceOutdent', () => {
     ]);
     let state = createEditingState(d);
     const caretAtStart = () =>
-      (state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1))));
+      (state = state.apply(
+        state.tr.setSelection(TextSelection.create(state.doc, 1)),
+      ));
 
     // Step 1: drops the marker, keeps the indent, text stays on the same line.
     caretAtStart();
-    expect(backspaceOutdent(state, (tr) => (state = state.apply(tr)))).toBe(true);
+    expect(backspaceOutdent(state, (tr) => (state = state.apply(tr)))).toBe(
+      true,
+    );
     expect(state.doc.child(0).attrs['list']).toBeNull();
     expect(state.doc.child(0).attrs['indent']).toEqual(listAttrs.indent);
     expect(state.doc.child(0).textContent).toBe('item');
 
     // Step 2: clears the indent (caret returns to the margin).
     caretAtStart();
-    expect(backspaceOutdent(state, (tr) => (state = state.apply(tr)))).toBe(true);
+    expect(backspaceOutdent(state, (tr) => (state = state.apply(tr)))).toBe(
+      true,
+    );
     expect(state.doc.child(0).attrs['indent']).toBeNull();
 
     // Step 3: nothing left to outdent → base keymap joins backward.
@@ -167,7 +194,9 @@ describe('backspaceOutdent', () => {
     let state = createEditingState(d);
     const apply = (cmd: typeof backspaceOutdent) =>
       cmd(state, (tr) => (state = state.apply(tr)));
-    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 2)));
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 2)),
+    );
 
     // demote: level 0 → 1, indent appears
     expect(apply(shiftListLevel(1))).toBe(true);
@@ -203,13 +232,18 @@ describe('backspaceOutdent', () => {
     expect(backspaceOutdent(mid, () => undefined)).toBe(false); // normal char delete
 
     let ranged = createEditingState(d);
-    ranged = ranged.apply(ranged.tr.setSelection(TextSelection.create(ranged.doc, 1, 3)));
+    ranged = ranged.apply(
+      ranged.tr.setSelection(TextSelection.create(ranged.doc, 1, 3)),
+    );
     expect(backspaceOutdent(ranged, () => undefined)).toBe(false); // deletes the range
   });
 });
 
 describe('wordRangeAt', () => {
-  const para = (text: string) => schema.node('doc', null, [schema.node('paragraph', null, [schema.text(text)])]);
+  const para = (text: string) =>
+    schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text(text)]),
+    ]);
 
   it('finds the word around a position', () => {
     const d = para('hello world');

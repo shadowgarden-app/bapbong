@@ -835,7 +835,8 @@ function planNumbering(doc: PMNode, carried: string | null): NumberingPlan {
 
   const generate: string[] = [];
   for (const id of used) {
-    if (inCarried(id) || !defs[id]) map.set(id, id); // covered, or no def (degraded passthrough)
+    if (inCarried(id) || !defs[id])
+      map.set(id, id); // covered, or no def (degraded passthrough)
     else generate.push(id);
   }
   if (generate.length === 0) return { map, abstractXml: '', numXml: '' };
@@ -881,7 +882,8 @@ function numberingPartXml(plan: NumberingPlan, carried: string | null): string {
     const firstNum = out.search(/<w:num[ >]/);
     if (firstNum >= 0)
       out = out.slice(0, firstNum) + plan.abstractXml + out.slice(firstNum);
-    else out = out.replace('</w:numbering>', `${plan.abstractXml}</w:numbering>`);
+    else
+      out = out.replace('</w:numbering>', `${plan.abstractXml}</w:numbering>`);
     return out.replace('</w:numbering>', `${plan.numXml}</w:numbering>`);
   }
   return (
