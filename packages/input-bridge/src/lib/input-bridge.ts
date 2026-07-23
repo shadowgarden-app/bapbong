@@ -66,6 +66,86 @@ export const splitListItem: Command = (state, dispatch) => {
   return true;
 };
 
+/** Backspace at the very start of a paragraph outdents in Word-like steps
+ *  instead of immediately joining backward:
+ *    1. a list item drops its marker (the `list` attr clears, indent kept);
+ *    2. an indented paragraph clears its indent (caret returns to the margin);
+ *    3. a plain, unindented paragraph defers to the base keymap (joins backward).
+ *  Only fires on a collapsed caret at the block start; returns false elsewhere
+ *  so ranged deletes and mid-line Backspace run normally. */
+export const backspaceOutdent: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection;
+  if (!empty) return false; // ranged Backspace deletes the selection
+  const parent = $from.parent;
+  if (!parent.isTextblock || $from.parentOffset !== 0) return false;
+  const attrs = parent.attrs;
+  const outdent =
+    attrs['list'] != null
+      ? { list: null } // step 1: drop the marker, keep the indent
+      : attrs['indent'] != null
+        ? { indent: null } // step 2: clear the indent, caret to the margin
+        : null; // step 3: nothing left to outdent
+  if (!outdent) return false;
+  dispatch?.(
+    state.tr.setNodeMarkup($from.before(), null, { ...attrs, ...outdent }),
+  );
+  return true;
+};
+
+/** Indent step per nesting level, matching the hanging indent Word gives
+ *  editor-authored lists (0.25" = 24px). */
+const LEVEL_INDENT = 24;
+/** Word's numbering depth limit (levels 0–8) when the definition has no
+ *  explicit level table to cap against. */
+const MAX_LEVEL = 8;
+
+/** Tab / Shift-Tab in a list: change the nesting level of every list item the
+ *  selection touches (Word demote/promote). The level is capped by the levels
+ *  the numbering definition actually defines (fallback 0–8), and the left
+ *  indent shifts 24px per level so nesting stays visible even for defs without
+ *  per-level indents. Returns false when the selection touches no list item,
+ *  so Tab keeps its default behavior outside lists. */
+export function shiftListLevel(delta: 1 | -1): Command {
+  return (state, dispatch) => {
+    const { from, to } = state.selection;
+    const targets: { pos: number; node: PMNode }[] = [];
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (!node.isTextblock) return true; // descend into tables etc.
+      if (node.attrs['list']) targets.push({ pos, node });
+      return false;
+    });
+    if (targets.length === 0) return false;
+
+    const defs = state.doc.attrs['numbering'] as {
+      [numId: string]: { levels?: Record<string, unknown> };
+    } | null;
+    let tr = state.tr;
+    let changed = false;
+    for (const { pos, node } of targets) {
+      const list = node.attrs['list'] as { numId: string; level?: number };
+      const levels = defs?.[list.numId]?.levels;
+      const defined = levels ? Object.keys(levels).map(Number) : [];
+      const max = defined.length > 0 ? Math.max(...defined) : MAX_LEVEL;
+      const level = Math.max(0, Math.min(max, (list.level ?? 0) + delta));
+      if (level === (list.level ?? 0)) continue;
+      const indent =
+        (node.attrs['indent'] as { left?: number } | null) ?? null;
+      const left = Math.max(0, (indent?.left ?? 0) + delta * LEVEL_INDENT);
+      const nextIndent = { ...indent, left };
+      if (left === 0) delete (nextIndent as { left?: number }).left;
+      tr = tr.setNodeMarkup(pos, null, {
+        ...node.attrs,
+        list: { ...list, level },
+        indent: Object.keys(nextIndent).length > 0 ? nextIndent : null,
+      });
+      changed = true;
+    }
+    if (!changed) return false;
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  };
+}
+
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
 /** The word range around `pos` (for double-click selection), or null when the

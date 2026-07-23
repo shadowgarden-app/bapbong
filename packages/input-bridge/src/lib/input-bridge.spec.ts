@@ -2,8 +2,10 @@ import { Schema } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { undo } from 'prosemirror-history';
 import {
+  backspaceOutdent,
   createEditingState,
   moveCaretCommand,
+  shiftListLevel,
   splitListItem,
   wordRangeAt,
 } from './input-bridge.js';
@@ -98,6 +100,111 @@ describe('splitListItem', () => {
       listSchema.node('doc', null, [listSchema.node('paragraph', null, [listSchema.text('x')])]),
     );
     expect(splitListItem(plain, () => undefined)).toBe(false); // base keymap's turn
+  });
+});
+
+describe('backspaceOutdent', () => {
+  const listSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { list: { default: null }, indent: { default: null } },
+      },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const listAttrs = { list: { numId: '1', level: 0 }, indent: { left: 48, hanging: 24 } };
+
+  it('outdents in steps: drop marker → clear indent → defer to join', () => {
+    const d = listSchema.node('doc', null, [
+      listSchema.node('paragraph', listAttrs, [listSchema.text('item')]),
+    ]);
+    let state = createEditingState(d);
+    const caretAtStart = () =>
+      (state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1))));
+
+    // Step 1: drops the marker, keeps the indent, text stays on the same line.
+    caretAtStart();
+    expect(backspaceOutdent(state, (tr) => (state = state.apply(tr)))).toBe(true);
+    expect(state.doc.child(0).attrs['list']).toBeNull();
+    expect(state.doc.child(0).attrs['indent']).toEqual(listAttrs.indent);
+    expect(state.doc.child(0).textContent).toBe('item');
+
+    // Step 2: clears the indent (caret returns to the margin).
+    caretAtStart();
+    expect(backspaceOutdent(state, (tr) => (state = state.apply(tr)))).toBe(true);
+    expect(state.doc.child(0).attrs['indent']).toBeNull();
+
+    // Step 3: nothing left to outdent → base keymap joins backward.
+    caretAtStart();
+    expect(backspaceOutdent(state, () => undefined)).toBe(false);
+  });
+
+  it('Tab/Shift-Tab shift the level within the definition, moving indent 24px', () => {
+    const numSchema = new Schema({
+      nodes: {
+        doc: { content: 'block+', attrs: { numbering: { default: null } } },
+        paragraph: {
+          group: 'block',
+          content: 'inline*',
+          attrs: { list: { default: null }, indent: { default: null } },
+        },
+        text: { group: 'inline' },
+      },
+      marks: {},
+    });
+    const numbering = {
+      '1': { key: 'k1', levels: { 0: {}, 1: {} } }, // two levels only
+    };
+    const d = numSchema.node('doc', { numbering }, [
+      numSchema.node('paragraph', { list: { numId: '1', level: 0 } }, [
+        numSchema.text('item'),
+      ]),
+    ]);
+    let state = createEditingState(d);
+    const apply = (cmd: typeof backspaceOutdent) =>
+      cmd(state, (tr) => (state = state.apply(tr)));
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 2)));
+
+    // demote: level 0 → 1, indent appears
+    expect(apply(shiftListLevel(1))).toBe(true);
+    expect(state.doc.child(0).attrs['list']).toEqual({ numId: '1', level: 1 });
+    expect(state.doc.child(0).attrs['indent']).toEqual({ left: 24 });
+
+    // capped at the definition's deepest level (1): no-op returns false
+    expect(apply(shiftListLevel(1))).toBe(false);
+
+    // promote: back to level 0, indent clears to null
+    expect(apply(shiftListLevel(-1))).toBe(true);
+    expect(state.doc.child(0).attrs['list']).toEqual({ numId: '1', level: 0 });
+    expect(state.doc.child(0).attrs['indent']).toBeNull();
+
+    // promote at level 0: nothing to do
+    expect(apply(shiftListLevel(-1))).toBe(false);
+
+    // outside a list: defers (Tab keeps its default behavior)
+    const plain = createEditingState(
+      numSchema.node('doc', null, [
+        numSchema.node('paragraph', null, [numSchema.text('x')]),
+      ]),
+    );
+    expect(shiftListLevel(1)(plain, () => undefined)).toBe(false);
+  });
+
+  it('defers mid-block and on a ranged selection', () => {
+    const d = listSchema.node('doc', null, [
+      listSchema.node('paragraph', listAttrs, [listSchema.text('item')]),
+    ]);
+    let mid = createEditingState(d);
+    mid = mid.apply(mid.tr.setSelection(TextSelection.create(mid.doc, 3))); // inside "item"
+    expect(backspaceOutdent(mid, () => undefined)).toBe(false); // normal char delete
+
+    let ranged = createEditingState(d);
+    ranged = ranged.apply(ranged.tr.setSelection(TextSelection.create(ranged.doc, 1, 3)));
+    expect(backspaceOutdent(ranged, () => undefined)).toBe(false); // deletes the range
   });
 });
 

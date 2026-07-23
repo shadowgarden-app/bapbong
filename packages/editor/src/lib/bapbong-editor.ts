@@ -10,6 +10,8 @@ import { RenderCore } from '@shadow-garden/bapbong-view';
 import {
   InputBridge,
   moveCaretCommand,
+  backspaceOutdent,
+  shiftListLevel,
   splitListItem,
   type Command,
   type EditorState,
@@ -630,6 +632,9 @@ export class BapbongEditor {
       doc,
       keys: {
         Enter: splitListItem, // continue lists; falls through outside them
+        Backspace: backspaceOutdent, // drop marker, then indent, before joining
+        Tab: shiftListLevel(1), // demote list items; inert outside lists
+        'Shift-Tab': shiftListLevel(-1), // promote list items
         ArrowUp: this.verticalCmd(-1),
         ArrowDown: this.verticalCmd(1),
         'Shift-ArrowUp': this.verticalCmd(-1, true),
