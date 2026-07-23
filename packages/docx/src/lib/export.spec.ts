@@ -579,13 +579,134 @@ describe('exportDocx (E4: carry original parts)', () => {
       level: 0,
     });
 
-    // Without carry: the list paragraph still round-trips, but the defs are gone.
+    // Without carry: numbering.xml is regenerated from the doc-attr defs, so
+    // the definition survives too (the numId may be re-minted).
     const fromScratch = await importDocx(await exportDocx(doc));
-    expect(fromScratch.doc.child(0).attrs['list']).toEqual({
-      numId: '1',
-      level: 0,
+    const list = fromScratch.doc.child(0).attrs['list'] as { numId: string };
+    const defs = fromScratch.doc.attrs['numbering'] as Record<
+      string,
+      { levels: Record<number, { lvlText: string }> }
+    >;
+    expect(defs[list.numId]?.levels[0]?.lvlText).toBe('%1.');
+  });
+
+  it('regenerates numbering.xml for editor-authored presets (integer numIds Word accepts)', async () => {
+    const numbering = {
+      'bb-ordered-paren': {
+        key: 'bb-ordered-paren',
+        levels: {
+          0: { numFmt: 'decimal', lvlText: '%1)', start: 1 },
+          1: { numFmt: 'lowerLetter', lvlText: '%2)', start: 1 },
+          2: { numFmt: 'lowerRoman', lvlText: '%3)', start: 1 },
+        },
+      },
+      'bb-bullet': {
+        key: 'bb-bullet',
+        levels: { 0: { numFmt: 'bullet', lvlText: '•', start: 1 } },
+      },
+    };
+    const doc = schema.node('doc', { numbering }, [
+      schema.node(
+        'paragraph',
+        { list: { numId: 'bb-ordered-paren', level: 0 } },
+        [schema.text('first')],
+      ),
+      schema.node(
+        'paragraph',
+        { list: { numId: 'bb-ordered-paren', level: 1 } },
+        [schema.text('nested')],
+      ),
+      schema.node('paragraph', { list: { numId: 'bb-bullet', level: 0 } }, [
+        schema.text('bullet'),
+      ]),
+    ]);
+
+    const bytes = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(bytes);
+    const docXml = await zip.file('word/document.xml')!.async('string');
+    // No bb-* id may leak into the document — Word requires integers.
+    expect(docXml).not.toContain('bb-');
+    const numIds = [...docXml.matchAll(/<w:numId w:val="([^"]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(numIds).toHaveLength(3);
+    for (const id of numIds) expect(id).toMatch(/^\d+$/);
+
+    const numberingXml = await zip.file('word/numbering.xml')!.async('string');
+    expect(numberingXml).toContain('w:numFmt w:val="lowerLetter"');
+    expect(numberingXml).toContain('w:lvlText w:val="•"');
+    // abstractNum defs must all precede the first w:num (schema order).
+    expect(numberingXml.lastIndexOf('<w:abstractNum ')).toBeLessThan(
+      numberingXml.search(/<w:num[ >]/),
+    );
+    // Part is wired up: relationship + content-type override.
+    const rels = await zip
+      .file('word/_rels/document.xml.rels')!
+      .async('string');
+    expect(rels).toContain('Target="numbering.xml"');
+    const ct = await zip.file('[Content_Types].xml')!.async('string');
+    expect(ct).toContain('/word/numbering.xml');
+
+    // Full round-trip: markers and levels identical when reopened.
+    const { doc: back } = await importDocx(bytes);
+    const backDefs = back.attrs['numbering'] as Record<
+      string,
+      { levels: Record<number, { numFmt: string; lvlText: string }> }
+    >;
+    const l0 = back.child(0).attrs['list'] as { numId: string; level: number };
+    const l1 = back.child(1).attrs['list'] as { numId: string; level: number };
+    expect(l0.level).toBe(0);
+    expect(l1.level).toBe(1);
+    expect(l1.numId).toBe(l0.numId); // same list, same def
+    expect(backDefs[l0.numId].levels[0]).toMatchObject({
+      numFmt: 'decimal',
+      lvlText: '%1)',
     });
-    expect(fromScratch.doc.attrs['numbering']).toBeNull();
+    expect(backDefs[l0.numId].levels[1]).toMatchObject({
+      numFmt: 'lowerLetter',
+      lvlText: '%2)',
+    });
+    const bullet = back.child(2).attrs['list'] as { numId: string };
+    expect(backDefs[bullet.numId].levels[0].lvlText).toBe('•');
+  });
+
+  it('merges editor-preset defs into a carried numbering.xml without touching original ids', async () => {
+    const { doc, raw } = await importDocx(await sourceBytes());
+    // User adds a bulleted paragraph in the editor: defs gain bb-bullet.
+    const defs = {
+      ...(doc.attrs['numbering'] as Record<string, unknown>),
+      'bb-bullet': {
+        key: 'bb-bullet',
+        levels: { 0: { numFmt: 'bullet', lvlText: '•', start: 1 } },
+      },
+    };
+    const doc2 = doc.type.create({ ...doc.attrs, numbering: defs }, [
+      doc.child(0),
+      schema.node('paragraph', { list: { numId: 'bb-bullet', level: 0 } }, [
+        schema.text('new bullet'),
+      ]),
+    ]);
+
+    const bytes = await exportDocx(doc2, { carry: raw });
+    const zip = await JSZip.loadAsync(bytes);
+    const numberingXml = await zip.file('word/numbering.xml')!.async('string');
+    // Original def untouched, new def appended in schema order.
+    expect(numberingXml).toContain('<w:num w:numId="1">');
+    expect(numberingXml).toContain('w:lvlText w:val="•"');
+    expect(numberingXml.lastIndexOf('<w:abstractNum ')).toBeLessThan(
+      numberingXml.search(/<w:num[ >]/),
+    );
+
+    const { doc: back } = await importDocx(bytes);
+    expect(back.child(0).attrs['list']).toEqual({ numId: '1', level: 0 }); // untouched
+    const bullet = back.child(1).attrs['list'] as { numId: string };
+    expect(bullet.numId).toMatch(/^\d+$/);
+    expect(bullet.numId).not.toBe('1');
+    const backDefs = back.attrs['numbering'] as Record<
+      string,
+      { levels: Record<number, { lvlText: string }> }
+    >;
+    expect(backDefs[bullet.numId].levels[0].lvlText).toBe('•');
   });
 });
 

@@ -45,6 +45,10 @@ interface ExportCtx {
   media: { path: string; base64: string }[];
   exts: Set<string>; // image extensions → content-type defaults
   nextId: number; // shared rId / media / drawing counter
+  /** Doc numId → output w:numId. Editor-authored ids (`bb-*`) are remapped to
+   *  fresh integers backed by generated numbering.xml defs; carried ids pass
+   *  through. */
+  numIdMap: Map<string, string>;
   // Comment ranges (E3): the doc's known comment ids, the last inline-node index
   // each id covers (so we can close the range), the currently-open ids, and a
   // running inline-node index aligned with the precompute.
@@ -329,7 +333,7 @@ function sectionSectPr(s: SectionConfig): string {
 }
 
 /** A paragraph's w:pPr children (no wrapper). */
-function paraProps(node: PMNode): string {
+function paraProps(node: PMNode, ctx: ExportCtx): string {
   const a = node.attrs;
   const out: string[] = [];
   // w:pStyle is the first pPr child. ensureStyleDefs() guarantees the
@@ -342,10 +346,12 @@ function paraProps(node: PMNode): string {
     out.push(`<w:pStyle w:val="${styleId}"/>`);
   if (a['pageBreakBefore']) out.push('<w:pageBreakBefore/>');
   const list = a['list'] as { numId: string; level: number } | null;
-  if (list)
+  if (list) {
+    const outId = ctx.numIdMap.get(list.numId) ?? list.numId;
     out.push(
-      `<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(list.numId)}"/></w:numPr>`,
+      `<w:numPr><w:ilvl w:val="${list.level}"/><w:numId w:val="${esc(outId)}"/></w:numPr>`,
     );
+  }
   // w:pBdr sits between numPr and spacing in the pPr sequence.
   const pBdr = a['borders'] as TableBorders | null;
   if (pBdr) {
@@ -394,7 +400,7 @@ function paraProps(node: PMNode): string {
 
 /** `sectPr` (a section break) appends inside this paragraph's pPr, last. */
 function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
-  const props = paraProps(node) + sectPr;
+  const props = paraProps(node, ctx) + sectPr;
   const pPr = props ? `<w:pPr>${props}</w:pPr>` : '';
   return `<w:p>${pPr}${inlineContent(node, ctx)}</w:p>`;
 }
@@ -679,7 +685,11 @@ function mergeStyles(xml: string, used: Set<string>): string {
   );
 }
 
-function contentTypes(exts: Set<string>, hasComments: boolean): string {
+function contentTypes(
+  exts: Set<string>,
+  hasComments: boolean,
+  hasNumbering = false,
+): string {
   const parts = [
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
     '<Default Extension="xml" ContentType="application/xml"/>',
@@ -694,6 +704,7 @@ function contentTypes(exts: Set<string>, hasComments: boolean): string {
   parts.push(
     '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>',
   );
+  if (hasNumbering) parts.push(NUMBERING_OVERRIDE);
   if (hasComments) {
     parts.push(
       '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>',
@@ -711,12 +722,14 @@ function mergeContentTypes(
   xml: string,
   exts: Set<string>,
   hasComments: boolean,
+  hasNewNumbering = false,
 ): string {
   let out = xml;
   const add = (frag: string, key: string) => {
     if (!out.includes(`"${key}"`))
       out = out.replace('</Types>', `${frag}</Types>`);
   };
+  if (hasNewNumbering) add(NUMBERING_OVERRIDE, '/word/numbering.xml');
   for (const ext of exts)
     add(
       `<Default Extension="${ext}" ContentType="${EXT_MIME[ext] ?? `image/${ext}`}"/>`,
@@ -762,6 +775,124 @@ function mergeRels(xml: string | undefined, newRels: string[]): string {
   );
 }
 
+// ── Numbering export ─────────────────────────────────────────────────
+// Editor-authored lists carry string numIds (`bb-bullet`, `bb-ordered-paren`)
+// whose definitions live only on the doc node's `numbering` attr — invalid in
+// OOXML (w:numId must be an integer) and undefined in Word. At export they are
+// remapped to fresh integer ids and their defs regenerated into
+// word/numbering.xml (merged into a carried part, or a new part from scratch),
+// so the file opens in Word with the same markers bapbong paints.
+
+type NumberingDefEntry = {
+  key: string;
+  levels: Record<
+    number,
+    { numFmt: string; lvlText: string; start?: number } | undefined
+  >;
+};
+
+interface NumberingPlan {
+  /** Doc numId → output w:numId (identity for ids the carried part covers). */
+  map: Map<string, string>;
+  /** Generated `<w:abstractNum>` / `<w:num>` fragments ('' when none). */
+  abstractXml: string;
+  numXml: string;
+}
+
+/** One abstractNum from a doc-attr definition. `w:suff="space"` matches the
+ *  marker-space-text layout bapbong paints (Word's default suffix is a tab). */
+function abstractNumXml(absId: number, def: NumberingDefEntry): string {
+  const lvls = Object.keys(def.levels)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((ilvl) => {
+      const l = def.levels[ilvl];
+      if (!l) return '';
+      return (
+        `<w:lvl w:ilvl="${ilvl}"><w:start w:val="${l.start ?? 1}"/>` +
+        `<w:numFmt w:val="${esc(l.numFmt)}"/><w:suff w:val="space"/>` +
+        `<w:lvlText w:val="${esc(l.lvlText)}"/><w:lvlJc w:val="left"/></w:lvl>`
+      );
+    })
+    .join('');
+  return `<w:abstractNum w:abstractNumId="${absId}"><w:multiLevelType w:val="hybridMultilevel"/>${lvls}</w:abstractNum>`;
+}
+
+/** Decide which numIds the output file must define, and mint their ids. */
+function planNumbering(doc: PMNode, carried: string | null): NumberingPlan {
+  const used = new Set<string>();
+  doc.descendants((n) => {
+    const list = n.attrs['list'] as { numId?: string } | null | undefined;
+    if (list?.numId) used.add(list.numId);
+  });
+  const map = new Map<string, string>();
+  if (used.size === 0) return { map, abstractXml: '', numXml: '' };
+
+  const defs =
+    (doc.attrs['numbering'] as Record<string, NumberingDefEntry> | null) ?? {};
+  const inCarried = (id: string) =>
+    carried != null && new RegExp(`<w:num w:numId="${id}"[ />]`).test(carried);
+
+  const generate: string[] = [];
+  for (const id of used) {
+    if (inCarried(id) || !defs[id]) map.set(id, id); // covered, or no def (degraded passthrough)
+    else generate.push(id);
+  }
+  if (generate.length === 0) return { map, abstractXml: '', numXml: '' };
+
+  // Mint ids above everything the carried part uses (numId and abstractNumId
+  // share one counter for simplicity — the namespaces are independent, so
+  // this only costs unused integers) and above kept integer ids.
+  const taken = new Set<number>([0]);
+  if (carried)
+    for (const m of carried.matchAll(/w:(?:numId|abstractNumId)="(\d+)"/g))
+      taken.add(Number(m[1]));
+  for (const id of generate) if (/^\d+$/.test(id)) taken.add(Number(id));
+  let next = Math.max(...taken) + 1;
+
+  // Ids sharing an abstract definition (`key`) share one abstractNum, so
+  // their counters keep advancing together, mirroring w:abstractNumId.
+  const absIdByKey = new Map<string, number>();
+  const abstracts: string[] = [];
+  const nums: string[] = [];
+  for (const id of generate) {
+    const def = defs[id];
+    const key = def.key || id;
+    let absId = absIdByKey.get(key);
+    if (absId == null) {
+      absId = next++;
+      absIdByKey.set(key, absId);
+      abstracts.push(abstractNumXml(absId, def));
+    }
+    const outId = /^\d+$/.test(id) ? id : String(next++);
+    map.set(id, outId);
+    nums.push(
+      `<w:num w:numId="${outId}"><w:abstractNumId w:val="${absId}"/></w:num>`,
+    );
+  }
+  return { map, abstractXml: abstracts.join(''), numXml: nums.join('') };
+}
+
+/** The generated fragments merged into a carried numbering.xml (schema order:
+ *  every abstractNum precedes the first w:num), or a fresh part. */
+function numberingPartXml(plan: NumberingPlan, carried: string | null): string {
+  if (carried && carried.includes('</w:numbering>')) {
+    let out = carried;
+    const firstNum = out.search(/<w:num[ >]/);
+    if (firstNum >= 0)
+      out = out.slice(0, firstNum) + plan.abstractXml + out.slice(firstNum);
+    else out = out.replace('</w:numbering>', `${plan.abstractXml}</w:numbering>`);
+    return out.replace('</w:numbering>', `${plan.numXml}</w:numbering>`);
+  }
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<w:numbering xmlns:w="${W_NS}">${plan.abstractXml}${plan.numXml}</w:numbering>`
+  );
+}
+
+const NUMBERING_OVERRIDE =
+  '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>';
+
 /**
  * Serialise a bapbong document back to `.docx` bytes.
  *
@@ -788,11 +919,17 @@ export async function exportDocx(
     idx++;
   });
 
+  // Numbering must be planned before the body serialises (numPr remapping).
+  const carriedNumbering =
+    (await opts?.carry?.file('word/numbering.xml')?.async('string')) ?? null;
+  const numbering = planNumbering(doc, carriedNumbering);
+
   const ctx: ExportCtx = {
     rels: [],
     media: [],
     exts: new Set(),
     nextId: 100,
+    numIdMap: numbering.map,
     knownComments,
     lastRun,
     openComments: new Set(),
@@ -814,6 +951,17 @@ export async function exportDocx(
     );
   }
 
+  // Regenerated numbering: merged into the carried part, or a brand-new part
+  // (which then needs its relationship + content-type override).
+  const numberingPart = numbering.numXml
+    ? numberingPartXml(numbering, carriedNumbering)
+    : null;
+  const newNumberingPart = numberingPart != null && carriedNumbering == null;
+  if (newNumberingPart)
+    ctx.rels.push(
+      `<Relationship Id="rIdNumbering" Type="${R_NS}/numbering" Target="numbering.xml"/>`,
+    );
+
   const zip = new JSZip();
   const styleIds = usedStyleIds(doc);
   let sectPr = ''; // re-attached from the original (carry) for page setup + headers
@@ -827,8 +975,8 @@ export async function exportDocx(
     zip.file(
       '[Content_Types].xml',
       ct
-        ? mergeContentTypes(ct, ctx.exts, hasComments)
-        : contentTypes(ctx.exts, hasComments),
+        ? mergeContentTypes(ct, ctx.exts, hasComments, newNumberingPart)
+        : contentTypes(ctx.exts, hasComments, numberingPart != null),
     );
     // Styles referenced by pStyle but never defined by the source (headings /
     // Title / Subtitle authored in bapbong) get their defs appended.
@@ -846,13 +994,18 @@ export async function exportDocx(
       `<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`,
     );
     zip.file('word/styles.xml', stylesXml(styleIds));
-    zip.file('[Content_Types].xml', contentTypes(ctx.exts, hasComments));
+    zip.file(
+      '[Content_Types].xml',
+      contentTypes(ctx.exts, hasComments, numberingPart != null),
+    );
     zip.file('_rels/.rels', ROOT_RELS);
     zip.file(
       'word/_rels/document.xml.rels',
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${ctx.rels.join('')}</Relationships>`,
     );
   }
+
+  if (numberingPart) zip.file('word/numbering.xml', numberingPart);
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
