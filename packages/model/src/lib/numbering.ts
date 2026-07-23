@@ -66,7 +66,9 @@ function formatCounter(n: number, fmt: string): string {
       return toRoman(n).toLowerCase();
     case 'upperRoman':
       return toRoman(n);
-    default: // decimal, decimalZero, and unknown formats
+    case 'decimalZero':
+      return String(n).padStart(2, '0');
+    default: // decimal and unknown formats
       return String(n);
   }
 }

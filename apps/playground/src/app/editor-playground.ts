@@ -16,7 +16,9 @@ import {
   activeFontFamily,
   activeFontSize,
   activeHighlight,
+  activeListPresetId,
   activeTextColor,
+  applyListPreset,
   cellAt,
   deleteColumn,
   deleteRow,
@@ -27,6 +29,7 @@ import {
   insertRow,
   insertTable,
   linkInfoAt,
+  listPresets,
   mergeCells,
   removeSectionBreak,
   setFontFamily,
@@ -404,8 +407,29 @@ export class EditorPlayground implements OnDestroy {
             },
             'clear-format',
           ],
+          [
+            {
+              kind: 'split',
+              name: 'bullet-list',
+              options: listPresets('bullet').map((p) => ({
+                value: p.id,
+                rows: p.samples,
+              })),
+              value: (s) => activeListPresetId(s, 'bullet'),
+              onSelect: (id) => this.exec(applyListPreset('bullet', id)),
+            },
+            {
+              kind: 'split',
+              name: 'ordered-list',
+              options: listPresets('ordered').map((p) => ({
+                value: p.id,
+                rows: p.samples,
+              })),
+              value: (s) => activeListPresetId(s, 'ordered'),
+              onSelect: (id) => this.exec(applyListPreset('ordered', id)),
+            },
+          ],
           ['align-left', 'align-center', 'align-right', 'align-justify'],
-          ['bullet-list', 'ordered-list'],
           [
             {
               kind: 'select',

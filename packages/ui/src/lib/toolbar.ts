@@ -51,8 +51,30 @@ export interface ToolbarColor {
   onSelect: (color: string | null) => void;
 }
 
-/** A toolbar group entry: a command name (button) or a control (select/colour). */
-export type ToolbarEntry = string | ToolbarSelect | ToolbarColor;
+/** One style card in a split button's dropdown: three preview markers, one per
+ *  nesting level (e.g. ['1.', 'a.', 'i.']), rendered beside placeholder bars. */
+export interface ToolbarSplitOption {
+  value: string;
+  rows: [string, string, string];
+  title?: string;
+}
+
+/** A split button: the main button runs the command `name` (toggle, with its
+ *  active/enabled tracking and icon), and a narrow ▾ opens a dropdown of style
+ *  cards. The host owns the parameterized command each card runs. */
+export interface ToolbarSplit {
+  kind: 'split';
+  /** Command for the main button — also the icon/tooltip lookup key. */
+  name: string;
+  options: ToolbarSplitOption[];
+  /** Currently applied option value (highlights its card), or null. */
+  value: (state: EditorStateOf) => string | null;
+  /** Called when the user picks a card. */
+  onSelect: (value: string) => void;
+}
+
+/** A toolbar group entry: a command name (button) or a control (select/colour/split). */
+export type ToolbarEntry = string | ToolbarSelect | ToolbarColor | ToolbarSplit;
 
 export interface ToolbarOptions {
   /** Groups rendered as separated clusters — command names (buttons) and/or
@@ -170,6 +192,20 @@ const STYLE = `
 .bb-color-none{grid-column:1/-1;font:inherit;font-size:12px;padding:3px 0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:5px;background:var(--bb-ui-bg,#fff);cursor:pointer}
 .bb-color-none:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
+.bb-toolbar-split{display:flex;align-items:center;gap:0}
+.bb-toolbar-split .bb-toolbar-btn{min-width:26px;padding:0 5px}
+.bb-split-arrow{min-width:14px !important;width:15px;padding:0 !important}
+.bb-split-arrow svg{display:block}
+.bb-split-pop{position:absolute;z-index:1200;display:grid;grid-template-columns:repeat(3,auto);gap:8px;padding:10px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16)}
+.bb-split-pop[hidden]{display:none}
+.bb-split-card{display:flex;flex-direction:column;gap:6px;width:76px;padding:9px 8px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit}
+.bb-split-card:hover{background:var(--bb-ui-hover,#f1efe8)}
+.bb-split-card.is-selected{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#b5d4f4)}
+.bb-split-row{display:flex;align-items:center;gap:4px}
+.bb-split-row[data-lvl="1"]{padding-left:9px}
+.bb-split-row[data-lvl="2"]{padding-left:18px}
+.bb-split-marker{flex:none;min-width:14px;font-size:9px;line-height:1.1;text-align:right;color:var(--bb-ui-fg,#2c2c2a);white-space:nowrap}
+.bb-split-bar{flex:1;height:3px;border-radius:2px;background:var(--bb-ui-border,#d9d9d4)}
 `;
 
 /**
@@ -210,6 +246,7 @@ export function mountToolbar(
   const buttons: Array<{ name: string; el: HTMLButtonElement }> = [];
   const selects: Array<{ spec: ToolbarSelect; el: HTMLSelectElement }> = [];
   const colors: Array<{ spec: ToolbarColor; bar: HTMLElement }> = [];
+  const splits: Array<{ spec: ToolbarSplit; cards: HTMLButtonElement[] }> = [];
   let latest: EditorStateOf | null = null;
 
   for (const group of groups) {
@@ -288,7 +325,7 @@ export function mountToolbar(
         btn.addEventListener('click', () => {
           const open = pop.hidden;
           wrap
-            .querySelectorAll('.bb-color-pop')
+            .querySelectorAll('.bb-color-pop,.bb-split-pop')
             .forEach((p) => ((p as HTMLElement).hidden = true));
           pop.hidden = !open;
           if (!pop.hidden) {
@@ -323,6 +360,105 @@ export function mountToolbar(
         wrap.appendChild(pop);
         groupEl.appendChild(colorWrap);
         colors.push({ spec: entry, bar });
+        continue;
+      }
+      if (typeof entry !== 'string' && entry.kind === 'split') {
+        const splitWrap = document.createElement('div');
+        splitWrap.className = 'bb-toolbar-split';
+        const item = items[entry.name] ?? { title: entry.name };
+        // Main button: behaves exactly like a plain command button.
+        const main = document.createElement('button');
+        main.type = 'button';
+        main.className = 'bb-toolbar-btn';
+        main.title = item.title;
+        main.setAttribute('aria-label', item.title);
+        if (item.svg) main.innerHTML = item.svg;
+        else main.textContent = item.label ?? entry.name;
+        main.addEventListener('mousedown', (e) => e.preventDefault());
+        main.addEventListener('click', () => {
+          if (!latest) return;
+          editor.commands
+            .get(entry.name)
+            ?.run(latest, (tr) => editor.dispatch(tr));
+          editor.focus();
+        });
+        buttons.push({ name: entry.name, el: main });
+        // ▾ arrow: opens the style-card dropdown (portaled to the wrap, like
+        // the colour pop, so the overflow-hidden row can't clip it).
+        const arrow = document.createElement('button');
+        arrow.type = 'button';
+        arrow.className = 'bb-toolbar-btn bb-split-arrow';
+        arrow.title = `${item.title} styles`;
+        arrow.setAttribute('aria-label', `${item.title} styles`);
+        arrow.setAttribute('aria-haspopup', 'true');
+        arrow.innerHTML =
+          '<svg viewBox="0 0 8 8" width="8" height="8" fill="currentColor" aria-hidden="true"><path d="M1 2.5h6L4 6z"/></svg>';
+        const pop = document.createElement('div');
+        pop.className = 'bb-split-pop';
+        pop.hidden = true;
+        const cards: HTMLButtonElement[] = [];
+        for (const opt of entry.options) {
+          const card = document.createElement('button');
+          card.type = 'button';
+          card.className = 'bb-split-card';
+          card.dataset['value'] = opt.value;
+          if (opt.title) card.title = opt.title;
+          opt.rows.forEach((marker, i) => {
+            const row = document.createElement('span');
+            row.className = 'bb-split-row';
+            row.dataset['lvl'] = String(i);
+            const m = document.createElement('span');
+            m.className = 'bb-split-marker';
+            m.textContent = marker;
+            const bar = document.createElement('span');
+            bar.className = 'bb-split-bar';
+            row.append(m, bar);
+            card.appendChild(row);
+          });
+          card.addEventListener('mousedown', (e) => e.preventDefault());
+          card.addEventListener('click', () => {
+            entry.onSelect(opt.value);
+            pop.hidden = true;
+            editor.focus();
+          });
+          pop.appendChild(card);
+          cards.push(card);
+        }
+        arrow.addEventListener('mousedown', (e) => e.preventDefault());
+        arrow.addEventListener('click', () => {
+          const open = pop.hidden;
+          wrap
+            .querySelectorAll('.bb-split-pop,.bb-color-pop')
+            .forEach((p) => ((p as HTMLElement).hidden = true));
+          pop.hidden = !open;
+          if (!pop.hidden) {
+            const wrapRect = wrap.getBoundingClientRect();
+            const btnRect = arrow.getBoundingClientRect();
+            pop.style.top = `${btnRect.bottom - wrapRect.top + 4}px`;
+            const left = Math.max(
+              0,
+              Math.min(
+                btnRect.left - wrapRect.left,
+                wrap.clientWidth - pop.offsetWidth - 4,
+              ),
+            );
+            pop.style.left = `${left}px`;
+            const onDoc = (ev: Event) => {
+              if (
+                !splitWrap.contains(ev.target as Node) &&
+                !pop.contains(ev.target as Node)
+              ) {
+                pop.hidden = true;
+                document.removeEventListener('pointerdown', onDoc, true);
+              }
+            };
+            document.addEventListener('pointerdown', onDoc, true);
+          }
+        });
+        splitWrap.append(main, arrow);
+        wrap.appendChild(pop);
+        groupEl.appendChild(splitWrap);
+        splits.push({ spec: entry, cards });
         continue;
       }
       const item = items[entry] ?? { title: entry };
@@ -388,10 +524,10 @@ export function mountToolbar(
     while (pop.firstChild) root.insertBefore(pop.firstChild, moreBtn);
     moreBtn.style.display = 'none';
     closePop();
-    // Refolding moves the anchor buttons — an open color pop would float
+    // Refolding moves the anchor buttons — an open color/split pop would float
     // detached from its button, so close them all.
     wrap
-      .querySelectorAll('.bb-color-pop')
+      .querySelectorAll('.bb-color-pop,.bb-split-pop')
       .forEach((p) => ((p as HTMLElement).hidden = true));
     if (fits()) return;
     moreBtn.style.display = '';
@@ -428,6 +564,14 @@ export function mountToolbar(
     // Empty → CSS `currentColor` (the button's text colour) shows in the bar.
     for (const { spec, bar } of colors)
       bar.style.background = spec.value(state) ?? '';
+    for (const { spec, cards } of splits) {
+      const selected = spec.value(state);
+      for (const card of cards)
+        card.classList.toggle(
+          'is-selected',
+          selected != null && card.dataset['value'] === selected,
+        );
+    }
   };
 
   const off = editor.onChange((c) => refresh(c.state));

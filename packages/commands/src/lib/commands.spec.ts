@@ -37,7 +37,12 @@ import {
   removeSectionBreak,
   setColumns,
 } from './sections.js';
-import { toggleList } from './list.js';
+import {
+  activeListPresetId,
+  applyListPreset,
+  listPresets,
+  toggleList,
+} from './list.js';
 import { defaultCommands } from './registry.js';
 
 // A minimal schema standing in for the real document schema — the commands key
@@ -589,6 +594,30 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     ).toBeTruthy();
     // toggling the same kind again clears it
     const off = apply(on, toggleList('bullet'));
+    expect(findNode(off, 'paragraph')?.attrs['list']).toBeNull();
+  });
+
+  it('applyListPreset switches marker style in place; activeListPresetId reports it', () => {
+    expect(listPresets('ordered').length).toBeGreaterThan(1);
+    // default preset via the toggle…
+    const on = apply(paraState(), toggleList('ordered'));
+    expect(activeListPresetId(on, 'ordered')).toBe('decimal');
+    // …switched to the paren style: numId + def change, list stays on
+    const paren = apply(on, applyListPreset('ordered', 'paren'));
+    const attrs = findNode(paren, 'paragraph')?.attrs['list'] as {
+      numId: string;
+      level: number;
+    };
+    expect(attrs.numId).toBe('bb-ordered-paren');
+    expect(
+      (paren.doc.attrs['numbering'] as Record<string, unknown>)[
+        'bb-ordered-paren'
+      ],
+    ).toBeTruthy();
+    expect(activeListPresetId(paren, 'ordered')).toBe('paren');
+    // the toggle still sees it as an ordered list (any preset) and clears it
+    expect(toggleList('ordered').isActive?.(paren)).toBe(true);
+    const off = apply(paren, toggleList('ordered'));
     expect(findNode(off, 'paragraph')?.attrs['list']).toBeNull();
   });
 });
