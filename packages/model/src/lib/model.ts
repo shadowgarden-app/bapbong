@@ -6,12 +6,29 @@ interface DomEl {
   getAttribute(name: string): string | null;
 }
 
+/** Complex attrs ride the DOM as data-* JSON so an internal copy/paste
+ *  (ProseMirror's clipboard is a toDOM → parseDOM round-trip) keeps them.
+ *  External HTML simply lacks the attribute → schema default. */
+function dataJson(el: unknown, name: string): unknown {
+  const raw = (el as DomEl).getAttribute(name);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** getAttrs for pasted <p>/<h1>–<h6>: heading level from the tag, alignment
  *  from inline style. Everything else keeps its schema default. */
 function pastedParagraphAttrs(el: unknown, heading: number | null) {
   const style = (el as DomEl).getAttribute('style') ?? '';
   const m = /(?:^|;)\s*text-align\s*:\s*(center|right|justify)/i.exec(style);
-  return { heading, align: m ? m[1].toLowerCase() : null };
+  return {
+    heading,
+    align: m ? m[1].toLowerCase() : null,
+    borders: dataJson(el, 'data-borders'),
+  };
 }
 
 /** Pasted <img>: only embedded bitmaps survive. Remote URLs are rejected —
@@ -38,6 +55,27 @@ function pastedImageAttrs(el: unknown) {
 function pastedLinkAttrs(el: unknown) {
   const href = ((el as DomEl).getAttribute('href') ?? '').trim();
   return /^(https?:|mailto:|#)/i.test(href) ? { href } : (false as const);
+}
+
+/** getAttrs for <td>/<th>: spans from standard attributes, the rich cell
+ *  attrs from their data-* JSON carriers, the fill from inline style. */
+function pastedCellAttrs(el: unknown) {
+  const e = el as DomEl;
+  const span = (name: string) => {
+    const n = parseInt(e.getAttribute(name) ?? '1', 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  };
+  const style = e.getAttribute('style') ?? '';
+  const bg = /(?:^|;)\s*background-color\s*:\s*([^;]+)/i.exec(style);
+  return {
+    colspan: span('colspan'),
+    rowspan: span('rowspan'),
+    colwidth: dataJson(el, 'data-colwidth'),
+    background: bg ? bg[1].trim() : null,
+    vAlign: e.getAttribute('data-valign'),
+    borders: dataJson(el, 'data-borders'),
+    padding: dataJson(el, 'data-padding'),
+  };
 }
 
 /**
@@ -117,6 +155,8 @@ export const schema = new Schema({
         const tag = attrs.heading ? `h${attrs.heading}` : 'p';
         const dom: Record<string, string> = style ? { style } : {};
         if (attrs.styleId) dom['data-style'] = attrs.styleId;
+        if (node.attrs['borders'])
+          dom['data-borders'] = JSON.stringify(node.attrs['borders']);
         return [tag, dom, 0];
       },
     },
@@ -204,12 +244,28 @@ export const schema = new Schema({
         // w:tblPr/w:jc — 'center' | 'right' table alignment, or null (left).
         align: { default: null },
       },
-      parseDOM: [{ tag: 'table' }],
-      toDOM: (node) => [
-        'table',
-        node.attrs['borders'] ? { 'data-borders': '1' } : {},
-        ['tbody', 0],
+      // Complex attrs round-trip as data-* JSON — ProseMirror's clipboard is
+      // a toDOM → parseDOM pass, so without this an internal copy/paste
+      // dropped borders / cell padding / alignment.
+      parseDOM: [
+        {
+          tag: 'table',
+          getAttrs: (el) => ({
+            borders: dataJson(el, 'data-borders'),
+            cellPadding: dataJson(el, 'data-cell-padding'),
+            align: (el as DomEl).getAttribute('data-align'),
+          }),
+        },
       ],
+      toDOM: (node) => {
+        const a = node.attrs;
+        const dom: Record<string, string> = {};
+        if (a['borders']) dom['data-borders'] = JSON.stringify(a['borders']);
+        if (a['cellPadding'])
+          dom['data-cell-padding'] = JSON.stringify(a['cellPadding']);
+        if (a['align']) dom['data-align'] = String(a['align']);
+        return ['table', dom, ['tbody', 0]];
+      },
     },
     table_row: {
       content: 'table_cell+',
@@ -221,11 +277,24 @@ export const schema = new Schema({
         // w:trHeight — { value: px, exact: boolean } or null (auto).
         height: { default: null },
       },
-      // No getAttrs (same rationale as paragraph): the importer sets attrs
-      // directly; revisit when HTML paste lands.
-      parseDOM: [{ tag: 'tr' }],
-      toDOM: (node) =>
-        node.attrs['header'] ? ['tr', { 'data-header': 'true' }, 0] : ['tr', 0],
+      parseDOM: [
+        {
+          tag: 'tr',
+          getAttrs: (el) => ({
+            header: (el as DomEl).getAttribute('data-header') === 'true',
+            cantSplit: (el as DomEl).getAttribute('data-cant-split') === 'true',
+            height: dataJson(el, 'data-height'),
+          }),
+        },
+      ],
+      toDOM: (node) => {
+        const dom: Record<string, string> = {};
+        if (node.attrs['header']) dom['data-header'] = 'true';
+        if (node.attrs['cantSplit']) dom['data-cant-split'] = 'true';
+        if (node.attrs['height'])
+          dom['data-height'] = JSON.stringify(node.attrs['height']);
+        return ['tr', dom, 0];
+      },
     },
     table_cell: {
       content: 'block+',
@@ -239,7 +308,10 @@ export const schema = new Schema({
         borders: { default: null }, // w:tcBorders per-side visibility override
         padding: { default: null }, // w:tcMar per-side margin override (px)
       },
-      parseDOM: [{ tag: 'td' }, { tag: 'th' }],
+      parseDOM: [
+        { tag: 'td', getAttrs: pastedCellAttrs },
+        { tag: 'th', getAttrs: pastedCellAttrs },
+      ],
       toDOM(node) {
         const attrs: Record<string, string> = {};
         if (node.attrs['colspan'] !== 1)
@@ -248,6 +320,14 @@ export const schema = new Schema({
           attrs['rowspan'] = String(node.attrs['rowspan']);
         if (node.attrs['background'])
           attrs['style'] = `background-color: ${node.attrs['background']}`;
+        if (node.attrs['colwidth'])
+          attrs['data-colwidth'] = JSON.stringify(node.attrs['colwidth']);
+        if (node.attrs['vAlign'])
+          attrs['data-valign'] = String(node.attrs['vAlign']);
+        if (node.attrs['borders'])
+          attrs['data-borders'] = JSON.stringify(node.attrs['borders']);
+        if (node.attrs['padding'])
+          attrs['data-padding'] = JSON.stringify(node.attrs['padding']);
         return ['td', attrs, 0];
       },
     },

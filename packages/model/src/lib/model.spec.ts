@@ -46,18 +46,29 @@ describe('schema', () => {
 
     it('parses h1–h6 into the heading attr and text-align into align', () => {
       const p = rules(schema.nodes.paragraph.spec as never);
-      expect(p.get('p')!(el({}))).toEqual({ heading: null, align: null });
-      expect(p.get('h2')!(el({}))).toEqual({ heading: 2, align: null });
+      const base = { borders: null };
+      expect(p.get('p')!(el({}))).toEqual({
+        heading: null,
+        align: null,
+        ...base,
+      });
+      expect(p.get('h2')!(el({}))).toEqual({
+        heading: 2,
+        align: null,
+        ...base,
+      });
       expect(
         p.get('h6')!(el({ style: 'color:red;text-align: center' })),
       ).toEqual({
         heading: 6,
         align: 'center',
+        ...base,
       });
       // 'left' is the default — normalized to null
       expect(p.get('p')!(el({ style: 'text-align:left' }))).toEqual({
         heading: null,
         align: null,
+        ...base,
       });
     });
 
@@ -163,6 +174,79 @@ describe('commentSchema', () => {
     expect(mention.isAtom).toBe(true);
     expect(mention.isInline).toBe(true);
     expect(doc.textContent).toBe('hi @Alice Nguyễn bye'); // leafText
+  });
+
+  it('round-trips rich table/cell attrs through toDOM/parseDOM (clipboard)', () => {
+    // ProseMirror's clipboard is a toDOM → parseDOM pass: complex attrs ride
+    // data-* JSON carriers or an internal copy/paste silently drops them.
+    const side = { width: 1, style: 'solid', color: '#000000' };
+    const asEl = (attrs: Record<string, string>) => ({
+      getAttribute: (n: string) => attrs[n] ?? null,
+    });
+    const getAttrs = (spec: unknown, i = 0) =>
+      (spec as { parseDOM: { getAttrs: (el: unknown) => unknown }[] }).parseDOM[
+        i
+      ].getAttrs;
+
+    const cell = schema.nodes.table_cell.create(
+      {
+        colspan: 2,
+        colwidth: [80, 120],
+        background: '#D9E2F3',
+        vAlign: 'center',
+        borders: { top: side },
+        padding: { left: 5, top: 4 },
+      },
+      [schema.nodes.paragraph.create()],
+    );
+    const row = schema.nodes.table_row.create(
+      { header: true, height: { value: 50, exact: false } },
+      [cell],
+    );
+    const table = schema.nodes.table.create(
+      {
+        borders: { top: side, insideH: side },
+        cellPadding: { left: 4 },
+        align: 'center',
+      },
+      [row],
+    );
+
+    const domAttrs = (node: typeof table) =>
+      (
+        node.type.spec.toDOM as (
+          n: typeof table,
+        ) => [string, Record<string, string>, ...unknown[]]
+      )(node)[1];
+
+    const tableBack = getAttrs(schema.nodes.table.spec)(
+      asEl(domAttrs(table)),
+    ) as Record<string, unknown>;
+    expect(tableBack['borders']).toEqual({ top: side, insideH: side });
+    expect(tableBack['cellPadding']).toEqual({ left: 4 });
+    expect(tableBack['align']).toBe('center');
+
+    const rowBack = getAttrs(schema.nodes.table_row.spec)(
+      asEl(domAttrs(row)),
+    ) as Record<string, unknown>;
+    expect(rowBack['header']).toBe(true);
+    expect(rowBack['height']).toEqual({ value: 50, exact: false });
+
+    const cellBack = getAttrs(schema.nodes.table_cell.spec)(
+      asEl(domAttrs(cell)),
+    ) as Record<string, unknown>;
+    expect(cellBack['colspan']).toBe(2);
+    expect(cellBack['colwidth']).toEqual([80, 120]);
+    expect(cellBack['background']).toBe('#D9E2F3');
+    expect(cellBack['vAlign']).toBe('center');
+    expect(cellBack['borders']).toEqual({ top: side });
+    expect(cellBack['padding']).toEqual({ left: 5, top: 4 });
+
+    const para = schema.nodes.paragraph.create({ borders: { top: side } });
+    const paraBack = getAttrs(schema.nodes.paragraph.spec)(
+      asEl(domAttrs(para)),
+    ) as Record<string, unknown>;
+    expect(paraBack['borders']).toEqual({ top: side });
   });
 
   it('mention round-trips through JSON keeping its attrs', () => {
