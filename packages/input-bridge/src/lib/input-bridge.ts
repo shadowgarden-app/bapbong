@@ -1,7 +1,7 @@
 import { baseKeymap, chainCommands } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
-import type { Node as PMNode, Schema } from 'prosemirror-model';
+import { DOMSerializer, type Node as PMNode, type Schema } from 'prosemirror-model';
 import {
   EditorState,
   Plugin,
@@ -199,13 +199,134 @@ export function createEditingState(
   });
 }
 
+// ── DOM windowing (large-document WebKit fix) ─────────────────────────
+//
+// The bridge holds the WHOLE document in its ProseMirror state, but it must
+// not hold the whole document as DOM: on WebKit, the mere presence of a
+// several-thousand-block hidden tree stalls the rendering pipeline for
+// seconds after every scroll (frames stop while the main thread stays idle)
+// — ablation-verified: with the tree out of the document the stalls vanish,
+// and no amount of `contain` / `content-visibility` / off-layer positioning
+// helps while it is present.
+//
+// So only a WINDOW of blocks around the selection is rendered for real; every
+// other top-level block renders as an empty stub element. The model, history,
+// clipboard and IME are untouched (they live on the full PM state — positions
+// never remapped); the DOM selection always sits inside the window, and the
+// window follows the selection: a `decorations` prop marks in-window blocks,
+// and the block node views recreate themselves whenever their membership
+// changes (update() → false). Stub blocks are opaque leaves (no contentDOM),
+// so ProseMirror never renders their children at all.
+
+/** Blocks kept fully rendered before/after the selection ends. Large enough
+ *  that Enter/Backspace joins and multi-line IME always touch real DOM. */
+const WINDOW_BUFFER = 4;
+
+const IN_WINDOW = 'bapbongInWindow';
+
+/** Node decorations marking the top-level blocks that must render for real:
+ *  a ±buffer around the selection's endpoints (two segments when a long
+ *  selection spans more — the blocks between stay stubs; DOM selection only
+ *  needs real anchor/head nodes, and copy serializes from the model). */
+function windowDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc;
+  if (doc.childCount === 0) return DecorationSet.empty;
+  const last = doc.childCount - 1;
+  const clamp = (i: number) => Math.max(0, Math.min(last, i));
+  const fromIdx = doc.resolve(state.selection.from).index(0);
+  const toIdx = doc.resolve(state.selection.to).index(0);
+  const K = WINDOW_BUFFER;
+  const segs: [number, number][] =
+    toIdx - fromIdx <= 2 * K
+      ? [[clamp(fromIdx - K), clamp(toIdx + K)]]
+      : [
+          [clamp(fromIdx - K), clamp(fromIdx + K)],
+          [clamp(toIdx - K), clamp(toIdx + K)],
+        ];
+  const decos: Decoration[] = [];
+  let idx = 0;
+  doc.forEach((node, offset) => {
+    if (segs.some(([a, b]) => idx >= a && idx <= b)) {
+      decos.push(
+        Decoration.node(offset, offset + node.nodeSize, {}, { [IN_WINDOW]: true }),
+      );
+    }
+    idx++;
+  });
+  return DecorationSet.create(doc, decos);
+}
+
+/** Whether the outer decorations mark this block as inside the window. */
+function isInWindow(decorations: readonly Decoration[]): boolean {
+  return decorations.some((d) => (d.spec as Record<string, unknown>)[IN_WINDOW]);
+}
+
+/** Node view for top-level blocks: real (default-equivalent, with contentDOM)
+ *  inside the window, an empty stub outside it. Nested occurrences (e.g.
+ *  paragraphs inside table cells) always render for real — their table is
+ *  already window-gated. Returning false from update() recreates the view when
+ *  window membership flips. */
+function windowedBlockView(
+  node: PMNode,
+  view: EditorView,
+  getPos: () => number | undefined,
+  decorations: readonly Decoration[],
+): {
+  dom: HTMLElement;
+  contentDOM?: HTMLElement;
+  update?: (n: PMNode, decos: readonly Decoration[]) => boolean;
+  ignoreMutation?: () => boolean;
+} {
+  const pos = getPos();
+  const topLevel =
+    typeof pos === 'number' && view.state.doc.resolve(pos).depth === 0;
+  if (!topLevel || isInWindow(decorations)) {
+    // Default-equivalent rendering (schema toDOM) so PM manages the children.
+    let dom: HTMLElement;
+    let contentDOM: HTMLElement | undefined;
+    const spec = node.type.spec.toDOM?.(node);
+    if (spec != null) {
+      const rendered = DOMSerializer.renderSpec(document, spec);
+      dom = rendered.dom as HTMLElement;
+      contentDOM = (rendered.contentDOM as HTMLElement | undefined) ?? undefined;
+    } else {
+      dom = document.createElement('div');
+      contentDOM = dom;
+    }
+    return {
+      dom,
+      contentDOM,
+      update: (n, decos) => {
+        if (n.type !== node.type) return false;
+        // Fell out of the window → recreate as a stub.
+        if (topLevel && !isInWindow(decos)) return false;
+        return true; // PM syncs children into contentDOM
+      },
+    };
+  }
+  // Stub: an opaque, empty placeholder — its children are never rendered and
+  // model changes inside it need no DOM work (the model is the source of
+  // truth; the canvas paints from the layout engine, not from this DOM).
+  const dom = document.createElement(node.isTextblock ? 'p' : 'div');
+  return {
+    dom,
+    update: (n, decos) => {
+      if (n.type !== node.type) return false;
+      if (isInWindow(decos)) return false; // entered the window → materialize
+      return true;
+    },
+    ignoreMutation: () => true,
+  };
+}
+
 /**
  * Hidden ProseMirror editor acting as the canvas's input sink.
  *
  * The browser routes keyboard and IME composition into a real (but invisible)
  * contenteditable; ProseMirror keeps the model, history and clipboard. The
  * host positions `dom` at the canvas caret via `place()` so IME candidate
- * popups appear next to the visible (painted) caret.
+ * popups appear next to the visible (painted) caret. Only the blocks around
+ * the selection exist as real DOM — see the DOM-windowing section above.
  */
 export class InputBridge {
   /** Clip layer appended near the canvas: it fills the positioned ancestor
@@ -221,11 +342,16 @@ export class InputBridge {
     this.dom = document.createElement('div');
     this.dom.className = 'bapbong-input-bridge';
     Object.assign(this.dom.style, {
+      // In the page-canvas stack (absolute), so the host — and the IME popup
+      // anchored to it — scrolls along with the painted caret. Safe because the
+      // windowed DOM above keeps this subtree small even for huge documents.
       position: 'absolute',
       inset: '0',
       overflow: 'hidden',
       pointerEvents: 'none',
       zIndex: '-1',
+      // Full containment: external layout changes never reach this subtree.
+      contain: 'strict',
     } satisfies Partial<CSSStyleDeclaration>);
 
     this.host = document.createElement('div');
@@ -244,6 +370,16 @@ export class InputBridge {
       opacity: '0',
       // Keep it focusable but out of the way of canvas pointer events.
       pointerEvents: 'none',
+      // Suppress the browser's NATIVE text caret. The visible caret is painted
+      // on the canvas; the hidden editor only sinks input. Left visible, the
+      // native caret blinks in this whole-document contenteditable, and on
+      // WebKit each blink re-lays-out the (huge) hidden DOM — a ~900ms
+      // main-thread stall every ~500ms that froze large docs.
+      caretColor: 'transparent',
+      // Fixed-size containment root: the host is explicitly 800px × 1em with the
+      // document clipped inside, so its layout must not participate in (or be
+      // invalidated by) the surrounding canvas stack's.
+      contain: 'strict',
     } satisfies Partial<CSSStyleDeclaration>);
     this.dom.appendChild(this.host);
 
@@ -261,6 +397,25 @@ export class InputBridge {
     this.view = new EditorView(this.host, {
       state: createEditingState(options.doc, options.keys),
       handlePaste: options.handlePaste,
+      // DOM windowing: only blocks near the selection render for real.
+      decorations: windowDecorations,
+      nodeViews: {
+        // Top-level blocks window-gate themselves (stub away from the caret).
+        paragraph: windowedBlockView,
+        table: windowedBlockView,
+        // The hidden editor is invisible and only sinks input; it never needs
+        // the actual bitmaps (the canvas paints from the model). Render images
+        // as empty, correctly-sized placeholders so the in-window DOM does not
+        // hold — and WebKit does not decode — the doc's media.
+        image(node) {
+          const dom = document.createElement('img');
+          const w = Number(node.attrs['width']) || 0;
+          const h = Number(node.attrs['height']) || 0;
+          if (w) dom.style.width = `${w}px`;
+          if (h) dom.style.height = `${h}px`;
+          return { dom };
+        },
+      },
       handleDOMEvents: {
         beforeinput: (view, event) => {
           if (event.inputType !== 'insertParagraph') return false;

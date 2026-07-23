@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
+import { perf } from '@shadow-garden/bapbong-contracts';
 import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderStyle,
@@ -939,8 +940,10 @@ export async function exportDocx(
   };
   const boundaries = sectionBoundaries(doc);
   let body = '';
-  doc.forEach(
-    (block, _offset, i) => (body += blockXml(block, ctx, boundaries.get(i))),
+  perf.span('export.body', () =>
+    doc.forEach(
+      (block, _offset, i) => (body += blockXml(block, ctx, boundaries.get(i))),
+    ),
   );
 
   const hasComments = comments.length > 0;
@@ -1018,7 +1021,12 @@ export async function exportDocx(
     zip.file('word/comments.xml', commentsXml(comments));
     zip.file('word/commentsExtended.xml', commentsExtendedXml(comments));
   }
-  for (const { path, base64 } of ctx.media)
-    zip.file(path, base64, { base64: true });
-  return zip.generateAsync({ type: 'uint8array' });
+  perf.span('export.media', () => {
+    for (const { path, base64 } of ctx.media)
+      zip.file(path, base64, { base64: true });
+  });
+  perf.bump('export.mediaCount', ctx.media.length);
+  return perf.spanAsync('export.generate', () =>
+    zip.generateAsync({ type: 'uint8array' }),
+  );
 }

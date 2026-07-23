@@ -13,6 +13,7 @@ import type {
   SelectionRect,
   ShapeSpec,
 } from '@shadow-garden/bapbong-contracts';
+import { perf } from '@shadow-garden/bapbong-contracts';
 
 export interface PaintOptions {
   /** Zoom factor (1 = 100%). */
@@ -153,35 +154,40 @@ export class CanvasPainter {
     this.lastFrame = { o, dpr };
 
     // Stacked geometry: page top edges + the container's scroll range.
-    const width = layout.pages.reduce((m, p) => Math.max(m, p.width), 0);
-    this.pageY = [];
-    let acc = 0;
-    for (const page of layout.pages) {
-      this.pageY.push(acc);
-      acc += page.height + o.pageGap;
-    }
-    const totalHeight = Math.max(0, acc - o.pageGap);
-    this.container.style.position ||= 'relative';
-    this.container.style.width = `${Math.round(width * o.zoom)}px`;
-    this.container.style.height = `${Math.round(totalHeight * o.zoom)}px`;
+    const desired = perf.span('paint.setup', () => {
+      const width = layout.pages.reduce((m, p) => Math.max(m, p.width), 0);
+      this.pageY = [];
+      let acc = 0;
+      for (const page of layout.pages) {
+        this.pageY.push(acc);
+        acc += page.height + o.pageGap;
+      }
+      const totalHeight = Math.max(0, acc - o.pageGap);
+      this.container.style.position ||= 'relative';
+      this.container.style.width = `${Math.round(width * o.zoom)}px`;
+      this.container.style.height = `${Math.round(totalHeight * o.zoom)}px`;
 
-    // Which pages to keep mounted: those intersecting the viewport (+ margin).
-    const vp = options.viewport;
-    const vTop = vp ? vp.top / o.zoom - VIEWPORT_MARGIN : -Infinity;
-    const vBottom = vp
-      ? (vp.top + vp.height) / o.zoom + VIEWPORT_MARGIN
-      : Infinity;
-    const desired = new Set<number>();
-    layout.pages.forEach((page, i) => {
-      const top = this.pageY[i];
-      if (top + page.height >= vTop && top <= vBottom) desired.add(i);
+      // Which pages to keep mounted: those intersecting the viewport (+ margin).
+      const vp = options.viewport;
+      const vTop = vp ? vp.top / o.zoom - VIEWPORT_MARGIN : -Infinity;
+      const vBottom = vp
+        ? (vp.top + vp.height) / o.zoom + VIEWPORT_MARGIN
+        : Infinity;
+      const set = new Set<number>();
+      layout.pages.forEach((page, i) => {
+        const top = this.pageY[i];
+        if (top + page.height >= vTop && top <= vBottom) set.add(i);
+      });
+
+      for (const idx of [...this.mounted.keys()]) {
+        if (!set.has(idx)) this.unmountPage(idx);
+      }
+      return set;
     });
-
-    for (const idx of [...this.mounted.keys()]) {
-      if (!desired.has(idx)) this.unmountPage(idx);
-    }
     this.overlayPages = new Set();
-    for (const i of desired) this.drawPage(i, o, dpr);
+    perf.span(`drawPages(${desired.size}/${layout.pages.length})`, () => {
+      for (const i of desired) this.drawPage(i, o, dpr);
+    });
     if (this.lastOverlay.caret)
       this.overlayPages.add(this.lastOverlay.caret.pageIndex);
     for (const r of this.lastOverlay.selection)
@@ -204,9 +210,11 @@ export class CanvasPainter {
     for (const r of this.lastOverlay.selection) next.add(r.pageIndex);
     const affected = new Set([...this.overlayPages, ...next]);
     this.overlayPages = next;
-    for (const i of affected) {
-      if (this.mounted.has(i)) this.drawPage(i, frame.o, frame.dpr);
-    }
+    perf.span(`paintOverlay(${affected.size}pg full-redraw)`, () => {
+      for (const i of affected) {
+        if (this.mounted.has(i)) this.drawPage(i, frame.o, frame.dpr);
+      }
+    });
   }
 
   /** Mount (or reuse) page `i`'s canvas, size + position it, and draw it. */
@@ -845,13 +853,17 @@ export class CanvasPainter {
     if (cached) return cached;
     if (typeof Image === 'undefined') return undefined;
     const el = new Image();
+    const t0 = perf.now();
     el.onload = () => {
+      perf.log(`image.load(${(src.length / 1024).toFixed(0)}KB src)`, perf.now() - t0);
       if (this.lastLayout) {
-        this.paint(this.lastLayout, {
-          ...this.lastOptions,
-          caret: this.lastOverlay.caret,
-          selection: this.lastOverlay.selection,
-        });
+        perf.span('image.onload-repaint', () =>
+          this.paint(this.lastLayout!, {
+            ...this.lastOptions,
+            caret: this.lastOverlay.caret,
+            selection: this.lastOverlay.selection,
+          }),
+        );
       }
     };
     el.src = src;
