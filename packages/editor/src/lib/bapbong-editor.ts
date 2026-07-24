@@ -278,16 +278,31 @@ export class BapbongEditor {
    *  exposed via `state`). */
   async loadDocx(
     bytes: ArrayBuffer,
+    opts?: {
+      /** Re-open the document at an in-progress edit state instead of the
+       *  pristine disk contents. `bytes` still supplies the page chrome + carry
+       *  package (edit-invariant), but the body laid out and mounted is
+       *  `restoreState.doc`, and the bridge adopts `restoreState` so its undo
+       *  history and selection survive. The state must have been produced by
+       *  this editor (same schema) — e.g. captured earlier from `state`. */
+      restoreState?: EditorState;
+    },
   ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
     // Compose the doc schema from model's base + any plugin schema
     // contributions, and import against it (so plugin-owned marks/nodes parse).
     const composed = composeSchema(baseSchema, this.plugins);
+    const restore = opts?.restoreState;
     const { doc, headerKeys, footerKeys } = await this.core.loadDocx(
       bytes,
       // Skip the core's initial paint — `mount` paints with a caret overlay.
-      { schema: composed ?? undefined, paint: false },
+      // When restoring, lay out the edited body, not the pristine import.
+      {
+        schema: composed ?? undefined,
+        paint: false,
+        layoutTarget: restore?.doc,
+      },
     );
-    this.mount(doc);
+    this.mount(restore?.doc ?? doc, restore);
     return { headerKeys, footerKeys };
   }
 
@@ -628,11 +643,15 @@ export class BapbongEditor {
 
   // ── Setup / render loop ─────────────────────────────────────────────
 
-  /** Mount the hidden ProseMirror editor on a fresh doc and run the first paint. */
-  private mount(doc: ProseMirrorNode): void {
+  /** Mount the hidden ProseMirror editor on a doc and run the first paint. When
+   *  `state` is given the bridge adopts it verbatim (carrying an in-progress
+   *  session's undo history + selection across a rebind); otherwise a fresh
+   *  editing state is created from `doc`. */
+  private mount(doc: ProseMirrorNode, state?: EditorState): void {
     this.bridge?.destroy();
     this.bridge = new InputBridge({
       doc,
+      state,
       keys: {
         Enter: splitListItem, // continue lists; falls through outside them
         Backspace: backspaceOutdent, // drop marker, then indent, before joining

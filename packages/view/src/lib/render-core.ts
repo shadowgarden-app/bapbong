@@ -196,7 +196,16 @@ export class RenderCore {
    */
   async loadDocx(
     bytes: ArrayBuffer,
-    opts: { schema?: Schema; paint?: boolean } = {},
+    opts: {
+      schema?: Schema;
+      paint?: boolean;
+      /** Lay out THIS doc instead of the one parsed from `bytes`. The page
+       *  chrome, carry package and numbering still come from `bytes` (they are
+       *  edit-invariant), but the laid-out/painted body is `layoutTarget` — used
+       *  to re-open a document at an in-progress edit state without re-deriving
+       *  it from disk. Must share the imported doc's schema. */
+      layoutTarget?: ProseMirrorNode;
+    } = {},
   ): Promise<{
     doc: ProseMirrorNode;
     headerKeys: string[];
@@ -214,9 +223,13 @@ export class RenderCore {
     this.chromeEvenAndOdd = evenAndOdd;
     this.footnotes = footnotes;
     this.page = page;
+    // Body to lay out: the caller's restored doc when given, else the freshly
+    // imported one. Fonts are measured against whichever body will actually
+    // render (an edit may have introduced a family the disk doc lacked).
+    const body = opts.layoutTarget ?? doc;
     // Measure with the real fonts, not their fallbacks.
     const families = collectFontFamilies(
-      doc,
+      body,
       ...Object.values(headers),
       ...Object.values(footers),
     );
@@ -227,7 +240,7 @@ export class RenderCore {
     // Opening a document can change the chrome above the stack (start screen →
     // editor), shifting the stack's offset — re-measure it on the next paint.
     this.invalidateViewportMetrics();
-    this.layoutDoc(doc);
+    this.layoutDoc(body);
     if (opts.paint !== false) this.paintContent();
     return {
       doc,
