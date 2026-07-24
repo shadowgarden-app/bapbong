@@ -255,6 +255,12 @@ export class BapbongEditor {
     return this.core.pageCount;
   }
 
+  /** 1-based index of the page the reader is currently looking at (0 before the
+   *  first layout). Cheap — safe to poll on scroll for a "Page X of N" readout. */
+  currentPage(): number {
+    return this.core.currentPage();
+  }
+
   /** The document schema in use (model's base + plugin schema contributions).
    *  Hosts serialize/parse comment bodies, previews, etc. against this. */
   get schema(): Schema {

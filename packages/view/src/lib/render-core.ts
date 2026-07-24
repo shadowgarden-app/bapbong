@@ -176,6 +176,21 @@ export class RenderCore {
     return this.resolved?.pages.length ?? 0;
   }
 
+  /** 1-based index of the page the reader is currently looking at — the one
+   *  occupying the upper part of the viewport — or 0 before the first layout.
+   *  Cheap: reads the cached scroll offset (no reflow), so it is safe to call
+   *  on every scroll frame for a "Page X of N" indicator. */
+  currentPage(): number {
+    const vp = this.currentViewport();
+    const pages = this.resolved?.pages.length ?? 0;
+    if (!vp || pages === 0) return 0;
+    // Probe a little below the top edge so the number reflects the page filling
+    // most of the view, not a sliver peeking in above it.
+    const y = vp.top + Math.min(vp.height * 0.25, 120);
+    const hit = this.painter.canvasToPage(0, y);
+    return (hit ? hit.pageIndex : pages - 1) + 1;
+  }
+
   /** The document schema in use (model's base, or a caller-supplied extension). */
   get schema(): Schema {
     return this.docSchema;
