@@ -7,7 +7,11 @@
  * host for the tool semantics and the seed of a future server-side document
  * service; the desktop app hosts the same PmDocSession over its live editor.
  */
-import { importDocx, exportDocx, type DocxImport } from '@shadow-garden/bapbong-headless';
+import {
+  importDocx,
+  exportDocx,
+  type DocxImport,
+} from '@shadow-garden/bapbong-headless';
 import { EditorState, type Transaction } from 'prosemirror-state';
 import type {
   DocSnapshot,
@@ -58,7 +62,10 @@ export class HeadlessSession implements DocumentSession {
       getVersion: () => this.docVersion,
       meta: () => ({ name: this.opts.name, dirty: this.dirty }),
       save: async () => {
-        const bytes = await exportDocx(this.state.doc, this.raw ? { carry: this.raw } : undefined);
+        const bytes = await exportDocx(
+          this.state.doc,
+          this.raw ? { carry: this.raw } : undefined,
+        );
         await this.opts.onSave?.(bytes);
         this.dirty = false;
       },
@@ -67,15 +74,24 @@ export class HeadlessSession implements DocumentSession {
     this.inner = new PmDocSession(host);
   }
 
-  static async open(bytes: ArrayBuffer | Uint8Array, opts: HeadlessSessionOptions = {}): Promise<HeadlessSession> {
-    const { doc, raw } = await importDocx(bytes instanceof Uint8Array ? (bytes.slice().buffer as ArrayBuffer) : bytes);
+  static async open(
+    bytes: ArrayBuffer | Uint8Array,
+    opts: HeadlessSessionOptions = {},
+  ): Promise<HeadlessSession> {
+    const { doc, raw } = await importDocx(
+      bytes instanceof Uint8Array
+        ? (bytes.slice().buffer as ArrayBuffer)
+        : bytes,
+    );
     return new HeadlessSession(EditorState.create({ doc }), raw, opts);
   }
 
   /** Optimistic-lock token. Prefixed with the document id when the host gave
    *  one, so a version read from one document never satisfies another's lock. */
   get docVersion(): string {
-    return this.opts.id ? `${this.opts.id}:v${this.version}` : `v${this.version}`;
+    return this.opts.id
+      ? `${this.opts.id}:v${this.version}`
+      : `v${this.version}`;
   }
 
   snapshot(): Promise<DocSnapshot> {
@@ -84,16 +100,33 @@ export class HeadlessSession implements DocumentSession {
   find(query: string): Promise<FindMatch[]> {
     return this.inner.find(query);
   }
-  replaceText(oldText: string, newText: string, opts?: MutationOptions): Promise<MutationResult> {
+  replaceText(
+    oldText: string,
+    newText: string,
+    opts?: MutationOptions,
+  ): Promise<MutationResult> {
     return this.inner.replaceText(oldText, newText, opts);
   }
-  insertContent(content: string, anchor: InsertAnchor, opts?: MutationOptions): Promise<MutationResult> {
+  insertContent(
+    content: string,
+    anchor: InsertAnchor,
+    opts?: MutationOptions,
+  ): Promise<MutationResult> {
     return this.inner.insertContent(content, anchor, opts);
   }
-  applyFormatting(target: string, format: Formatting, opts?: MutationOptions): Promise<MutationResult> {
+  applyFormatting(
+    target: string,
+    format: Formatting,
+    opts?: MutationOptions,
+  ): Promise<MutationResult> {
     return this.inner.applyFormatting(target, format, opts);
   }
-  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions): Promise<MutationResult> {
+  updateImage(
+    blockIndex: number,
+    imageIndex: number,
+    changes: ImageChanges,
+    opts?: MutationOptions,
+  ): Promise<MutationResult> {
     return this.inner.updateImage(blockIndex, imageIndex, changes, opts);
   }
   save(): Promise<void> {

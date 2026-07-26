@@ -8,4 +8,7 @@
  * storage — the workspace folder, a server's object store — imports this and
  * takes that dependency deliberately.
  */
-export { HeadlessSession, type HeadlessSessionOptions } from './lib/headless-session.js';
+export {
+  HeadlessSession,
+  type HeadlessSessionOptions,
+} from './lib/headless-session.js';

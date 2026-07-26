@@ -37,7 +37,9 @@ export class ReadOnlySession implements DocumentSession {
   }
 
   private refuse(what: string): never {
-    throw new ReadOnlyError(`Cannot ${what} — ${this.opts.reason ?? DEFAULT_REASON}`);
+    throw new ReadOnlyError(
+      `Cannot ${what} — ${this.opts.reason ?? DEFAULT_REASON}`,
+    );
   }
 
   // ── Reads: straight through ─────────────────────────────────────────

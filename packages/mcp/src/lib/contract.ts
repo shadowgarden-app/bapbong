@@ -109,13 +109,30 @@ export interface DocumentSession {
   readonly capabilities: SessionCapabilities;
   snapshot(): Promise<DocSnapshot>;
   find(query: string): Promise<FindMatch[]>;
-  replaceText(oldText: string, newText: string, opts?: MutationOptions): Promise<MutationResult>;
+  replaceText(
+    oldText: string,
+    newText: string,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
   /** `content`: plain text; each line becomes one paragraph. */
-  insertContent(content: string, anchor: InsertAnchor, opts?: MutationOptions): Promise<MutationResult>;
-  applyFormatting(target: string, format: Formatting, opts?: MutationOptions): Promise<MutationResult>;
+  insertContent(
+    content: string,
+    anchor: InsertAnchor,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
+  applyFormatting(
+    target: string,
+    format: Formatting,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
   /** Resize/rotate one image, addressed as (blockIndex, imageIndex) from the
    *  latest snapshot. One transaction — a single undo step in a live editor. */
-  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions): Promise<MutationResult>;
+  updateImage(
+    blockIndex: number,
+    imageIndex: number,
+    changes: ImageChanges,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */
@@ -146,7 +163,10 @@ export function singleDocumentProvider(
   session: DocumentSession | (() => DocumentSession | null),
 ): SessionProvider {
   const resolve = typeof session === 'function' ? session : () => session;
-  return { get: async (documentId?: string) => (documentId === undefined ? resolve() : null) };
+  return {
+    get: async (documentId?: string) =>
+      documentId === undefined ? resolve() : null,
+  };
 }
 
 /** The document changed since `expectedVersion` — re-read, then retry. */
@@ -170,7 +190,9 @@ export class AnchorError extends Error {
 
 /** The host has no document to operate on (desktop: nothing open yet). */
 export class NoDocumentError extends Error {
-  constructor(message = 'No document is open. Ask the user to open a document first.') {
+  constructor(
+    message = 'No document is open. Ask the user to open a document first.',
+  ) {
     super(message);
     this.name = 'NoDocumentError';
   }

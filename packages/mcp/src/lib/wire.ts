@@ -62,22 +62,41 @@ export async function executeOp(
     return { id: request.id, ok: true, value };
   } catch (err) {
     const e = err instanceof Error ? err : new Error(String(err));
-    return { id: request.id, ok: false, error: { name: e.name, message: e.message } };
+    return {
+      id: request.id,
+      ok: false,
+      error: { name: e.name, message: e.message },
+    };
   }
 }
 
-function run(session: DocumentSession, { op, args }: SessionOpRequest): Promise<unknown> {
+function run(
+  session: DocumentSession,
+  { op, args }: SessionOpRequest,
+): Promise<unknown> {
   switch (op) {
     case 'snapshot':
       return session.snapshot();
     case 'find':
       return session.find(args[0] as string);
     case 'replaceText':
-      return session.replaceText(args[0] as string, args[1] as string, args[2] as MutationOptions | undefined);
+      return session.replaceText(
+        args[0] as string,
+        args[1] as string,
+        args[2] as MutationOptions | undefined,
+      );
     case 'insertContent':
-      return session.insertContent(args[0] as string, args[1] as InsertAnchor, args[2] as MutationOptions | undefined);
+      return session.insertContent(
+        args[0] as string,
+        args[1] as InsertAnchor,
+        args[2] as MutationOptions | undefined,
+      );
     case 'applyFormatting':
-      return session.applyFormatting(args[0] as string, args[1] as Formatting, args[2] as MutationOptions | undefined);
+      return session.applyFormatting(
+        args[0] as string,
+        args[1] as Formatting,
+        args[2] as MutationOptions | undefined,
+      );
     case 'updateImage':
       return session.updateImage(
         args[0] as number,
@@ -119,7 +138,10 @@ export function reviveError(error: { name: string; message: string }): Error {
  *  the host's business — desktop uses its SSE command channel + POST-back). */
 export class RemoteSession implements DocumentSession {
   constructor(
-    private readonly send: (op: SessionOpName, args: unknown[]) => Promise<unknown>,
+    private readonly send: (
+      op: SessionOpName,
+      args: unknown[],
+    ) => Promise<unknown>,
     readonly capabilities: SessionCapabilities,
   ) {}
 
@@ -128,25 +150,48 @@ export class RemoteSession implements DocumentSession {
   }
 
   snapshot() {
-    return this.call<Awaited<ReturnType<DocumentSession['snapshot']>>>('snapshot');
+    return this.call<Awaited<ReturnType<DocumentSession['snapshot']>>>(
+      'snapshot',
+    );
   }
   find(query: string) {
-    return this.call<Awaited<ReturnType<DocumentSession['find']>>>('find', [query]);
+    return this.call<Awaited<ReturnType<DocumentSession['find']>>>('find', [
+      query,
+    ]);
   }
   replaceText(oldText: string, newText: string, opts?: MutationOptions) {
-    return this.call<Awaited<ReturnType<DocumentSession['replaceText']>>>('replaceText', [oldText, newText, opts]);
+    return this.call<Awaited<ReturnType<DocumentSession['replaceText']>>>(
+      'replaceText',
+      [oldText, newText, opts],
+    );
   }
   insertContent(content: string, anchor: InsertAnchor, opts?: MutationOptions) {
-    return this.call<Awaited<ReturnType<DocumentSession['insertContent']>>>('insertContent', [content, anchor, opts]);
+    return this.call<Awaited<ReturnType<DocumentSession['insertContent']>>>(
+      'insertContent',
+      [content, anchor, opts],
+    );
   }
   applyFormatting(target: string, format: Formatting, opts?: MutationOptions) {
-    return this.call<Awaited<ReturnType<DocumentSession['applyFormatting']>>>('applyFormatting', [target, format, opts]);
+    return this.call<Awaited<ReturnType<DocumentSession['applyFormatting']>>>(
+      'applyFormatting',
+      [target, format, opts],
+    );
   }
-  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions) {
-    return this.call<Awaited<ReturnType<DocumentSession['updateImage']>>>('updateImage', [blockIndex, imageIndex, changes, opts]);
+  updateImage(
+    blockIndex: number,
+    imageIndex: number,
+    changes: ImageChanges,
+    opts?: MutationOptions,
+  ) {
+    return this.call<Awaited<ReturnType<DocumentSession['updateImage']>>>(
+      'updateImage',
+      [blockIndex, imageIndex, changes, opts],
+    );
   }
   async getSelection() {
-    return this.call<{ text: string; blockIndex: number } | null>('getSelection');
+    return this.call<{ text: string; blockIndex: number } | null>(
+      'getSelection',
+    );
   }
   async save() {
     await this.call<void>('save');
