@@ -3,7 +3,6 @@ import {
   Node as ProseMirrorNode,
   Schema,
 } from 'prosemirror-model';
-import type { EditorView } from 'prosemirror-view';
 import { imagePasteHandler, insertImageBlobs } from './paste-images';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
 import { RenderCore } from '@shadow-garden/bapbong-view';
@@ -14,6 +13,9 @@ import {
   shiftListLevel,
   splitListItem,
   type Command,
+  // EditorView comes via input-bridge's re-export (not straight from
+  // prosemirror-view) so `bridge.view` and this type share ONE identity.
+  type EditorView,
   type EditorState,
   type Transaction,
 } from '@shadow-garden/bapbong-input-bridge';
