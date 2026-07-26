@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { exportDocx, schema } from '@shadow-garden/bapbong-headless';
-import { AnchorError, NoDocumentError, VersionConflictError } from './contract.js';
+import { AnchorError, NoDocumentError, singleDocumentProvider, VersionConflictError } from './contract.js';
 import { HeadlessSession } from './headless-session.js';
 import { ReadOnlySession } from './read-only-session.js';
 import { createMcpServer } from './server.js';
@@ -285,25 +285,31 @@ describe('createMcpServer (end-to-end over MCP)', () => {
     expect(missing.isError).toBe(true);
   });
 
-  it('offers list_documents only when the provider can list', async () => {
+  it('registers tools for ONE document — discovering others is up to the host', async () => {
     const { client } = await connect();
-    expect((await client.listTools()).tools.map((t) => t.name)).not.toContain('list_documents');
-
-    const session = await openSession();
-    const server = createMcpServer({
-      get: async () => session,
-      list: async () => [{ id: 'a.docx', name: 'a.docx', open: true }, { id: 'b.docx', name: 'b.docx' }],
-    });
-    const listing = new Client({ name: 'test-client', version: '0.0.0' });
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain('list_documents');
+    // …and a host that wants that can add it to the server it was handed.
+    const server = createMcpServer(singleDocumentProvider(await openSession()));
+    server.registerTool('list_documents', { title: 'List', inputSchema: {} }, async () => ({
+      content: [{ type: 'text' as const, text: '{"documents":[]}' }],
+    }));
+    const extended = new Client({ name: 'test-client', version: '0.0.0' });
     const [ct, st] = InMemoryTransport.createLinkedPair();
-    await Promise.all([server.connect(st), listing.connect(ct)]);
+    await Promise.all([server.connect(st), extended.connect(ct)]);
+    expect((await extended.listTools()).tools.map((t) => t.name)).toContain('list_documents');
+  });
 
-    expect((await listing.listTools()).tools.map((t) => t.name)).toContain('list_documents');
-    const res = await listing.callTool({ name: 'list_documents', arguments: {} });
-    expect(JSON.parse(text(res)).documents).toEqual([
-      { id: 'a.docx', name: 'a.docx', open: true },
-      { id: 'b.docx', name: 'b.docx' },
-    ]);
+  it('singleDocumentProvider answers only for the omitted id', async () => {
+    const server = createMcpServer(singleDocumentProvider(await openSession()));
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+
+    expect((await client.callTool({ name: 'get_document', arguments: {} })).isError).toBeFalsy();
+    const other = await client.callTool({ name: 'get_document', arguments: { documentId: 'x.docx' } });
+    expect(other.isError).toBe(true);
+    expect(text(other)).toContain('No document with id');
   });
 
   it('refuses mutations on a read-only session but still serves reads', async () => {

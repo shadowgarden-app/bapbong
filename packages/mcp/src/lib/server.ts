@@ -222,23 +222,6 @@ export function createMcpServer(provider: SessionProvider, opts: CreateMcpServer
       }),
   );
 
-  // Only when the host serves more than one document — otherwise `documentId`
-  // is always omitted and there is nothing to discover.
-  if (provider.list) {
-    server.registerTool(
-      'list_documents',
-      {
-        title: 'List the documents you can work on',
-        description:
-          'Every document this host serves. Use a returned `id` as `documentId` on the other tools; ' +
-          'omitting documentId targets the one the user currently has open. Call this first when you ' +
-          'need to work across documents rather than just the open one.',
-        inputSchema: {},
-      },
-      async () => json({ documents: await provider.list!() }),
-    );
-  }
-
   if (opts.selection) {
     server.registerTool(
       'get_selection',

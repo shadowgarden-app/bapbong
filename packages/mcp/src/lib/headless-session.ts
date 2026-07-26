@@ -26,10 +26,11 @@ export interface HeadlessSessionOptions {
   /** Where save() writes the exported bytes (file, DB, test sink…). */
   onSave?: (bytes: Uint8Array) => void | Promise<void>;
   name?: string;
-  /** Document identity woven into `docVersion` (e.g. the workspace-relative
-   *  path). A host serving several documents MUST set it: without it every
-   *  document counts `v1, v2, …` independently, so an `expectedVersion` read
-   *  from one document can silently satisfy the optimistic lock of another. */
+  /** Document identity woven into `docVersion` (whatever the host keys
+   *  documents by — a path, a row id). A host serving several documents MUST
+   *  set it: without it every document counts `v1, v2, …` independently, so an
+   *  `expectedVersion` read from one document can silently satisfy the
+   *  optimistic lock of another. */
   id?: string;
 }
 

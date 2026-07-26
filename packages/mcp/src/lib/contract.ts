@@ -123,26 +123,30 @@ export interface DocumentSession {
   close(): Promise<void>;
 }
 
-/** One document a host can serve, as listed by {@link SessionProvider.list}. */
-export interface DocumentRef {
-  /** The value to pass back as `documentId`. */
-  id: string;
-  /** Human-readable label (file name, title…). */
-  name: string;
-  /** The host already has this document open. It owns any edits to it, so a
-   *  mutation may be routed through it — or refused when the host can't reach
-   *  that particular one — rather than applied to a separate copy. */
-  open?: boolean;
-}
-
-/** Resolves the session a tool call operates on. Desktop: `documentId`
- *  omitted = the open document. Server: id is required (tenancy). */
+/**
+ * Resolves the session a tool call operates on.
+ *
+ * `documentId` is how a host that knows several documents picks one — a server
+ * keyed by tenancy, say. There is deliberately no way to *enumerate* them here:
+ * the tools this package registers cover editing ONE document, the one the host
+ * hands back when the id is omitted. A host that wants agents working across a
+ * set of documents supplies its own way to discover them, by registering a tool
+ * of its own on the returned server.
+ *
+ * For the common case — one document, no ids — use
+ * {@link singleDocumentProvider}.
+ */
 export interface SessionProvider {
   get(documentId?: string): Promise<DocumentSession | null>;
-  /** The documents this host can serve, so a client can discover the ids it
-   *  may pass as `documentId`. Optional: a single-document host omits it and
-   *  the list_documents tool is simply not offered. */
-  list?(): Promise<DocumentRef[]>;
+}
+
+/** The provider for a host with exactly one document: it answers when the id is
+ *  omitted, and reports "no such document" for anything else. */
+export function singleDocumentProvider(
+  session: DocumentSession | (() => DocumentSession | null),
+): SessionProvider {
+  const resolve = typeof session === 'function' ? session : () => session;
+  return { get: async (documentId?: string) => (documentId === undefined ? resolve() : null) };
 }
 
 /** The document changed since `expectedVersion` — re-read, then retry. */
