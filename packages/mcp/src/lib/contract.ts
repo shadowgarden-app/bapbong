@@ -129,7 +129,9 @@ export interface DocumentRef {
   id: string;
   /** Human-readable label (file name, title…). */
   name: string;
-  /** Whether this document is the one currently open/focused in the host. */
+  /** The host already has this document open. It owns any edits to it, so a
+   *  mutation may be routed through it — or refused when the host can't reach
+   *  that particular one — rather than applied to a separate copy. */
   open?: boolean;
 }
 
