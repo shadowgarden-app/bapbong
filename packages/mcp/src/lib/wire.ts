@@ -32,7 +32,12 @@ export type SessionOpName =
   | 'updateImage'
   | 'getSelection'
   | 'save'
-  | 'consent';
+  // Host-level, handled by the caller before executeOp (see its note):
+  /** Ask the user to allow an AI client in. */
+  | 'consent'
+  /** Host → UI: something host-side changed; `args[0]` is a host-defined
+   *  topic the UI re-reads (it carries no document state itself). */
+  | 'notify';
 
 export interface SessionOpRequest {
   id: string;
@@ -44,8 +49,9 @@ export type SessionOpResponse =
   | { id: string; ok: true; value: unknown }
   | { id: string; ok: false; error: { name: string; message: string } };
 
-/** Run one wire op against a local session ('consent' is host-level and is
- *  handled by the caller before this). Never throws — errors are encoded. */
+/** Run one wire op against a local session ('consent' and 'notify' are
+ *  host-level and are handled by the caller before this). Never throws —
+ *  errors are encoded. */
 export async function executeOp(
   session: DocumentSession | null,
   request: SessionOpRequest,
