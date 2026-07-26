@@ -7,7 +7,14 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { AnchorError, NoDocumentError, VersionConflictError, type DocumentSession, type SessionProvider } from './contract.js';
+import {
+  AnchorError,
+  NoDocumentError,
+  ReadOnlyError,
+  VersionConflictError,
+  type DocumentSession,
+  type SessionProvider,
+} from './contract.js';
 
 export interface CreateMcpServerOptions {
   name?: string;
@@ -64,7 +71,12 @@ export function createMcpServer(provider: SessionProvider, opts: CreateMcpServer
     try {
       return await fn(session);
     } catch (err) {
-      if (err instanceof AnchorError || err instanceof VersionConflictError || err instanceof NoDocumentError) {
+      if (
+        err instanceof AnchorError ||
+        err instanceof VersionConflictError ||
+        err instanceof NoDocumentError ||
+        err instanceof ReadOnlyError
+      ) {
         return errorText(err.message);
       }
       throw err;
@@ -209,6 +221,23 @@ export function createMcpServer(provider: SessionProvider, opts: CreateMcpServer
         return json({ saved: true });
       }),
   );
+
+  // Only when the host serves more than one document — otherwise `documentId`
+  // is always omitted and there is nothing to discover.
+  if (provider.list) {
+    server.registerTool(
+      'list_documents',
+      {
+        title: 'List the documents you can work on',
+        description:
+          'Every document this host serves. Use a returned `id` as `documentId` on the other tools; ' +
+          'omitting documentId targets the one the user currently has open. Call this first when you ' +
+          'need to work across documents rather than just the open one.',
+        inputSchema: {},
+      },
+      async () => json({ documents: await provider.list!() }),
+    );
+  }
 
   if (opts.selection) {
     server.registerTool(

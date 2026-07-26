@@ -26,6 +26,11 @@ export interface HeadlessSessionOptions {
   /** Where save() writes the exported bytes (file, DB, test sink…). */
   onSave?: (bytes: Uint8Array) => void | Promise<void>;
   name?: string;
+  /** Document identity woven into `docVersion` (e.g. the workspace-relative
+   *  path). A host serving several documents MUST set it: without it every
+   *  document counts `v1, v2, …` independently, so an `expectedVersion` read
+   *  from one document can silently satisfy the optimistic lock of another. */
+  id?: string;
 }
 
 export class HeadlessSession implements DocumentSession {
@@ -66,8 +71,10 @@ export class HeadlessSession implements DocumentSession {
     return new HeadlessSession(EditorState.create({ doc }), raw, opts);
   }
 
+  /** Optimistic-lock token. Prefixed with the document id when the host gave
+   *  one, so a version read from one document never satisfies another's lock. */
   get docVersion(): string {
-    return `v${this.version}`;
+    return this.opts.id ? `${this.opts.id}:v${this.version}` : `v${this.version}`;
   }
 
   snapshot(): Promise<DocSnapshot> {

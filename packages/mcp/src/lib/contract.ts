@@ -123,10 +123,24 @@ export interface DocumentSession {
   close(): Promise<void>;
 }
 
+/** One document a host can serve, as listed by {@link SessionProvider.list}. */
+export interface DocumentRef {
+  /** The value to pass back as `documentId`. */
+  id: string;
+  /** Human-readable label (file name, title…). */
+  name: string;
+  /** Whether this document is the one currently open/focused in the host. */
+  open?: boolean;
+}
+
 /** Resolves the session a tool call operates on. Desktop: `documentId`
  *  omitted = the open document. Server: id is required (tenancy). */
 export interface SessionProvider {
   get(documentId?: string): Promise<DocumentSession | null>;
+  /** The documents this host can serve, so a client can discover the ids it
+   *  may pass as `documentId`. Optional: a single-document host omits it and
+   *  the list_documents tool is simply not offered. */
+  list?(): Promise<DocumentRef[]>;
 }
 
 /** The document changed since `expectedVersion` — re-read, then retry. */
@@ -153,5 +167,14 @@ export class NoDocumentError extends Error {
   constructor(message = 'No document is open. Ask the user to open a document first.') {
     super(message);
     this.name = 'NoDocumentError';
+  }
+}
+
+/** The session is readable but not writable — the host granted read-only
+ *  access to this document (see {@link ReadOnlySession}). */
+export class ReadOnlyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReadOnlyError';
   }
 }

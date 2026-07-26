@@ -4,6 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { exportDocx, schema } from '@shadow-garden/bapbong-headless';
 import { AnchorError, NoDocumentError, VersionConflictError } from './contract.js';
 import { HeadlessSession } from './headless-session.js';
+import { ReadOnlySession } from './read-only-session.js';
 import { createMcpServer } from './server.js';
 import { executeOp, RemoteSession, reviveError, type SessionOpName } from './wire.js';
 
@@ -282,5 +283,71 @@ describe('createMcpServer (end-to-end over MCP)', () => {
     expect(ok.isError).toBeFalsy();
     const missing = await client.callTool({ name: 'get_document', arguments: { documentId: 'other' } });
     expect(missing.isError).toBe(true);
+  });
+
+  it('offers list_documents only when the provider can list', async () => {
+    const { client } = await connect();
+    expect((await client.listTools()).tools.map((t) => t.name)).not.toContain('list_documents');
+
+    const session = await openSession();
+    const server = createMcpServer({
+      get: async () => session,
+      list: async () => [{ id: 'a.docx', name: 'a.docx', open: true }, { id: 'b.docx', name: 'b.docx' }],
+    });
+    const listing = new Client({ name: 'test-client', version: '0.0.0' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), listing.connect(ct)]);
+
+    expect((await listing.listTools()).tools.map((t) => t.name)).toContain('list_documents');
+    const res = await listing.callTool({ name: 'list_documents', arguments: {} });
+    expect(JSON.parse(text(res)).documents).toEqual([
+      { id: 'a.docx', name: 'a.docx', open: true },
+      { id: 'b.docx', name: 'b.docx' },
+    ]);
+  });
+
+  it('refuses mutations on a read-only session but still serves reads', async () => {
+    const session = new ReadOnlySession(await openSession());
+    const server = createMcpServer({ get: async () => session });
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+
+    // Reads pass through.
+    const doc = JSON.parse(text(await client.callTool({ name: 'get_document', arguments: {} })));
+    expect(doc.blocks).toHaveLength(4);
+
+    // Mutations come back as a teaching error, not a silent no-op.
+    const res = await client.callTool({
+      name: 'replace_text',
+      arguments: { old_text: '1.500.000', new_text: '9' },
+    });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toContain('reading only');
+
+    // …and the document really is untouched.
+    const after = JSON.parse(text(await client.callTool({ name: 'get_document', arguments: {} })));
+    expect(JSON.stringify(after.blocks)).toContain('1.500.000');
+  });
+});
+
+describe('doc-scoped versions', () => {
+  it('prefixes docVersion with the document id so locks cannot cross documents', async () => {
+    const a = await HeadlessSession.open(await sampleBytes(), { id: 'a.docx' });
+    const b = await HeadlessSession.open(await sampleBytes(), { id: 'b.docx' });
+    expect((await a.snapshot()).docVersion).toBe('a.docx:v1');
+    expect((await b.snapshot()).docVersion).toBe('b.docx:v1');
+
+    // A version read from b must not satisfy a's optimistic lock, even though
+    // both documents are on their own "v1".
+    await expect(
+      a.replaceText('1.500.000', '9', { expectedVersion: 'b.docx:v1' }),
+    ).rejects.toThrow(VersionConflictError);
+    await expect(a.replaceText('1.500.000', '9', { expectedVersion: 'a.docx:v1' })).resolves.toBeTruthy();
+  });
+
+  it('stays unprefixed for a single-document host', async () => {
+    const s = await HeadlessSession.open(await sampleBytes());
+    expect((await s.snapshot()).docVersion).toBe('v1');
   });
 });
