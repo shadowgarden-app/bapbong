@@ -109,13 +109,30 @@ export interface DocumentSession {
   readonly capabilities: SessionCapabilities;
   snapshot(): Promise<DocSnapshot>;
   find(query: string): Promise<FindMatch[]>;
-  replaceText(oldText: string, newText: string, opts?: MutationOptions): Promise<MutationResult>;
+  replaceText(
+    oldText: string,
+    newText: string,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
   /** `content`: plain text; each line becomes one paragraph. */
-  insertContent(content: string, anchor: InsertAnchor, opts?: MutationOptions): Promise<MutationResult>;
-  applyFormatting(target: string, format: Formatting, opts?: MutationOptions): Promise<MutationResult>;
+  insertContent(
+    content: string,
+    anchor: InsertAnchor,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
+  applyFormatting(
+    target: string,
+    format: Formatting,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
   /** Resize/rotate one image, addressed as (blockIndex, imageIndex) from the
    *  latest snapshot. One transaction — a single undo step in a live editor. */
-  updateImage(blockIndex: number, imageIndex: number, changes: ImageChanges, opts?: MutationOptions): Promise<MutationResult>;
+  updateImage(
+    blockIndex: number,
+    imageIndex: number,
+    changes: ImageChanges,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */
@@ -123,10 +140,33 @@ export interface DocumentSession {
   close(): Promise<void>;
 }
 
-/** Resolves the session a tool call operates on. Desktop: `documentId`
- *  omitted = the open document. Server: id is required (tenancy). */
+/**
+ * Resolves the session a tool call operates on.
+ *
+ * `documentId` is how a host that knows several documents picks one — a server
+ * keyed by tenancy, say. There is deliberately no way to *enumerate* them here:
+ * the tools this package registers cover editing ONE document, the one the host
+ * hands back when the id is omitted. A host that wants agents working across a
+ * set of documents supplies its own way to discover them, by registering a tool
+ * of its own on the returned server.
+ *
+ * For the common case — one document, no ids — use
+ * {@link singleDocumentProvider}.
+ */
 export interface SessionProvider {
   get(documentId?: string): Promise<DocumentSession | null>;
+}
+
+/** The provider for a host with exactly one document: it answers when the id is
+ *  omitted, and reports "no such document" for anything else. */
+export function singleDocumentProvider(
+  session: DocumentSession | (() => DocumentSession | null),
+): SessionProvider {
+  const resolve = typeof session === 'function' ? session : () => session;
+  return {
+    get: async (documentId?: string) =>
+      documentId === undefined ? resolve() : null,
+  };
 }
 
 /** The document changed since `expectedVersion` — re-read, then retry. */
@@ -150,8 +190,19 @@ export class AnchorError extends Error {
 
 /** The host has no document to operate on (desktop: nothing open yet). */
 export class NoDocumentError extends Error {
-  constructor(message = 'No document is open. Ask the user to open a document first.') {
+  constructor(
+    message = 'No document is open. Ask the user to open a document first.',
+  ) {
     super(message);
     this.name = 'NoDocumentError';
+  }
+}
+
+/** The session is readable but not writable — the host granted read-only
+ *  access to this document (see {@link ReadOnlySession}). */
+export class ReadOnlyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReadOnlyError';
   }
 }

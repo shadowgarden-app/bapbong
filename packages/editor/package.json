@@ -60,7 +60,6 @@
     "@shadow-garden/bapbong-model": "workspace:^",
     "@shadow-garden/bapbong-selection": "workspace:^",
     "@shadow-garden/bapbong-view": "workspace:^",
-    "prosemirror-model": "^1.25.7",
-    "prosemirror-view": "^1.41.3"
+    "prosemirror-model": "^1.25.7"
   }
 }

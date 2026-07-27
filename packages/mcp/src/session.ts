@@ -7,6 +7,10 @@
 export * from './lib/contract.js';
 export { PmDocSession, type PmSessionHost } from './lib/pm-session.js';
 export {
+  ReadOnlySession,
+  type ReadOnlySessionOptions,
+} from './lib/read-only-session.js';
+export {
   executeOp,
   reviveError,
   RemoteSession,

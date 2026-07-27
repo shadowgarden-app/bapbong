@@ -176,6 +176,21 @@ export class RenderCore {
     return this.resolved?.pages.length ?? 0;
   }
 
+  /** 1-based index of the page the reader is currently looking at — the one
+   *  occupying the upper part of the viewport — or 0 before the first layout.
+   *  Cheap: reads the cached scroll offset (no reflow), so it is safe to call
+   *  on every scroll frame for a "Page X of N" indicator. */
+  currentPage(): number {
+    const vp = this.currentViewport();
+    const pages = this.resolved?.pages.length ?? 0;
+    if (!vp || pages === 0) return 0;
+    // Probe a little below the top edge so the number reflects the page filling
+    // most of the view, not a sliver peeking in above it.
+    const y = vp.top + Math.min(vp.height * 0.25, 120);
+    const hit = this.painter.canvasToPage(0, y);
+    return (hit ? hit.pageIndex : pages - 1) + 1;
+  }
+
   /** The document schema in use (model's base, or a caller-supplied extension). */
   get schema(): Schema {
     return this.docSchema;
@@ -196,7 +211,16 @@ export class RenderCore {
    */
   async loadDocx(
     bytes: ArrayBuffer,
-    opts: { schema?: Schema; paint?: boolean } = {},
+    opts: {
+      schema?: Schema;
+      paint?: boolean;
+      /** Lay out THIS doc instead of the one parsed from `bytes`. The page
+       *  chrome, carry package and numbering still come from `bytes` (they are
+       *  edit-invariant), but the laid-out/painted body is `layoutTarget` — used
+       *  to re-open a document at an in-progress edit state without re-deriving
+       *  it from disk. Must share the imported doc's schema. */
+      layoutTarget?: ProseMirrorNode;
+    } = {},
   ): Promise<{
     doc: ProseMirrorNode;
     headerKeys: string[];
@@ -214,9 +238,13 @@ export class RenderCore {
     this.chromeEvenAndOdd = evenAndOdd;
     this.footnotes = footnotes;
     this.page = page;
+    // Body to lay out: the caller's restored doc when given, else the freshly
+    // imported one. Fonts are measured against whichever body will actually
+    // render (an edit may have introduced a family the disk doc lacked).
+    const body = opts.layoutTarget ?? doc;
     // Measure with the real fonts, not their fallbacks.
     const families = collectFontFamilies(
-      doc,
+      body,
       ...Object.values(headers),
       ...Object.values(footers),
     );
@@ -227,7 +255,7 @@ export class RenderCore {
     // Opening a document can change the chrome above the stack (start screen →
     // editor), shifting the stack's offset — re-measure it on the next paint.
     this.invalidateViewportMetrics();
-    this.layoutDoc(doc);
+    this.layoutDoc(body);
     if (opts.paint !== false) this.paintContent();
     return {
       doc,

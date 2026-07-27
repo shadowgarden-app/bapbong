@@ -20,6 +20,11 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 // Re-exported so hosts type against ONE prosemirror-state identity (mixing
 // module resolutions across packages makes TS treat duplicates as unrelated).
 export type { Command, EditorState, Transaction } from 'prosemirror-state';
+// Same rationale for the view type: `InputBridge.view` crosses the package
+// boundary into the editor, so consumers must import EditorView from HERE (not
+// straight from prosemirror-view) to share one identity — otherwise a stale
+// `tsc --build` composite state can treat the same file as two unrelated types.
+export type { EditorView } from 'prosemirror-view';
 
 /** A command that moves the caret to the position computed by `compute`
  *  (e.g. layout-aware ArrowUp/ArrowDown from bapbong-selection). With `extend`,
@@ -176,6 +181,12 @@ export function wordRangeAt(
 export interface InputBridgeOptions {
   /** The initial document (its schema drives the editor). */
   doc: PMNode;
+  /** A pre-built editor state to adopt verbatim instead of creating a fresh
+   *  one from `doc` — carries an in-progress editing session (undo/redo history,
+   *  selection) across a rebind. When given, its `doc` must already be the one
+   *  passed as `doc` (same schema). `keys` still drives the keymaps it was built
+   *  with, so the state must have been produced by `createEditingState`. */
+  state?: EditorState;
   /** Extra bindings, checked before the base keymap — e.g. ArrowUp/ArrowDown
    *  wired to layout-aware caret motion from bapbong-selection. */
   keys?: Record<string, Command>;
@@ -407,7 +418,7 @@ export class InputBridge {
       baseKeymap['Enter'],
     );
     this.view = new EditorView(this.host, {
-      state: createEditingState(options.doc, options.keys),
+      state: options.state ?? createEditingState(options.doc, options.keys),
       handlePaste: options.handlePaste,
       // DOM windowing: only blocks near the selection render for real.
       decorations: windowDecorations,

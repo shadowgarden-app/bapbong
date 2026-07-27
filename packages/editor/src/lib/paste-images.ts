@@ -1,4 +1,7 @@
-import type { EditorView } from 'prosemirror-view';
+// EditorView via input-bridge's re-export (not straight from prosemirror-view)
+// so the view a caller gets from `bridge.view` is the same identity these
+// handlers expect — see the note in input-bridge.
+import type { EditorView } from '@shadow-garden/bapbong-input-bridge';
 
 /**
  * Image paste support.
