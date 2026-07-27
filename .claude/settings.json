@@ -1,17 +1,6 @@
 {
-  "extraKnownMarketplaces": {
-    "nx-claude-plugins": {
-      "source": {
-        "source": "github",
-        "repo": "nrwl/nx-ai-agents-config"
-      }
-    }
-  },
   "attribution": {
     "commit": "",
     "pr": ""
-  },
-  "enabledPlugins": {
-    "nx@nx-claude-plugins": true
   }
 }
