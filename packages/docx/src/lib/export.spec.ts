@@ -198,6 +198,61 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(tbl.child(1).child(0).textContent).toBe('wide');
   });
 
+  it('round-trips custom tab stops (w:tabs)', async () => {
+    const tabs = [
+      { pos: 200, val: 'right', leader: 'dot' },
+      { pos: 400, val: 'decimal' },
+    ];
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', { tabs }, [schema.text('x')]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).attrs['tabs']).toEqual(tabs);
+  });
+
+  it('round-trips a PAGE field in the body (w:fldSimple)', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('page_field', { kind: 'page' }),
+      ]),
+      schema.node('paragraph', null, [
+        schema.node('page_field', { kind: 'pages' }),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const xml = await (await JSZip.loadAsync(bytes))
+      .file('word/document.xml')!
+      .async('string');
+    expect(xml).toContain('w:instr=" PAGE "');
+    expect(xml).toContain('w:instr=" NUMPAGES "');
+
+    const { doc: back } = await importDocx(bytes);
+    const kinds: string[] = [];
+    back.descendants((n) => {
+      if (n.type.name === 'page_field') kinds.push(n.attrs['kind'] as string);
+    });
+    expect(kinds).toEqual(['page', 'pages']);
+  });
+
+  it('round-trips image alt text (wp:docPr@descr)', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: `data:image/png;base64,${PNG_1PX}`,
+          width: 10,
+          height: 10,
+          alt: 'a duck & a "goose"',
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    let alt: unknown = null;
+    back.descendants((n) => {
+      if (n.type.name === 'image') alt = n.attrs['alt'];
+    });
+    expect(alt).toBe('a duck & a "goose"');
+  });
+
   it('round-trips a vertical merge (rowspan → w:vMerge)', async () => {
     const cell = (text: string, attrs?: Record<string, unknown>) =>
       schema.node('table_cell', attrs ?? null, [

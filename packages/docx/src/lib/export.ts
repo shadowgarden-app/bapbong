@@ -66,7 +66,13 @@ const commentIdsOf = (node: PMNode): number[] =>
 
 /** Is this an inline leaf the comment-range index counts (text / image / break)? */
 const isInlineLeaf = (node: PMNode): boolean =>
-  node.isText || node.type.name === 'image' || node.type.name === 'hard_break';
+  node.isText ||
+  node.type.name === 'image' ||
+  node.type.name === 'hard_break' ||
+  // Without this, inlineContent skips page_field entirely and PAGE/NUMPAGES
+  // vanish from the body on export. Both the comment-range precompute and the
+  // writer use this predicate, so they stay in step.
+  node.type.name === 'page_field';
 
 function esc(s: string): string {
   return s.replace(
@@ -249,9 +255,13 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   }
   const cx = pxToEmu((node.attrs['width'] as number) ?? 96);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 96);
+  // descr is where Word keeps alt text. Dropping it is silent — the image
+  // still renders, so nothing looks wrong; only screen readers lose it.
+  const alt = (node.attrs['alt'] as string | null) ?? '';
+  const descr = alt ? ` descr="${esc(alt)}"` : '';
   return (
     `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
-    `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Picture ${n}"/>` +
+    `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Picture ${n}"${descr}/>` +
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
     `<pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
     `<pic:blipFill>${blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
@@ -265,6 +275,13 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
 function inlineXml(node: PMNode, ctx: ExportCtx): string {
   if (node.type.name === 'hard_break') return '<w:r><w:br/></w:r>';
   if (node.type.name === 'image') return imageXml(node, ctx);
+  // w:fldSimple, not the three-part w:fldChar dance: it is the form the
+  // importer already reads back, and Word recomputes the result on open — the
+  // run we emit is only a placeholder that carries the formatting.
+  if (node.type.name === 'page_field') {
+    const instr = node.attrs['kind'] === 'pages' ? ' NUMPAGES ' : ' PAGE ';
+    return `<w:fldSimple w:instr="${instr}"><w:r>${runProps(node.marks)}<w:t>1</w:t></w:r></w:fldSimple>`;
+  }
   if (node.isText) {
     const fn = node.marks.find((m) => m.type.name === 'footnote');
     if (fn)
@@ -358,6 +375,22 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
   if (pBdr) {
     const box = bordersXml('w:pBdr', pBdr, CELL_SIDES);
     if (box) out.push(box);
+  }
+  // w:tabs sits between pBdr and spacing in the pPr sequence. The importer
+  // resolves these through the style cascade into px; they go back as twips.
+  const tabs = a['tabs'] as
+    | { pos: number; val: string; leader?: string }[]
+    | null;
+  if (tabs?.length) {
+    const stops = tabs
+      .map(
+        (t) =>
+          `<w:tab w:val="${t.val}" w:pos="${pxToTwips(t.pos)}"${
+            t.leader ? ` w:leader="${t.leader}"` : ''
+          }/>`,
+      )
+      .join('');
+    out.push(`<w:tabs>${stops}</w:tabs>`);
   }
   const sp = a['spacing'] as {
     before?: number;
