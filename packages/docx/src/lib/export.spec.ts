@@ -198,6 +198,45 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(tbl.child(1).child(0).textContent).toBe('wide');
   });
 
+  it('round-trips a vertical merge (rowspan → w:vMerge)', async () => {
+    const cell = (text: string, attrs?: Record<string, unknown>) =>
+      schema.node('table_cell', attrs ?? null, [
+        schema.node('paragraph', null, [schema.text(text)]),
+      ]);
+    // Column 1 spans all three rows, so rows 2 and 3 hold ONE node each — the
+    // covered slot is absorbed into the rowspan above and has no node at all.
+    const doc = schema.node('doc', null, [
+      schema.node('table', null, [
+        schema.node('table_row', null, [
+          cell('tall', { rowspan: 3, colwidth: [80] }),
+          cell('B1', { colwidth: [120] }),
+        ]),
+        schema.node('table_row', null, [cell('B2', { colwidth: [120] })]),
+        schema.node('table_row', null, [cell('B3', { colwidth: [120] })]),
+      ]),
+    ]);
+
+    const bytes = await exportDocx(doc);
+    const xml = await (await JSZip.loadAsync(bytes))
+      .file('word/document.xml')!
+      .async('string');
+    // OOXML keeps a real w:tc in every covered row; dropping them is what left
+    // rows shorter than w:tblGrid and made Word render the table ragged.
+    expect((xml.match(/<w:tc>/g) ?? []).length).toBe(6);
+    expect((xml.match(/<w:vMerge w:val="restart"\/>/g) ?? []).length).toBe(1);
+    expect((xml.match(/<w:vMerge\/>/g) ?? []).length).toBe(2);
+
+    const { doc: back } = await importDocx(bytes);
+    const tbl = back.child(0);
+    expect(tbl.childCount).toBe(3);
+    expect(tbl.child(0).child(0).attrs['rowspan']).toBe(3);
+    expect(tbl.child(0).child(0).textContent).toBe('tall');
+    // The covered rows come back with one cell each, as they went out.
+    expect(tbl.child(1).childCount).toBe(1);
+    expect(tbl.child(1).child(0).textContent).toBe('B2');
+    expect(tbl.child(2).child(0).textContent).toBe('B3');
+  });
+
   it('round-trips an inline image (src + dimensions)', async () => {
     const src = `data:image/png;base64,${PNG_1PX}`;
     const doc = schema.node('doc', null, [

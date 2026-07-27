@@ -454,6 +454,12 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
     );
   if ((a['colspan'] as number) > 1)
     pr.push(`<w:gridSpan w:val="${a['colspan']}"/>`);
+  // A vertical merge starts here; the rows it covers get their placeholder
+  // cells from rowXml. Without this the merge is lost on export — the model
+  // carries it as `rowspan`, but OOXML expresses it as a `w:vMerge` on the
+  // first cell plus a real `w:tc` in every covered row.
+  if ((a['rowspan'] as number) > 1)
+    pr.push('<w:vMerge w:val="restart"/>');
   const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tcBorders', borders, CELL_SIDES));
   const bg = a['background'] as string | null;
@@ -485,7 +491,37 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
   return `<w:tc><w:tcPr>${pr.join('')}</w:tcPr>${content}</w:tc>`;
 }
 
-function rowXml(row: PMNode, ctx: ExportCtx): string {
+/** A vertical merge still open below the row that started it. */
+interface PendingMerge {
+  /** Rows it still has to cover, not counting the one it started in. */
+  rowsLeft: number;
+  colspan: number;
+  colwidth: number[] | null;
+}
+
+/** The placeholder a covered row needs. OOXML has no "this row is shorter"
+ *  concept: a merged-away slot is still a real `w:tc`, just one carrying an
+ *  empty `w:vMerge`. Omitting it leaves the row with fewer cells than
+ *  `w:tblGrid` declares, which is what made Word draw the table ragged. */
+function mergeContinuationXml(p: PendingMerge): string {
+  const pr: string[] = [];
+  if (p.colwidth?.length)
+    pr.push(
+      `<w:tcW w:w="${pxToTwips(p.colwidth.reduce((x, y) => x + y, 0))}" w:type="dxa"/>`,
+    );
+  if (p.colspan > 1) pr.push(`<w:gridSpan w:val="${p.colspan}"/>`);
+  pr.push('<w:vMerge/>');
+  return `<w:tc><w:tcPr>${pr.join('')}</w:tcPr><w:p/></w:tc>`;
+}
+
+/** `pending` is carried across rows by the caller — the model absorbs merged
+ *  cells into a `rowspan` on the cell above (see the importer's logical grid),
+ *  so the rows below have no node for that slot and we have to put one back. */
+function rowXml(
+  row: PMNode,
+  ctx: ExportCtx,
+  pending: Map<number, PendingMerge>,
+): string {
   const pr: string[] = [];
   if (row.attrs['header']) pr.push('<w:tblHeader/>');
   if (row.attrs['cantSplit']) pr.push('<w:cantSplit/>');
@@ -495,8 +531,43 @@ function rowXml(row: PMNode, ctx: ExportCtx): string {
       `<w:trHeight w:val="${pxToTwips(h.value)}" w:hRule="${h.exact ? 'exact' : 'atLeast'}"/>`,
     );
   const trPr = pr.length ? `<w:trPr>${pr.join('')}</w:trPr>` : '';
+
+  const nodes: PMNode[] = [];
+  row.forEach((c) => nodes.push(c));
   let cells = '';
-  row.forEach((c) => (cells += cellXml(c, ctx)));
+  let col = 0;
+  let i = 0;
+  // Walk grid columns, not nodes: a covered slot has no node, so the two
+  // indices drift apart exactly where the merge is.
+  while (i < nodes.length || pending.size) {
+    const open = pending.get(col);
+    if (open) {
+      cells += mergeContinuationXml(open);
+      const at = col;
+      col += open.colspan;
+      if (--open.rowsLeft <= 0) pending.delete(at);
+      continue;
+    }
+    if (i < nodes.length) {
+      const c = nodes[i++];
+      cells += cellXml(c, ctx);
+      const colspan = (c.attrs['colspan'] as number) || 1;
+      const rowspan = (c.attrs['rowspan'] as number) || 1;
+      if (rowspan > 1)
+        pending.set(col, {
+          rowsLeft: rowspan - 1,
+          colspan,
+          colwidth: c.attrs['colwidth'] as number[] | null,
+        });
+      col += colspan;
+      continue;
+    }
+    // Out of nodes but merges are still open further right — skip the gap
+    // rather than invent cells for it.
+    const next = [...pending.keys()].filter((k) => k > col).sort((x, y) => x - y)[0];
+    if (next === undefined) break;
+    col = next;
+  }
   return `<w:tr>${trPr}${cells}</w:tr>`;
 }
 
@@ -529,7 +600,10 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
     ? `<w:tblGrid>${grid.map((w) => `<w:gridCol w:w="${pxToTwips(w)}"/>`).join('')}</w:tblGrid>`
     : '';
   let rows = '';
-  node.forEach((r) => (rows += rowXml(r, ctx)));
+  // One map per table, threaded through the rows: a merge opened in row N has
+  // to be closed out by rows N+1… — state that cannot live inside rowXml.
+  const pending = new Map<number, PendingMerge>();
+  node.forEach((r) => (rows += rowXml(r, ctx, pending)));
   return `<w:tbl><w:tblPr>${pr.join('')}</w:tblPr>${gridXml}${rows}</w:tbl>`;
 }
 
