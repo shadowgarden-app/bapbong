@@ -491,8 +491,7 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
   // cells from rowXml. Without this the merge is lost on export — the model
   // carries it as `rowspan`, but OOXML expresses it as a `w:vMerge` on the
   // first cell plus a real `w:tc` in every covered row.
-  if ((a['rowspan'] as number) > 1)
-    pr.push('<w:vMerge w:val="restart"/>');
+  if ((a['rowspan'] as number) > 1) pr.push('<w:vMerge w:val="restart"/>');
   const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tcBorders', borders, CELL_SIDES));
   const bg = a['background'] as string | null;
@@ -597,7 +596,9 @@ function rowXml(
     }
     // Out of nodes but merges are still open further right — skip the gap
     // rather than invent cells for it.
-    const next = [...pending.keys()].filter((k) => k > col).sort((x, y) => x - y)[0];
+    const next = [...pending.keys()]
+      .filter((k) => k > col)
+      .sort((x, y) => x - y)[0];
     if (next === undefined) break;
     col = next;
   }
