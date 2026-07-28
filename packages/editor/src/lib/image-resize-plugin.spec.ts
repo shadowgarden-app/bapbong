@@ -140,3 +140,23 @@ describe('wrap-mode conversions (floatForWrapMode)', () => {
     expect(square['behind']).toBeUndefined();
   });
 });
+
+describe('floatAtPagePoint (cross-page re-anchor)', () => {
+  it('re-pins offsets from the target page content origin, dropping hAlign', async () => {
+    const { floatAtPagePoint } = await import('./image-resize-plugin');
+    const f = floatAtPagePoint(
+      { wrap: 'none', hAlign: 'right', hRel: 'page', vRel: 'paragraph', vOffset: 275, distL: 12 },
+      400, 1380 - 1080, // page-local drop
+      { contentLeft: 96, contentTop: 96 },
+    );
+    expect(f).toMatchObject({
+      wrap: 'none',
+      hRel: 'margin',
+      hOffset: 304,
+      vRel: 'margin',
+      vOffset: 204,
+      distL: 12, // dist gaps ride along
+    });
+    expect(f['hAlign']).toBeUndefined();
+  });
+});

@@ -329,6 +329,26 @@ export function floatForWrapMode(
   return base;
 }
 
+/** `float` re-pinned at a page-local point: offsets measured from the page's
+ *  content origin (hRel/vRel 'margin'), alignment dropped — the same
+ *  position-preserving shape the wrap strip uses. Pure, for tests; it is the
+ *  cross-page half of drag-to-move (the node re-anchors to a paragraph on the
+ *  target page, and these offsets put it back under the pointer there). */
+export function floatAtPagePoint(
+  float: Record<string, unknown>,
+  x: number,
+  y: number,
+  page: { contentLeft?: number; contentTop?: number },
+): Record<string, unknown> {
+  const next = { ...float };
+  delete next['hAlign'];
+  next['hRel'] = 'margin';
+  next['hOffset'] = Math.round(x - (page.contentLeft ?? 0));
+  next['vRel'] = 'margin';
+  next['vOffset'] = Math.round(y - (page.contentTop ?? 0));
+  return next;
+}
+
 /** The resolved float record for the image node at `pos` — the layout's view
  *  of it, carrying the effective offsets a move commits against. */
 function floatRecordFor(
@@ -429,20 +449,49 @@ export function imageResizePlugin(): EditorPlugin {
     const node = c.state.doc.nodeAt(m.pos);
     if (node?.type.name !== 'image') return;
     if (m.kind === 'float') {
-      // Same page only: a float's offsets are anchored to its paragraph, and
-      // dragging across pages is re-anchoring — out of this gesture's scope.
-      if (!ev.point || ev.point.pageIndex !== m.pageIndex) return;
-      const rec = floatRecordFor(c.layout, m.pos);
+      if (!ev.point) return; // released in the page gap / outside — cancel
       const float = node.attrs['float'] as Record<string, unknown> | null;
-      if (!rec || rec.effHOffset === undefined || !float) return;
-      const dx = ev.point.x - m.startX;
-      const dy = ev.point.y - m.startY;
-      if (Math.round(dx) === 0 && Math.round(dy) === 0) return;
-      const next = { ...float };
-      delete next['hAlign'];
-      next['hOffset'] = Math.round(rec.effHOffset + dx);
-      next['vOffset'] = Math.round((rec.effVOffset ?? 0) + dy);
-      c.dispatch(c.state.tr.setNodeAttribute(m.pos, 'float', next));
+      if (!float) return;
+      if (ev.point.pageIndex === m.pageIndex) {
+        // Same page: attr-only nudge relative to the existing anchor.
+        const rec = floatRecordFor(c.layout, m.pos);
+        if (!rec || rec.effHOffset === undefined) return;
+        const dx = ev.point.x - m.startX;
+        const dy = ev.point.y - m.startY;
+        if (Math.round(dx) === 0 && Math.round(dy) === 0) return;
+        const next = { ...float };
+        delete next['hAlign'];
+        next['hOffset'] = Math.round(rec.effHOffset + dx);
+        next['vOffset'] = Math.round((rec.effVOffset ?? 0) + dy);
+        c.dispatch(c.state.tr.setNodeAttribute(m.pos, 'float', next));
+        return;
+      }
+      // Cross-page: a float's offsets are anchored to its paragraph, and its
+      // paragraph decides the page — so the NODE must re-anchor to a
+      // paragraph on the target page (Word re-anchors on drag too). One
+      // transaction: relocate the node like an inline move, with offsets
+      // re-pinned under the pointer on the new page.
+      if (ev.pos == null) return;
+      const pg = c.layout?.pages[ev.point.pageIndex];
+      if (!pg) return;
+      const nx = ev.point.x - (m.startX - m.base.x); // keep the grab point
+      const ny = ev.point.y - (m.startY - m.base.y);
+      const moved = node.type.create(
+        { ...node.attrs, float: floatAtPagePoint(float, nx, ny, pg) },
+        null,
+        node.marks,
+      );
+      const tr = c.state.tr.delete(m.pos, m.pos + node.nodeSize);
+      const target = tr.mapping.map(ev.pos);
+      const point = dropPoint(
+        tr.doc,
+        target,
+        new Slice(Fragment.from(moved), 0, 0),
+      );
+      if (point == null) return;
+      tr.insert(point, moved);
+      c.dispatch(tr);
+      sel = { pos: point };
       return;
     }
     if (ev.pos == null) return;
@@ -583,15 +632,16 @@ export function imageResizePlugin(): EditorPlugin {
               mv.active = true;
               setCursor(c, 'grabbing');
             }
-            if (mv.active && samePage) {
+            if (mv.active) {
               // DOM-only preview, like resize: the frame ghost follows the
               // pointer; document and canvas stay untouched until the drop.
-              // (Page-local deltas mean nothing across pages — off-page the
-              // frame simply holds its last position.)
+              // Cross-page it re-homes to the pointer's page, holding the
+              // grab point — deltas don't translate between page-local
+              // spaces, but "pointer minus where you grabbed it" does.
               c.setFrame({
-                pageIndex: mv.pageIndex,
-                x: mv.base.x + (ev.point.x - mv.startX),
-                y: mv.base.y + (ev.point.y - mv.startY),
+                pageIndex: ev.point.pageIndex,
+                x: ev.point.x - (mv.startX - mv.base.x),
+                y: ev.point.y - (mv.startY - mv.base.y),
                 width: mv.base.width,
                 height: mv.base.height,
                 ...(mv.rotation ? { rotation: mv.rotation } : {}),
