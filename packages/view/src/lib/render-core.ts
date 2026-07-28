@@ -489,6 +489,13 @@ export class RenderCore {
   private currentViewport(): { top: number; height: number } | undefined {
     const wrap = this.viewport;
     if (!wrap) return undefined;
+    // A zero-height cache is a measurement taken while the viewport wasn't
+    // laid out yet (display:none host, pre-load flex settling) — with it, the
+    // mount window shrinks to the margins around the top edge and scrolling
+    // reveals unmounted pages as void. Degenerate → drop and re-measure; if
+    // the element is GENUINELY zero-height right now, the fresh measure says
+    // so and we harmlessly re-measure again next call.
+    if (this.viewportMetrics?.height === 0) this.viewportMetrics = null;
     if (!this.viewportMetrics) {
       // Rare path (first paint / resize / load): read live geometry once and
       // sync the scroll cache, so the constant offset is measured consistently.
