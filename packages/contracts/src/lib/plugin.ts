@@ -1,6 +1,11 @@
 import type { EditorState, Transaction } from 'prosemirror-state';
 import type { MarkSpec, NodeSpec } from 'prosemirror-model';
-import type { CaretRect, PagePoint, ResolvedLayout, SelectionRect } from './contracts.js';
+import type {
+  CaretRect,
+  PagePoint,
+  ResolvedLayout,
+  SelectionRect,
+} from './contracts.js';
 
 /** A decoration a plugin paints over a document range (comment tint, find
  *  highlight, track-change underline…). Doc positions; the editor resolves them
@@ -135,7 +140,11 @@ export interface PluginContext {
   /** Caret geometry at a doc position (page-local), or null. */
   caretRect(pos: number): CaretRect | null;
   /** Map a page-local point to canvas-stack coordinates, or null. */
-  pageToCanvas(p: { pageIndex: number; x: number; y: number }): { x: number; y: number } | null;
+  pageToCanvas(p: {
+    pageIndex: number;
+    x: number;
+    y: number;
+  }): { x: number; y: number } | null;
   /** Move the selection (caret if `to` omitted). */
   setSelection(from: number, to?: number): void;
   /** Scroll the viewport so the caret at `pos` sits `topMargin` px from the top. */
@@ -178,7 +187,10 @@ export interface EditorPlugin {
   readonly name: string;
   /** Schema contributions merged into the editor's document schema, so a plugin
    *  can own its marks/nodes. Composed once when a document loads. */
-  schema?: { marks?: Record<string, MarkSpec>; nodes?: Record<string, NodeSpec> };
+  schema?: {
+    marks?: Record<string, MarkSpec>;
+    nodes?: Record<string, NodeSpec>;
+  };
   /** Called once when the editor is constructed; may return a teardown fn. */
   setup?(ctx: PluginContext): void | (() => void);
   /** Called after every editor layout/paint cycle. */

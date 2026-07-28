@@ -1060,7 +1060,9 @@ export class BapbongEditor {
         strip.addEventListener(type, (e) => {
           e.stopPropagation();
           if (e.type !== 'click') return;
-          const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
+          const btn = (e.target as HTMLElement).closest<HTMLElement>(
+            '[data-action]',
+          );
           if (!btn) return;
           const id = btn.dataset['action'] as string;
           for (const p of this.plugins) if (p.onFrameAction?.(id)) return;
@@ -1116,7 +1118,9 @@ export class BapbongEditor {
           b.style.cssText =
             'display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;' +
             'border:0;border-radius:12px;cursor:pointer;padding:0;' +
-            (a.active ? 'background:#e6f1fb;color:#185fa5;' : 'background:transparent;color:#5f5e5a;');
+            (a.active
+              ? 'background:#e6f1fb;color:#185fa5;'
+              : 'background:transparent;color:#5f5e5a;');
           b.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${a.svg}</svg>`;
           strip.appendChild(b);
         }

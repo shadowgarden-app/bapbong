@@ -341,7 +341,9 @@ export function boxFullyOnPage(
   height: number,
   page: { width: number; height: number },
 ): boolean {
-  return x >= 0 && y >= 0 && x + width <= page.width && y + height <= page.height;
+  return (
+    x >= 0 && y >= 0 && x + width <= page.width && y + height <= page.height
+  );
 }
 
 /** `float` re-pinned at a page-local point: offsets measured from the page's
@@ -594,7 +596,11 @@ export function imageResizePlugin(): EditorPlugin {
     if (ev.pos == null) return;
     const tr = c.state.tr.delete(m.pos, m.pos + node.nodeSize);
     const target = tr.mapping.map(ev.pos);
-    const point = dropPoint(tr.doc, target, new Slice(Fragment.from(node), 0, 0));
+    const point = dropPoint(
+      tr.doc,
+      target,
+      new Slice(Fragment.from(node), 0, 0),
+    );
     if (point == null || point === m.pos) return; // no valid slot / same place
     tr.insert(point, node);
     c.dispatch(tr);

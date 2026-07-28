@@ -1341,8 +1341,34 @@ describe('floating images', () => {
       type: 'paragraph',
       runs: [{ src: 'big.png', width: 300, height: 328 }],
       floats: [
-        { src: 'l1', width: 107, height: 32, wrap: 'square', hOffset: 88, hRel: 'margin', vOffset: 14, vRel: 'paragraph', distL: 12, distR: 12, distT: 5, distB: 5 },
-        { src: 'l2', width: 107, height: 32, wrap: 'square', hOffset: 410, hRel: 'margin', vOffset: 15, vRel: 'paragraph', distL: 12, distR: 12, distT: 5, distB: 5 },
+        {
+          src: 'l1',
+          width: 107,
+          height: 32,
+          wrap: 'square',
+          hOffset: 88,
+          hRel: 'margin',
+          vOffset: 14,
+          vRel: 'paragraph',
+          distL: 12,
+          distR: 12,
+          distT: 5,
+          distB: 5,
+        },
+        {
+          src: 'l2',
+          width: 107,
+          height: 32,
+          wrap: 'square',
+          hOffset: 410,
+          hRel: 'margin',
+          vOffset: 15,
+          vRel: 'paragraph',
+          distL: 12,
+          distR: 12,
+          distT: 5,
+          distB: 5,
+        },
       ],
     };
     const { pages } = layoutBlocks([block], {
@@ -1384,7 +1410,7 @@ describe('floating images', () => {
     expect(line.y).toBeGreaterThanOrEqual(60);
   });
 
-  it("a paragraph pushed to the next page takes its floats with it", () => {
+  it('a paragraph pushed to the next page takes its floats with it', () => {
     // Page content band [20, 980] (height 1000, margins 20). The filler eats
     // most of it; the float-carrying paragraph's first line no longer fits, so
     // the paragraph breaks to page 2 — and the float must register THERE, at
@@ -1394,16 +1420,34 @@ describe('floating images', () => {
       type: 'paragraph',
       // 4 words/line ('aaaa ' = 50px in the 200px band) × 60 lines × 16px
       // = 960px: exactly the content band, so the NEXT paragraph breaks.
-      runs: [{ text: Array(60 * 4).fill('aaaa').join(' '), font: font() }],
+      runs: [
+        {
+          text: Array(60 * 4)
+            .fill('aaaa')
+            .join(' '),
+          font: font(),
+        },
+      ],
     };
     const anchored: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: 'hello', font: font() }],
       floats: [
-        { src: 'f', width: 40, height: 30, wrap: 'none', vRel: 'margin', vOffset: 10, hOffset: 5 },
+        {
+          src: 'f',
+          width: 40,
+          height: 30,
+          wrap: 'none',
+          vRel: 'margin',
+          vOffset: 10,
+          hOffset: 5,
+        },
       ],
     };
-    const { pages } = layoutBlocks([filler, anchored], config({ height: 1000 }));
+    const { pages } = layoutBlocks(
+      [filler, anchored],
+      config({ height: 1000 }),
+    );
     expect(pages).toHaveLength(2);
     expect(pages[0].floats ?? []).toHaveLength(0);
     expect(pages[1].floats).toHaveLength(1);
