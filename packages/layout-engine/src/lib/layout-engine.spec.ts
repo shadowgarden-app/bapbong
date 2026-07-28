@@ -1305,6 +1305,31 @@ describe('floating images', () => {
     expect(pages[0].lines[0].width).toBeCloseTo(110); // band ends 10px before the image
   });
 
+  it("w:line 'auto' scales text but never an inline image's height", () => {
+    // Word/Google Docs size an image line to the image — the line multiple
+    // applies to text boxes only. Multiplying the image (319×1.08 ≈ +25px per
+    // picture) paginated real documents a page earlier than Word.
+    const image = { src: 'shot.png', width: 100, height: 319 };
+    const mk = (spacing?: { line: number }): FlowBlock => ({
+      type: 'paragraph',
+      runs: [image],
+      ...(spacing ? { spacing } : {}),
+    });
+    const plain = layoutBlocks([mk()], config()).pages[0].lines[0];
+    const auto = layoutBlocks([mk({ line: 259 / 240 })], config()).pages[0]
+      .lines[0];
+    expect(auto.height).toBeCloseTo(plain.height); // image box untouched
+    // …while a TEXT line still grows by the multiple.
+    const t = (spacing?: { line: number }): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text: 'hello', font: font() }],
+      ...(spacing ? { spacing } : {}),
+    });
+    const tPlain = layoutBlocks([t()], config()).pages[0].lines[0];
+    const tAuto = layoutBlocks([t({ line: 2 })], config()).pages[0].lines[0];
+    expect(tAuto.height).toBeCloseTo(tPlain.height * 2);
+  });
+
   it('moves an inline image below square floats it cannot fit between', () => {
     // Geometry from a real report (CEA template): column 624px wide, two
     // floating text-box labels at +88 and +410 (107px wide, dist 12), and an

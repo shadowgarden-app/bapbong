@@ -600,6 +600,11 @@ function wrapParagraph(
   let maxImagePx = 0; // tallest inline image on the line
   let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
   let maxDescent = baseMetrics?.descent ?? 0;
+  // Text-only ascent/descent, excluding image contributions: the w:line
+  // 'auto' multiple scales the TEXT box, never an image (Word semantics) —
+  // so the spacing code needs the text height by itself.
+  let textAscent = baseMetrics?.ascent ?? 0;
+  let textDescent = baseMetrics?.descent ?? 0;
 
   const lineStart = () => (firstLine ? firstLineStart : contStart);
 
@@ -777,14 +782,26 @@ function wrapParagraph(
     }
     // w:spacing/w:line: 'auto' multiplies the natural height (extra space split
     // below the baseline), 'exact' forces it, 'atLeast' is a floor.
+    //
+    // 'auto' scales the TEXT box only — never an image. Word and Google Docs
+    // size an image line to the image (it sits on the baseline); multiplying
+    // the image height inflated every picture line by the paragraph's line
+    // factor (~8% of a 300px screenshot is ~25px), and the accumulated slack
+    // paginated documents earlier than Word. The image keeps its natural box;
+    // the multiple only wins when the scaled text is taller.
     const sp = block.spacing;
     if (sp?.line) {
+      const textH = metrics
+        ? textAscent + textDescent
+        : maxFontPx * LINE_HEIGHT_FACTOR;
       const target =
         sp.lineRule === 'exact'
           ? sp.line
           : sp.lineRule === 'atLeast'
             ? Math.max(height, sp.line)
-            : height * sp.line;
+            : maxImagePx > 0
+              ? Math.max(height, textH * sp.line)
+              : textH * sp.line;
       baseline +=
         Math.max(0, target - height) *
         (sp.lineRule === 'exact' ? baseline / height : 1);
@@ -809,6 +826,8 @@ function wrapParagraph(
     maxImagePx = 0;
     maxAscent = baseMetrics?.ascent ?? 0;
     maxDescent = baseMetrics?.descent ?? 0;
+    textAscent = baseMetrics?.ascent ?? 0;
+    textDescent = baseMetrics?.descent ?? 0;
     firstLine = false;
 
     // The next line may sit beside (or past) a float — fetch its band.
@@ -969,6 +988,8 @@ function wrapParagraph(
         const m = metrics(token.font);
         maxAscent = Math.max(maxAscent, m.ascent);
         maxDescent = Math.max(maxDescent, m.descent);
+        textAscent = Math.max(textAscent, m.ascent);
+        textDescent = Math.max(textDescent, m.descent);
       }
     }
   }
