@@ -90,3 +90,53 @@ describe('cursorFor', () => {
     expect(cursorFor('n', 40)).toBe('nesw-resize');
   });
 });
+
+describe('wrap-mode conversions (floatForWrapMode)', () => {
+  const keep = { hOffset: 120, vOffset: 340 };
+
+  it('maps float attrs to strip modes', async () => {
+    const { wrapModeOf } = await import('./image-resize-plugin');
+    expect(wrapModeOf(null)).toBe('inline');
+    expect(wrapModeOf({ wrap: 'square' })).toBe('square');
+    expect(wrapModeOf({ wrap: 'topAndBottom' })).toBe('topAndBottom');
+    expect(wrapModeOf({ wrap: 'none' })).toBe('front');
+    expect(wrapModeOf({ wrap: 'none', behind: true })).toBe('behind');
+  });
+
+  it('is a no-op when the mode is already in effect', async () => {
+    const { floatForWrapMode } = await import('./image-resize-plugin');
+    expect(floatForWrapMode(null, 'inline', keep)).toBeUndefined();
+    expect(floatForWrapMode({ wrap: 'square' }, 'square', keep)).toBeUndefined();
+  });
+
+  it('inline → float pins the rendered position via margin-relative offsets', async () => {
+    const { floatForWrapMode } = await import('./image-resize-plugin');
+    const f = floatForWrapMode(null, 'square', keep) as Record<string, unknown>;
+    expect(f).toMatchObject({
+      wrap: 'square',
+      hRel: 'margin',
+      hOffset: 120,
+      vRel: 'margin',
+      vOffset: 340,
+    });
+  });
+
+  it('float → inline returns null; wrap switches keep the position attrs', async () => {
+    const { floatForWrapMode } = await import('./image-resize-plugin');
+    const cur = { wrap: 'square', hOffset: 50, vOffset: 60, hRel: 'margin', vRel: 'paragraph' };
+    expect(floatForWrapMode(cur, 'inline', keep)).toBeNull();
+    const toBreak = floatForWrapMode(cur, 'topAndBottom', keep) as Record<string, unknown>;
+    expect(toBreak).toMatchObject({ wrap: 'topAndBottom', hOffset: 50, vOffset: 60 });
+  });
+
+  it('behind pairs with wrapNone and clears when leaving z-modes', async () => {
+    const { floatForWrapMode } = await import('./image-resize-plugin');
+    const behind = floatForWrapMode({ wrap: 'square', hOffset: 5 }, 'behind', keep) as Record<string, unknown>;
+    expect(behind).toMatchObject({ wrap: 'none', behind: true, hOffset: 5 });
+    const front = floatForWrapMode(behind, 'front', keep) as Record<string, unknown>;
+    expect(front['behind']).toBeUndefined();
+    expect(front).toMatchObject({ wrap: 'none' });
+    const square = floatForWrapMode(behind, 'square', keep) as Record<string, unknown>;
+    expect(square['behind']).toBeUndefined();
+  });
+});

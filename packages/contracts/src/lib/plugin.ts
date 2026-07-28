@@ -80,6 +80,18 @@ export interface OverlayGuide {
   height: number;
 }
 
+/** One button on the frame's floating action strip. `svg` is inner SVG markup
+ *  for a 16×16 viewBox (the editor wraps it in the <svg> element) — plugins
+ *  own their icons so the editor stays generic. */
+export interface OverlayFrameAction {
+  id: string;
+  /** Tooltip / accessible name. */
+  title: string;
+  svg: string;
+  /** Render highlighted (the mode currently in effect). */
+  active?: boolean;
+}
+
 /** A selection frame around an object (image resize): border + 8 resize
  *  handles + a rotate knob above the top edge, rotated by `rotation` degrees
  *  around the rect center. Page-local geometry; purely visual — the plugin
@@ -94,6 +106,10 @@ export interface OverlayFrame {
   rotation?: number;
   /** Small readout above the frame (e.g. "320 × 214" during a resize). */
   label?: string;
+  /** Floating button strip below the frame (e.g. image wrap modes). Clicks
+   *  come back through {@link EditorPlugin.onFrameAction}. Omit during drag
+   *  previews — the strip is for the resting selection. */
+  actions?: OverlayFrameAction[];
 }
 
 /** A page-local rect the editor fills as a translucent highlight (e.g. a
@@ -181,4 +197,7 @@ export interface EditorPlugin {
    *  arrows) — e.g. Escape cancelling an in-flight drag gesture. Return true
    *  to claim (the editor preventDefaults and stops the event). */
   onKey?(ev: EditorKeyEvent): boolean;
+  /** A click on one of the frame's action-strip buttons (the plugin put them
+   *  there via setFrame's `actions`). Return true to claim. */
+  onFrameAction?(id: string): boolean;
 }

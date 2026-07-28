@@ -1814,6 +1814,8 @@ function placeBlocks(
       index: pages.length,
       width: page.width,
       height: page.height,
+      contentLeft,
+      contentTop: top,
       lines,
     };
     if (tables.length > 0) resolved.tables = tables;

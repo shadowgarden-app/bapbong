@@ -1046,6 +1046,27 @@ export class BapbongEditor {
         'position:absolute;right:0;top:-46px;display:none;background:#042c53;color:#b5d4f4;' +
         'font:11px/1.6 ui-monospace,monospace;padding:0 7px;border-radius:4px;white-space:nowrap;';
       el.appendChild(label);
+      // Floating action strip below the frame (e.g. image wrap modes). The
+      // frame container is pointer-events:none; the strip re-enables them and
+      // swallows its pointer events so a button press never falls through to
+      // the caret/selection pipeline underneath.
+      const strip = document.createElement('div');
+      strip.dataset['role'] = 'actions';
+      strip.style.cssText =
+        'position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);' +
+        'display:none;gap:2px;pointer-events:auto;background:#fff;border:1px solid #d0d4da;' +
+        'border-radius:15px;padding:3px 5px;box-shadow:0 2px 8px rgba(0,0,0,0.12);white-space:nowrap;';
+      for (const type of ['pointerdown', 'pointerup', 'mousedown', 'click']) {
+        strip.addEventListener(type, (e) => {
+          e.stopPropagation();
+          if (e.type !== 'click') return;
+          const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
+          if (!btn) return;
+          const id = btn.dataset['action'] as string;
+          for (const p of this.plugins) if (p.onFrameAction?.(id)) return;
+        });
+      }
+      el.appendChild(strip);
       this.stack.appendChild(el);
       this.frameEl = el;
     }
@@ -1074,6 +1095,37 @@ export class BapbongEditor {
     if (label) {
       label.style.display = frame.label ? 'block' : 'none';
       if (frame.label) label.textContent = frame.label;
+    }
+    const strip = el.querySelector<HTMLDivElement>('[data-role="actions"]');
+    if (strip) {
+      const acts = frame.actions ?? [];
+      // Rebuild only when the set (ids + active states) changes — setFrame
+      // runs per pointer-move during drags, and those frames carry no actions
+      // anyway (previews omit them).
+      const sig = acts.map((a) => `${a.id}${a.active ? '!' : ''}`).join(',');
+      if (strip.dataset['sig'] !== sig) {
+        strip.dataset['sig'] = sig;
+        strip.replaceChildren();
+        for (const a of acts) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.dataset['action'] = a.id;
+          b.title = a.title;
+          b.setAttribute('aria-label', a.title);
+          if (a.active) b.setAttribute('aria-pressed', 'true');
+          b.style.cssText =
+            'display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;' +
+            'border:0;border-radius:12px;cursor:pointer;padding:0;' +
+            (a.active ? 'background:#e6f1fb;color:#185fa5;' : 'background:transparent;color:#5f5e5a;');
+          b.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${a.svg}</svg>`;
+          strip.appendChild(b);
+        }
+      }
+      strip.style.display = acts.length ? 'flex' : 'none';
+      // The strip must stay readable under the frame's rotation.
+      strip.style.transform = frame.rotation
+        ? `translateX(-50%) rotate(${-frame.rotation}deg)`
+        : 'translateX(-50%)';
     }
   }
 

@@ -496,6 +496,11 @@ export interface ResolvedPage {
   index: number;
   width: number;
   height: number;
+  /** Content-area origin (left/top margins in page coords) — lets a plugin
+   *  turn a page rect back into margin-relative offsets (e.g. converting an
+   *  inline image to a float that keeps its visual position). */
+  contentLeft?: number;
+  contentTop?: number;
   lines: LayoutLine[];
   /** Tables on this page, positioned in page coordinates. */
   tables?: ResolvedTable[];

@@ -248,6 +248,87 @@ function imageNodeAt(state: State, pos: number): boolean {
   return state.doc.nodeAt(pos)?.type.name === 'image';
 }
 
+/** The wrap-mode strip under a selected image (the Google-Docs image bar).
+ *  Ids map onto the float attr: null (inline), wrap square / topAndBottom /
+ *  none, and none+behind. Icons are 16×16 stroke paths. */
+const WRAP_ACTIONS: { id: string; title: string; svg: string }[] = [
+  {
+    id: 'inline',
+    title: 'Nội dòng',
+    svg: '<path d="M2 3.5h12M2 12.5h12M2 8h2.5M11.5 8h2.5"/><rect x="6" y="5.5" width="4" height="5"/>',
+  },
+  {
+    id: 'square',
+    title: 'Chữ bao quanh',
+    svg: '<path d="M2 3.5h12M2 6.5h4M2 9.5h4M2 12.5h12"/><rect x="8.5" y="5" width="5.5" height="6"/>',
+  },
+  {
+    id: 'topAndBottom',
+    title: 'Ngắt trên–dưới',
+    svg: '<path d="M2 2.5h12M2 13.5h12"/><rect x="5" y="5" width="6" height="6"/>',
+  },
+  {
+    id: 'front',
+    title: 'Nổi trên chữ',
+    svg: '<path d="M2 3.5h12M2 8h1.5M12.5 8h1.5M2 12.5h1.5M12.5 12.5h1.5"/><rect x="5" y="6" width="6" height="6" fill="currentColor" stroke="none" opacity="0.55"/><rect x="5" y="6" width="6" height="6"/>',
+  },
+  {
+    id: 'behind',
+    title: 'Sau lưng chữ',
+    svg: '<rect x="5" y="6" width="6" height="6" opacity="0.45"/><path d="M2 3.5h12M2 8h12M2 12.5h12"/>',
+  },
+];
+
+/** Which strip id is in effect for an image's float attr. */
+export function wrapModeOf(float: Record<string, unknown> | null): string {
+  if (!float) return 'inline';
+  if (float['wrap'] === 'square') return 'square';
+  if (float['wrap'] === 'topAndBottom') return 'topAndBottom';
+  return float['behind'] ? 'behind' : 'front';
+}
+
+/** The float attr that realizes `mode` — pure, so the conversion rules are
+ *  unit-testable. `current` is the image's float attr (null for inline);
+ *  `keepPosition` carries the margin-relative offsets an inline→float switch
+ *  pins the image at (from its rendered rect), so it doesn't jump.
+ *
+ *  Word pairs behindDoc with wrapNone; square/topAndBottom therefore clear
+ *  `behind`. Returns null for 'inline' (the attr for an inline image), and
+ *  `undefined` when the mode is already in effect (nothing to dispatch). */
+export function floatForWrapMode(
+  current: Record<string, unknown> | null,
+  mode: string,
+  keepPosition: { hOffset: number; vOffset: number },
+): Record<string, unknown> | null | undefined {
+  if (mode === wrapModeOf(current)) return undefined;
+  if (mode === 'inline') return null;
+  const base: Record<string, unknown> = current
+    ? { ...current }
+    : {
+        // Coming from inline: pin the image where the user sees it. vRel
+        // 'margin' (not 'paragraph') because the offsets were measured from
+        // the page's content origin — position-preserving by construction.
+        hRel: 'margin',
+        hOffset: keepPosition.hOffset,
+        vRel: 'margin',
+        vOffset: keepPosition.vOffset,
+        distL: 12,
+        distR: 12,
+        distT: 5,
+        distB: 5,
+      };
+  delete base['behind'];
+  if (mode === 'behind') {
+    base['wrap'] = 'none';
+    base['behind'] = true;
+  } else if (mode === 'front') {
+    base['wrap'] = 'none';
+  } else {
+    base['wrap'] = mode; // 'square' | 'topAndBottom'
+  }
+  return base;
+}
+
 /** The resolved float record for the image node at `pos` — the layout's view
  *  of it, carrying the effective offsets a move commits against. */
 function floatRecordFor(
@@ -293,13 +374,24 @@ export function imageResizePlugin(): EditorPlugin {
     hoverCursor = cursor !== null;
   };
 
+  /** The wrap strip for the image at `pos`, with the current mode lit. */
+  const actionsFor = (c: PluginContext, pos: number) => {
+    const float = c.state.doc.nodeAt(pos)?.attrs['float'] as Record<
+      string,
+      unknown
+    > | null;
+    const mode = wrapModeOf(float ?? null);
+    return WRAP_ACTIONS.map((a) => ({ ...a, active: a.id === mode }));
+  };
+
   const refresh = (c: PluginContext): void => {
     if (!sel || !imageNodeAt(c.state, sel.pos)) {
       sel = null;
       c.setFrame(null);
       return;
     }
-    c.setFrame(frameForPos(c.layout, sel.pos));
+    const frame = frameForPos(c.layout, sel.pos);
+    c.setFrame(frame ? { ...frame, actions: actionsFor(c, sel.pos) } : null);
   };
 
   /** Commit the drag's final size — ONE transaction, the gesture's only touch
@@ -387,6 +479,26 @@ export function imageResizePlugin(): EditorPlugin {
     setup(c) {
       ctx = c;
       return () => c.setFrame(null);
+    },
+    onFrameAction(id) {
+      const c = ctx;
+      if (!c || !sel || !imageNodeAt(c.state, sel.pos)) return false;
+      if (!WRAP_ACTIONS.some((a) => a.id === id)) return false;
+      const node = c.state.doc.nodeAt(sel.pos);
+      const float = node?.attrs['float'] as Record<string, unknown> | null;
+      // Margin-relative offsets of the CURRENT rendered rect: an inline→float
+      // switch pins the image exactly where the user sees it.
+      const frame = frameForPos(c.layout, sel.pos);
+      const pg = frame ? c.layout?.pages[frame.pageIndex] : undefined;
+      const keep = {
+        hOffset: Math.round((frame?.x ?? 0) - (pg?.contentLeft ?? 0)),
+        vOffset: Math.round((frame?.y ?? 0) - (pg?.contentTop ?? 0)),
+      };
+      const next = floatForWrapMode(float ?? null, id, keep);
+      if (next !== undefined)
+        c.dispatch(c.state.tr.setNodeAttribute(sel.pos, 'float', next));
+      refresh(c);
+      return true;
     },
     onChange() {
       // Skip while dragging/rotating: the preview frame must keep following
@@ -616,6 +728,7 @@ export function imageResizePlugin(): EditorPlugin {
             ...(rotationAt(c.state, hit.pos)
               ? { rotation: rotationAt(c.state, hit.pos) }
               : {}),
+            actions: actionsFor(c, hit.pos),
           });
           mv = {
             pos: hit.pos,
