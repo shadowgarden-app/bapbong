@@ -160,3 +160,15 @@ describe('floatAtPagePoint (cross-page re-anchor)', () => {
     expect(f['hAlign']).toBeUndefined();
   });
 });
+
+describe('boxFullyOnPage (cross-page arrival test)', () => {
+  const page = { width: 816, height: 1056 };
+  it('true only when the whole box is inside', async () => {
+    const { boxFullyOnPage } = await import('./image-resize-plugin');
+    expect(boxFullyOnPage(100, 100, 300, 328, page)).toBe(true);
+    expect(boxFullyOnPage(100, -5, 300, 328, page)).toBe(false); // đỉnh còn ở trang trước
+    expect(boxFullyOnPage(100, 800, 300, 328, page)).toBe(false); // đáy tràn xuống
+    expect(boxFullyOnPage(600, 100, 300, 328, page)).toBe(false); // tràn phải
+    expect(boxFullyOnPage(100, 0, 300, 1056, page)).toBe(true); // chạm mép vẫn là trong
+  });
+});

@@ -329,6 +329,21 @@ export function floatForWrapMode(
   return base;
 }
 
+/** Whether a box placed at (x, y) page-local sits ENTIRELY inside the page.
+ *  This — not the pointer — is what declares a drag "arrived" on another
+ *  page: the pointer crosses the boundary while the box still straddles it,
+ *  and re-anchoring at that moment would pin the box with a negative offset
+ *  on the new page (clipped at its top edge). */
+export function boxFullyOnPage(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  page: { width: number; height: number },
+): boolean {
+  return x >= 0 && y >= 0 && x + width <= page.width && y + height <= page.height;
+}
+
 /** `float` re-pinned at a page-local point: offsets measured from the page's
  *  content origin (hRel/vRel 'margin'), alignment dropped — the same
  *  position-preserving shape the wrap strip uses. Pure, for tests; it is the
@@ -452,30 +467,51 @@ export function imageResizePlugin(): EditorPlugin {
       if (!ev.point) return; // released in the page gap / outside — cancel
       const float = node.attrs['float'] as Record<string, unknown> | null;
       if (!float) return;
-      if (ev.point.pageIndex === m.pageIndex) {
-        // Same page: attr-only nudge relative to the existing anchor.
+      // Attr-only nudge on the EXISTING anchor, by (dx, dy) in its page space.
+      const nudge = (dx: number, dy: number): void => {
         const rec = floatRecordFor(c.layout, m.pos);
         if (!rec || rec.effHOffset === undefined) return;
-        const dx = ev.point.x - m.startX;
-        const dy = ev.point.y - m.startY;
         if (Math.round(dx) === 0 && Math.round(dy) === 0) return;
         const next = { ...float };
         delete next['hAlign'];
         next['hOffset'] = Math.round(rec.effHOffset + dx);
         next['vOffset'] = Math.round((rec.effVOffset ?? 0) + dy);
         c.dispatch(c.state.tr.setNodeAttribute(m.pos, 'float', next));
+      };
+      if (ev.point.pageIndex === m.pageIndex) {
+        nudge(ev.point.x - m.startX, ev.point.y - m.startY);
         return;
       }
-      // Cross-page: a float's offsets are anchored to its paragraph, and its
-      // paragraph decides the page — so the NODE must re-anchor to a
+      const pages = c.layout?.pages;
+      const pg = pages?.[ev.point.pageIndex];
+      if (!pages || !pg) return;
+      const nx = ev.point.x - (m.startX - m.base.x); // keep the grab point
+      const ny = ev.point.y - (m.startY - m.base.y);
+      // The BOX decides arrival, not the pointer: while it still straddles
+      // the boundary this is a move on the original page (below its edge, as
+      // floats may hang), not a re-anchor that would clip on the new page.
+      if (!boxFullyOnPage(nx, ny, m.base.width, m.base.height, pg)) {
+        // Pointer delta converted across pages: page-local ys differ by the
+        // heights of the pages in between. (The visual page gap is paint-only
+        // — it does not exist in page space, so a straddling drop lands the
+        // gap's height above the ghost. The ghost was in the void anyway.)
+        const absY = (pageIndex: number, y: number): number => {
+          let acc = 0;
+          for (let i = 0; i < pageIndex; i++) acc += pages[i].height;
+          return acc + y;
+        };
+        nudge(
+          ev.point.x - m.startX,
+          absY(ev.point.pageIndex, ev.point.y) - absY(m.pageIndex, m.startY),
+        );
+        return;
+      }
+      // Fully arrived: a float's offsets are anchored to its paragraph, and
+      // its paragraph decides the page — so the NODE re-anchors to a
       // paragraph on the target page (Word re-anchors on drag too). One
       // transaction: relocate the node like an inline move, with offsets
       // re-pinned under the pointer on the new page.
       if (ev.pos == null) return;
-      const pg = c.layout?.pages[ev.point.pageIndex];
-      if (!pg) return;
-      const nx = ev.point.x - (m.startX - m.base.x); // keep the grab point
-      const ny = ev.point.y - (m.startY - m.base.y);
       const moved = node.type.create(
         { ...node.attrs, float: floatAtPagePoint(float, nx, ny, pg) },
         null,
