@@ -531,8 +531,18 @@ function draftToLine(d: LineDraft, y: number, dx = 0): LayoutLine {
 
 /** The content bounds for the line about to be assembled. Queried once per
  *  line, so callers can flow text around floating images (the band narrows
- *  while a float's rectangle is in the way). */
-type BandFn = (estHeight: number) => { left: number; right: number };
+ *  while a float's rectangle is in the way).
+ *
+ *  `minWidth` is the width the next UNBREAKABLE item needs. Text never sends
+ *  it — text narrows to any band and, alone on a line, breaks at character
+ *  level. An inline image can do neither, so a band that passed the MIN_BAND
+ *  floor can still be useless to it; the caller should then keep skipping
+ *  below the floats (Word's behavior) instead of handing back a band the
+ *  image will overflow. Callers with a fixed band (table cells) ignore it. */
+type BandFn = (
+  estHeight: number,
+  minWidth?: number,
+) => { left: number; right: number };
 
 /** Wrap one paragraph, emitting one LineDraft per line. The band may differ
  *  per line; indents, the list marker and tab stops apply within each band. */
@@ -578,7 +588,8 @@ function wrapParagraph(
     };
     markerTextX = marker.x + measure(`${block.marker} `, base);
   }
-  const firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
+  // `let`: re-derived if the first line's band is re-queried for a wide image.
+  let firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
   let contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
 
   let lineTokens: Token[] = [];
@@ -871,6 +882,36 @@ function wrapParagraph(
       else if (clusterable(token))
         token.width = measure(token.text as string, token.font);
     }
+    // An inline image that doesn't fit the band, alone on its line: it cannot
+    // break like text, so a float-narrowed band the MIN_BAND floor accepted
+    // can still be useless — placing it there overflows straight into the
+    // float's rectangle. Ask for a band wide enough; the caller skips below
+    // the floats to find one (moving its y), so refresh every band-derived
+    // coordinate. If the re-queried band still can't fit it (image wider than
+    // the column, or a fixed cell band), keep today's overflow.
+    if (
+      token.image &&
+      lineTokens.length === 0 &&
+      lineStart() + token.width > lineRight
+    ) {
+      // Everything left of the content start (indent, first-line delta, list
+      // marker) plus the image plus the right indent — the exact width the
+      // band must offer. The left-side geometry is re-derived below relative
+      // to the new band, so the relation carries over.
+      band = bandFn(
+        nominalH,
+        lineStart() - band.left + token.width + indentRight,
+      );
+      lineLeft = band.left + indentLeft;
+      lineRight = band.right - indentRight;
+      if (marker) {
+        marker.x = lineLeft + firstLineDelta;
+        markerTextX = marker.x + measure(`${block.marker} `, base);
+      }
+      firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
+      contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
+    }
+
     // A single word wider than the whole band (narrow table cells): break it
     // at character level, Word-style — fit what we can (at least one char),
     // the remainder re-enters the loop as its own token on the next line.
@@ -1875,17 +1916,28 @@ function placeBlocks(
     wrapParagraph(
       flow,
       ctx,
-      (estH) => {
+      (estH, minWidth) => {
         for (;;) {
           if (y + estH > colBottom() && colDirty) {
             breakBand(); // next column/page: exclusions are gone
             continue;
           }
           const b = bandAt(y, estH);
-          if (b) return b;
           const blockers = exclusions.filter(
             (ex) => ex.top < y + estH && ex.bottom > y,
           );
+          // A band that passed the MIN_BAND floor can still be too narrow for
+          // an unbreakable item (an inline image). While a float is what
+          // narrowed it, keep walking down past the floats — same move as a
+          // null band. With no blockers left the band is the full column;
+          // return it even if the item is wider (it overflows, as before).
+          if (
+            b &&
+            (minWidth === undefined ||
+              b.right - b.left >= minWidth ||
+              blockers.length === 0)
+          )
+            return b;
           if (blockers.length === 0) return { left: colX0(), right: colX1() };
           y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
         }

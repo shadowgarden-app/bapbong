@@ -1305,6 +1305,60 @@ describe('floating images', () => {
     expect(pages[0].lines[0].width).toBeCloseTo(110); // band ends 10px before the image
   });
 
+  it('moves an inline image below square floats it cannot fit between', () => {
+    // Geometry from a real report (CEA template): column 624px wide, two
+    // floating text-box labels at +88 and +410 (107px wide, dist 12), and an
+    // inline 300×328 screenshot in the same paragraph. The gap between the
+    // labels is 191px — over MIN_BAND, so the band was accepted and the image
+    // overflowed 97px into the right label. Word drops the image below the
+    // labels instead; so do we, via the band's minWidth.
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ src: 'big.png', width: 300, height: 328 }],
+      floats: [
+        { src: 'l1', width: 107, height: 32, wrap: 'square', hOffset: 88, hRel: 'margin', vOffset: 14, vRel: 'paragraph', distL: 12, distR: 12, distT: 5, distB: 5 },
+        { src: 'l2', width: 107, height: 32, wrap: 'square', hOffset: 410, hRel: 'margin', vOffset: 15, vRel: 'paragraph', distL: 12, distR: 12, distT: 5, distB: 5 },
+      ],
+    };
+    const { pages } = layoutBlocks([block], {
+      measureText: measure,
+      defaultFont: { sizePt: 10 },
+      page: {
+        width: 816,
+        height: 1056,
+        margin: { top: 96, right: 96, bottom: 96, left: 96 },
+      },
+    });
+    const pg = pages[0];
+    const line = pg.lines[0];
+    const img = line.images![0];
+    // Below both labels' exclusion rects (bottom = 96+15+32+5 = 148; the walk
+    // stops at the lower blocker bottom that clears the width, 147→148).
+    expect(line.y).toBeGreaterThanOrEqual(147);
+    // Full-width band → image starts at the margin and clears the labels.
+    expect(img.x).toBeCloseTo(96);
+    const l2 = pg.floats!.find((f) => f.src === 'l2')!;
+    expect(img.x + img.width).toBeLessThanOrEqual(l2.x);
+  });
+
+  it('still overflows an image wider than the whole column', () => {
+    // No band can ever fit it — the old behavior (place and overflow) must
+    // survive, and the band walk must not loop forever looking for one.
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ src: 'huge.png', width: 300, height: 40 }],
+      floats: [
+        { src: 'f', width: 80, height: 40, wrap: 'square', hAlign: 'right' },
+      ],
+    };
+    const { pages } = layoutBlocks([block], config()); // column 200px wide
+    const line = pages[0].lines[0];
+    expect(line.images![0].width).toBe(300);
+    // It skipped below the float (band there is the full 200px column) rather
+    // than squeezing beside it.
+    expect(line.y).toBeGreaterThanOrEqual(60);
+  });
+
   it('topAndBottom floats push the text below them', () => {
     const block: FlowBlock = {
       type: 'paragraph',
