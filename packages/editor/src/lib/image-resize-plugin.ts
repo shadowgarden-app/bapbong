@@ -7,11 +7,14 @@ import type {
   ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
 import { imageAtPoint } from '@shadow-garden/bapbong-selection';
+import { Fragment, Slice } from 'prosemirror-model';
+import { dropPoint } from 'prosemirror-transform';
 
 /** The editor state type, taken from the plugin context (no direct PM dep). */
 type State = PluginContext['state'];
 
 const HANDLE_TOL = 6; // px proximity to a handle center to start a resize
+const MOVE_TOL = 4; // px of travel before a press inside the frame is a MOVE
 const MIN_SIZE = 16; // px minimum image dimension
 const KNOB_OFFSET = 27; // rotate knob center above the top edge (mirrors setFrame's DOM)
 const KNOB_TOL = 8; // px proximity to the rotate knob
@@ -49,6 +52,19 @@ interface RotateState {
    *  the pointer as it orbits the center. */
   grip: number;
   rotation: number; // current (snapped) preview rotation
+}
+
+/** A press inside the frame, armed as a POSSIBLE move: it only becomes one
+ *  after MOVE_TOL px of travel — under that it stays a click (select). */
+interface MoveState {
+  pos: number;
+  kind: 'inline' | 'float';
+  base: Rect; // frame rect when the press landed (page-local)
+  pageIndex: number;
+  rotation: number;
+  startX: number;
+  startY: number;
+  active: boolean; // travelled past MOVE_TOL — the gesture is a move now
 }
 
 /** `point` mapped into the frame's unrotated local space (inverse-rotate
@@ -232,6 +248,27 @@ function imageNodeAt(state: State, pos: number): boolean {
   return state.doc.nodeAt(pos)?.type.name === 'image';
 }
 
+/** The resolved float record for the image node at `pos` — the layout's view
+ *  of it, carrying the effective offsets a move commits against. */
+function floatRecordFor(
+  layout: ResolvedLayout | null,
+  pos: number,
+): { effHOffset?: number; effVOffset?: number } | null {
+  if (!layout) return null;
+  for (const page of layout.pages) {
+    const floats = [...(page.floats ?? [])];
+    const visit = (t: ResolvedTable) => {
+      for (const cell of t.cells) {
+        floats.push(...(cell.floats ?? []));
+        cell.tables?.forEach(visit);
+      }
+    };
+    page.tables?.forEach(visit);
+    for (const f of floats) if (f.pos === pos) return f;
+  }
+  return null;
+}
+
 /**
  * Internal plugin: click an image to select it — a frame with 8 resize handles
  * and a rotate knob appears (DOM overlay; the content canvas is untouched).
@@ -247,6 +284,7 @@ export function imageResizePlugin(): EditorPlugin {
   let sel: Selected | null = null;
   let drag: DragState | null = null;
   let rot: RotateState | null = null;
+  let mv: MoveState | null = null;
   let hoverCursor = false; // we set the canvas cursor (so we may clear it)
 
   const setCursor = (c: PluginContext, cursor: string | null): void => {
@@ -277,6 +315,52 @@ export function imageResizePlugin(): EditorPlugin {
         .setNodeAttribute(sel.pos, 'width', w)
         .setNodeAttribute(sel.pos, 'height', h),
     );
+  };
+
+  /** Commit a move — one transaction, so ⌘Z restores the old position.
+   *
+   *  A FLOAT moves by attrs: `hOffset = effHOffset + dx` (per the layout's
+   *  resolved record, so alignment floats convert to an explicit offset the
+   *  way Word pins them when dragged), `vOffset` likewise; hAlign is dropped.
+   *  The exporter already writes these back as wp:anchor posOffset, so a
+   *  dragged position survives save/re-open in Word.
+   *
+   *  An INLINE image has no coordinates — it is a character. Moving it is a
+   *  document restructure: delete at the old position, insert at the drop
+   *  position (dropPoint finds the nearest valid slot). Export needs nothing:
+   *  document order IS the position. */
+  const commitMove = (
+    c: PluginContext,
+    m: MoveState,
+    ev: EditorPointerEvent,
+  ): void => {
+    const node = c.state.doc.nodeAt(m.pos);
+    if (node?.type.name !== 'image') return;
+    if (m.kind === 'float') {
+      // Same page only: a float's offsets are anchored to its paragraph, and
+      // dragging across pages is re-anchoring — out of this gesture's scope.
+      if (!ev.point || ev.point.pageIndex !== m.pageIndex) return;
+      const rec = floatRecordFor(c.layout, m.pos);
+      const float = node.attrs['float'] as Record<string, unknown> | null;
+      if (!rec || rec.effHOffset === undefined || !float) return;
+      const dx = ev.point.x - m.startX;
+      const dy = ev.point.y - m.startY;
+      if (Math.round(dx) === 0 && Math.round(dy) === 0) return;
+      const next = { ...float };
+      delete next['hAlign'];
+      next['hOffset'] = Math.round(rec.effHOffset + dx);
+      next['vOffset'] = Math.round((rec.effVOffset ?? 0) + dy);
+      c.dispatch(c.state.tr.setNodeAttribute(m.pos, 'float', next));
+      return;
+    }
+    if (ev.pos == null) return;
+    const tr = c.state.tr.delete(m.pos, m.pos + node.nodeSize);
+    const target = tr.mapping.map(ev.pos);
+    const point = dropPoint(tr.doc, target, new Slice(Fragment.from(node), 0, 0));
+    if (point == null || point === m.pos) return; // no valid slot / same place
+    tr.insert(point, node);
+    c.dispatch(tr);
+    sel = { pos: point };
   };
 
   /** Commit the rotate gesture's final angle — likewise one transaction. */
@@ -334,9 +418,10 @@ export function imageResizePlugin(): EditorPlugin {
       if (ev.key !== 'Escape') return false;
       // Mid-gesture: abandon the preview, snap the frame back to the layout
       // (nothing was dispatched, so there is nothing to undo).
-      if (drag || rot) {
+      if (drag || rot || mv) {
         drag = null;
         rot = null;
+        mv = null;
         setCursor(c, null);
         refresh(c);
         return true;
@@ -367,6 +452,39 @@ export function imageResizePlugin(): EditorPlugin {
               rotation: rot.rotation,
               label: `${Math.round(rot.rotation)}°`,
             });
+          }
+          return true;
+        }
+        if (mv) {
+          if (ev.point) {
+            const samePage = ev.point.pageIndex === mv.pageIndex;
+            // Leaving the page IS travel: an inline image may be dropped on
+            // any page, so activation must not require same-page geometry —
+            // requiring it silently downgraded every cross-page drag to a
+            // click (the first move step had already left the page).
+            if (
+              !mv.active &&
+              (!samePage ||
+                Math.hypot(ev.point.x - mv.startX, ev.point.y - mv.startY) >=
+                  MOVE_TOL)
+            ) {
+              mv.active = true;
+              setCursor(c, 'grabbing');
+            }
+            if (mv.active && samePage) {
+              // DOM-only preview, like resize: the frame ghost follows the
+              // pointer; document and canvas stay untouched until the drop.
+              // (Page-local deltas mean nothing across pages — off-page the
+              // frame simply holds its last position.)
+              c.setFrame({
+                pageIndex: mv.pageIndex,
+                x: mv.base.x + (ev.point.x - mv.startX),
+                y: mv.base.y + (ev.point.y - mv.startY),
+                width: mv.base.width,
+                height: mv.base.height,
+                ...(mv.rotation ? { rotation: mv.rotation } : {}),
+              });
+            }
           }
           return true;
         }
@@ -424,7 +542,17 @@ export function imageResizePlugin(): EditorPlugin {
               return false;
             }
             const handle = handleAt(base, local.x, local.y);
-            setCursor(c, handle ? cursorFor(handle, rotation) : null);
+            const inside =
+              local.x >= base.x &&
+              local.x <= base.x + base.width &&
+              local.y >= base.y &&
+              local.y <= base.y + base.height;
+            // Inside the frame body (not on a handle): the image can be
+            // dragged to move — say so.
+            setCursor(
+              c,
+              handle ? cursorFor(handle, rotation) : inside ? 'move' : null,
+            );
             return false;
           }
           setCursor(c, null);
@@ -475,7 +603,10 @@ export function imageResizePlugin(): EditorPlugin {
             }
           }
         }
-        // …otherwise a click selects (or deselects) an image.
+        // …otherwise a click selects (or deselects) an image. The press is
+        // ALSO armed as a possible move: past MOVE_TOL px it drags the image
+        // (select-and-drag in one motion, as Word does); under it, it stays
+        // a click and only the selection above happens.
         const hit = imageAtPoint(c.layout as ResolvedLayout, ev.point);
         if (hit) {
           sel = { pos: hit.pos };
@@ -486,6 +617,16 @@ export function imageResizePlugin(): EditorPlugin {
               ? { rotation: rotationAt(c.state, hit.pos) }
               : {}),
           });
+          mv = {
+            pos: hit.pos,
+            kind: hit.kind,
+            base: { ...hit.rect },
+            pageIndex: hit.pageIndex,
+            rotation: rotationAt(c.state, hit.pos),
+            startX: ev.point.x,
+            startY: ev.point.y,
+            active: false,
+          };
           return true; // claim: keep the caret where it is
         }
         if (sel) {
@@ -497,6 +638,17 @@ export function imageResizePlugin(): EditorPlugin {
       }
 
       if (ev.type === 'up') {
+        if (mv) {
+          const m = mv;
+          mv = null;
+          if (!m.active) return true; // stayed a click — selection already set
+          setCursor(c, null);
+          commitMove(c, m, ev);
+          // The commit's relayout refresh re-anchors the frame; a cancelled
+          // move (cross-page, no slot) snaps it back the same way.
+          refresh(c);
+          return true;
+        }
         if (rot) {
           const r = rot;
           rot = null;

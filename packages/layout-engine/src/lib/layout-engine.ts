@@ -1127,7 +1127,13 @@ function layoutFlow(
         // Vertical: relative to the anchor paragraph's top (margin/page
         // degrade to the same — a cell has no margin band of its own).
         const fy = y + (f.vOffset ?? 0);
-        floats.push(resolveFloat(f, fx, fy, ctx));
+        floats.push({
+          ...resolveFloat(f, fx, fy, ctx),
+          // Effective offsets for drag-to-move (translation-invariant — the
+          // cell-float shift sites need no bookkeeping).
+          effHOffset: fx - contentLeft,
+          effVOffset: f.vOffset ?? 0,
+        });
       }
       for (const d of layoutParagraph(block, contentLeft, contentRight, ctx)) {
         lines.push(draftToLine(d, y));
@@ -1893,7 +1899,14 @@ function placeBlocks(
           : f.vRel === 'margin'
             ? top + (f.vOffset ?? 0)
             : yPara + (f.vOffset ?? 0);
-      pageFloats.push(resolveFloat(f, fx, fy, ctx));
+      pageFloats.push({
+        ...resolveFloat(f, fx, fy, ctx),
+        // Effective offsets for drag-to-move: what hOffset/vOffset would put
+        // the float at exactly this spot. For an hAlign float this is the
+        // alignment resolved to a number, which is what a drag pins it to.
+        effHOffset: fx - baseL,
+        effVOffset: f.vOffset ?? 0,
+      });
       colDirty = true;
       if (f.wrap === 'square') {
         exclusions.push({

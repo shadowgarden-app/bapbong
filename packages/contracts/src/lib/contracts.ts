@@ -475,6 +475,14 @@ export interface ResolvedFloat {
   lines?: LayoutLine[];
   /** Clockwise degrees around the box center (paint-only). */
   rotation?: number;
+  /** The offsets that WOULD render the float exactly here — i.e. resolved
+   *  against its anchor bases (hRel/vRel, alignment included) at layout time.
+   *  Translation-invariant, so the many places that shift a cell's floats
+   *  need no bookkeeping. A drag-to-move gesture commits
+   *  `hOffset = effHOffset + dx` (dropping hAlign — dragging pins the float
+   *  to an explicit position, as Word does). */
+  effHOffset?: number;
+  effVOffset?: number;
   /** Absolute PM position of the carrying image node (absent in chrome). */
   pos?: number;
 }
