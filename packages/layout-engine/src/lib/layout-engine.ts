@@ -1082,6 +1082,7 @@ function resolveFloat(
   if (f.pos != null) rf.pos = f.pos;
   if (f.rotation) rf.rotation = f.rotation;
   if (f.shape) rf.shape = f.shape;
+  if (f.behind) rf.behind = true;
   if (f.content && f.content.length > 0) {
     const inset = f.inset ?? TEXTBOX_INSET;
     const right = Math.max(inset.l + MIN_BAND, f.width - inset.r);

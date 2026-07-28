@@ -241,9 +241,14 @@ export class CanvasPainter {
       this.chromeFor(i, 'footer'),
     ]) {
       if (!chrome) continue;
+      // Watermarks live in headers as behindDoc anchors — under the chrome
+      // text; the rest stays on top as before.
+      for (const f of chrome.floats ?? [])
+        if (f.behind) this.paintFloat(f, 0, o, pageInfo);
       for (const line of chrome.lines) this.paintLine(line, 0, o, pageInfo);
       for (const table of chrome.tables) this.paintTable(table, 0, o, pageInfo);
-      for (const f of chrome.floats ?? []) this.paintFloat(f, 0, o, pageInfo);
+      for (const f of chrome.floats ?? [])
+        if (!f.behind) this.paintFloat(f, 0, o, pageInfo);
     }
   }
 
@@ -336,8 +341,13 @@ export class CanvasPainter {
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, yOffset + 0.5, page.width - 1, page.height - 1);
 
-    // Floating images sit behind the text (text already flows around them).
-    for (const f of page.floats ?? []) this.paintFloat(f, yOffset, o, pageInfo);
+    // Two-pass float painting, Word's z-order: only behindDoc drawings sit
+    // under the text; everything else paints OVER it (see below). Painting
+    // all floats first was wrong two ways — it hid Word's default-front
+    // drawings under overlapping text, and it disagreed with the cell/chrome
+    // paths, which already painted floats on top.
+    for (const f of page.floats ?? [])
+      if (f.behind) this.paintFloat(f, yOffset, o, pageInfo);
 
     // Selection sits under the text.
     ctx.fillStyle = o.selectionColor;
@@ -378,6 +388,10 @@ export class CanvasPainter {
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);
     for (const table of page.tables ?? [])
       this.paintTable(table, yOffset, o, pageInfo);
+
+    // Anchored drawings without behindDoc: over the text (Word's default).
+    for (const f of page.floats ?? [])
+      if (!f.behind) this.paintFloat(f, yOffset, o, pageInfo);
 
     // Plugin underline/strike decorations over the text.
     for (const d of o.decorations) {
@@ -708,6 +722,10 @@ export class CanvasPainter {
         ctx.fillRect(cell.x, yOffset + cell.y, cell.width, cell.height);
       }
     }
+    // behindDoc drawings in cells: under the cell text, over the fills.
+    for (const cell of table.cells)
+      for (const f of cell.floats ?? [])
+        if (f.behind) this.paintFloat(f, yOffset, o, pageInfo);
     // Cell content next: run shading/highlight boxes can reach the cell edge,
     // so borders must stroke AFTER them (Word paints grid lines on top).
     for (const cell of table.cells) {
@@ -761,7 +779,7 @@ export class CanvasPainter {
     // non-behindDoc drawings over the table grid).
     for (const cell of table.cells) {
       for (const f of cell.floats ?? [])
-        this.paintFloat(f, yOffset, o, pageInfo);
+        if (!f.behind) this.paintFloat(f, yOffset, o, pageInfo);
     }
   }
 

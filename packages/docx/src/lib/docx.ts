@@ -326,6 +326,10 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
       : 'none'; // wrapNone / absent: paints without affecting text
 
   const float: Record<string, unknown> = { wrap };
+  // z-order: behindDoc="1" puts the drawing UNDER the text (watermarks, page
+  // backgrounds). Word's default is in front. Dropping this flag on import is
+  // what silently pulled behind-text images in front of the text on save.
+  if (attrOf(anchor, 'behindDoc') === '1') float['behind'] = true;
 
   const posH = child(anchor, 'wp:positionH');
   if (posH) {

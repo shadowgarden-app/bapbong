@@ -171,6 +171,9 @@ export interface FlowFloat {
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
   wrap: 'square' | 'topAndBottom' | 'none';
+  /** wp:anchor behindDoc="1" — paint UNDER the text (watermarks). Absent =
+   *  Word's default: anchored drawings paint over the text. */
+  behind?: boolean;
   /** Horizontal: alignment within hRel, or an offset from its left edge. */
   hAlign?: 'left' | 'right' | 'center';
   hOffset?: number;
@@ -483,6 +486,8 @@ export interface ResolvedFloat {
    *  to an explicit position, as Word does). */
   effHOffset?: number;
   effVOffset?: number;
+  /** Paint under the text (wp:anchor behindDoc) — see FlowFloat.behind. */
+  behind?: boolean;
   /** Absolute PM position of the carrying image node (absent in chrome). */
   pos?: number;
 }

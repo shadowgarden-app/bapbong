@@ -198,6 +198,40 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(tbl.child(1).child(0).textContent).toBe('wide');
   });
 
+  it('round-trips behindDoc (float.behind) both ways', async () => {
+    const img = (behind: boolean) =>
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: `data:image/png;base64,${PNG_1PX}`,
+          width: 10,
+          height: 10,
+          float: {
+            wrap: 'none',
+            hOffset: 50,
+            vOffset: 60,
+            ...(behind ? { behind: true } : {}),
+          },
+        }),
+      ]);
+    const doc = schema.node('doc', null, [img(true), img(false)]);
+    const bytes = await exportDocx(doc);
+    const xml = await (await JSZip.loadAsync(bytes))
+      .file('word/document.xml')!
+      .async('string');
+    // Hardcoding behindDoc="0" was silently pulling behind-text images in
+    // front of the text on every save.
+    expect((xml.match(/behindDoc="1"/g) ?? []).length).toBe(1);
+    expect((xml.match(/behindDoc="0"/g) ?? []).length).toBe(1);
+
+    const { doc: back } = await importDocx(bytes);
+    const floats: unknown[] = [];
+    back.descendants((n) => {
+      if (n.type.name === 'image') floats.push(n.attrs['float']);
+    });
+    expect(floats[0]).toMatchObject({ wrap: 'none', behind: true });
+    expect((floats[1] as Record<string, unknown>)['behind']).toBeUndefined();
+  });
+
   it('round-trips custom tab stops (w:tabs)', async () => {
     const tabs = [
       { pos: 200, val: 'right', leader: 'dot' },

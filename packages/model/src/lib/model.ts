@@ -186,7 +186,8 @@ export const schema = new Schema({
         height: { default: null },
         // wp:anchor (floating image): { wrap: 'square'|'topAndBottom'|'none',
         // hAlign?, hOffset?, hRel?, vOffset?, vRel?, distL?, distR?, distT?,
-        // distB? } in px, or null for inline images. Importer-set.
+        // distB?, behind? } in px (behind = behindDoc: paint under the text),
+        // or null for inline images. Importer-set.
         float: { default: null },
         // Drawn vector shape (wps rect / straight connector) riding this box:
         // { kind: 'rect'|'line', stroke?, strokeWidth?, fill?, flipV? } — src

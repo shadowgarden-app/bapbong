@@ -352,7 +352,7 @@ describe('CanvasPainter', () => {
     expect(widthSets).toBe(1);
   });
 
-  it('paints page floats behind the text once loaded', async () => {
+  it('paints floats in Word z-order: default over the text, behindDoc under', async () => {
     class FakeImage {
       onload: (() => void) | null = null;
       complete = false;
@@ -367,6 +367,7 @@ describe('CanvasPainter', () => {
     }
     vi.stubGlobal('Image', FakeImage);
     try {
+      // Default (no behind flag): the anchored drawing paints OVER the text.
       const { painter, container } = setup();
       painter.paint(
         { pages: [{ ...page([helloLine]), floats: [{ x: 140, y: 20, width: 80, height: 40, src: 'f' }] }] },
@@ -376,10 +377,21 @@ describe('CanvasPainter', () => {
       const ctx = ctxAt(container, 0);
       const draw = ctx.of('drawImage')[0];
       expect(draw.args.slice(1)).toEqual([140, 20, 80, 40]);
-      // behind the text: drawImage precedes the repaint's fillText
       const lastDraw = ctx.calls.lastIndexOf(ctx.of('drawImage').at(-1) as never);
       const lastText = ctx.calls.lastIndexOf(ctx.of('fillText').at(-1) as never);
-      expect(lastDraw).toBeLessThan(lastText);
+      expect(lastDraw).toBeGreaterThan(lastText);
+
+      // behindDoc: under the text (watermarks).
+      const b = setup();
+      b.painter.paint(
+        { pages: [{ ...page([helloLine]), floats: [{ x: 140, y: 20, width: 80, height: 40, src: 'f', behind: true }] }] },
+        { devicePixelRatio: 1 },
+      );
+      await new Promise((r) => setTimeout(r, 0));
+      const bctx = ctxAt(b.container, 0);
+      const bDraw = bctx.calls.lastIndexOf(bctx.of('drawImage').at(-1) as never);
+      const bText = bctx.calls.lastIndexOf(bctx.of('fillText').at(-1) as never);
+      expect(bDraw).toBeLessThan(bText);
     } finally {
       vi.unstubAllGlobals();
     }

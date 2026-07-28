@@ -145,6 +145,7 @@ function anchorXml(
   cy: number,
   n: number,
   graphic: string,
+  docPr?: string,
 ): string {
   const dist = (k: string) => pxToEmu((float[k] as number) ?? 0);
   const hRel = float['hRel'] === 'page' ? 'page' : 'column';
@@ -166,13 +167,14 @@ function anchorXml(
         : '<wp:wrapSquare wrapText="bothSides"/>';
   return (
     `<wp:anchor distT="${dist('distT')}" distB="${dist('distB')}" distL="${dist('distL')}" distR="${dist('distR')}" ` +
-    `simplePos="0" relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">` +
+    `simplePos="0" relativeHeight="251658240" behindDoc="${float['behind'] ? 1 : 0}" locked="0" layoutInCell="1" allowOverlap="1">` +
     `<wp:simplePos x="0" y="0"/>` +
     `<wp:positionH relativeFrom="${hRel}">${posH}</wp:positionH>` +
     `<wp:positionV relativeFrom="${vRel}">${posV}</wp:positionV>` +
     `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>` +
     wrap +
-    `<wp:docPr id="${n}" name="Shape ${n}"/><wp:cNvGraphicFramePr/>` +
+    (docPr ?? `<wp:docPr id="${n}" name="Shape ${n}"/>`) +
+    `<wp:cNvGraphicFramePr/>` +
     graphic +
     `</wp:anchor>`
   );
@@ -259,16 +261,23 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   // still renders, so nothing looks wrong; only screen readers lose it.
   const alt = (node.attrs['alt'] as string | null) ?? '';
   const descr = alt ? ` descr="${esc(alt)}"` : '';
-  return (
-    `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
-    `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Picture ${n}"${descr}/>` +
+  const graphic =
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
     `<pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
     `<pic:blipFill>${blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
     `<pic:spPr><a:xfrm${rotAttr(node)}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
-    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
-  );
+    `</pic:pic></a:graphicData></a:graphic>`;
+  const docPr = `<wp:docPr id="${n}" name="Picture ${n}"${descr}/>`;
+  // A floating BITMAP goes out as wp:anchor like the drawn shapes always did —
+  // the unconditional wp:inline here flattened every floating picture to
+  // inline on save (shapes were fine; they take the shapeXml path).
+  const float = node.attrs['float'] as Record<string, unknown> | null;
+  const body = float
+    ? anchorXml(float, cx, cy, n, graphic, docPr)
+    : `<wp:inline distT="0" distB="0" distL="0" distR="0">` +
+      `<wp:extent cx="${cx}" cy="${cy}"/>${docPr}${graphic}</wp:inline>`;
+  return `<w:r><w:drawing>${body}</w:drawing></w:r>`;
 }
 
 /** One inline node → its run XML (excluding the link wrapper). */
