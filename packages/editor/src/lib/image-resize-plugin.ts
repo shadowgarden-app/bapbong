@@ -364,6 +364,54 @@ export function floatAtPagePoint(
   return next;
 }
 
+/** The page on which the paragraph containing `pos` STARTS. That page — not
+ *  the page under the pointer — is where the engine renders the paragraph's
+ *  floats (they register at the paragraph's top). Null when unknown (pos not
+ *  inside a top-level textblock, or not laid out). */
+function paragraphStartPage(
+  layout: ResolvedLayout | null,
+  state: State,
+  pos: number,
+): number | null {
+  if (!layout) return null;
+  const $pos = state.doc.resolve(pos);
+  if (!$pos.parent.isTextblock) return null;
+  const start = $pos.start();
+  for (const page of layout.pages)
+    for (const line of page.lines)
+      if (
+        line.from != null &&
+        line.to != null &&
+        line.from <= start &&
+        start <= line.to
+      )
+        return page.index;
+  return null;
+}
+
+/** A drop position on `pageIndex` whose paragraph also STARTS there —
+ *  `preferred` when it qualifies, else the first such paragraph on the page.
+ *  Anchoring a float to a paragraph that began on an EARLIER page renders it
+ *  on that earlier page at the new margin offsets (the "image bounced to
+ *  page 1 at page-2's position" report). */
+function dropPosOnPage(
+  layout: ResolvedLayout | null,
+  state: State,
+  pageIndex: number,
+  preferred: number,
+): number | null {
+  if (paragraphStartPage(layout, state, preferred) === pageIndex)
+    return preferred;
+  const page = layout?.pages[pageIndex];
+  if (!page) return null;
+  for (const line of page.lines) {
+    if (line.from == null) continue;
+    if (paragraphStartPage(layout, state, line.from) === pageIndex)
+      return line.from;
+  }
+  return null;
+}
+
 /** The resolved float record for the image node at `pos` — the layout's view
  *  of it, carrying the effective offsets a move commits against. */
 function floatRecordFor(
@@ -511,14 +559,27 @@ export function imageResizePlugin(): EditorPlugin {
       // paragraph on the target page (Word re-anchors on drag too). One
       // transaction: relocate the node like an inline move, with offsets
       // re-pinned under the pointer on the new page.
+      //
+      // "On the target page" means the paragraph STARTS there: ev.pos can
+      // resolve into a paragraph that began on the previous page (a straddling
+      // paragraph, or dropPoint sliding to the neighbour), and floats render
+      // on their paragraph's starting page — the image would bounce back to
+      // page 1 at page-2's offsets. No qualifying paragraph → cancel.
       if (ev.pos == null) return;
+      const anchor = dropPosOnPage(
+        c.layout,
+        c.state,
+        ev.point.pageIndex,
+        ev.pos,
+      );
+      if (anchor == null) return;
       const moved = node.type.create(
         { ...node.attrs, float: floatAtPagePoint(float, nx, ny, pg) },
         null,
         node.marks,
       );
       const tr = c.state.tr.delete(m.pos, m.pos + node.nodeSize);
-      const target = tr.mapping.map(ev.pos);
+      const target = tr.mapping.map(anchor);
       const point = dropPoint(
         tr.doc,
         target,

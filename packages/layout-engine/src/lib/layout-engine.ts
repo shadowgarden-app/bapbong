@@ -1949,6 +1949,35 @@ function placeBlocks(
 
   /** Wrap + place a paragraph line by line, flowing around active floats. */
   const placeParaBanded = (flow: FlowParagraph) => {
+    // A paragraph's floats belong on the page its FIRST LINE lands on — but
+    // that page-break decision normally happens inside the band callback,
+    // AFTER registerFloats has already pushed the floats into the CURRENT
+    // page at the current cursor. A paragraph pushed to the next page then
+    // left its floats behind, positioned in the previous page's space (the
+    // "image bounced to the top of page 1 at page-2's offsets" report). So
+    // for float-carrying paragraphs, settle the start first: run the same
+    // break/skip loop the band callback would, with a nominal line height —
+    // deliberately WITHOUT this paragraph's own floats, whose exclusions
+    // don't exist yet (same rule as Word: the anchor's page is decided by
+    // the text position, then the drawing follows the anchor).
+    if (flow.floats && flow.floats.length > 0) {
+      const bm = ctx.metrics ? ctx.metrics(ctx.base) : null;
+      const estH = bm
+        ? bm.ascent + bm.descent
+        : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
+      for (;;) {
+        if (y + estH > colBottom() && colDirty) {
+          breakBand();
+          continue;
+        }
+        if (bandAt(y, estH)) break;
+        const blockers = exclusions.filter(
+          (ex) => ex.top < y + estH && ex.bottom > y,
+        );
+        if (blockers.length === 0) break;
+        y = Math.min(...blockers.map((ex) => ex.bottom));
+      }
+    }
     registerFloats(flow, y);
     wrapParagraph(
       flow,
