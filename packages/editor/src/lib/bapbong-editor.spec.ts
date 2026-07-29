@@ -1,5 +1,5 @@
 import { Schema } from 'prosemirror-model';
-import { BapbongEditor, composeSchema, type EditorPlugin } from './bapbong-editor';
+import { BapbongEditor, composeSchema, orderPluginsByUses, type EditorPlugin } from './bapbong-editor';
 
 const baseSchema = new Schema({
   nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*' }, text: {} },
@@ -48,5 +48,29 @@ describe('BapbongEditor', () => {
     expect(probe.name).toBe('probe');
     expect(typeof probe.setup).toBe('function');
     expect(setupCalled).toBe(false); // setup runs only when the editor calls it
+  });
+});
+
+describe('orderPluginsByUses', () => {
+  const P = (name: string, uses?: string[]): EditorPlugin => ({ name, ...(uses ? { uses } : {}) });
+
+  it('puts dependencies before dependents', () => {
+    const order = orderPluginsByUses([P('c', ['b']), P('a'), P('b', ['a'])]);
+    expect(order.map((p) => p.name)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('leaves independent plugins in their given order', () => {
+    // Most plugins declare nothing; registration order must stay meaningful
+    // (the pointer hook depends on it).
+    const order = orderPluginsByUses([P('x'), P('y'), P('z')]);
+    expect(order.map((p) => p.name)).toEqual(['x', 'y', 'z']);
+  });
+
+  it('rejects a dependency that is not registered — at registration', () => {
+    expect(() => orderPluginsByUses([P('a', ['ghost'])])).toThrow(/not registered/);
+  });
+
+  it('rejects a dependency cycle', () => {
+    expect(() => orderPluginsByUses([P('a', ['b']), P('b', ['a'])])).toThrow(/cycle/);
   });
 });

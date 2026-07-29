@@ -291,8 +291,10 @@ export class EditorPlayground implements OnDestroy {
       });
     });
     // Cell-block action icon → cell-properties dialog (applied to the block).
-    editor.tableSelection.onAction((block) =>
-      this.openCellPropsForBlock(block),
+    // onPlugin, not plugin(): instances are rebuilt per document, so a
+    // one-shot subscription would die at the first load.
+    editor.onPlugin('table-selection', (p) =>
+      p.onAction((block) => this.openCellPropsForBlock(block)),
     );
     // Menubar / toolbar / find-bar: hand bapbong-ui the host elements + the
     // editor; it renders from editor.commands / editor.find and wires everything
@@ -450,7 +452,7 @@ export class EditorPlayground implements OnDestroy {
     // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace,
     // pinned to the canvas viewport's top-right (like Google Docs). Uses the
     // lib's English defaults.
-    this.findDialog = createFindDialog(editor.find, {
+    this.findDialog = createFindDialog(() => editor.plugin('find'), {
       anchor: () =>
         this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
     });
@@ -786,7 +788,7 @@ export class EditorPlayground implements OnDestroy {
     const cell = cellAt(ed.state);
     if (cell) {
       // Act on the selected block if there is one, else the clicked cell (1×1).
-      const block = ed.tableSelection.block() ?? {
+      const block = ed.plugin('table-selection').block() ?? {
         cells: [{ pos: cell.pos, row: 0, col: 0 }],
         rows: 1,
         cols: 1,
@@ -864,7 +866,7 @@ export class EditorPlayground implements OnDestroy {
           }
         }
         if (tr.docChanged) ed.dispatch(tr);
-        ed.tableSelection.clear();
+        ed.plugin('table-selection').clear();
       },
     });
   }

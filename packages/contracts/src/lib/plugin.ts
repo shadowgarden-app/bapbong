@@ -65,6 +65,24 @@ export interface EditorPointerEvent {
   altKey: boolean;
 }
 
+/**
+ * Typed handles for plugins that expose a public API. A plugin AUGMENTS this
+ * interface from its own module:
+ *
+ *   declare module '@shadow-garden/bapbong-contracts' {
+ *     interface EditorPluginHandles { find: FindPlugin }
+ *   }
+ *
+ * so `editor.plugin('find')` (host) and `ctx.plugin('find')` (a plugin that
+ * declared it in `uses`) come back fully typed — and the editor core never
+ * hardcodes a plugin name. Plugins without a public API don't register here.
+ */
+// Empty BY DESIGN: this is the augmentation target. Plugins fill it from their
+// own modules, which is what keeps the core free of plugin names.
+/* eslint-disable @typescript-eslint/no-empty-object-type, @typescript-eslint/no-empty-interface -- rule renamed across the eslint versions in this workspace; disable both names */
+export interface EditorPluginHandles {}
+/* eslint-enable @typescript-eslint/no-empty-object-type, @typescript-eslint/no-empty-interface */
+
 /** A keyboard event offered to plugins (via {@link EditorPlugin.onKey})
  *  before the editor's own keymaps see it. */
 export interface EditorKeyEvent {
@@ -166,6 +184,13 @@ export interface PluginContext {
    *  or null to clear. Page-local geometry; the editor renders it as DOM
    *  overlay in the canvas stack — no canvas repaint. */
   setFrame(frame: OverlayFrame | null): void;
+  /** Another plugin's public handle — ONLY names this plugin declared in
+   *  `uses` (anything else throws, by design). Resolved live against the
+   *  current document's plugin set: instances are document-scoped, so a
+   *  cached reference would go stale on the next load — don't keep one. */
+  plugin<K extends keyof EditorPluginHandles & string>(
+    name: K,
+  ): EditorPluginHandles[K];
   /** Show a small action button straddling a page-local point (e.g. a selected
    *  cell block's top-right), invoking `onActivate` on click/tap; null clears it.
    *  A touch-friendly trigger where hover/right-click aren't available. */
@@ -185,6 +210,12 @@ export interface PluginContext {
 export interface EditorPlugin {
   /** Stable identifier (also used for diagnostics). */
   readonly name: string;
+  /** Names of the plugins this one calls through `ctx.plugin()`. Declared,
+   *  not discovered: registration fails fast when a name is missing, setup
+   *  order follows the dependency graph, and `ctx.plugin()` refuses anything
+   *  undeclared — so the graph in the code is the graph in truth. Omit when
+   *  the plugin stands alone (most do). */
+  readonly uses?: readonly string[];
   /** Schema contributions merged into the editor's document schema, so a plugin
    *  can own its marks/nodes. Composed once when a document loads. */
   schema?: {

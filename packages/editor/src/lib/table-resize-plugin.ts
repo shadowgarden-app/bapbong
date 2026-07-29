@@ -108,6 +108,12 @@ export function tableResizePlugin(): EditorPlugin {
     name: 'table-resize',
     setup(c) {
       ctx = c;
+      // Clear what this plugin can leave on screen (a column-resize guide
+      // mid-drag, the col-resize cursor) — see image-resize for the rule.
+      return () => {
+        c.setGuide(null);
+        c.setCursor(null);
+      };
     },
     onPointer(ev: EditorPointerEvent): boolean {
       const c = ctx;

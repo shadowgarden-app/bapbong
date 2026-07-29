@@ -26,6 +26,7 @@ import type {
   Command as EditorCommand,
   EditorChange,
   EditorPlugin,
+  EditorPluginHandles,
   EditorPointerEvent,
   MeasureMetrics,
   MeasureText,
@@ -67,8 +68,6 @@ export { RenderCore } from '@shadow-garden/bapbong-view';
 import { createBuiltins } from './built-in-plugins';
 import { Collection, perf } from '@shadow-garden/bapbong-contracts';
 import { defaultCommands } from '@shadow-garden/bapbong-commands';
-import type { FindPlugin } from './find-plugin';
-import type { TableSelectionPlugin } from './table-selection-plugin';
 export type {
   TableSelectionPlugin,
   CellBlock,
@@ -83,8 +82,15 @@ export interface BapbongEditorOptions {
    *  scroll-into-view). Defaults to `stack.closest('.canvas-wrap')`. */
   viewport?: HTMLElement;
   /** Editor plugins. Their lifecycle/event hooks are invoked by the core; they
-   *  reach back through the PluginContext handed to `setup`. */
-  plugins?: EditorPlugin[];
+   *  reach back through the PluginContext handed to `setup`.
+   *
+   *  Plugin instances are DOCUMENT-SCOPED: every `loadDocx` tears the current
+   *  set down and builds a fresh one, so per-document state (a selected
+   *  image's position, search matches) cannot survive into a document it
+   *  doesn't belong to. Pass a FACTORY to get that isolation (a new closure
+   *  per document); a bare instance is also accepted — it is re-setup() each
+   *  document and must treat setup/teardown as its reset points. */
+  plugins?: Array<EditorPlugin | (() => EditorPlugin)>;
   /** Engine-independent text measurer (e.g. font-file metrics). Defaults to a
    *  canvas-backed one; inject to make wrapping/pagination deterministic across
    *  WebView engines. Pair with {@link measureMetrics}. */
@@ -142,9 +148,13 @@ export class BapbongEditor {
   private inputStartedAt: number | null = null;
 
   /** Plugin registry keyed by name — built-ins (internal) + host (external). */
-  private readonly plugins: Collection<EditorPlugin>;
+  private plugins: Collection<EditorPlugin>;
   private readonly pluginTeardowns: Array<() => void> = [];
   private readonly pluginCtx: PluginContext;
+  /** The host's plugin entries as given — factories re-run per document. */
+  private readonly hostPluginEntries: Array<EditorPlugin | (() => EditorPlugin)>;
+  /** Per-plugin gated context (carries that plugin's `uses` allowlist). */
+  private pluginCtxs = new Map<EditorPlugin, PluginContext>();
   // Whether any plugin wants pointer events (gates the per-move offer).
   private pointerPlugins = false;
   // Unsubscribe from the core's late-font relayout signal.
@@ -195,20 +205,70 @@ export class BapbongEditor {
     // claimed pointerdown left focus outside the hidden editor (see onKeyDown).
     window.addEventListener('keydown', this.onKeyDown, true);
 
-    // Plugins: build their context and run setup (teardowns collected for destroy).
-    // Internal (built-in) plugins first, then external/host-provided plugins.
-    this.plugins = new Collection<EditorPlugin>(
-      [...createBuiltins(), ...(opts.plugins ?? [])],
-      {
-        idProperty: 'name',
-      },
-    );
-    this.pointerPlugins = [...this.plugins].some((p) => p.onPointer);
+    // Plugins are document-scoped: this first build serves the empty editor,
+    // and every loadDocx rebuilds (see buildPlugins).
+    this.hostPluginEntries = opts.plugins ?? [];
     this.pluginCtx = this.makePluginContext();
-    for (const p of this.plugins) {
-      const teardown = p.setup?.(this.pluginCtx);
+    this.plugins = new Collection<EditorPlugin>([], { idProperty: 'name' });
+    this.buildPlugins();
+  }
+
+  /** Tear down the current plugin set and build a fresh one.
+   *
+   *  Runs once at construction and again on every document load. Built-ins
+   *  come from their factories, so each document gets NEW closures — the only
+   *  structure in which per-document plugin state (a selected image's
+   *  position, search matches) cannot leak into a document it doesn't belong
+   *  to. No lifecycle flag to remember, nothing to opt into: the state's
+   *  container simply stops existing. Host entries passed as factories get
+   *  the same isolation; bare instances are re-setup() and documented to
+   *  treat setup/teardown as their reset points.
+   *
+   *  `uses` declarations are enforced here: unknown names fail registration
+   *  outright, and setup runs dependencies-first (cycles are an error). */
+  private buildPlugins(): void {
+    for (const t of this.pluginTeardowns) t();
+    this.pluginTeardowns.length = 0;
+    this.pluginCtxs = new Map();
+
+    const instances = [
+      ...createBuiltins(),
+      ...this.hostPluginEntries.map((e) => (typeof e === 'function' ? e() : e)),
+    ];
+    this.plugins = new Collection<EditorPlugin>(instances, { idProperty: 'name' });
+    this.pointerPlugins = instances.some((p) => p.onPointer);
+
+    for (const p of orderPluginsByUses(instances)) {
+      const ctx = this.ctxFor(p);
+      this.pluginCtxs.set(p, ctx);
+      const teardown = p.setup?.(ctx);
       if (teardown) this.pluginTeardowns.push(teardown);
     }
+    // Replay host bindings onto the new instances — without this, a listener
+    // registered once at startup would be lost at the first document load.
+    for (const bind of this.pluginBindings) bind(this);
+  }
+
+  /** The shared context plus this plugin's gated `plugin()` accessor.
+   *  Prototype inheritance, NOT a spread: the shared context exposes `state`
+   *  and `layout` as live getters, and spreading would invoke them here —
+   *  throwing before a document loads, and freezing a snapshot after. */
+  private ctxFor(p: EditorPlugin): PluginContext {
+    const gated = (name: string): never => {
+      if (!p.uses?.includes(name))
+        throw new Error(
+          `plugin "${p.name}" asked for "${name}" without declaring it in \`uses\``,
+        );
+      const dep = this.plugins.get(name);
+      if (!dep)
+        throw new Error(
+          `plugin "${p.name}" uses "${name}", which is not registered`,
+        );
+      return dep as never;
+    };
+    return Object.create(this.pluginCtx, {
+      plugin: { value: gated, enumerable: true },
+    }) as PluginContext;
   }
 
   /** The controlled surface handed to each plugin (live state + geometry). */
@@ -269,16 +329,46 @@ export class BapbongEditor {
     return this.core.schema;
   }
 
-  /** Built-in find-and-replace (always registered; the host renders the bar).
-   *  Cast is safe by construction — createBuiltins() always registers it. */
-  get find(): FindPlugin {
-    return this.plugins.get('find') as FindPlugin;
+  /** Host subscriptions that must survive document loads, replayed against
+   *  each fresh plugin set (see `onPlugin`). */
+  private readonly pluginBindings: Array<(e: BapbongEditor) => void> = [];
+
+  /** Bind to a plugin handle in a way that survives document loads.
+   *
+   *  Plugin instances are document-scoped, so a listener registered once at
+   *  startup (`editor.plugin('table-selection').onAction(…)`) would die at the
+   *  first `loadDocx` — silently, which is the worst way for a feature to
+   *  stop working. This runs `bind` now AND after every rebuild:
+   *
+   *    editor.onPlugin('table-selection', (p) => p.onAction(openCellProps));
+   *
+   *  Prefer it over `plugin()` for anything long-lived; `plugin()` stays right
+   *  for one-shot calls (`plugin('find').setQuery(q)`). */
+  onPlugin<K extends keyof EditorPluginHandles & string>(
+    name: K,
+    bind: (handle: EditorPluginHandles[K]) => void,
+  ): void {
+    const run = (e: BapbongEditor) => bind(e.plugin(name));
+    this.pluginBindings.push(run);
+    if (this.plugins.get(name)) run(this);
   }
 
-  /** Built-in table cell-range selection (drag across cells). The host opens
-   *  cell properties from its action icon / right-click via `onAction`. */
-  get tableSelection(): TableSelectionPlugin {
-    return this.plugins.get('table-selection') as TableSelectionPlugin;
+  /** A plugin's public handle by name — `editor.plugin('find').setQuery(…)`.
+   *
+   *  One generic accessor instead of a getter per plugin: the core stays
+   *  ignorant of which plugins exist, and a new one becomes reachable just by
+   *  augmenting `EditorPluginHandles` from its own module. Types come from
+   *  that augmentation, so the name is checked and autocompleted.
+   *
+   *  Resolves LIVE against the current document's plugin set. Don't cache the
+   *  result across a `loadDocx` — instances are document-scoped, and a held
+   *  reference would drive a torn-down plugin. */
+  plugin<K extends keyof EditorPluginHandles & string>(
+    name: K,
+  ): EditorPluginHandles[K] {
+    const p = this.plugins.get(name);
+    if (!p) throw new Error(`BapbongEditor: no plugin named "${name}"`);
+    return p as EditorPluginHandles[K];
   }
 
   /** Import a .docx, lay it out, and paint the first frame. Resolves with the
@@ -296,6 +386,11 @@ export class BapbongEditor {
       restoreState?: EditorState;
     },
   ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
+    // Fresh plugin instances for this document — per-document state (a
+    // selected image, search matches) belongs to the document it came from,
+    // and rebuilding is what makes that true structurally. Must precede
+    // composeSchema: the new instances contribute the schema.
+    this.buildPlugins();
     // Compose the doc schema from model's base + any plugin schema
     // contributions, and import against it (so plugin-owned marks/nodes parse).
     const composed = composeSchema(baseSchema, this.plugins);
@@ -1209,6 +1304,36 @@ export class BapbongEditor {
  * contribution (extra marks/nodes appended). Returns `null` when no plugin
  * contributes anything, so callers can keep using the base schema unchanged.
  */
+/** Setup order for a plugin set: dependencies (per `uses`) before dependents.
+ *  Throws on an unknown name or a cycle — at REGISTRATION, not first use, so
+ *  a bad graph cannot ship. Exported for tests. */
+export function orderPluginsByUses(plugins: EditorPlugin[]): EditorPlugin[] {
+  const byName = new Map(plugins.map((p) => [p.name, p]));
+  for (const p of plugins)
+    for (const dep of p.uses ?? [])
+      if (!byName.has(dep))
+        throw new Error(
+          `plugin "${p.name}" uses "${dep}", which is not registered`,
+        );
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+  const out: EditorPlugin[] = [];
+  const visit = (p: EditorPlugin): void => {
+    if (done.has(p.name)) return;
+    if (visiting.has(p.name))
+      throw new Error(
+        `plugin dependency cycle through "${p.name}" (check \`uses\`)`,
+      );
+    visiting.add(p.name);
+    for (const dep of p.uses ?? []) visit(byName.get(dep) as EditorPlugin);
+    visiting.delete(p.name);
+    done.add(p.name);
+    out.push(p);
+  };
+  for (const p of plugins) visit(p);
+  return out;
+}
+
 export function composeSchema(
   base: Schema,
   plugins: Iterable<EditorPlugin>,

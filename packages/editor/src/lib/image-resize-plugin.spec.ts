@@ -235,3 +235,22 @@ describe('boxFullyOnPage (cross-page arrival test)', () => {
     expect(boxFullyOnPage(100, 0, 300, 1056, page)).toBe(true); // chạm mép vẫn là trong
   });
 });
+
+describe('imageAt (stale position guard)', () => {
+  it('returns null past the end instead of throwing', async () => {
+    const { imageAt } = await import('./image-resize-plugin');
+    const { Schema } = await import('prosemirror-model');
+    const schema = new Schema({
+      nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*' }, text: {} },
+    });
+    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('hi')])]);
+    const state = { doc } as never;
+
+    // The bug this guards: a position kept from a LARGER document. PM's
+    // nodeAt throws RangeError here, killing the whole change cycle.
+    expect(() => doc.nodeAt(486)).toThrow();
+    expect(imageAt(state, 486)).toBeNull();
+    expect(imageAt(state, -1)).toBeNull();
+    expect(imageAt(state, 1)).toBeNull(); // in range, but it's text, not an image
+  });
+});

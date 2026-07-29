@@ -7,7 +7,7 @@ import type {
   ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
 import { imageAtPoint } from '@shadow-garden/bapbong-selection';
-import { Fragment, Slice } from 'prosemirror-model';
+import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { dropPoint } from 'prosemirror-transform';
 
 /** The editor state type, taken from the plugin context (no direct PM dep). */
@@ -243,9 +243,22 @@ function frameForPos(
   return null;
 }
 
+/** The image node at `pos`, or null — the ONE way this plugin reads a node.
+ *
+ *  `pos` is plugin-held state that outlives the document state it was taken
+ *  from: a doc can shrink under a live selection (an agent editing through
+ *  MCP, an undo) between one frame and the next. `doc.nodeAt` sounds
+ *  bounds-safe but THROWS a RangeError past the end, and a throw here kills
+ *  the whole change cycle. Out of range simply means "gone". */
+export function imageAt(state: State, pos: number): PMNode | null {
+  if (pos < 0 || pos >= state.doc.content.size) return null;
+  const node = state.doc.nodeAt(pos);
+  return node?.type.name === 'image' ? node : null;
+}
+
 /** Whether the doc still has an image node at `pos`. */
 function imageNodeAt(state: State, pos: number): boolean {
-  return state.doc.nodeAt(pos)?.type.name === 'image';
+  return imageAt(state, pos) !== null;
 }
 
 /** The wrap-mode strip under a selected image (the Google-Docs image bar).
@@ -376,6 +389,9 @@ function paragraphStartPage(
   pos: number,
 ): number | null {
   if (!layout) return null;
+  // `resolve` throws past the end, same hazard as nodeAt (see imageAt) — a
+  // drop position can outlive the document it was computed against.
+  if (pos < 0 || pos > state.doc.content.size) return null;
   const $pos = state.doc.resolve(pos);
   if (!$pos.parent.isTextblock) return null;
   const start = $pos.start();
@@ -461,7 +477,7 @@ export function imageResizePlugin(): EditorPlugin {
 
   /** The wrap strip for the image at `pos`, with the current mode lit. */
   const actionsFor = (c: PluginContext, pos: number) => {
-    const float = c.state.doc.nodeAt(pos)?.attrs['float'] as Record<
+    const float = imageAt(c.state, pos)?.attrs['float'] as Record<
       string,
       unknown
     > | null;
@@ -511,7 +527,7 @@ export function imageResizePlugin(): EditorPlugin {
     m: MoveState,
     ev: EditorPointerEvent,
   ): void => {
-    const node = c.state.doc.nodeAt(m.pos);
+    const node = imageAt(c.state, m.pos);
     if (node?.type.name !== 'image') return;
     if (m.kind === 'float') {
       if (!ev.point) return; // released in the page gap / outside — cancel
@@ -616,7 +632,7 @@ export function imageResizePlugin(): EditorPlugin {
   };
 
   const rotationAt = (state: State, pos: number): number =>
-    Number(state.doc.nodeAt(pos)?.attrs['rotation']) || 0;
+    Number(imageAt(state, pos)?.attrs['rotation']) || 0;
 
   /** Pointer angle around the rect center, in clockwise degrees where 0 points
    *  up (the knob's rest direction). */
@@ -630,13 +646,19 @@ export function imageResizePlugin(): EditorPlugin {
     name: 'image-resize',
     setup(c) {
       ctx = c;
-      return () => c.setFrame(null);
+      // Symmetric teardown: whatever this plugin can put on screen, it takes
+      // back. Instances are per-document, so a leftover frame or resize
+      // cursor would belong to a document that is no longer open.
+      return () => {
+        c.setFrame(null);
+        c.setCursor(null);
+      };
     },
     onFrameAction(id) {
       const c = ctx;
       if (!c || !sel || !imageNodeAt(c.state, sel.pos)) return false;
       if (!WRAP_ACTIONS.some((a) => a.id === id)) return false;
-      const node = c.state.doc.nodeAt(sel.pos);
+      const node = imageAt(c.state, sel.pos);
       const float = node?.attrs['float'] as Record<string, unknown> | null;
       // Margin-relative offsets of the CURRENT rendered rect: an inline→float
       // switch pins the image exactly where the user sees it.
@@ -671,7 +693,7 @@ export function imageResizePlugin(): EditorPlugin {
         !rot
       ) {
         if (!imageNodeAt(c.state, sel.pos)) return false;
-        const node = c.state.doc.nodeAt(sel.pos);
+        const node = imageAt(c.state, sel.pos);
         if (!node) return false;
         c.dispatch(c.state.tr.delete(sel.pos, sel.pos + node.nodeSize));
         sel = null;

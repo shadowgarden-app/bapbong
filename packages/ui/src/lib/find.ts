@@ -77,8 +77,20 @@ const STYLE = `
  * closing clears the search so highlights go away. The host (any framework)
  * just opens it from a menu / shortcut.
  */
-export function createFindDialog(find: FindHandle, options: FindDialogOptions = {}): FindDialogHandle {
+export function createFindDialog(
+  handle: FindHandle | (() => FindHandle),
+  options: FindDialogOptions = {},
+): FindDialogHandle {
   injectStyle('bb-ui-find-styles', STYLE);
+  // Resolve on EVERY use, never once. The editor rebuilds its plugins per
+  // document, so a handle captured here would drive a torn-down plugin after
+  // the first document switch — the panel would go quietly dead. Passing a
+  // getter (`() => editor.plugin('find')`) keeps it pointed at the live one.
+  const find: FindHandle = typeof handle === 'function'
+    ? new Proxy({} as FindHandle, {
+        get: (_t, prop: string) => (handle() as unknown as Record<string, unknown>)[prop],
+      })
+    : handle;
   const labels = { ...DEFAULT_LABELS, ...(options.labels ?? {}) };
 
   const root = document.createElement('div');

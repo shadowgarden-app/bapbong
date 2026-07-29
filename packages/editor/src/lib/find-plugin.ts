@@ -30,9 +30,17 @@ export interface FindPlugin extends EditorPlugin {
   onState(cb: (s: FindState) => void): () => void;
 }
 
+/** Register the handle's type so `editor.plugin('find')` is typed without the
+ *  core knowing this plugin exists. */
+declare module '@shadow-garden/bapbong-contracts' {
+  interface EditorPluginHandles {
+    find: FindPlugin;
+  }
+}
+
 /**
  * Find-and-replace as a built-in ("internal") editor plugin: the editor
- * instantiates it and exposes it as `editor.find`. Highlighting rides the
+ * instantiates it and reaches it as `editor.plugin('find')`. Highlighting rides the
  * decoration pipeline (read side); replace dispatches transactions (write side)
  * — exercising both halves of the plugin contract. Matches are recomputed only
  * when the query or the doc changes (cached for cheap per-scroll repaints).

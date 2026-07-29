@@ -25,7 +25,7 @@ export interface CellBlock {
   cols: number;
 }
 
-/** Richer handle the editor exposes as `editor.tableSelection`. */
+/** Richer handle reached as `editor.plugin('table-selection')`. */
 export interface TableSelectionPlugin extends EditorPlugin {
   /** Subscribe to the action trigger (icon tap / menu); receives the selected
    *  block (cells + grid size). Returns an unsubscribe. */
@@ -34,6 +34,14 @@ export interface TableSelectionPlugin extends EditorPlugin {
   block(): CellBlock | null;
   /** Clear the block selection + its overlay. */
   clear(): void;
+}
+
+/** Register the handle's type so `editor.plugin('table-selection')` is typed
+ *  without the core knowing this plugin exists. */
+declare module '@shadow-garden/bapbong-contracts' {
+  interface EditorPluginHandles {
+    'table-selection': TableSelectionPlugin;
+  }
 }
 
 interface CellHit {
@@ -137,6 +145,12 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
     name: 'table-selection',
     setup(c) {
       ctx = c;
+      // Without this, a cell-block highlight and its action button survived
+      // into the NEXT document — blue rectangles floating over unrelated text.
+      return () => {
+        c.setHighlight(null);
+        c.setActionButton(null);
+      };
     },
     onPointer(ev: EditorPointerEvent): boolean {
       const c = ctx;
