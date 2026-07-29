@@ -30,12 +30,19 @@ interface BorderHit {
 
 const near = (a: number, b: number) => Math.abs(a - b) < 1;
 
-function borderAt(layout: ResolvedLayout | null, point: PagePoint): BorderHit | null {
+function borderAt(
+  layout: ResolvedLayout | null,
+  point: PagePoint,
+): BorderHit | null {
   const page = layout?.pages[point.pageIndex];
   if (!page?.tables) return null;
   for (const table of page.tables) {
     if (point.y < table.y || point.y > table.y + table.height) continue;
-    if (point.x < table.x - EDGE_TOL || point.x > table.x + table.width + EDGE_TOL) continue;
+    if (
+      point.x < table.x - EDGE_TOL ||
+      point.x > table.x + table.width + EDGE_TOL
+    )
+      continue;
     const simple = table.cells.filter((c) => c.colspan === 1);
     for (const cell of simple) {
       if (point.y < cell.y || point.y > cell.y + cell.height) continue;
@@ -46,7 +53,16 @@ function borderAt(layout: ResolvedLayout | null, point: PagePoint): BorderHit | 
       if (rightCells.length === 0) return null; // outer-right edge → not resizable
       const leftX = Math.min(...leftCells.map((c) => c.x));
       const rightX = Math.max(...rightCells.map((c) => c.x + c.width));
-      return { pageIndex: point.pageIndex, borderX: rightEdge, leftX, rightX, leftCells, rightCells, tableY: table.y, tableHeight: table.height };
+      return {
+        pageIndex: point.pageIndex,
+        borderX: rightEdge,
+        leftX,
+        rightX,
+        leftCells,
+        rightCells,
+        tableY: table.y,
+        tableHeight: table.height,
+      };
     }
   }
   return null;
@@ -84,7 +100,12 @@ export function tableResizePlugin(): EditorPlugin {
   let drag: DragState | null = null;
 
   const showGuide = (c: PluginContext, hit: BorderHit, x: number): void =>
-    c.setGuide({ pageIndex: hit.pageIndex, x, y: hit.tableY, height: hit.tableHeight });
+    c.setGuide({
+      pageIndex: hit.pageIndex,
+      x,
+      y: hit.tableY,
+      height: hit.tableHeight,
+    });
 
   const commit = (c: PluginContext, d: DragState): void => {
     const { hit, borderX } = d;

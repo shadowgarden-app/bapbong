@@ -243,9 +243,15 @@ describe('imageAt (stale position guard)', () => {
     const { imageAt } = await import('./image-resize-plugin');
     const { Schema } = await import('prosemirror-model');
     const schema = new Schema({
-      nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*' }, text: {} },
+      nodes: {
+        doc: { content: 'paragraph+' },
+        paragraph: { content: 'text*' },
+        text: {},
+      },
     });
-    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('hi')])]);
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text('hi')]),
+    ]);
     const state = { doc } as never;
 
     // The bug this guards: a position kept from a LARGER document. PM's

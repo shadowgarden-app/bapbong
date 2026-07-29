@@ -152,7 +152,9 @@ export class BapbongEditor {
   private readonly pluginTeardowns: Array<() => void> = [];
   private readonly pluginCtx: PluginContext;
   /** The host's plugin entries as given — factories re-run per document. */
-  private readonly hostPluginEntries: Array<EditorPlugin | (() => EditorPlugin)>;
+  private readonly hostPluginEntries: Array<
+    EditorPlugin | (() => EditorPlugin)
+  >;
   /** Per-plugin gated context (carries that plugin's `uses` allowlist). */
   private pluginCtxs = new Map<EditorPlugin, PluginContext>();
   // Whether any plugin wants pointer events (gates the per-move offer).
@@ -235,7 +237,9 @@ export class BapbongEditor {
       ...createBuiltins(),
       ...this.hostPluginEntries.map((e) => (typeof e === 'function' ? e() : e)),
     ];
-    this.plugins = new Collection<EditorPlugin>(instances, { idProperty: 'name' });
+    this.plugins = new Collection<EditorPlugin>(instances, {
+      idProperty: 'name',
+    });
     this.pointerPlugins = instances.some((p) => p.onPointer);
 
     for (const p of orderPluginsByUses(instances)) {

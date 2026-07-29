@@ -86,11 +86,13 @@ export function createFindDialog(
   // document, so a handle captured here would drive a torn-down plugin after
   // the first document switch — the panel would go quietly dead. Passing a
   // getter (`() => editor.plugin('find')`) keeps it pointed at the live one.
-  const find: FindHandle = typeof handle === 'function'
-    ? new Proxy({} as FindHandle, {
-        get: (_t, prop: string) => (handle() as unknown as Record<string, unknown>)[prop],
-      })
-    : handle;
+  const find: FindHandle =
+    typeof handle === 'function'
+      ? new Proxy({} as FindHandle, {
+          get: (_t, prop: string) =>
+            (handle() as unknown as Record<string, unknown>)[prop],
+        })
+      : handle;
   const labels = { ...DEFAULT_LABELS, ...(options.labels ?? {}) };
 
   const root = document.createElement('div');
@@ -144,8 +146,12 @@ export function createFindDialog(
   });
   prev.addEventListener('click', () => find.prev());
   next.addEventListener('click', () => find.next());
-  replaceOne.addEventListener('click', () => find.replaceCurrent(replaceInput.value));
-  replaceAll.addEventListener('click', () => find.replaceAll(replaceInput.value));
+  replaceOne.addEventListener('click', () =>
+    find.replaceCurrent(replaceInput.value),
+  );
+  replaceAll.addEventListener('click', () =>
+    find.replaceAll(replaceInput.value),
+  );
 
   const off = find.onState((s) => {
     count.textContent = s.count ? `${s.active}/${s.count}` : '0';
@@ -174,12 +180,17 @@ export function createFindDialog(
 
   // Ctrl/Cmd+F opens the panel and pre-empts the browser's native find.
   const onHotkey = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      !e.altKey &&
+      (e.key === 'f' || e.key === 'F')
+    ) {
       e.preventDefault();
       openPanel();
     }
   };
-  if (options.shortcut !== false) document.addEventListener('keydown', onHotkey);
+  if (options.shortcut !== false)
+    document.addEventListener('keydown', onHotkey);
 
   return {
     open: openPanel,

@@ -56,7 +56,11 @@ export function findPlugin(): FindPlugin {
   const listeners = new Set<(s: FindState) => void>();
 
   const notify = (): void => {
-    const s: FindState = { query, count: matches.length, active: matches.length ? active + 1 : 0 };
+    const s: FindState = {
+      query,
+      count: matches.length,
+      active: matches.length ? active + 1 : 0,
+    };
     for (const cb of listeners) cb(s);
   };
 
@@ -67,12 +71,17 @@ export function findPlugin(): FindPlugin {
       ctx.state.doc.descendants((node, pos) => {
         if (!node.isText || !node.text) return;
         const hay = node.text.toLowerCase();
-        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + query.length)) {
+        for (
+          let i = hay.indexOf(needle);
+          i !== -1;
+          i = hay.indexOf(needle, i + query.length)
+        ) {
           matches.push({ from: pos + i, to: pos + i + query.length });
         }
       });
     }
-    if (active >= matches.length) active = matches.length ? matches.length - 1 : 0;
+    if (active >= matches.length)
+      active = matches.length ? matches.length - 1 : 0;
   };
 
   const revealActive = (): void => {

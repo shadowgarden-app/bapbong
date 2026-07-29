@@ -8,7 +8,11 @@ import {
 } from './bapbong-editor';
 
 const baseSchema = new Schema({
-  nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*' }, text: {} },
+  nodes: {
+    doc: { content: 'paragraph+' },
+    paragraph: { content: 'text*' },
+    text: {},
+  },
   marks: { em: {} },
 });
 
@@ -58,7 +62,10 @@ describe('BapbongEditor', () => {
 });
 
 describe('orderPluginsByUses', () => {
-  const P = (name: string, uses?: string[]): EditorPlugin => ({ name, ...(uses ? { uses } : {}) });
+  const P = (name: string, uses?: string[]): EditorPlugin => ({
+    name,
+    ...(uses ? { uses } : {}),
+  });
 
   it('puts dependencies before dependents', () => {
     const order = orderPluginsByUses([P('c', ['b']), P('a'), P('b', ['a'])]);
@@ -73,19 +80,29 @@ describe('orderPluginsByUses', () => {
   });
 
   it('rejects a dependency that is not registered — at registration', () => {
-    expect(() => orderPluginsByUses([P('a', ['ghost'])])).toThrow(/not registered/);
+    expect(() => orderPluginsByUses([P('a', ['ghost'])])).toThrow(
+      /not registered/,
+    );
   });
 
   it('rejects a dependency cycle', () => {
-    expect(() => orderPluginsByUses([P('a', ['b']), P('b', ['a'])])).toThrow(/cycle/);
+    expect(() => orderPluginsByUses([P('a', ['b']), P('b', ['a'])])).toThrow(
+      /cycle/,
+    );
   });
 });
 
 describe('pluginLookupFor (the `uses` gate)', () => {
-  const P = (name: string, uses?: string[]): EditorPlugin => ({ name, ...(uses ? { uses } : {}) });
+  const P = (name: string, uses?: string[]): EditorPlugin => ({
+    name,
+    ...(uses ? { uses } : {}),
+  });
   const find = P('find');
   const table = P('table-selection');
-  const registry = new Map([['find', find], ['table-selection', table]]);
+  const registry = new Map([
+    ['find', find],
+    ['table-selection', table],
+  ]);
   const resolve = (n: string) => registry.get(n) ?? null;
 
   it('hands back a plugin the caller declared', () => {
