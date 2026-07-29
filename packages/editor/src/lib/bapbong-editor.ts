@@ -254,18 +254,7 @@ export class BapbongEditor {
    *  and `layout` as live getters, and spreading would invoke them here —
    *  throwing before a document loads, and freezing a snapshot after. */
   private ctxFor(p: EditorPlugin): PluginContext {
-    const gated = (name: string): never => {
-      if (!p.uses?.includes(name))
-        throw new Error(
-          `plugin "${p.name}" asked for "${name}" without declaring it in \`uses\``,
-        );
-      const dep = this.plugins.get(name);
-      if (!dep)
-        throw new Error(
-          `plugin "${p.name}" uses "${name}", which is not registered`,
-        );
-      return dep as never;
-    };
+    const gated = pluginLookupFor(p, (name) => this.plugins.get(name) ?? null);
     return Object.create(this.pluginCtx, {
       plugin: { value: gated, enumerable: true },
     }) as PluginContext;
@@ -1304,6 +1293,28 @@ export class BapbongEditor {
  * contribution (extra marks/nodes appended). Returns `null` when no plugin
  * contributes anything, so callers can keep using the base schema unchanged.
  */
+/** `ctx.plugin` for one plugin: it may reach ONLY the names that plugin put in
+ *  its `uses`. Undeclared access throws rather than resolving quietly, so the
+ *  declared graph is the real graph — a plugin cannot grow a hidden dependency
+ *  that setup ordering then fails to honour. Exported for tests. */
+export function pluginLookupFor(
+  p: EditorPlugin,
+  resolve: (name: string) => EditorPlugin | null,
+): (name: string) => never {
+  return (name: string): never => {
+    if (!p.uses?.includes(name))
+      throw new Error(
+        `plugin "${p.name}" asked for "${name}" without declaring it in \`uses\``,
+      );
+    const dep = resolve(name);
+    if (!dep)
+      throw new Error(
+        `plugin "${p.name}" uses "${name}", which is not registered`,
+      );
+    return dep as never;
+  };
+}
+
 /** Setup order for a plugin set: dependencies (per `uses`) before dependents.
  *  Throws on an unknown name or a cycle — at REGISTRATION, not first use, so
  *  a bad graph cannot ship. Exported for tests. */

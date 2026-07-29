@@ -1,5 +1,11 @@
 import { Schema } from 'prosemirror-model';
-import { BapbongEditor, composeSchema, orderPluginsByUses, type EditorPlugin } from './bapbong-editor';
+import {
+  BapbongEditor,
+  composeSchema,
+  orderPluginsByUses,
+  pluginLookupFor,
+  type EditorPlugin,
+} from './bapbong-editor';
 
 const baseSchema = new Schema({
   nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*' }, text: {} },
@@ -72,5 +78,35 @@ describe('orderPluginsByUses', () => {
 
   it('rejects a dependency cycle', () => {
     expect(() => orderPluginsByUses([P('a', ['b']), P('b', ['a'])])).toThrow(/cycle/);
+  });
+});
+
+describe('pluginLookupFor (the `uses` gate)', () => {
+  const P = (name: string, uses?: string[]): EditorPlugin => ({ name, ...(uses ? { uses } : {}) });
+  const find = P('find');
+  const table = P('table-selection');
+  const registry = new Map([['find', find], ['table-selection', table]]);
+  const resolve = (n: string) => registry.get(n) ?? null;
+
+  it('hands back a plugin the caller declared', () => {
+    const lookup = pluginLookupFor(P('a', ['find']), resolve);
+    expect(lookup('find')).toBe(find);
+  });
+
+  it('refuses a plugin that is registered but NOT declared', () => {
+    // The whole point: reachable is not the same as allowed. Silent access
+    // would let a hidden dependency exist that setup ordering never honours.
+    const lookup = pluginLookupFor(P('a', ['find']), resolve);
+    expect(() => lookup('table-selection')).toThrow(/without declaring it/);
+  });
+
+  it('refuses everything when the caller declares nothing', () => {
+    const lookup = pluginLookupFor(P('a'), resolve);
+    expect(() => lookup('find')).toThrow(/without declaring it/);
+  });
+
+  it('reports a declared-but-missing dependency distinctly', () => {
+    const lookup = pluginLookupFor(P('a', ['ghost']), resolve);
+    expect(() => lookup('ghost')).toThrow(/not registered/);
   });
 });

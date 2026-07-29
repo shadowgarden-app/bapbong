@@ -1,5 +1,7 @@
+import { schema } from '@shadow-garden/bapbong-model';
 import {
   cursorFor,
+  imageAt,
   resizeRect,
   snapAngle,
   toLocal,
@@ -252,5 +254,46 @@ describe('imageAt (stale position guard)', () => {
     expect(imageAt(state, 486)).toBeNull();
     expect(imageAt(state, -1)).toBeNull();
     expect(imageAt(state, 1)).toBeNull(); // in range, but it's text, not an image
+  });
+});
+
+describe('imageAt (stale-position guard)', () => {
+  // The bug this closes: a plugin holds the position of an image it selected
+  // in document A; document B loads (smaller); the next change cycle asks
+  // about that position. `doc.nodeAt` READS as bounds-safe but throws
+  // RangeError past the end — and that throw killed the whole document load.
+  //
+  // The state stub is deliberate: imageAt only ever reads `state.doc`, and
+  // prosemirror-state is not a dependency of this package — importing it here
+  // would resolve to a SECOND module instance whose EditorState is a distinct
+  // type to the one contracts uses (the same duplicate-identity trap that bit
+  // EditorView). A doc is all the function needs, so a doc is all we pass.
+  const mk = (paras: number) => {
+    const doc = schema.node(
+      'doc',
+      null,
+      Array.from({ length: paras }, () =>
+        schema.node('paragraph', null, [schema.text('hello')]),
+      ),
+    );
+    return { doc } as unknown as Parameters<typeof imageAt>[0];
+  };
+
+  it('returns null past the end instead of throwing', () => {
+    const small = mk(1); // content.size is ~7
+    const stale = 486; // a position carried over from a much larger document
+    expect(small.doc.content.size).toBeLessThan(stale);
+    // The unguarded call is the crash we are protecting against...
+    expect(() => small.doc.nodeAt(stale)).toThrow();
+    // ...and the guarded one simply reports "gone".
+    expect(imageAt(small, stale)).toBeNull();
+  });
+
+  it('returns null for a negative position', () => {
+    expect(imageAt(mk(1), -1)).toBeNull();
+  });
+
+  it('returns null when the position holds a non-image node', () => {
+    expect(imageAt(mk(2), 1)).toBeNull(); // inside a paragraph's text
   });
 });
