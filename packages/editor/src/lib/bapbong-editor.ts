@@ -126,6 +126,24 @@ export interface BapbongEditorOptions {
  * sink, pointer-driven caret/selection, plugins, commands and clipboard — and
  * pushes a fresh doc + caret overlay to the core on every transaction.
  */
+/**
+ * The editor the user last interacted with (focused, or pressed a pointer on).
+ *
+ * Keydown is listened for on `window` in capture, because a plugin must still
+ * see keys mid-gesture — when a claimed pointerdown has left DOM focus on
+ * `<body>` rather than in the hidden contenteditable. With ONE editor on the
+ * page "focus is on body" unambiguously meant "meant for me". With several
+ * live editors it does not, and every one of them would claim the same key.
+ *
+ * So the body case is resolved by recency: exactly one editor can be the last
+ * one touched, and only that one takes it. Editors whose own subtree holds the
+ * target are unaffected — that case was never ambiguous.
+ *
+ * Deliberately not a "split" or "pane" concept: the library still knows nothing
+ * about how a host arranges its editors, only that more than one can exist.
+ */
+let lastInteracted: BapbongEditor | null = null;
+
 export class BapbongEditor {
   private readonly stack: HTMLElement;
   private readonly core: RenderCore;
@@ -562,6 +580,7 @@ export class BapbongEditor {
 
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
+    lastInteracted = this;
     this.bridge?.focus();
   }
 
@@ -713,6 +732,9 @@ export class BapbongEditor {
   }
 
   destroy(): void {
+    // Never leave a destroyed editor as the body-key owner: it would silence
+    // the surviving ones (they'd all defer to something that no longer exists).
+    if (lastInteracted === this) lastInteracted = null;
     for (const t of this.pluginTeardowns) t();
     this.pluginTeardowns.length = 0;
     this.stopBlink();
@@ -897,6 +919,10 @@ export class BapbongEditor {
   // ── Pointer ─────────────────────────────────────────────────────────
 
   private onPointerDown = (ev: PointerEvent): void => {
+    // Pressing in an editor makes it the one a body-targeted key belongs to —
+    // recorded before any claim, since a claimed gesture is exactly the case
+    // that strands focus on <body>.
+    lastInteracted = this;
     // A pointer plugin (e.g. table-column resize) may claim the press; if so,
     // preventDefault + capture the pointer for it and skip caret placement.
     if (this.offerPointer('down', ev)) {
@@ -936,9 +962,17 @@ export class BapbongEditor {
    *  no specific target (body — where focus lands after a claimed pointer
    *  gesture), so plugins never steal keys from other inputs on the page. */
   private onKeyDown = (ev: KeyboardEvent): void => {
-    const target = ev.target as Node | null;
-    if (target && target !== document.body && !this.stack.contains(target))
-      return;
+    // `target` is not always a Node: a key dispatched at `window` (or at the
+    // document) reports one of those, and handing either to `contains` throws.
+    // Those cases name no element, so they fall through to the same
+    // recency test as `<body>` below.
+    const node = ev.target instanceof Node ? ev.target : null;
+    const mine = node !== null && this.stack.contains(node);
+    if (node !== null && node !== document.body && !mine) return;
+    // Focus is on <body>, so the event names no editor. Only the last one the
+    // user touched may act on it — otherwise a second live editor on the page
+    // would run its plugins over the same keystroke (see lastInteracted).
+    if (!mine && lastInteracted !== null && lastInteracted !== this) return;
     // Stamp the keyboard-event arrival so refresh() can report the full
     // keydown → painted latency. Ignore pure modifier presses (they produce no
     // edit, so their stamp would otherwise inflate the next real keystroke).

@@ -43,6 +43,15 @@ export interface SessionOpRequest {
   id: string;
   op: SessionOpName;
   args: unknown[];
+  /** Which document the op is for, in the host's own id space; absent means
+   *  "the one the user is working in".
+   *
+   *  A host with a single live document never needs it. One that can hold
+   *  several open at once — side-by-side panes, several windows — does: the
+   *  target would otherwise be implied by whatever happens to be focused when
+   *  the request lands, which is a race, not an address. The wire stays
+   *  ignorant of what a pane or a window is; it just carries the id. */
+  doc?: string;
 }
 
 export type SessionOpResponse =
@@ -141,12 +150,16 @@ export class RemoteSession implements DocumentSession {
     private readonly send: (
       op: SessionOpName,
       args: unknown[],
+      doc?: string,
     ) => Promise<unknown>,
     readonly capabilities: SessionCapabilities,
+    /** Pins this session to one document (see SessionOpRequest.doc). Omit for
+     *  "whatever the user is working in". */
+    private readonly doc?: string,
   ) {}
 
   private async call<T>(op: SessionOpName, args: unknown[] = []): Promise<T> {
-    return (await this.send(op, args)) as T;
+    return (await this.send(op, args, this.doc)) as T;
   }
 
   snapshot() {
