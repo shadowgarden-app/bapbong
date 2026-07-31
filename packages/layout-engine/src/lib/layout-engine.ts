@@ -28,6 +28,7 @@ import type {
   MeasureText,
   PageConfig,
   ParagraphBorderBox,
+  ResolvedChromeSet,
   ParagraphBorders,
   ParagraphIndent,
   ParagraphSpacing,
@@ -1413,6 +1414,9 @@ type SectionMarker = ColumnConfig & {
   height?: number;
   /** Per-section page-geometry override (sanitized); absent → config.page. */
   page?: PageConfig;
+  /** Section index — stamps pages (ResolvedPage.chromeIndex) so the painter
+   *  picks that section's header/footer set. */
+  chromeIndex?: number;
 };
 type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
   /** Set on the first block of each section: switch column flow here. `height`
@@ -1641,12 +1645,22 @@ function placeBlocks(
   items: Iterable<BlockItem>,
   config: LayoutConfig,
   ctx: Ctx,
-  bandFor?: (p: PageConfig) => { top: number; bottom: number },
+  bandFor?: (p: PageConfig, chromeIndex?: number) => { top: number; bottom: number },
   footnotes?: Map<number, FootnoteBody>,
 ): ResolvedLayout {
   const { page } = config;
+  // Which section's chrome the CURRENT page shows: the section in effect where
+  // the page starts (a continuous section joining mid-page doesn't change it —
+  // Word's rule). `sectionFirst` drives per-section titlePg.
+  let curChromeIndex: number | undefined;
+  let pageChromeIndex: number | undefined;
+  let pageSectionFirst = true;
+  let sectionFirstPending = false;
   const bandOf = (p: PageConfig) =>
-    bandFor?.(p) ?? { top: p.margin.top, bottom: p.height - p.margin.bottom };
+    bandFor?.(p, curChromeIndex) ?? {
+      top: p.margin.top,
+      bottom: p.height - p.margin.bottom,
+    };
   // Geometry of the page being filled — mutable: a section carrying a `page`
   // override swaps it at its boundary (always a page boundary; a continuous
   // break with differing geometry is promoted to next-page, as Word does).
@@ -1712,19 +1726,25 @@ function placeBlocks(
     colWidth = (contentWidth - colGap * (colCount - 1)) / colCount;
   };
 
-  /** Swap to a section's page geometry and restart the band on it. Only ever
-   *  called at a page boundary (after finalizePage, or before any content). */
-  const setGeometry = (p: PageConfig) => {
-    curPage = p;
-    ({ top, bottom } = bandOf(p));
-    contentLeft = p.margin.left;
-    contentRight = p.width - p.margin.right;
-    contentWidth = contentRight - contentLeft;
+  /** Recompute the band for the current page/chrome and restart on it. Only
+   *  ever called when the current page is empty. */
+  const restartBand = () => {
+    ({ top, bottom } = bandOf(curPage));
     colIndex = 0;
     bandTop = top;
     sectionMaxY = top;
     colDirty = false;
     y = top;
+  };
+
+  /** Swap to a section's page geometry and restart the band on it. Only ever
+   *  called at a page boundary (after finalizePage, or before any content). */
+  const setGeometry = (p: PageConfig) => {
+    curPage = p;
+    contentLeft = p.margin.left;
+    contentRight = p.width - p.margin.right;
+    contentWidth = contentRight - contentLeft;
+    restartBand();
   };
 
   // Footnotes referenced on the current page, in first-appearance order. Their
@@ -1850,6 +1870,17 @@ function placeBlocks(
     if (pageFnNums.length > 0)
       resolved.footnotes = buildFootnoteArea(pageFnNums);
     if (paraBorderBoxes.length > 0) resolved.paraBorders = paraBorderBoxes;
+    if (pageChromeIndex != null) {
+      resolved.chromeIndex = pageChromeIndex;
+      resolved.sectionFirst = pageSectionFirst;
+    }
+    // The next page starts under the CURRENT section's chrome — recompute the
+    // band so a section with taller/shorter chrome gets its own bounds even
+    // when the geometry didn't change.
+    pageChromeIndex = curChromeIndex;
+    pageSectionFirst = sectionFirstPending;
+    sectionFirstPending = false;
+    ({ top, bottom } = bandOf(curPage));
     paraBorderBoxes = [];
     pages.push(resolved);
     lines = [];
@@ -2045,13 +2076,26 @@ function placeBlocks(
     if (item.section) {
       const nextPage = item.section.page ?? page;
       const geomChanges = !sameGeom(nextPage, curPage);
+      curChromeIndex = item.section.chromeIndex;
       if (firstItem) {
+        pageChromeIndex = curChromeIndex;
+        pageSectionFirst = true;
         if (geomChanges) setGeometry(nextPage);
+        else restartBand(); // page is empty — adopt this section's chrome band
         applyColumns(item.section);
       } else if (item.section.newPage || geomChanges) {
         // Geometry may only change at a page boundary — a continuous break
         // with a differing page is laid out as next-page (Word's promotion).
-        if (pageHasContent()) finalizePage();
+        sectionFirstPending = true;
+        if (pageHasContent()) {
+          finalizePage(); // its tail re-bands for the new section's chrome
+        } else {
+          // The current (empty) page becomes this section's first page.
+          pageChromeIndex = curChromeIndex;
+          pageSectionFirst = true;
+          sectionFirstPending = false;
+          restartBand();
+        }
         if (geomChanges) setGeometry(nextPage);
         applyColumns(item.section);
       } else {
@@ -2059,6 +2103,7 @@ function placeBlocks(
         // unless that's already at the band floor (then start a fresh page).
         bump();
         if (sectionMaxY >= limit()) {
+          sectionFirstPending = true; // the fresh page opens this section
           finalizePage();
         } else {
           bandTop = sectionMaxY;
@@ -2429,6 +2474,24 @@ export interface PageChrome {
   titlePg?: boolean;
   /** w:evenAndOddHeaders — even pages use the even variant (blank if none). */
   evenAndOdd?: boolean;
+  /** Per-section chrome, aligned with doc.attrs.sections. When present it
+   *  wins over the flat fields above: each section's pages take their own
+   *  header/footer set (titlePg selects the "first" variant on the SECTION's
+   *  first page), laid out against that section's page geometry. */
+  sections?: SectionChromeDocs[];
+}
+
+/** One section's chrome documents (import side, pre-layout). Inheritance
+ *  (Word's "Link to Previous") is resolved by the importer — every section
+ *  arrives here with its effective documents. */
+export interface SectionChromeDocs {
+  header?: PMNode;
+  footer?: PMNode;
+  headerFirst?: PMNode;
+  footerFirst?: PMNode;
+  headerEven?: PMNode;
+  footerEven?: PMNode;
+  titlePg?: boolean;
 }
 
 /** Header/footer documents grouped by variant. */
@@ -2618,8 +2681,9 @@ export function layout(
     start: boolean;
     newPage: boolean;
     page?: PageConfig;
+    chromeIndex: number;
   }[] = [];
-  for (const sec of sections) {
+  sections.forEach((sec, si) => {
     // Per-section geometry overrides are attr data — sanitize like config.page
     // (degenerate values would hang the page-fill loop).
     const secPage = sec.page ? sanitizePage(sec.page) : undefined;
@@ -2629,9 +2693,10 @@ export function layout(
         start: k === 0,
         newPage: sec.newPage,
         page: secPage,
+        chromeIndex: si,
       });
     }
-  }
+  });
   const lastSec = sections[sections.length - 1];
   const lastSecPage = lastSec.page ? sanitizePage(lastSec.page) : undefined;
   while (blockSection.length < doc.childCount) {
@@ -2640,8 +2705,46 @@ export function layout(
       start: false,
       newPage: lastSec.newPage,
       page: lastSecPage,
+      chromeIndex: sections.length - 1,
     });
   }
+
+  // Per-section chrome: each section's bands laid against its own geometry.
+  // setBandH[i] feeds bandFor so a tall section header shrinks exactly that
+  // section's pages.
+  const secChromeDocs = chrome?.sections;
+  let chromeSets: ResolvedChromeSet[] | undefined;
+  let setBandH: { header: number; footer: number }[] = [];
+  const layChromeSets = (c: Ctx) => {
+    if (!secChromeDocs) return;
+    chromeSets = [];
+    setBandH = [];
+    for (let i = 0; i < sections.length; i++) {
+      const cs = secChromeDocs[i] ?? {};
+      const p = sections[i].page ? sanitizePage(sections[i].page as PageConfig) : page;
+      const l = p.margin.left;
+      const r = p.width - p.margin.right;
+      const hb = layVariants(
+        { default: cs.header, first: cs.headerFirst, even: cs.headerEven },
+        (d) => layoutChrome(d, CHROME_DISTANCE, l, r, c),
+      );
+      const fb = layVariants(
+        { default: cs.footer, first: cs.footerFirst, even: cs.footerEven },
+        (d) => layoutFooterChrome(d, p.height, l, r, c),
+      );
+      chromeSets.push({
+        header: hb.default,
+        footer: fb.default,
+        headerFirst: hb.first,
+        footerFirst: fb.first,
+        headerEven: hb.even,
+        footerEven: fb.even,
+        titlePg: cs.titlePg,
+      });
+      setBandH.push({ header: maxBandHeight(hb), footer: maxBandHeight(fb) });
+    }
+  };
+  perf.span('chrome-sections', () => layChromeSets(ctx));
 
   const items: BlockItem[] = [];
   const buildEnd = perf.begin('build-items');
@@ -2663,6 +2766,7 @@ export function layout(
       if (bs.start) {
         item.section = { ...bs.columns, newPage: bs.newPage };
         if (bs.page) item.section.page = bs.page;
+        item.section.chromeIndex = bs.chromeIndex;
       }
       return item;
     };
@@ -2777,12 +2881,18 @@ export function layout(
     }
   }
   perf.span('assignSectionHeights', () => assignSectionHeights(items));
-  // Band bounds as a function of page geometry: the chrome inset applies to
-  // whichever page a section switches to (per-section-width chrome re-wrap is
-  // a later phase — heights come from the document-level chrome).
-  const bandFor = (p: PageConfig) => {
+  // Band bounds as a function of page geometry (+ the active section's chrome
+  // set when per-section chrome is present): the inset applies to whichever
+  // page a section switches to.
+  const bandFor = (p: PageConfig, chromeIndex?: number) => {
     let t = p.margin.top;
     let b = p.height - p.margin.bottom;
+    const sh = chromeIndex != null ? setBandH[chromeIndex] : undefined;
+    if (sh) {
+      if (sh.header > 0) t = Math.max(t, CHROME_DISTANCE + sh.header);
+      if (sh.footer > 0) b = Math.min(b, p.height - CHROME_DISTANCE - sh.footer);
+      return { top: t, bottom: b };
+    }
     if (headers.default || headers.first || headers.even)
       t = Math.max(t, CHROME_DISTANCE + maxBandHeight(headers));
     if (footers.default || footers.first || footers.even)
@@ -2795,14 +2905,20 @@ export function layout(
 
   // Chrome with page-number fields: re-lay every variant now that the page
   // total is known, so each field slot is as wide as the widest number shown.
-  if (anyBandHasFields(headers) || anyBandHasFields(footers)) {
+  const setsHaveFields = (chromeSets ?? []).some((s) =>
+    anyBandHasFields({ default: s.header, first: s.headerFirst, even: s.headerEven }) ||
+    anyBandHasFields({ default: s.footer, first: s.footerFirst, even: s.footerEven }),
+  );
+  if (anyBandHasFields(headers) || anyBandHasFields(footers) || setsHaveFields) {
     const fieldCtx: Ctx = {
       ...ctx,
       fieldPlaceholder: String(resolved.pages.length),
     };
     headers = layHeaders(fieldCtx);
     footers = layFooters(fieldCtx);
+    layChromeSets(fieldCtx); // rebuilds chromeSets with the real page total
   }
+  if (chromeSets) resolved.chromeSets = chromeSets;
 
   if (headers.default) resolved.pageHeader = headers.default;
   if (headers.first) resolved.pageHeaderFirst = headers.first;

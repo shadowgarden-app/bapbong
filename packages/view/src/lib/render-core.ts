@@ -4,6 +4,7 @@ import {
   importDocx,
   exportDocx,
   type DocxImport,
+  type SectionChrome,
 } from '@shadow-garden/bapbong-docx';
 import {
   createLayoutCache,
@@ -95,6 +96,9 @@ export class RenderCore {
   private chromeFooters: Record<string, ProseMirrorNode> = {};
   private chromeTitlePg = false;
   private chromeEvenAndOdd = false;
+  /** Per-section chrome (aligned with doc.attrs.sections), when it differs
+   *  from the flat fields above. */
+  private sectionChrome: SectionChrome[] | null = null;
   // Footnote bodies keyed by display number (laid out at the page bottom).
   private footnotes: Record<number, ProseMirrorNode> | undefined;
   // The imported source package — passed to exportDocx({ carry }) so styles /
@@ -226,27 +230,43 @@ export class RenderCore {
     headerKeys: string[];
     footerKeys: string[];
   }> {
-    const { doc, headers, footers, footnotes, titlePg, evenAndOdd, page, raw } =
-      await perf.spanAsync('importDocx', () =>
-        importDocx(bytes, opts.schema ? { schema: opts.schema } : undefined),
-      );
+    const {
+      doc,
+      headers,
+      footers,
+      footnotes,
+      titlePg,
+      evenAndOdd,
+      page,
+      raw,
+      sectionChrome,
+    } = await perf.spanAsync('importDocx', () =>
+      importDocx(bytes, opts.schema ? { schema: opts.schema } : undefined),
+    );
     this.docSchema = opts.schema ?? baseSchema;
     this.importedRaw = raw; // carried on export so unmodelled parts survive
     this.chromeHeaders = headers;
     this.chromeFooters = footers;
     this.chromeTitlePg = titlePg;
     this.chromeEvenAndOdd = evenAndOdd;
+    this.sectionChrome = sectionChrome ?? null;
     this.footnotes = footnotes;
     this.page = page;
     // Body to lay out: the caller's restored doc when given, else the freshly
     // imported one. Fonts are measured against whichever body will actually
     // render (an edit may have introduced a family the disk doc lacked).
     const body = opts.layoutTarget ?? doc;
-    // Measure with the real fonts, not their fallbacks.
+    // Measure with the real fonts, not their fallbacks (per-section chrome
+    // stories included — a chapter header may use its own family).
+    const sectionChromeDocs = (sectionChrome ?? []).flatMap((s) => [
+      ...Object.values(s.headers),
+      ...Object.values(s.footers),
+    ]);
     const families = collectFontFamilies(
       body,
       ...Object.values(headers),
       ...Object.values(footers),
+      ...sectionChromeDocs,
     );
     this.docFamilies = new Set(families.map(normalizeFamily));
     await perf.spanAsync('ensureFontsLoaded', () =>
@@ -303,6 +323,17 @@ export class RenderCore {
           footerEven: this.chromeFooters['even'],
           titlePg: this.chromeTitlePg,
           evenAndOdd: this.chromeEvenAndOdd,
+          sections: this.sectionChrome
+            ? this.sectionChrome.map((s) => ({
+                header: s.headers['default'],
+                footer: s.footers['default'],
+                headerFirst: s.headers['first'],
+                footerFirst: s.footers['first'],
+                headerEven: s.headers['even'],
+                footerEven: s.footers['even'],
+                titlePg: s.titlePg,
+              }))
+            : undefined,
         },
         this.footnotes,
       ),

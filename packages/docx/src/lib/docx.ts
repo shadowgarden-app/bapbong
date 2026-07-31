@@ -73,6 +73,13 @@ interface CommentNode {
   resolved: boolean;
 }
 
+/** One section's effective chrome stories (inheritance already applied). */
+export interface SectionChrome {
+  headers: Record<string, PMNode>;
+  footers: Record<string, PMNode>;
+  titlePg: boolean;
+}
+
 export interface DocxImport {
   doc: PMNode;
   rawDocumentXml: string;
@@ -88,6 +95,12 @@ export interface DocxImport {
   titlePg: boolean;
   /** w:evenAndOddHeaders — even pages use the "even" header/footer. */
   evenAndOdd: boolean;
+  /** Per-section chrome, aligned with doc.attrs.sections, with Word's "Link
+   *  to Previous" resolved: a section without its own w:headerReference of a
+   *  type inherits the previous section's story. Present only when the doc
+   *  has ≥2 sections AND at least one declares its own chrome or titlePg —
+   *  the flat `headers`/`footers` (the LAST section's) cover the rest. */
+  sectionChrome?: SectionChrome[];
   /** Comments referenced by the body (w:commentRange), in appearance order. */
   comments: CommentData[];
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
@@ -802,36 +815,72 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   for (const node of effectiveChildren(p.children)) {
     if (node.name === 'w:r') {
       if (hasPageBreak(node)) pageBreak = true;
-      const fldType = attrOf(child(node, 'w:fldChar'), 'w:fldCharType');
-      if (fldType === 'begin') {
-        field = { instr: '', resultRuns: [], phase: 'instr' };
-        continue;
-      }
-      if (field) {
-        if (fldType === 'separate') {
-          field.phase = 'result';
-        } else if (fldType === 'end') {
-          const kind = fieldKind(field.instr);
-          if (kind) {
-            inline.push(
-              pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
-            );
+      const fldChars = children(node, 'w:fldChar');
+      if (fldChars.length === 0) {
+        if (field) {
+          if (field.phase === 'instr') {
+            field.instr += children(node, 'w:instrText')
+              .map((t) => t.text)
+              .join('');
           } else {
-            // Unknown instruction: keep the cached result text.
-            for (const r of field.resultRuns)
-              inline.push(...runToInline(r, paraBase, ctx, null));
+            field.resultRuns.push(node);
           }
-          field = null;
-        } else if (field.phase === 'instr') {
-          field.instr += children(node, 'w:instrText')
-            .map((t) => t.text)
-            .join('');
-        } else {
-          field.resultRuns.push(node);
+          continue;
         }
+        inline.push(...runToInline(node, paraBase, ctx, null));
         continue;
       }
-      inline.push(...runToInline(node, paraBase, ctx, null));
+      // The run carries fldChar(s). Some producers (Google Docs) pack
+      // begin + instrText + separate + end into a SINGLE run — treating the
+      // run as one fldChar (the old shape) left the field open forever and
+      // swallowed the rest of the paragraph. Walk the run's children in
+      // order through the same state machine instead.
+      const rPr = child(node, 'w:rPr');
+      let plain: OoxmlNode[] = [];
+      const flushPlain = () => {
+        if (plain.length === 0) return;
+        const synth: OoxmlNode = {
+          name: 'w:r',
+          attrs: node.attrs,
+          children: rPr ? [rPr, ...plain] : plain,
+          text: '',
+        };
+        if (field && field.phase === 'result') field.resultRuns.push(synth);
+        else if (!field) inline.push(...runToInline(synth, paraBase, ctx, null));
+        // phase 'instr': stray content between begin and separate is
+        // instruction-side noise — dropped, as Word does.
+        plain = [];
+      };
+      for (const c of node.children) {
+        if (c.name === 'w:fldChar') {
+          const t = attrOf(c, 'w:fldCharType');
+          if (t === 'begin') {
+            flushPlain();
+            field = { instr: '', resultRuns: [], phase: 'instr' };
+          } else if (t === 'separate') {
+            if (field) field.phase = 'result';
+          } else if (t === 'end') {
+            flushPlain(); // result text inside this run, before the end mark
+            if (field) {
+              const kind = fieldKind(field.instr);
+              if (kind) {
+                inline.push(
+                  pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
+                );
+              } else {
+                for (const r of field.resultRuns)
+                  inline.push(...runToInline(r, paraBase, ctx, null));
+              }
+              field = null;
+            }
+          }
+        } else if (c.name === 'w:instrText') {
+          if (field && field.phase === 'instr') field.instr += c.text;
+        } else if (c.name !== 'w:rPr') {
+          plain.push(c);
+        }
+      }
+      flushPlain();
     } else if (node.name === 'w:fldSimple') {
       const kind = fieldKind(attrOf(node, 'w:instr') ?? '');
       const resultRuns = children(node, 'w:r');
@@ -1817,39 +1866,98 @@ export async function importDocx(
     pageGeom, // page geometry rides the doc so page-setup edits are undoable
   );
 
-  // Headers/footers referenced by the section properties.
-  const headers: Record<string, PMNode> = {};
-  const footers: Record<string, PMNode> = {};
-  if (sectPr) {
-    const collect = async (
-      refName: string,
-      store: Record<string, PMNode>,
-      root: string,
-    ) => {
-      for (const ref of children(sectPr, refName)) {
-        const type = attrOf(ref, 'w:type') ?? 'default';
-        const rId = attrOf(ref, 'r:id');
-        const target = rId ? ctx.rels.get(rId)?.target : undefined;
-        if (!target || store[type]) continue;
-        const partPath = `word/${target.replace(/^\/+/, '')}`;
-        const xml = await readPart(zip, partPath);
-        if (!xml) continue;
-        const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
-        const el = child(parseXml(xml), root);
-        store[type] = storyDoc(
-          partCtx,
-          el ? parseBlocks(el, partCtx) : [],
-          ctx.numbering.defs,
-        );
+  // Headers/footers, per section. Every sectPr (paragraph-level breaks +
+  // the body's) is visited in document order; a section that doesn't declare
+  // a w:headerReference/w:footerReference of a type inherits the previous
+  // section's story — Word's "Link to Previous". Parts are parsed once and
+  // shared (memoized by path) across the sections referencing them.
+  const partMemo = new Map<string, PMNode | undefined>();
+  const loadChromePart = async (
+    rId: string | undefined,
+    root: string,
+  ): Promise<PMNode | undefined> => {
+    const target = rId ? ctx.rels.get(rId)?.target : undefined;
+    if (!target) return undefined;
+    const partPath = `word/${target.replace(/^\/+/, '')}`;
+    if (partMemo.has(partPath)) return partMemo.get(partPath);
+    const xml = await readPart(zip, partPath);
+    let story: PMNode | undefined;
+    if (xml) {
+      const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
+      const el = child(parseXml(xml), root);
+      story = storyDoc(
+        partCtx,
+        el ? parseBlocks(el, partCtx) : [],
+        ctx.numbering.defs,
+      );
+    }
+    partMemo.set(partPath, story);
+    return story;
+  };
+  const chromeOf = async (sp: OoxmlNode | undefined) => {
+    const own: SectionChrome = { headers: {}, footers: {}, titlePg: false };
+    let declared = false;
+    if (sp) {
+      const collect = async (
+        refName: string,
+        store: Record<string, PMNode>,
+        root: string,
+      ) => {
+        for (const ref of children(sp, refName)) {
+          const type = attrOf(ref, 'w:type') ?? 'default';
+          if (store[type]) continue;
+          const story = await loadChromePart(attrOf(ref, 'r:id'), root);
+          if (story) {
+            store[type] = story;
+            declared = true;
+          }
+        }
+      };
+      await collect('w:headerReference', own.headers, 'w:hdr');
+      await collect('w:footerReference', own.footers, 'w:ftr');
+      own.titlePg = isToggleOn(child(sp, 'w:titlePg'));
+      if (own.titlePg) declared = true;
+    }
+    return { own, declared };
+  };
+  // sectPrs in document order, aligned with `sections` (the body sectPr is
+  // the last section's — unless the doc ended AT a paragraph break and the
+  // body sectPr closed no section of its own).
+  const sectPrList: (OoxmlNode | undefined)[] = [];
+  if (body) {
+    for (const node of unwrapSdt(body.children)) {
+      if (node.name === 'w:p') {
+        const sp = child(child(node, 'w:pPr'), 'w:sectPr');
+        if (sp) sectPrList.push(sp);
       }
-    };
-    await collect('w:headerReference', headers, 'w:hdr');
-    await collect('w:footerReference', footers, 'w:ftr');
+    }
   }
+  sectPrList.push(sectPr);
+  const sectionChrome: SectionChrome[] = [];
+  let anyDeclaredBeforeLast = false;
+  for (let i = 0; i < sections.length; i++) {
+    const { own, declared } = await chromeOf(sectPrList[i]);
+    const prev = sectionChrome[i - 1];
+    sectionChrome.push({
+      headers: { ...(prev?.headers ?? {}), ...own.headers },
+      footers: { ...(prev?.footers ?? {}), ...own.footers },
+      titlePg: own.titlePg,
+    });
+    if (declared && i < sections.length - 1) anyDeclaredBeforeLast = true;
+  }
+  const lastChrome = sectionChrome[sectionChrome.length - 1] ?? {
+    headers: {},
+    footers: {},
+    titlePg: false,
+  };
+  // The flat fields stay the LAST section's resolved chrome (what the old
+  // body-sectPr-only path produced, plus inheritance).
+  const headers = lastChrome.headers;
+  const footers = lastChrome.footers;
 
   // w:titlePg (section) → page 1 uses the "first" chrome; w:evenAndOddHeaders
   // (document settings) → even pages use the "even" chrome.
-  const titlePg = sectPr ? isToggleOn(child(sectPr, 'w:titlePg')) : false;
+  const titlePg = lastChrome.titlePg;
   const settingsXml = await readPart(zip, 'word/settings.xml');
   const settings = settingsXml
     ? child(parseXml(settingsXml), 'w:settings')
@@ -1858,7 +1966,7 @@ export async function importDocx(
     ? isToggleOn(child(settings, 'w:evenAndOddHeaders'))
     : false;
 
-  return {
+  const out: DocxImport = {
     doc,
     rawDocumentXml,
     headers,
@@ -1870,6 +1978,12 @@ export async function importDocx(
     page: pageGeom,
     raw: zip,
   };
+  // Only when some non-last section declares its own chrome/titlePg does the
+  // per-section set differ from the flat fields.
+  if (sections.length > 1 && anyDeclaredBeforeLast) {
+    out.sectionChrome = sectionChrome;
+  }
+  return out;
 }
 
 /** An OOXML on/off toggle element (w:titlePg, w:evenAndOddHeaders, …): present

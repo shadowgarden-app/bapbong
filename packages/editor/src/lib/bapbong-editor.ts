@@ -144,6 +144,10 @@ export interface BapbongEditorOptions {
  */
 let lastInteracted: BapbongEditor | null = null;
 
+function markInteracted(editor: BapbongEditor): void {
+  lastInteracted = editor;
+}
+
 export class BapbongEditor {
   private readonly stack: HTMLElement;
   private readonly core: RenderCore;
@@ -580,7 +584,7 @@ export class BapbongEditor {
 
   /** Focus the hidden ProseMirror editor (keyboard/IME sink). */
   focus(): void {
-    lastInteracted = this;
+    markInteracted(this);
     this.bridge?.focus();
   }
 
@@ -922,7 +926,7 @@ export class BapbongEditor {
     // Pressing in an editor makes it the one a body-targeted key belongs to —
     // recorded before any claim, since a claimed gesture is exactly the case
     // that strands focus on <body>.
-    lastInteracted = this;
+    markInteracted(this);
     // A pointer plugin (e.g. table-column resize) may claim the press; if so,
     // preventDefault + capture the pointer for it and skip caret placement.
     if (this.offerPointer('down', ev)) {
