@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-a11y",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "bapbong — accessibility: a visually-hidden ARIA DOM mirror of the canvas document so screen readers can read it (the canvas itself is opaque to assistive tech).",
   "license": "MIT",
   "repository": {
