@@ -357,7 +357,11 @@ function inlineContent(node: PMNode, ctx: ExportCtx): string {
  *  body sectPr's values — so the geometry is always emitted: the section's
  *  own override when present, the document default otherwise. Child order
  *  (type < pgSz < pgMar < cols) is schema-fixed. */
-function sectionSectPr(s: SectionConfig, docPage: PageConfig): string {
+function sectionSectPr(
+  s: SectionConfig,
+  docPage: PageConfig,
+  carried?: { refs: string; titlePg: string },
+): string {
   const type = `<w:type w:val="${s.newPage ? 'nextPage' : 'continuous'}"/>`;
   const p = s.page ?? docPage;
   const geom = pgSzXml(p) + pgMarXml(p.margin);
@@ -365,7 +369,22 @@ function sectionSectPr(s: SectionConfig, docPage: PageConfig): string {
     s.columns.count > 1
       ? `<w:cols w:num="${s.columns.count}" w:space="${pxToTwips(s.columns.gap)}"/>`
       : `<w:cols w:space="${pxToTwips(s.columns.gap)}"/>`;
-  return `<w:sectPr>${type}${geom}${cols}</w:sectPr>`;
+  // Carried header/footer references + titlePg re-attach in their schema
+  // slots (refs first, titlePg after cols) — their parts and rels survive via
+  // the carry package, so the old rIds stay valid.
+  return `<w:sectPr>${carried?.refs ?? ''}${type}${geom}${cols}${carried?.titlePg ?? ''}</w:sectPr>`;
+}
+
+/** The header/footer references + titlePg of a carried sectPr, verbatim. */
+function chromeRefsOf(sectPr: string): { refs: string; titlePg: string } {
+  const refs = (
+    sectPr.match(/<w:(?:header|footer)Reference\b[^>]*\/>/g) ?? []
+  ).join('');
+  const titlePg =
+    /<w:titlePg\b[^>]*\/>|<w:titlePg\b(?:[^>]*[^/>])?><\/w:titlePg>/.exec(
+      sectPr,
+    )?.[0] ?? '';
+  return { refs, titlePg };
 }
 
 /** A paragraph's w:pPr children (no wrapper). */
@@ -671,15 +690,28 @@ function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
 
 /** Block index → section-break sectPr, for every section but the last (whose
  *  properties live in the body sectPr). */
-function sectionBoundaries(doc: PMNode): Map<number, string> {
+function sectionBoundaries(
+  doc: PMNode,
+  origDocXml?: string,
+): Map<number, string> {
   const sections = doc.attrs['sections'] as SectionConfig[] | null;
   const out = new Map<number, string>();
   if (!sections || sections.length < 2) return out;
   const docPage = (doc.attrs['page'] as PageConfig | null) ?? A4_PAGE;
+  // Per-section chrome refs survive the round-trip only via the original
+  // sectPrs — the model doesn't hold rIds. Reattached positionally, so only
+  // when the section count still matches (an edited section map would
+  // misalign them; refs are then dropped, the pre-existing behavior).
+  const origSectPrs =
+    origDocXml?.match(
+      /<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g,
+    ) ?? [];
+  const aligned = origSectPrs.length === sections.length;
   let acc = 0;
   for (let i = 0; i < sections.length - 1; i++) {
     acc += sections[i].blockCount;
-    out.set(acc - 1, sectionSectPr(sections[i], docPage)); // last block of section i
+    const carried = aligned ? chromeRefsOf(origSectPrs[i]) : undefined;
+    out.set(acc - 1, sectionSectPr(sections[i], docPage, carried)); // last block of section i
   }
   return out;
 }
@@ -1160,7 +1192,10 @@ export async function exportDocx(
     openComments: new Set(),
     runIdx: 0,
   };
-  const boundaries = sectionBoundaries(doc);
+  const origDocXml = opts?.carry
+    ? await opts.carry.file('word/document.xml')?.async('string')
+    : undefined;
+  const boundaries = sectionBoundaries(doc, origDocXml);
   let body = '';
   perf.span('export.body', () =>
     doc.forEach(
@@ -1214,8 +1249,7 @@ export async function exportDocx(
       .file('word/_rels/document.xml.rels')
       ?.async('string');
     zip.file('word/_rels/document.xml.rels', mergeRels(rels, ctx.rels));
-    const origDoc = await carry.file('word/document.xml')?.async('string');
-    if (origDoc) sectPr = extractBodySectPr(origDoc);
+    if (origDocXml) sectPr = extractBodySectPr(origDocXml);
   } else {
     ctx.rels.push(
       `<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`,

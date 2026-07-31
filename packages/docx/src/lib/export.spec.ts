@@ -993,6 +993,50 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
   });
 });
 
+describe('exportDocx (per-section chrome round-trip)', () => {
+  async function twoSectionSource(): Promise<Uint8Array> {
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/header2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/_rels/document.xml.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rIdH1" Type="${R_NS}/header" Target="header1.xml"/><Relationship Id="rIdH2" Type="${R_NS}/header" Target="header2.xml"/></Relationships>`,
+    );
+    const hdr = (t: string) =>
+      `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:hdr>`;
+    zip.file('word/header1.xml', hdr('SECTION ONE'));
+    zip.file('word/header2.xml', hdr('SECTION TWO'));
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body><w:p><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rIdH1"/><w:titlePg/><w:pgSz w:w="12240" w:h="15840"/></w:sectPr></w:pPr><w:r><w:t>one</w:t></w:r></w:p><w:p><w:r><w:t>two</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rIdH2"/><w:pgSz w:w="12240" w:h="15840"/></w:sectPr></w:body></w:document>`,
+    );
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  it('re-attaches intermediate header refs + titlePg on carry export', async () => {
+    const { doc, raw, sectionChrome } = await importDocx(
+      await twoSectionSource(),
+    );
+    expect(sectionChrome?.[0].headers['default']?.textContent).toBe(
+      'SECTION ONE',
+    );
+    const back = await importDocx(await exportDocx(doc, { carry: raw }));
+    expect(back.sectionChrome?.[0].headers['default']?.textContent).toBe(
+      'SECTION ONE',
+    );
+    expect(back.sectionChrome?.[0].titlePg).toBe(true);
+    expect(back.sectionChrome?.[1].headers['default']?.textContent).toBe(
+      'SECTION TWO',
+    );
+  });
+});
+
 describe('exportDocx (sections + footnotes)', () => {
   // The exported word/document.xml, for inspecting serialization directly.
   async function docXml(
