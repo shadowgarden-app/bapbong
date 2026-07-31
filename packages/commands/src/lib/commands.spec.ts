@@ -37,6 +37,7 @@ import {
   removeSectionBreak,
   setColumns,
 } from './sections.js';
+import { PAPER_SIZES, setOrientation, setPaperSize } from './page-setup.js';
 import {
   activeListPresetId,
   applyListPreset,
@@ -53,7 +54,11 @@ const schema = new Schema({
   nodes: {
     doc: {
       content: 'block+',
-      attrs: { numbering: { default: null }, sections: { default: null } },
+      attrs: {
+        numbering: { default: null },
+        sections: { default: null },
+        page: { default: null },
+      },
     },
     paragraph: {
       group: 'block',
@@ -619,5 +624,58 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(toggleList('ordered').isActive?.(paren)).toBe(true);
     const off = apply(paren, toggleList('ordered'));
     expect(findNode(off, 'paragraph')?.attrs['list']).toBeNull();
+  });
+});
+
+describe('page setup (orientation + paper size)', () => {
+  const oneP = () => {
+    const doc = n('doc', null, n('paragraph', null, schema.text('x')));
+    return EditorState.create({ schema, doc });
+  };
+  const pageOf = (s: EditorState) =>
+    s.doc.attrs['page'] as {
+      width: number;
+      height: number;
+      margin: Record<string, number>;
+    };
+
+  it('setOrientation(landscape) swaps A4 dims and keeps margins', () => {
+    const after = apply(oneP(), setOrientation('landscape'));
+    expect(pageOf(after)).toMatchObject({ width: 1123, height: 794 });
+    expect(pageOf(after).margin).toEqual({
+      top: 96,
+      right: 96,
+      bottom: 96,
+      left: 96,
+    });
+    expect(setOrientation('landscape').isActive?.(after)).toBe(true);
+    expect(setOrientation('portrait').isActive?.(after)).toBe(false);
+    // Back to portrait restores the original dims.
+    const back = apply(after, setOrientation('portrait'));
+    expect(pageOf(back)).toMatchObject({ width: 794, height: 1123 });
+  });
+
+  it('setOrientation is a no-op (no doc change) when already there', () => {
+    const s = oneP();
+    let dispatched = false;
+    setOrientation('portrait').run(s, () => (dispatched = true));
+    expect(dispatched).toBe(false); // portrait already — no undo step
+  });
+
+  it('setPaperSize keeps orientation and margins', () => {
+    const landscape = apply(oneP(), setOrientation('landscape'));
+    const after = apply(landscape, setPaperSize('letter'));
+    // Letter, still landscape.
+    expect(pageOf(after)).toMatchObject({
+      width: PAPER_SIZES.letter.height,
+      height: PAPER_SIZES.letter.width,
+    });
+    expect(setPaperSize('letter').isActive?.(after)).toBe(true);
+    expect(setPaperSize('a4').isActive?.(after)).toBe(false);
+    expect(setOrientation('landscape').isActive?.(after)).toBe(true);
+  });
+
+  it('paper-size default reports A4 active on a fresh doc', () => {
+    expect(setPaperSize('a4').isActive?.(oneP())).toBe(true);
   });
 });

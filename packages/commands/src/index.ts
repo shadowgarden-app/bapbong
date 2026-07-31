@@ -7,4 +7,5 @@ export * from './lib/history.js';
 export * from './lib/insert.js';
 export * from './lib/edit.js';
 export * from './lib/sections.js';
+export * from './lib/page-setup.js';
 export * from './lib/registry.js';
