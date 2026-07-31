@@ -548,6 +548,47 @@ describe('importDocx', () => {
     expect(page2.margin.right).toBe(48);
   });
 
+  it('imports per-section page geometry overrides (mixed portrait/landscape)', async () => {
+    // Section 1 portrait Letter (differs from body → override), body section
+    // landscape Letter (the document default — no override).
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:sectPr>
+        <w:pgSz w:w="12240" w:h="15840"/>
+        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+      </w:sectPr></w:pPr><w:r><w:t>portrait part</w:t></w:r></w:p>
+      <w:p><w:r><w:t>landscape part</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>
+        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const { doc, page } = await importDocx(await makeDocx(documentXml));
+    expect(page).toMatchObject({ width: 1056, height: 816 }); // body: landscape
+    const sections = doc.attrs.sections as {
+      blockCount: number;
+      page?: { width: number; height: number };
+    }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].page).toMatchObject({ width: 816, height: 1056 }); // override
+    expect(sections[1].page).toBeUndefined(); // body geometry — no override
+  });
+
+  it('drops per-section geometry matching the document default', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:sectPr>
+        <w:pgSz w:w="11906" w:h="16838"/>
+        <w:cols w:num="2" w:space="425"/>
+      </w:sectPr></w:pPr><w:r><w:t>two cols</w:t></w:r></w:p>
+      <w:p><w:r><w:t>one col</w:t></w:r></w:p>
+      <w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const sections = doc.attrs.sections as { page?: unknown }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].page).toBeUndefined(); // same geometry → no override
+    expect(sections[1].page).toBeUndefined();
+  });
+
   it('defaults page geometry to A4 when sectPr omits it', async () => {
     const { page } = await importDocx(await makeDocx(DOCUMENT_XML));
     expect(page).toEqual({

@@ -1409,6 +1409,10 @@ function parseBodyBlocks(
           blockCount: blocks.length - start,
           columns: parseColumns(sectPr),
           newPage: sectionStartsNewPage(sectPr),
+          // Every OOXML sectPr is self-contained — parse its geometry too.
+          // importDocx drops `page` again on sections matching the document
+          // default, so single-geometry docs stay on the fast path.
+          page: parsePageGeometry(sectPr),
         });
         start = blocks.length;
       }
@@ -1781,9 +1785,23 @@ export async function importDocx(
   if (endnoteBlocks.length > 0 && sections.length > 0) {
     sections[sections.length - 1].blockCount += endnoteBlocks.length;
   }
-  // Only ride the sections attr when it changes layout (>1 section, or columns).
+  // Sections whose geometry matches the document default carry no override —
+  // the common all-one-geometry doc keeps every `page` absent.
+  const samePage = (a: PageConfig, b: PageConfig) =>
+    a.width === b.width &&
+    a.height === b.height &&
+    a.margin.top === b.margin.top &&
+    a.margin.right === b.margin.right &&
+    a.margin.bottom === b.margin.bottom &&
+    a.margin.left === b.margin.left;
+  for (const s of sections) {
+    if (s.page && samePage(s.page, pageGeom)) delete s.page;
+  }
+  // Only ride the sections attr when it changes layout (>1 section, columns,
+  // or a per-section geometry override).
   const multiSection =
-    sections.length > 1 || sections.some((s) => s.columns.count > 1);
+    sections.length > 1 ||
+    sections.some((s) => s.columns.count > 1 || s.page);
   // Comment threads only ride the doc when the schema carries the comment mark
   // (the comment plugin is present); otherwise comment values are filtered out.
   const hasComments = !!ctx.schema.marks['comment'];

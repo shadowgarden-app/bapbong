@@ -22,6 +22,12 @@ export interface SectionConfig {
   blockCount: number;
   columns: ColumnConfig;
   newPage: boolean;
+  /** Page geometry override (w:pgSz/w:pgMar on this section's sectPr) when it
+   *  differs from the document default (`doc.attrs.page`) — e.g. a landscape
+   *  section inside a portrait document. Absent → the document geometry.
+   *  Geometry can only change at a page boundary, so a continuous section
+   *  with a differing `page` is laid out as next-page (Word's own promotion). */
+  page?: PageConfig;
 }
 
 /** A document comment (w:comment) referenced by a w:commentRange in the body.
