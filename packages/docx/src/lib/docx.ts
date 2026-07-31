@@ -1368,6 +1368,9 @@ interface SectionConfig {
   blockCount: number;
   columns: { count: number; gap: number };
   newPage: boolean;
+  /** Geometry override when this section's w:pgSz/w:pgMar differ from the
+   *  document default (the body sectPr). */
+  page?: PageConfig;
 }
 
 /** Column flow from a section's w:cols (equal-width only). count defaults to 1;

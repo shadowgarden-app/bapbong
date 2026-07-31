@@ -1862,6 +1862,100 @@ describe('multi-column layout', () => {
     expect(r.pages).toHaveLength(2);
     expect(r.pages[1].lines[0].y).toBe(20); // section B at the new page top
   });
+
+  it('lays a per-section page override on its own page geometry', () => {
+    // Section B rotates to landscape (500×240) with wider margins.
+    const landscape = {
+      width: 500,
+      height: 240,
+      margin: { top: 30, right: 40, bottom: 30, left: 40 },
+    };
+    const doc = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: true },
+        {
+          blockCount: 2,
+          columns: { count: 1, gap: 0 },
+          newPage: true,
+          page: landscape,
+        },
+      ],
+      4,
+    );
+    const r = layout(doc, config({ height: 1000 }));
+    expect(r.pages).toHaveLength(2);
+    // Page 0: document geometry; page 1: the override's.
+    expect(r.pages[0]).toMatchObject({ width: 240, height: 1000 });
+    expect(r.pages[1]).toMatchObject({ width: 500, height: 240 });
+    // Section B content starts at ITS margins, not the document's.
+    expect(r.pages[1].lines[0].y).toBe(30);
+    expect(r.pages[1].lines[0].x).toBe(40);
+  });
+
+  it('promotes a continuous break to next-page when geometry differs', () => {
+    const landscape = {
+      width: 500,
+      height: 240,
+      margin: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const doc = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: false },
+        {
+          blockCount: 2,
+          columns: { count: 1, gap: 0 },
+          newPage: false, // continuous — but geometry can't switch mid-page
+          page: landscape,
+        },
+      ],
+      4,
+    );
+    const r = layout(doc, config({ height: 1000 }));
+    expect(r.pages).toHaveLength(2);
+    expect(r.pages[1]).toMatchObject({ width: 500, height: 240 });
+  });
+
+  it('a first-section override applies from page one', () => {
+    const landscape = {
+      width: 500,
+      height: 240,
+      margin: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const doc = secDoc(
+      [
+        {
+          blockCount: 2,
+          columns: { count: 1, gap: 0 },
+          newPage: true,
+          page: landscape,
+        },
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: true },
+      ],
+      4,
+    );
+    const r = layout(doc, config({ height: 1000 }));
+    expect(r.pages).toHaveLength(2);
+    expect(r.pages[0]).toMatchObject({ width: 500, height: 240 });
+    expect(r.pages[1]).toMatchObject({ width: 240, height: 1000 }); // back to doc default
+  });
+
+  it('sanitizes a degenerate per-section override instead of hanging', () => {
+    const doc = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: true },
+        {
+          blockCount: 2,
+          columns: { count: 1, gap: 0 },
+          newPage: true,
+          page: { width: NaN, height: -5, margin: { top: NaN, right: 0, bottom: 0, left: 0 } },
+        },
+      ],
+      4,
+    );
+    const r = layout(doc, config({ height: 1000 })); // must terminate
+    expect(r.pages.length).toBeGreaterThanOrEqual(2);
+    expect(Number.isFinite(r.pages[1].width)).toBe(true);
+  });
 });
 
 describe('incremental table re-layout', () => {

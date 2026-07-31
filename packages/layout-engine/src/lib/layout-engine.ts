@@ -26,6 +26,7 @@ import type {
   LayoutSegment,
   MeasureMetrics,
   MeasureText,
+  PageConfig,
   ParagraphBorderBox,
   ParagraphBorders,
   ParagraphIndent,
@@ -1407,7 +1408,12 @@ type ParaItem = {
   /** w:pBdr — a border box painted around the paragraph's lines. */
   borders?: ParagraphBorders;
 };
-type SectionMarker = ColumnConfig & { newPage: boolean; height?: number };
+type SectionMarker = ColumnConfig & {
+  newPage: boolean;
+  height?: number;
+  /** Per-section page-geometry override (sanitized); absent → config.page. */
+  page?: PageConfig;
+};
 type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
   /** Set on the first block of each section: switch column flow here. `height`
    *  (filled by assignSectionHeights) is the section's total content height,
@@ -1628,20 +1634,26 @@ function buildCtx(config: LayoutConfig): Ctx {
   };
 }
 
-/** Stack laid-out blocks onto pages (the paginator). `band` overrides the
- *  vertical content bounds (e.g. pushed in by a tall page header/footer). */
+/** Stack laid-out blocks onto pages (the paginator). `bandFor` computes the
+ *  vertical content bounds for a page geometry (e.g. pushed in by a tall page
+ *  header/footer) — a function because sections can override the geometry. */
 function placeBlocks(
   items: Iterable<BlockItem>,
   config: LayoutConfig,
   ctx: Ctx,
-  band?: { top: number; bottom: number },
+  bandFor?: (p: PageConfig) => { top: number; bottom: number },
   footnotes?: Map<number, FootnoteBody>,
 ): ResolvedLayout {
   const { page } = config;
-  const top = band?.top ?? page.margin.top;
-  const bottom = band?.bottom ?? page.height - page.margin.bottom;
-  const contentLeft = page.margin.left;
-  const contentRight = page.width - page.margin.right;
+  const bandOf = (p: PageConfig) =>
+    bandFor?.(p) ?? { top: p.margin.top, bottom: p.height - p.margin.bottom };
+  // Geometry of the page being filled — mutable: a section carrying a `page`
+  // override swaps it at its boundary (always a page boundary; a continuous
+  // break with differing geometry is promoted to next-page, as Word does).
+  let curPage = page;
+  let { top, bottom } = bandOf(page);
+  let contentLeft = page.margin.left;
+  let contentRight = page.width - page.margin.right;
 
   const pages: ResolvedPage[] = [];
   let lines: LayoutLine[] = [];
@@ -1680,7 +1692,7 @@ function placeBlocks(
   // is where columns start on the current page (top, or the handoff y after a
   // continuous section break); `sectionMaxY` tracks the deepest content so the
   // next continuous section can resume below it. count 1 ⇒ ordinary flow.
-  const contentWidth = contentRight - contentLeft;
+  let contentWidth = contentRight - contentLeft;
   let colCount = 1;
   let colGap = 0;
   let colWidth = contentWidth;
@@ -1698,6 +1710,21 @@ function placeBlocks(
     colCount = Math.max(1, cols.count);
     colGap = colCount > 1 ? cols.gap : 0;
     colWidth = (contentWidth - colGap * (colCount - 1)) / colCount;
+  };
+
+  /** Swap to a section's page geometry and restart the band on it. Only ever
+   *  called at a page boundary (after finalizePage, or before any content). */
+  const setGeometry = (p: PageConfig) => {
+    curPage = p;
+    ({ top, bottom } = bandOf(p));
+    contentLeft = p.margin.left;
+    contentRight = p.width - p.margin.right;
+    contentWidth = contentRight - contentLeft;
+    colIndex = 0;
+    bandTop = top;
+    sectionMaxY = top;
+    colDirty = false;
+    y = top;
   };
 
   // Footnotes referenced on the current page, in first-appearance order. Their
@@ -1812,8 +1839,8 @@ function placeBlocks(
     flushPBdrFrag(false); // a bordered paragraph continuing → open-bottom box
     const resolved: ResolvedPage = {
       index: pages.length,
-      width: page.width,
-      height: page.height,
+      width: curPage.width,
+      height: curPage.height,
       contentLeft,
       contentTop: top,
       lines,
@@ -1887,7 +1914,7 @@ function placeBlocks(
   const registerFloats = (flow: FlowParagraph, yPara: number) => {
     for (const f of flow.floats ?? []) {
       const baseL = f.hRel === 'page' ? 0 : contentLeft;
-      const baseR = f.hRel === 'page' ? page.width : contentRight;
+      const baseR = f.hRel === 'page' ? curPage.width : contentRight;
       const fx =
         f.hAlign === 'right'
           ? baseR - f.width
@@ -2016,10 +2043,16 @@ function placeBlocks(
   for (const item of items) {
     // Section boundary: switch column flow (and break) before the block.
     if (item.section) {
+      const nextPage = item.section.page ?? page;
+      const geomChanges = !sameGeom(nextPage, curPage);
       if (firstItem) {
+        if (geomChanges) setGeometry(nextPage);
         applyColumns(item.section);
-      } else if (item.section.newPage) {
+      } else if (item.section.newPage || geomChanges) {
+        // Geometry may only change at a page boundary — a continuous break
+        // with a differing page is laid out as next-page (Word's promotion).
         if (pageHasContent()) finalizePage();
+        if (geomChanges) setGeometry(nextPage);
         applyColumns(item.section);
       } else {
         // Continuous break: resume below the finishing section's deepest column,
@@ -2180,9 +2213,9 @@ function placeBlocks(
  *  measurement is injected. */
 /** A degenerate page config (NaN or absurd values from a hostile import)
  *  must never reach pagination — a non-finite or negative content box turns
- *  the page-fill loop infinite and hangs the app. Sanitize per field. */
-function sanitizeConfig(config: LayoutConfig): LayoutConfig {
-  const p = config.page;
+ *  the page-fill loop infinite and hangs the app. Sanitize per field. Applied
+ *  to the document page AND every per-section override. */
+function sanitizePage(p: PageConfig): PageConfig {
   const num = (v: number, fallback: number) =>
     Number.isFinite(v) && v >= 0 ? v : fallback;
   // Small pages are legitimate — only zero/NaN falls back to A4.
@@ -2207,7 +2240,25 @@ function sanitizeConfig(config: LayoutConfig): LayoutConfig {
     margin.right === p.margin.right &&
     margin.bottom === p.margin.bottom &&
     margin.left === p.margin.left;
-  return same ? config : { ...config, page: { width, height, margin } };
+  return same ? p : { width, height, margin };
+}
+
+function sanitizeConfig(config: LayoutConfig): LayoutConfig {
+  const page = sanitizePage(config.page);
+  return page === config.page ? config : { ...config, page };
+}
+
+/** Field-equality for page geometry (identity is not enough — overrides come
+ *  from doc attrs and are rebuilt on every transaction). */
+function sameGeom(a: PageConfig, b: PageConfig): boolean {
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.margin.top === b.margin.top &&
+    a.margin.right === b.margin.right &&
+    a.margin.bottom === b.margin.bottom &&
+    a.margin.left === b.margin.left
+  );
 }
 
 export function layoutBlocks(
@@ -2546,17 +2597,6 @@ export function layout(
     );
   let headers = perf.span('chrome-headers', () => layHeaders(ctx));
   let footers = perf.span('chrome-footers', () => layFooters(ctx));
-  let top = page.margin.top;
-  let bottom = page.height - page.margin.bottom;
-  if (headers.default || headers.first || headers.even) {
-    top = Math.max(top, CHROME_DISTANCE + maxBandHeight(headers));
-  }
-  if (footers.default || footers.first || footers.even) {
-    bottom = Math.min(
-      bottom,
-      page.height - CHROME_DISTANCE - maxBandHeight(footers),
-    );
-  }
 
   // Markers are recounted on every layout, so list edits renumber live. The
   // counter advances for every list paragraph — including cache hits.
@@ -2577,22 +2617,29 @@ export function layout(
     columns: ColumnConfig;
     start: boolean;
     newPage: boolean;
+    page?: PageConfig;
   }[] = [];
   for (const sec of sections) {
+    // Per-section geometry overrides are attr data — sanitize like config.page
+    // (degenerate values would hang the page-fill loop).
+    const secPage = sec.page ? sanitizePage(sec.page) : undefined;
     for (let k = 0; k < sec.blockCount; k++) {
       blockSection.push({
         columns: sec.columns,
         start: k === 0,
         newPage: sec.newPage,
+        page: secPage,
       });
     }
   }
   const lastSec = sections[sections.length - 1];
+  const lastSecPage = lastSec.page ? sanitizePage(lastSec.page) : undefined;
   while (blockSection.length < doc.childCount) {
     blockSection.push({
       columns: lastSec.columns,
       start: false,
       newPage: lastSec.newPage,
+      page: lastSecPage,
     });
   }
 
@@ -2604,11 +2651,19 @@ export function layout(
       start: false,
       newPage: true,
     };
-    // Blocks wrap at their section's column width; the placer shifts each into
-    // its column. `right` (cache key) is the column's right edge.
-    const colRight = left + columnWidth(right - left, bs.columns);
+    // Blocks wrap at their section's column width — computed against the
+    // section's own page geometry when it overrides the document's. `bLeft`/
+    // `colRight` are the cache key, so a geometry change re-measures exactly
+    // the affected sections.
+    const secPage = bs.page ?? page;
+    const bLeft = secPage.margin.left;
+    const bRight = secPage.width - secPage.margin.right;
+    const colRight = bLeft + columnWidth(bRight - bLeft, bs.columns);
     const tag = (item: BlockItem): BlockItem => {
-      if (bs.start) item.section = { ...bs.columns, newPage: bs.newPage };
+      if (bs.start) {
+        item.section = { ...bs.columns, newPage: bs.newPage };
+        if (bs.page) item.section.page = bs.page;
+      }
       return item;
     };
     if (node.type.name === 'paragraph') {
@@ -2624,7 +2679,7 @@ export function layout(
       const hit = cache?.paragraphs.get(node);
       if (
         hit &&
-        hit.left === left &&
+        hit.left === bLeft &&
         hit.right === colRight &&
         hit.marker === marker
       ) {
@@ -2661,10 +2716,10 @@ export function layout(
       }
       perf.bump('para.miss');
       const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
-      const drafts = layoutParagraph(flow, left, colRight, ctx);
+      const drafts = layoutParagraph(flow, bLeft, colRight, ctx);
       const item: ParaItem = { ...mkItem(drafts), getFlow: () => flow };
       cache?.paragraphs.set(node, {
-        left,
+        left: bLeft,
         right: colRight,
         basePos: contentStart,
         marker,
@@ -2676,7 +2731,7 @@ export function layout(
       // moved) instead of re-measuring every cell. List-bearing tables are
       // never cached — they advance the live numbering counter.
       const hit = cache?.tables.get(node);
-      if (hit && hit.left === left && hit.right === colRight) {
+      if (hit && hit.left === bLeft && hit.right === colRight) {
         perf.bump(offset !== hit.basePos ? 'table.shift' : 'table.hit');
         items.push(
           tag({ table: cloneTableShifted(hit.table, offset - hit.basePos) }),
@@ -2686,13 +2741,13 @@ export function layout(
       perf.bump('table.miss');
       const table = layoutTable(
         tableToFlow(node, ctx.base, offset, counter),
-        left,
+        bLeft,
         colRight,
         ctx,
       );
       if (cache && !tableHasList(node)) {
         cache.tables.set(node, {
-          left,
+          left: bLeft,
           right: colRight,
           basePos: offset,
           table,
@@ -2722,8 +2777,20 @@ export function layout(
     }
   }
   perf.span('assignSectionHeights', () => assignSectionHeights(items));
+  // Band bounds as a function of page geometry: the chrome inset applies to
+  // whichever page a section switches to (per-section-width chrome re-wrap is
+  // a later phase — heights come from the document-level chrome).
+  const bandFor = (p: PageConfig) => {
+    let t = p.margin.top;
+    let b = p.height - p.margin.bottom;
+    if (headers.default || headers.first || headers.even)
+      t = Math.max(t, CHROME_DISTANCE + maxBandHeight(headers));
+    if (footers.default || footers.first || footers.even)
+      b = Math.min(b, p.height - CHROME_DISTANCE - maxBandHeight(footers));
+    return { top: t, bottom: b };
+  };
   const resolved = perf.span('placeBlocks', () =>
-    placeBlocks(items, config, ctx, { top, bottom }, fnMap),
+    placeBlocks(items, config, ctx, bandFor, fnMap),
   );
 
   // Chrome with page-number fields: re-lay every variant now that the page
