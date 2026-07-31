@@ -10,8 +10,15 @@ const DEFAULT_GAP = 28;
  *  with the page-setup commands (insertLandscapeSection). */
 export function currentSections(state: EditorState): SectionConfig[] {
   const raw = state.doc.attrs['sections'] as SectionConfig[] | null;
-  if (raw && raw.length) return raw.map((s) => ({ ...s, columns: { ...s.columns } }));
-  return [{ blockCount: state.doc.childCount, columns: { count: 1, gap: 0 }, newPage: false }];
+  if (raw && raw.length)
+    return raw.map((s) => ({ ...s, columns: { ...s.columns } }));
+  return [
+    {
+      blockCount: state.doc.childCount,
+      columns: { count: 1, gap: 0 },
+      newPage: false,
+    },
+  ];
 }
 
 /** Index of the top-level block containing the selection head. */
@@ -20,7 +27,10 @@ export function headBlockIndex(state: EditorState): number {
 }
 
 /** The section index covering top-level block `bi`, plus its first block. */
-export function sectionAt(sections: SectionConfig[], bi: number): { i: number; start: number } {
+export function sectionAt(
+  sections: SectionConfig[],
+  bi: number,
+): { i: number; start: number } {
   let start = 0;
   for (let i = 0; i < sections.length; i++) {
     if (bi < start + sections[i].blockCount) return { i, start };
@@ -57,8 +67,16 @@ export function insertSectionBreak(opts: { newPage: boolean }): Command {
       if (dispatch) {
         const next: SectionConfig[] = [
           ...sections.slice(0, i),
-          { blockCount: firstCount, columns: { ...S.columns }, newPage: S.newPage },
-          { blockCount: secondCount, columns: { ...S.columns }, newPage: opts.newPage },
+          {
+            blockCount: firstCount,
+            columns: { ...S.columns },
+            newPage: S.newPage,
+          },
+          {
+            blockCount: secondCount,
+            columns: { ...S.columns },
+            newPage: opts.newPage,
+          },
           ...sections.slice(i + 1),
         ];
         dispatch(state.tr.setDocAttribute('sections', next).scrollIntoView());
@@ -113,15 +131,23 @@ export function setColumns(count: number): Command {
       const sections = currentSections(state);
       const { i } = sectionAt(sections, headBlockIndex(state));
       if (dispatch) {
-        const gap = count > 1 ? sections[i].columns.gap || DEFAULT_GAP : sections[i].columns.gap;
-        const next = sections.map((s, j) => (j === i ? { ...s, columns: { count, gap } } : s));
+        const gap =
+          count > 1
+            ? sections[i].columns.gap || DEFAULT_GAP
+            : sections[i].columns.gap;
+        const next = sections.map((s, j) =>
+          j === i ? { ...s, columns: { count, gap } } : s,
+        );
         dispatch(state.tr.setDocAttribute('sections', next).scrollIntoView());
       }
       return true;
     },
     isActive: (state) => {
       const sections = currentSections(state);
-      return sections[sectionAt(sections, headBlockIndex(state)).i].columns.count === count;
+      return (
+        sections[sectionAt(sections, headBlockIndex(state)).i].columns.count ===
+        count
+      );
     },
   };
 }

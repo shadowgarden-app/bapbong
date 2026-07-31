@@ -840,28 +840,28 @@ describe('exportDocx (E4: carry original parts)', () => {
 
 // Module-scoped: shared by the E4-fidelity and page-setup describes.
 async function sourceWithHeader(): Promise<Uint8Array> {
-    const zip = new JSZip();
-    zip.file(
-      '[Content_Types].xml',
-      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>`,
-    );
-    zip.file(
-      '_rels/.rels',
-      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
-    );
-    zip.file(
-      'word/_rels/document.xml.rels',
-      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rIdH" Type="${R_NS}/header" Target="header1.xml"/></Relationships>`,
-    );
-    zip.file(
-      'word/header1.xml',
-      `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>MY HEADER</w:t></w:r></w:p></w:hdr>`,
-    );
-    zip.file(
-      'word/document.xml',
-      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body><w:p><w:r><w:t>body text</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`,
-    );
-    return zip.generateAsync({ type: 'uint8array' });
+  const zip = new JSZip();
+  zip.file(
+    '[Content_Types].xml',
+    `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>`,
+  );
+  zip.file(
+    '_rels/.rels',
+    `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
+  );
+  zip.file(
+    'word/_rels/document.xml.rels',
+    `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rIdH" Type="${R_NS}/header" Target="header1.xml"/></Relationships>`,
+  );
+  zip.file(
+    'word/header1.xml',
+    `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>MY HEADER</w:t></w:r></w:p></w:hdr>`,
+  );
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body><w:p><w:r><w:t>body text</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`,
+  );
+  return zip.generateAsync({ type: 'uint8array' });
 }
 
 describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
@@ -948,9 +948,7 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
     // Replaced in place: the old portrait pgSz is gone.
     expect(xml).not.toContain('<w:pgSz w:w="11906" w:h="16838"/>');
     // Round-trip: importing the export yields the edited geometry.
-    const back = await importDocx(
-      await exportDocx(edited, { carry: raw }),
-    );
+    const back = await importDocx(await exportDocx(edited, { carry: raw }));
     expect(back.page.width).toBe(1123);
     expect(back.doc.attrs.page).toMatchObject({ width: 1123, height: 794 });
   });

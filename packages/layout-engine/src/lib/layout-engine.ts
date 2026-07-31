@@ -1645,7 +1645,10 @@ function placeBlocks(
   items: Iterable<BlockItem>,
   config: LayoutConfig,
   ctx: Ctx,
-  bandFor?: (p: PageConfig, chromeIndex?: number) => { top: number; bottom: number },
+  bandFor?: (
+    p: PageConfig,
+    chromeIndex?: number,
+  ) => { top: number; bottom: number },
   footnotes?: Map<number, FootnoteBody>,
 ): ResolvedLayout {
   const { page } = config;
@@ -2721,7 +2724,9 @@ export function layout(
     setBandH = [];
     for (let i = 0; i < sections.length; i++) {
       const cs = secChromeDocs[i] ?? {};
-      const p = sections[i].page ? sanitizePage(sections[i].page as PageConfig) : page;
+      const p = sections[i].page
+        ? sanitizePage(sections[i].page as PageConfig)
+        : page;
       const l = p.margin.left;
       const r = p.width - p.margin.right;
       const hb = layVariants(
@@ -2890,7 +2895,8 @@ export function layout(
     const sh = chromeIndex != null ? setBandH[chromeIndex] : undefined;
     if (sh) {
       if (sh.header > 0) t = Math.max(t, CHROME_DISTANCE + sh.header);
-      if (sh.footer > 0) b = Math.min(b, p.height - CHROME_DISTANCE - sh.footer);
+      if (sh.footer > 0)
+        b = Math.min(b, p.height - CHROME_DISTANCE - sh.footer);
       return { top: t, bottom: b };
     }
     if (headers.default || headers.first || headers.even)
@@ -2905,11 +2911,24 @@ export function layout(
 
   // Chrome with page-number fields: re-lay every variant now that the page
   // total is known, so each field slot is as wide as the widest number shown.
-  const setsHaveFields = (chromeSets ?? []).some((s) =>
-    anyBandHasFields({ default: s.header, first: s.headerFirst, even: s.headerEven }) ||
-    anyBandHasFields({ default: s.footer, first: s.footerFirst, even: s.footerEven }),
+  const setsHaveFields = (chromeSets ?? []).some(
+    (s) =>
+      anyBandHasFields({
+        default: s.header,
+        first: s.headerFirst,
+        even: s.headerEven,
+      }) ||
+      anyBandHasFields({
+        default: s.footer,
+        first: s.footerFirst,
+        even: s.footerEven,
+      }),
   );
-  if (anyBandHasFields(headers) || anyBandHasFields(footers) || setsHaveFields) {
+  if (
+    anyBandHasFields(headers) ||
+    anyBandHasFields(footers) ||
+    setsHaveFields
+  ) {
     const fieldCtx: Ctx = {
       ...ctx,
       fieldPlaceholder: String(resolved.pages.length),

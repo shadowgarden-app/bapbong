@@ -625,19 +625,33 @@ describe('importDocx', () => {
       <w:sectPr><w:headerReference w:type="default" r:id="rIdH2"/></w:sectPr>
     </w:body></w:document>`;
     const { sectionChrome, headers } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, undefined, undefined, {
-        'word/header1.xml': hdr('CHAPTER ONE'),
-        'word/header2.xml': hdr('CHAPTER TWO'),
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        undefined,
+        undefined,
+        {
+          'word/header1.xml': hdr('CHAPTER ONE'),
+          'word/header2.xml': hdr('CHAPTER TWO'),
+        },
+      ),
     );
     expect(sectionChrome).toHaveLength(3);
-    expect(sectionChrome?.[0].headers['default']?.textContent).toBe('CHAPTER ONE');
+    expect(sectionChrome?.[0].headers['default']?.textContent).toBe(
+      'CHAPTER ONE',
+    );
     expect(sectionChrome?.[0].titlePg).toBe(true);
     // Link to Previous: section 2 shows section 1's header, but not titlePg.
-    expect(sectionChrome?.[1].headers['default']?.textContent).toBe('CHAPTER ONE');
+    expect(sectionChrome?.[1].headers['default']?.textContent).toBe(
+      'CHAPTER ONE',
+    );
     expect(sectionChrome?.[1].titlePg).toBe(false);
     // Section 3 overrides with its own.
-    expect(sectionChrome?.[2].headers['default']?.textContent).toBe('CHAPTER TWO');
+    expect(sectionChrome?.[2].headers['default']?.textContent).toBe(
+      'CHAPTER TWO',
+    );
     // Flat fields = the last section's resolved chrome (legacy shape).
     expect(headers['default']?.textContent).toBe('CHAPTER TWO');
   });
@@ -651,9 +665,17 @@ describe('importDocx', () => {
       <w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>
     </w:body></w:document>`;
     const { sectionChrome, headers } = await importDocx(
-      await makeDocx(documentXml, undefined, undefined, relsXml, undefined, undefined, {
-        'word/header1.xml': hdr,
-      }),
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        undefined,
+        undefined,
+        {
+          'word/header1.xml': hdr,
+        },
+      ),
     );
     // Uniform chrome — the flat fields cover every page; no per-section set.
     expect(sectionChrome).toBeUndefined();

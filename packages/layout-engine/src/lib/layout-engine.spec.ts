@@ -1972,7 +1972,7 @@ describe('multi-column layout', () => {
     expect(r.chromeSets?.[1].header?.lines.length).toBeGreaterThan(0);
   });
 
-  it('a tall section header shrinks only that section\'s pages', () => {
+  it("a tall section header shrinks only that section's pages", () => {
     // Section 2's header is 5 lines tall; section 1 has none.
     const tallHeader = secSchema.node(
       'doc',
@@ -2005,7 +2005,11 @@ describe('multi-column layout', () => {
           blockCount: 2,
           columns: { count: 1, gap: 0 },
           newPage: true,
-          page: { width: NaN, height: -5, margin: { top: NaN, right: 0, bottom: 0, left: 0 } },
+          page: {
+            width: NaN,
+            height: -5,
+            margin: { top: NaN, right: 0, bottom: 0, left: 0 },
+          },
         },
       ],
       4,

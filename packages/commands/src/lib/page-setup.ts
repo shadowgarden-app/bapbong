@@ -61,7 +61,8 @@ export function setOrientation(o: 'portrait' | 'landscape'): Command {
       }
       return true;
     },
-    isActive: (state) => isLandscape(currentPage(state)) === (o === 'landscape'),
+    isActive: (state) =>
+      isLandscape(currentPage(state)) === (o === 'landscape'),
   };
 }
 
@@ -96,7 +97,11 @@ export function insertLandscapeSection(): Command {
         };
         const next: SectionConfig[] = [
           ...sections.slice(0, i),
-          { blockCount: firstCount, columns: { ...S.columns }, newPage: S.newPage },
+          {
+            blockCount: firstCount,
+            columns: { ...S.columns },
+            newPage: S.newPage,
+          },
           {
             blockCount: 1,
             columns: { count: 1, gap: 0 },

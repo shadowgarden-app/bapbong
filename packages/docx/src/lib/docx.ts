@@ -846,7 +846,8 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
           text: '',
         };
         if (field && field.phase === 'result') field.resultRuns.push(synth);
-        else if (!field) inline.push(...runToInline(synth, paraBase, ctx, null));
+        else if (!field)
+          inline.push(...runToInline(synth, paraBase, ctx, null));
         // phase 'instr': stray content between begin and separate is
         // instruction-side noise — dropped, as Word does.
         plain = [];
@@ -1852,8 +1853,7 @@ export async function importDocx(
   // Only ride the sections attr when it changes layout (>1 section, columns,
   // or a per-section geometry override).
   const multiSection =
-    sections.length > 1 ||
-    sections.some((s) => s.columns.count > 1 || s.page);
+    sections.length > 1 || sections.some((s) => s.columns.count > 1 || s.page);
   // Comment threads only ride the doc when the schema carries the comment mark
   // (the comment plugin is present); otherwise comment values are filtered out.
   const hasComments = !!ctx.schema.marks['comment'];
