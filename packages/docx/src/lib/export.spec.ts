@@ -838,8 +838,8 @@ describe('exportDocx (E4: carry original parts)', () => {
   });
 });
 
-describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
-  async function sourceWithHeader(): Promise<Uint8Array> {
+// Module-scoped: shared by the E4-fidelity and page-setup describes.
+async function sourceWithHeader(): Promise<Uint8Array> {
     const zip = new JSZip();
     zip.file(
       '[Content_Types].xml',
@@ -862,8 +862,9 @@ describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
       `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body><w:p><w:r><w:t>body text</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`,
     );
     return zip.generateAsync({ type: 'uint8array' });
-  }
+}
 
+describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
   it('re-attaches sectPr so headers + page geometry survive (carry)', async () => {
     const { doc, headers, page, raw } = await importDocx(
       await sourceWithHeader(),
@@ -879,6 +880,79 @@ describe('exportDocx (E4 fidelity: sectPr + header refs)', () => {
     // Without carry there's no sectPr → no header.
     const noCarry = await importDocx(await exportDocx(doc));
     expect(Object.keys(noCarry.headers)).toHaveLength(0);
+  });
+});
+
+describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
+  async function xmlOf(
+    doc: import('prosemirror-model').Node,
+    opts?: Parameters<typeof exportDocx>[1],
+  ): Promise<string> {
+    const zip = await JSZip.loadAsync(await exportDocx(doc, opts));
+    return (await zip.file('word/document.xml')?.async('string')) ?? '';
+  }
+  const para = (t: string) => schema.node('paragraph', null, [schema.text(t)]);
+
+  it('emits an A4 body sectPr for a fresh doc without a page attr', async () => {
+    // Without one, Word applies ITS default (usually Letter) — not the A4
+    // bapbong laid the doc out against.
+    const xml = await xmlOf(schema.node('doc', null, [para('x')]));
+    expect(xml).toContain('<w:pgSz w:w="11906" w:h="16838"/>'); // canonical A4
+    expect(xml).toContain(
+      '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"',
+    );
+  });
+
+  it('emits doc.attrs.page — landscape Letter swaps dims and rides w:orient', async () => {
+    const page = {
+      width: 1056, // Letter landscape (px)
+      height: 816,
+      margin: { top: 48, right: 72, bottom: 48, left: 72 },
+    };
+    const xml = await xmlOf(schema.node('doc', { page }, [para('x')]));
+    expect(xml).toContain(
+      '<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>',
+    );
+    expect(xml).toContain(
+      '<w:pgMar w:top="720" w:right="1080" w:bottom="720" w:left="1080"',
+    );
+  });
+
+  it('keeps the carried sectPr byte-identical when page setup is untouched', async () => {
+    const { doc, raw } = await importDocx(await sourceWithHeader());
+    const xml = await xmlOf(doc, { carry: raw });
+    // The exact original sectPr — px↔twips rounding must not drift it.
+    expect(xml).toContain(
+      '<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>',
+    );
+  });
+
+  it('splices an edited page setup into the carried sectPr, preserving header refs', async () => {
+    const { doc, raw } = await importDocx(await sourceWithHeader());
+    const edited = doc.type.create(
+      {
+        ...doc.attrs,
+        page: {
+          width: 1123, // rotated to A4 landscape
+          height: 794,
+          margin: { top: 96, right: 96, bottom: 96, left: 96 },
+        },
+      },
+      doc.content,
+    );
+    const xml = await xmlOf(edited, { carry: raw });
+    expect(xml).toContain('<w:headerReference w:type="default" r:id="rIdH"/>'); // survives
+    expect(xml).toContain(
+      '<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>',
+    );
+    // Replaced in place: the old portrait pgSz is gone.
+    expect(xml).not.toContain('<w:pgSz w:w="11906" w:h="16838"/>');
+    // Round-trip: importing the export yields the edited geometry.
+    const back = await importDocx(
+      await exportDocx(edited, { carry: raw }),
+    );
+    expect(back.page.width).toBe(1123);
+    expect(back.doc.attrs.page).toMatchObject({ width: 1123, height: 794 });
   });
 });
 
@@ -911,8 +985,9 @@ describe('exportDocx (sections + footnotes)', () => {
     expect(xml).toContain(
       '<w:sectPr><w:type w:val="nextPage"/><w:cols w:num="2" w:space="360"/></w:sectPr>',
     );
-    // Only the non-last section is serialized inline (last → body sectPr).
-    expect(xml.match(/<w:sectPr>/g)?.length).toBe(1);
+    // The non-last section is serialized inline; the last section's slot is
+    // the body sectPr (now always emitted, carrying the page geometry).
+    expect(xml.match(/<w:sectPr>/g)?.length).toBe(2);
   });
 
   it('serializes a footnote reference for a footnote-marked run', async () => {

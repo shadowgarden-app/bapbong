@@ -1861,8 +1861,9 @@ function isToggleOn(el: OoxmlNode | undefined): boolean {
 
 /** Page size + margins from w:sectPr (twips→px). Defaults to A4 @96dpi with
  *  1in margins; landscape swaps w/h. Header/footer distances aren't returned —
- *  the layout engine uses its own chrome distance. */
-function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
+ *  the layout engine uses its own chrome distance. Exported for the exporter,
+ *  which re-parses the carried sectPr to detect page-setup edits. */
+export function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
   const A4: PageConfig = {
     width: 794,
     height: 1123,

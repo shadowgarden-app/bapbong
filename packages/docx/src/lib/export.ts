@@ -5,10 +5,13 @@ import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderStyle,
   CommentNode,
+  PageConfig,
   SectionConfig,
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
+import { parsePageGeometry } from './docx.js';
+import { child, parseXml } from './ooxml.js';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -877,6 +880,101 @@ function extractBodySectPr(xml: string): string {
   return all ? all[all.length - 1] : '';
 }
 
+// ── Page geometry (w:pgSz / w:pgMar) ────────────────────────────────
+
+/** A4 @96dpi with 1in margins — what layout shows when a doc carries no page
+ *  attr, so export must emit the same (Word's own default is Letter). */
+const A4_PAGE: PageConfig = {
+  width: 794,
+  height: 1123,
+  margin: { top: 96, right: 96, bottom: 96, left: 96 },
+};
+
+const PGSZ_RX = /<w:pgSz\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/w:pgSz>)/;
+const PGMAR_RX = /<w:pgMar\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/w:pgMar>)/;
+
+/** Canonical twip dimensions for common paper sizes, keyed by portrait px
+ *  size. Emitting the canonical value (not px×15, which lands a few twips off
+ *  after import rounding) keeps Word's paper-size dropdown naming the size
+ *  ("A4") instead of showing "Custom". */
+const PAPER_TWIPS: Record<string, [number, number]> = {
+  '794x1123': [11906, 16838], // A4
+  '816x1056': [12240, 15840], // Letter
+  '816x1344': [12240, 20160], // Legal
+  '1123x1587': [16838, 23811], // A3
+  '559x794': [8391, 11906], // A5
+};
+
+/** w:pgSz for the modelled page (px→twips); landscape swaps the emitted
+ *  dimensions and rides w:orient, the shape Word itself writes. */
+function pgSzXml(page: PageConfig): string {
+  const landscape = page.width > page.height;
+  const [pw, ph] = landscape
+    ? [page.height, page.width]
+    : [page.width, page.height];
+  const [tw, th] = PAPER_TWIPS[`${pw}x${ph}`] ?? [pxToTwips(pw), pxToTwips(ph)];
+  const [w, h] = landscape ? [th, tw] : [tw, th];
+  return `<w:pgSz w:w="${w}" w:h="${h}"${landscape ? ' w:orient="landscape"' : ''}/>`;
+}
+
+/** w:pgMar for the modelled margins. `keep` preserves the original pgMar's
+ *  header/footer/gutter distances (not modelled); Word defaults otherwise. */
+function pgMarXml(
+  m: PageConfig['margin'],
+  keep?: { header?: string; footer?: string; gutter?: string },
+): string {
+  return (
+    `<w:pgMar w:top="${pxToTwips(m.top)}" w:right="${pxToTwips(m.right)}"` +
+    ` w:bottom="${pxToTwips(m.bottom)}" w:left="${pxToTwips(m.left)}"` +
+    ` w:header="${keep?.header ?? '720'}" w:footer="${keep?.footer ?? '720'}"` +
+    ` w:gutter="${keep?.gutter ?? '0'}"/>`
+  );
+}
+
+/** True when the carried sectPr's geometry equals the modelled one — i.e. the
+ *  user never touched page setup. Compared in px through the importer's own
+ *  parser so px↔twips rounding can't produce a false "edited". */
+function sectPrMatchesPage(sectPr: string, page: PageConfig): boolean {
+  const parsed = parsePageGeometry(child(parseXml(sectPr), 'w:sectPr'));
+  return (
+    parsed.width === page.width &&
+    parsed.height === page.height &&
+    parsed.margin.top === page.margin.top &&
+    parsed.margin.right === page.margin.right &&
+    parsed.margin.bottom === page.margin.bottom &&
+    parsed.margin.left === page.margin.left
+  );
+}
+
+/** Replace the carried body sectPr's w:pgSz/w:pgMar with the modelled page
+ *  geometry, in place (child order — headerReference, type, pgSz, pgMar,
+ *  cols… — is schema-significant). Only called on a real page-setup edit; an
+ *  untouched doc keeps its original bytes (px↔twips rounding would otherwise
+ *  drift values on every save). */
+function splicePageGeometry(sectPr: string, page: PageConfig): string {
+  // A childless self-closing sectPr needs a slot to insert into.
+  const self = /^<w:sectPr\b([^>]*)\/>\s*$/.exec(sectPr.trim());
+  let out = self ? `<w:sectPr${self[1]}></w:sectPr>` : sectPr;
+  const oldMar = PGMAR_RX.exec(out)?.[0] ?? '';
+  const keepAttr = (name: string) =>
+    new RegExp(`\\bw:${name}="([^"]*)"`).exec(oldMar)?.[1];
+  const sz = pgSzXml(page);
+  const mar = pgMarXml(page.margin, {
+    header: keepAttr('header'),
+    footer: keepAttr('footer'),
+    gutter: keepAttr('gutter'),
+  });
+  out = PGSZ_RX.test(out)
+    ? out.replace(PGSZ_RX, sz)
+    : PGMAR_RX.test(out)
+      ? out.replace(PGMAR_RX, (m) => sz + m)
+      : out.replace('</w:sectPr>', `${sz}</w:sectPr>`);
+  out = PGMAR_RX.test(out)
+    ? out.replace(PGMAR_RX, mar)
+    : out.replace(sz, sz + mar);
+  return out;
+}
+
 /** Original document rels minus any comment(sExtended) rels (regenerated),
  *  plus the freshly-emitted rels (E4 merge). */
 function mergeRels(xml: string | undefined, newRels: string[]): string {
@@ -1128,6 +1226,19 @@ export async function exportDocx(
   }
 
   if (numberingPart) zip.file('word/numbering.xml', numberingPart);
+
+  // Page setup: the modelled geometry (doc.attrs.page) wins over the carried
+  // sectPr — but only a real edit rewrites it (byte fidelity otherwise). No
+  // sectPr at all (fresh doc, or a carry without one) → emit the modelled
+  // geometry outright; omitting it would hand Word ITS default (Letter), not
+  // the A4 bapbong displayed.
+  const pageAttr = doc.attrs['page'] as PageConfig | null;
+  if (sectPr && pageAttr && !sectPrMatchesPage(sectPr, pageAttr)) {
+    sectPr = splicePageGeometry(sectPr, pageAttr);
+  } else if (!sectPr) {
+    const p = pageAttr ?? A4_PAGE;
+    sectPr = `<w:sectPr>${pgSzXml(p)}${pgMarXml(p.margin)}</w:sectPr>`;
+  }
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
