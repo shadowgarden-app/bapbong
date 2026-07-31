@@ -705,6 +705,10 @@ export class EditorPlayground implements OnDestroy {
                 command: 'section-break-continuous',
                 label: 'Section break (continuous)',
               },
+              {
+                command: 'insert-landscape-section',
+                label: 'Landscape page',
+              },
             ],
           },
         ],

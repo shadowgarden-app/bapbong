@@ -37,7 +37,12 @@ import {
   removeSectionBreak,
   setColumns,
 } from './sections.js';
-import { PAPER_SIZES, setOrientation, setPaperSize } from './page-setup.js';
+import {
+  PAPER_SIZES,
+  insertLandscapeSection,
+  setOrientation,
+  setPaperSize,
+} from './page-setup.js';
 import {
   activeListPresetId,
   applyListPreset,
@@ -677,5 +682,50 @@ describe('page setup (orientation + paper size)', () => {
 
   it('paper-size default reports A4 active on a fresh doc', () => {
     expect(setPaperSize('a4').isActive?.(oneP())).toBe(true);
+  });
+});
+
+describe('insertLandscapeSection', () => {
+  const threeP = () => {
+    const doc = n('doc', null, [
+      n('paragraph', null, schema.text('aa')),
+      n('paragraph', null, schema.text('bb')),
+      n('paragraph', null, schema.text('cc')),
+    ]);
+    const s = EditorState.create({ schema, doc });
+    // caret in block 1 ("bb")
+    return s.apply(s.tr.setSelection(TextSelection.create(doc, 5)));
+  };
+
+  it('fences a rotated empty page between the halves of the caret section', () => {
+    const after = apply(threeP(), insertLandscapeSection());
+    expect(after.doc.childCount).toBe(4); // + the landscape paragraph
+    const sections = after.doc.attrs['sections'] as {
+      blockCount: number;
+      newPage: boolean;
+      page?: { width: number; height: number };
+    }[];
+    expect(sections.map((s) => s.blockCount)).toEqual([2, 1, 1]);
+    expect(sections[1].page).toMatchObject({ width: 1123, height: 794 }); // A4 rotated
+    expect(sections[1].newPage).toBe(true);
+    expect(sections[2].newPage).toBe(true); // resume on a fresh portrait page
+    expect(sections[2].page).toBeUndefined();
+    // Caret lands inside the new empty paragraph (block index 2).
+    expect(after.selection.$head.index(0)).toBe(2);
+    // Undo-ability: both the node insert and the section map ride ONE step.
+  });
+
+  it('caret at the doc end appends the landscape page as the last section', () => {
+    const doc = n('doc', null, [n('paragraph', null, schema.text('only'))]);
+    let s = EditorState.create({ schema, doc });
+    s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 3)));
+    const after = apply(s, insertLandscapeSection());
+    const sections = after.doc.attrs['sections'] as { blockCount: number }[];
+    expect(sections.map((x) => x.blockCount)).toEqual([1, 1]); // no empty tail
+  });
+
+  it('is disabled when the document is already landscape', () => {
+    const landscape = apply(threeP(), setOrientation('landscape'));
+    expect(insertLandscapeSection().isEnabled?.(landscape)).toBe(false);
   });
 });

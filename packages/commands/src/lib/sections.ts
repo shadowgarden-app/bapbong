@@ -6,20 +6,21 @@ import type { Command, SectionConfig } from '@shadow-garden/bapbong-contracts';
 const DEFAULT_GAP = 28;
 
 /** The doc's sections, defaulting to one implicit single-column section over
- *  every top-level block. Returns a deep-ish copy (safe to mutate). */
-function currentSections(state: EditorState): SectionConfig[] {
+ *  every top-level block. Returns a deep-ish copy (safe to mutate). Shared
+ *  with the page-setup commands (insertLandscapeSection). */
+export function currentSections(state: EditorState): SectionConfig[] {
   const raw = state.doc.attrs['sections'] as SectionConfig[] | null;
   if (raw && raw.length) return raw.map((s) => ({ ...s, columns: { ...s.columns } }));
   return [{ blockCount: state.doc.childCount, columns: { count: 1, gap: 0 }, newPage: false }];
 }
 
 /** Index of the top-level block containing the selection head. */
-function headBlockIndex(state: EditorState): number {
+export function headBlockIndex(state: EditorState): number {
   return state.selection.$head.index(0);
 }
 
 /** The section index covering top-level block `bi`, plus its first block. */
-function sectionAt(sections: SectionConfig[], bi: number): { i: number; start: number } {
+export function sectionAt(sections: SectionConfig[], bi: number): { i: number; start: number } {
   let start = 0;
   for (let i = 0; i < sections.length; i++) {
     if (bi < start + sections[i].blockCount) return { i, start };

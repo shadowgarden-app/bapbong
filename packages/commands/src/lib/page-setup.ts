@@ -1,5 +1,11 @@
+import { TextSelection } from 'prosemirror-state';
 import type { EditorState } from 'prosemirror-state';
-import type { Command, PageConfig } from '@shadow-garden/bapbong-contracts';
+import type {
+  Command,
+  PageConfig,
+  SectionConfig,
+} from '@shadow-garden/bapbong-contracts';
+import { currentSections, headBlockIndex, sectionAt } from './sections.js';
 
 /**
  * Page-setup commands (File → Page setup): paper size + orientation. The Word
@@ -56,6 +62,73 @@ export function setOrientation(o: 'portrait' | 'landscape'): Command {
       return true;
     },
     isActive: (state) => isLandscape(currentPage(state)) === (o === 'landscape'),
+  };
+}
+
+/**
+ * Insert a landscape page after the block at the caret: a fresh empty
+ * paragraph, fenced off as its own section whose geometry is the document
+ * page rotated. The manual equivalent — two next-page breaks plus a
+ * per-section orientation — is exactly what this compounds, and what Word
+ * does when you scope Orientation to a selection. The following content
+ * resumes on the document geometry.
+ */
+export function insertLandscapeSection(): Command {
+  return {
+    name: 'insert-landscape-section',
+    run(state, dispatch) {
+      if (state.doc.childCount === 0) return false;
+      const docPage = currentPage(state);
+      if (isLandscape(docPage)) return false; // already landscape everywhere
+      if (dispatch) {
+        const sections = currentSections(state);
+        const bi = headBlockIndex(state);
+        const { i, start } = sectionAt(sections, bi);
+        const S = sections[i];
+        // Split S at the caret block; the landscape page sits between the
+        // halves. An empty second half is dropped (caret at section end).
+        const firstCount = bi + 1 - start;
+        const secondCount = S.blockCount - firstCount;
+        const landscape: PageConfig = {
+          width: docPage.height,
+          height: docPage.width,
+          margin: { ...docPage.margin },
+        };
+        const next: SectionConfig[] = [
+          ...sections.slice(0, i),
+          { blockCount: firstCount, columns: { ...S.columns }, newPage: S.newPage },
+          {
+            blockCount: 1,
+            columns: { count: 1, gap: 0 },
+            newPage: true,
+            page: landscape,
+          },
+          ...(secondCount > 0
+            ? [
+                {
+                  blockCount: secondCount,
+                  columns: { ...S.columns },
+                  newPage: true,
+                },
+              ]
+            : []),
+          ...sections.slice(i + 1),
+        ];
+        // Insert the empty paragraph after the caret block, then rewrite the
+        // section map in the same transaction so undo reverts both at once.
+        const insertAt = state.selection.$head.after(1);
+        const para = state.schema.nodes['paragraph'].create();
+        const tr = state.tr
+          .insert(insertAt, para)
+          .setDocAttribute('sections', next);
+        // Land the caret on the new page, ready to type.
+        tr.setSelection(TextSelection.create(tr.doc, insertAt + 1));
+        dispatch(tr.scrollIntoView());
+      }
+      return true;
+    },
+    isEnabled: (state) =>
+      state.doc.childCount > 0 && !isLandscape(currentPage(state)),
   };
 }
 

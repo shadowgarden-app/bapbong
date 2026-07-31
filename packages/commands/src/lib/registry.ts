@@ -6,7 +6,11 @@ import { toggleList } from './list.js';
 import { redoCommand, undoCommand } from './history.js';
 import { pageBreakCommand } from './insert.js';
 import { insertSectionBreak, setColumns } from './sections.js';
-import { setOrientation, setPaperSize } from './page-setup.js';
+import {
+  insertLandscapeSection,
+  setOrientation,
+  setPaperSize,
+} from './page-setup.js';
 
 /**
  * The built-in static commands a toolbar/menubar references by name — mark
@@ -56,6 +60,7 @@ export function defaultCommands(): Collection<Command> {
       setPaperSize('legal'),
       setPaperSize('a3'),
       setPaperSize('a5'),
+      insertLandscapeSection(),
     ],
     { idProperty: 'name' },
   );
