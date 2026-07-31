@@ -263,6 +263,22 @@ export class CanvasPainter {
     const L = this.lastLayout;
     if (!L) return undefined;
     const s = L.chromeSelect;
+    // Per-section chrome: the page carries its section's set index; titlePg
+    // applies on the SECTION's first page (evenAndOdd stays document-wide).
+    const page = L.pages[i];
+    const set =
+      L.chromeSets && page?.chromeIndex != null
+        ? L.chromeSets[page.chromeIndex]
+        : undefined;
+    if (set) {
+      if (set.titlePg && page.sectionFirst) {
+        return kind === 'header' ? set.headerFirst : set.footerFirst;
+      }
+      if (s?.evenAndOdd && (i + 1) % 2 === 0) {
+        return kind === 'header' ? set.headerEven : set.footerEven;
+      }
+      return kind === 'header' ? set.header : set.footer;
+    }
     const pick = (
       def?: ResolvedChrome,
       first?: ResolvedChrome,

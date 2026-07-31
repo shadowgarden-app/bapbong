@@ -5,10 +5,13 @@ import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderStyle,
   CommentNode,
+  PageConfig,
   SectionConfig,
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
+import { parsePageGeometry } from './docx.js';
+import { child, parseXml } from './ooxml.js';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -348,15 +351,40 @@ function inlineContent(node: PMNode, ctx: ExportCtx): string {
 
 // ── paragraphs ──────────────────────────────────────────────────────
 
-/** A section break's w:sectPr (column flow + break type). Page geometry is
- *  inherited from the body sectPr, so it isn't repeated here. */
-function sectionSectPr(s: SectionConfig): string {
+/** A section break's w:sectPr (column flow + break type + page geometry).
+ *  Every sectPr is self-contained in OOXML — one without w:pgSz gets the
+ *  READER's default (Word: Letter/A4 by locale; our importer: A4), not the
+ *  body sectPr's values — so the geometry is always emitted: the section's
+ *  own override when present, the document default otherwise. Child order
+ *  (type < pgSz < pgMar < cols) is schema-fixed. */
+function sectionSectPr(
+  s: SectionConfig,
+  docPage: PageConfig,
+  carried?: { refs: string; titlePg: string },
+): string {
   const type = `<w:type w:val="${s.newPage ? 'nextPage' : 'continuous'}"/>`;
+  const p = s.page ?? docPage;
+  const geom = pgSzXml(p) + pgMarXml(p.margin);
   const cols =
     s.columns.count > 1
       ? `<w:cols w:num="${s.columns.count}" w:space="${pxToTwips(s.columns.gap)}"/>`
       : `<w:cols w:space="${pxToTwips(s.columns.gap)}"/>`;
-  return `<w:sectPr>${type}${cols}</w:sectPr>`;
+  // Carried header/footer references + titlePg re-attach in their schema
+  // slots (refs first, titlePg after cols) — their parts and rels survive via
+  // the carry package, so the old rIds stay valid.
+  return `<w:sectPr>${carried?.refs ?? ''}${type}${geom}${cols}${carried?.titlePg ?? ''}</w:sectPr>`;
+}
+
+/** The header/footer references + titlePg of a carried sectPr, verbatim. */
+function chromeRefsOf(sectPr: string): { refs: string; titlePg: string } {
+  const refs = (
+    sectPr.match(/<w:(?:header|footer)Reference\b[^>]*\/>/g) ?? []
+  ).join('');
+  const titlePg =
+    /<w:titlePg\b[^>]*\/>|<w:titlePg\b(?:[^>]*[^/>])?><\/w:titlePg>/.exec(
+      sectPr,
+    )?.[0] ?? '';
+  return { refs, titlePg };
 }
 
 /** A paragraph's w:pPr children (no wrapper). */
@@ -662,14 +690,28 @@ function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
 
 /** Block index → section-break sectPr, for every section but the last (whose
  *  properties live in the body sectPr). */
-function sectionBoundaries(doc: PMNode): Map<number, string> {
+function sectionBoundaries(
+  doc: PMNode,
+  origDocXml?: string,
+): Map<number, string> {
   const sections = doc.attrs['sections'] as SectionConfig[] | null;
   const out = new Map<number, string>();
   if (!sections || sections.length < 2) return out;
+  const docPage = (doc.attrs['page'] as PageConfig | null) ?? A4_PAGE;
+  // Per-section chrome refs survive the round-trip only via the original
+  // sectPrs — the model doesn't hold rIds. Reattached positionally, so only
+  // when the section count still matches (an edited section map would
+  // misalign them; refs are then dropped, the pre-existing behavior).
+  const origSectPrs =
+    origDocXml?.match(
+      /<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g,
+    ) ?? [];
+  const aligned = origSectPrs.length === sections.length;
   let acc = 0;
   for (let i = 0; i < sections.length - 1; i++) {
     acc += sections[i].blockCount;
-    out.set(acc - 1, sectionSectPr(sections[i])); // last block of section i
+    const carried = aligned ? chromeRefsOf(origSectPrs[i]) : undefined;
+    out.set(acc - 1, sectionSectPr(sections[i], docPage, carried)); // last block of section i
   }
   return out;
 }
@@ -877,6 +919,101 @@ function extractBodySectPr(xml: string): string {
   return all ? all[all.length - 1] : '';
 }
 
+// ── Page geometry (w:pgSz / w:pgMar) ────────────────────────────────
+
+/** A4 @96dpi with 1in margins — what layout shows when a doc carries no page
+ *  attr, so export must emit the same (Word's own default is Letter). */
+const A4_PAGE: PageConfig = {
+  width: 794,
+  height: 1123,
+  margin: { top: 96, right: 96, bottom: 96, left: 96 },
+};
+
+const PGSZ_RX = /<w:pgSz\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/w:pgSz>)/;
+const PGMAR_RX = /<w:pgMar\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/w:pgMar>)/;
+
+/** Canonical twip dimensions for common paper sizes, keyed by portrait px
+ *  size. Emitting the canonical value (not px×15, which lands a few twips off
+ *  after import rounding) keeps Word's paper-size dropdown naming the size
+ *  ("A4") instead of showing "Custom". */
+const PAPER_TWIPS: Record<string, [number, number]> = {
+  '794x1123': [11906, 16838], // A4
+  '816x1056': [12240, 15840], // Letter
+  '816x1344': [12240, 20160], // Legal
+  '1123x1587': [16838, 23811], // A3
+  '559x794': [8391, 11906], // A5
+};
+
+/** w:pgSz for the modelled page (px→twips); landscape swaps the emitted
+ *  dimensions and rides w:orient, the shape Word itself writes. */
+function pgSzXml(page: PageConfig): string {
+  const landscape = page.width > page.height;
+  const [pw, ph] = landscape
+    ? [page.height, page.width]
+    : [page.width, page.height];
+  const [tw, th] = PAPER_TWIPS[`${pw}x${ph}`] ?? [pxToTwips(pw), pxToTwips(ph)];
+  const [w, h] = landscape ? [th, tw] : [tw, th];
+  return `<w:pgSz w:w="${w}" w:h="${h}"${landscape ? ' w:orient="landscape"' : ''}/>`;
+}
+
+/** w:pgMar for the modelled margins. `keep` preserves the original pgMar's
+ *  header/footer/gutter distances (not modelled); Word defaults otherwise. */
+function pgMarXml(
+  m: PageConfig['margin'],
+  keep?: { header?: string; footer?: string; gutter?: string },
+): string {
+  return (
+    `<w:pgMar w:top="${pxToTwips(m.top)}" w:right="${pxToTwips(m.right)}"` +
+    ` w:bottom="${pxToTwips(m.bottom)}" w:left="${pxToTwips(m.left)}"` +
+    ` w:header="${keep?.header ?? '720'}" w:footer="${keep?.footer ?? '720'}"` +
+    ` w:gutter="${keep?.gutter ?? '0'}"/>`
+  );
+}
+
+/** True when the carried sectPr's geometry equals the modelled one — i.e. the
+ *  user never touched page setup. Compared in px through the importer's own
+ *  parser so px↔twips rounding can't produce a false "edited". */
+function sectPrMatchesPage(sectPr: string, page: PageConfig): boolean {
+  const parsed = parsePageGeometry(child(parseXml(sectPr), 'w:sectPr'));
+  return (
+    parsed.width === page.width &&
+    parsed.height === page.height &&
+    parsed.margin.top === page.margin.top &&
+    parsed.margin.right === page.margin.right &&
+    parsed.margin.bottom === page.margin.bottom &&
+    parsed.margin.left === page.margin.left
+  );
+}
+
+/** Replace the carried body sectPr's w:pgSz/w:pgMar with the modelled page
+ *  geometry, in place (child order — headerReference, type, pgSz, pgMar,
+ *  cols… — is schema-significant). Only called on a real page-setup edit; an
+ *  untouched doc keeps its original bytes (px↔twips rounding would otherwise
+ *  drift values on every save). */
+function splicePageGeometry(sectPr: string, page: PageConfig): string {
+  // A childless self-closing sectPr needs a slot to insert into.
+  const self = /^<w:sectPr\b([^>]*)\/>\s*$/.exec(sectPr.trim());
+  let out = self ? `<w:sectPr${self[1]}></w:sectPr>` : sectPr;
+  const oldMar = PGMAR_RX.exec(out)?.[0] ?? '';
+  const keepAttr = (name: string) =>
+    new RegExp(`\\bw:${name}="([^"]*)"`).exec(oldMar)?.[1];
+  const sz = pgSzXml(page);
+  const mar = pgMarXml(page.margin, {
+    header: keepAttr('header'),
+    footer: keepAttr('footer'),
+    gutter: keepAttr('gutter'),
+  });
+  out = PGSZ_RX.test(out)
+    ? out.replace(PGSZ_RX, sz)
+    : PGMAR_RX.test(out)
+      ? out.replace(PGMAR_RX, (m) => sz + m)
+      : out.replace('</w:sectPr>', `${sz}</w:sectPr>`);
+  out = PGMAR_RX.test(out)
+    ? out.replace(PGMAR_RX, mar)
+    : out.replace(sz, sz + mar);
+  return out;
+}
+
 /** Original document rels minus any comment(sExtended) rels (regenerated),
  *  plus the freshly-emitted rels (E4 merge). */
 function mergeRels(xml: string | undefined, newRels: string[]): string {
@@ -1055,7 +1192,10 @@ export async function exportDocx(
     openComments: new Set(),
     runIdx: 0,
   };
-  const boundaries = sectionBoundaries(doc);
+  const origDocXml = opts?.carry
+    ? await opts.carry.file('word/document.xml')?.async('string')
+    : undefined;
+  const boundaries = sectionBoundaries(doc, origDocXml);
   let body = '';
   perf.span('export.body', () =>
     doc.forEach(
@@ -1109,8 +1249,7 @@ export async function exportDocx(
       .file('word/_rels/document.xml.rels')
       ?.async('string');
     zip.file('word/_rels/document.xml.rels', mergeRels(rels, ctx.rels));
-    const origDoc = await carry.file('word/document.xml')?.async('string');
-    if (origDoc) sectPr = extractBodySectPr(origDoc);
+    if (origDocXml) sectPr = extractBodySectPr(origDocXml);
   } else {
     ctx.rels.push(
       `<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`,
@@ -1128,6 +1267,19 @@ export async function exportDocx(
   }
 
   if (numberingPart) zip.file('word/numbering.xml', numberingPart);
+
+  // Page setup: the modelled geometry (doc.attrs.page) wins over the carried
+  // sectPr — but only a real edit rewrites it (byte fidelity otherwise). No
+  // sectPr at all (fresh doc, or a carry without one) → emit the modelled
+  // geometry outright; omitting it would hand Word ITS default (Letter), not
+  // the A4 bapbong displayed.
+  const pageAttr = doc.attrs['page'] as PageConfig | null;
+  if (sectPr && pageAttr && !sectPrMatchesPage(sectPr, pageAttr)) {
+    sectPr = splicePageGeometry(sectPr, pageAttr);
+  } else if (!sectPr) {
+    const p = pageAttr ?? A4_PAGE;
+    sectPr = `<w:sectPr>${pgSzXml(p)}${pgMarXml(p.margin)}</w:sectPr>`;
+  }
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +

@@ -22,6 +22,12 @@ export interface SectionConfig {
   blockCount: number;
   columns: ColumnConfig;
   newPage: boolean;
+  /** Page geometry override (w:pgSz/w:pgMar on this section's sectPr) when it
+   *  differs from the document default (`doc.attrs.page`) — e.g. a landscape
+   *  section inside a portrait document. Absent → the document geometry.
+   *  Geometry can only change at a page boundary, so a continuous section
+   *  with a differing `page` is laid out as next-page (Word's own promotion). */
+  page?: PageConfig;
 }
 
 /** A document comment (w:comment) referenced by a w:commentRange in the body.
@@ -511,6 +517,13 @@ export interface ResolvedPage {
   footnotes?: ResolvedFootnotes;
   /** Paragraph border boxes (w:pBdr) on this page, painted under the text. */
   paraBorders?: ParagraphBorderBox[];
+  /** Index into ResolvedLayout.chromeSets for this page's header/footer —
+   *  the section in effect where the page starts. Absent → the flat
+   *  document-level chrome. */
+  chromeIndex?: number;
+  /** True when this page is the first page of its section — w:titlePg picks
+   *  the "first" chrome variant per SECTION, not per document. */
+  sectionFirst?: boolean;
 }
 
 /** One paragraph's border box on a page (page-local px). A paragraph split
@@ -563,8 +576,26 @@ export interface ResolvedLayout {
   pageHeaderEven?: ResolvedChrome;
   pageFooterEven?: ResolvedChrome;
   /** Which chrome variant applies per page. `titlePg` → page 1 uses the first
-   *  variant (blank if none); `evenAndOdd` → even pages use the even variant. */
+   *  variant (blank if none); `evenAndOdd` → even pages use the even variant.
+   *  With chromeSets, titlePg lives per set — only evenAndOdd (a document
+   *  setting) is read from here. */
   chromeSelect?: { titlePg: boolean; evenAndOdd: boolean };
+  /** Per-section header/footer bands, indexed by ResolvedPage.chromeIndex.
+   *  Present only when sections carry distinct chrome; otherwise the flat
+   *  pageHeader/pageFooter fields above apply to every page. */
+  chromeSets?: ResolvedChromeSet[];
+}
+
+/** One section's laid-out chrome bands (all variants), plus its titlePg
+ *  toggle. The "first" variant applies on the section's first page. */
+export interface ResolvedChromeSet {
+  header?: ResolvedChrome;
+  footer?: ResolvedChrome;
+  headerFirst?: ResolvedChrome;
+  footerFirst?: ResolvedChrome;
+  headerEven?: ResolvedChrome;
+  footerEven?: ResolvedChrome;
+  titlePg?: boolean;
 }
 
 // ── Interaction (M4): caret, selection, hit-testing ────────────────

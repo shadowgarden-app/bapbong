@@ -515,12 +515,15 @@ describe('importDocx', () => {
         <w:pgMar w:top="720" w:right="1080" w:bottom="720" w:left="1080"/>
       </w:sectPr>
     </w:body></w:document>`;
-    const { page } = await importDocx(await makeDocx(documentXml));
+    const { page, doc } = await importDocx(await makeDocx(documentXml));
     expect(page).toEqual({
       width: 1056, // 15840tw → 1056px (landscape swap)
       height: 816, // 12240tw → 816px
       margin: { top: 48, right: 72, bottom: 48, left: 72 },
     });
+    // The same geometry rides the doc (doc.attrs.page) so page-setup
+    // commands can edit it through dispatch/undo.
+    expect(doc.attrs.page).toEqual(page);
   });
 
   it('parses unit-suffixed pgMar values and never yields NaN margins', async () => {
@@ -543,6 +546,140 @@ describe('importDocx', () => {
     const { page: page2 } = await importDocx(await makeDocx(bad));
     expect(page2.margin.top).toBe(96);
     expect(page2.margin.right).toBe(48);
+  });
+
+  it('imports per-section page geometry overrides (mixed portrait/landscape)', async () => {
+    // Section 1 portrait Letter (differs from body → override), body section
+    // landscape Letter (the document default — no override).
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:sectPr>
+        <w:pgSz w:w="12240" w:h="15840"/>
+        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+      </w:sectPr></w:pPr><w:r><w:t>portrait part</w:t></w:r></w:p>
+      <w:p><w:r><w:t>landscape part</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>
+        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const { doc, page } = await importDocx(await makeDocx(documentXml));
+    expect(page).toMatchObject({ width: 1056, height: 816 }); // body: landscape
+    const sections = doc.attrs.sections as {
+      blockCount: number;
+      page?: { width: number; height: number };
+    }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].page).toMatchObject({ width: 816, height: 1056 }); // override
+    expect(sections[1].page).toBeUndefined(); // body geometry — no override
+  });
+
+  it('drops per-section geometry matching the document default', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:sectPr>
+        <w:pgSz w:w="11906" w:h="16838"/>
+        <w:cols w:num="2" w:space="425"/>
+      </w:sectPr></w:pPr><w:r><w:t>two cols</w:t></w:r></w:p>
+      <w:p><w:r><w:t>one col</w:t></w:r></w:p>
+      <w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const sections = doc.attrs.sections as { page?: unknown }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].page).toBeUndefined(); // same geometry → no override
+    expect(sections[1].page).toBeUndefined();
+  });
+
+  it('survives a PAGE field packed into a single run (Google Docs shape)', async () => {
+    // begin + instrText + separate + end all in ONE w:r, the visible text in
+    // the NEXT run. The old per-run state machine left the field open and
+    // swallowed the rest of the paragraph.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:fldChar w:fldCharType="begin"/><w:instrText xml:space="preserve">PAGE</w:instrText><w:fldChar w:fldCharType="separate"/><w:fldChar w:fldCharType="end"/></w:r>
+        <w:r><w:t xml:space="preserve"> after the field</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(p.textContent).toBe(' after the field');
+    // The PAGE field itself is materialized as a page_field node.
+    let fields = 0;
+    p.forEach((n) => {
+      if (n.type.name === 'page_field') fields++;
+    });
+    expect(fields).toBe(1);
+  });
+
+  it('collects per-section headers with Link-to-Previous inheritance', async () => {
+    const hdr = (t: string) =>
+      `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:hdr>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdH1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdH2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/></Relationships>`;
+    // Section 1: own header + titlePg. Section 2: NOTHING (inherits section
+    // 1's — Word's "Link to Previous"). Section 3 (body): its own header.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>
+      <w:p><w:pPr><w:sectPr>
+        <w:headerReference w:type="default" r:id="rIdH1"/><w:titlePg/>
+      </w:sectPr></w:pPr><w:r><w:t>one</w:t></w:r></w:p>
+      <w:p><w:pPr><w:sectPr/></w:pPr><w:r><w:t>two</w:t></w:r></w:p>
+      <w:p><w:r><w:t>three</w:t></w:r></w:p>
+      <w:sectPr><w:headerReference w:type="default" r:id="rIdH2"/></w:sectPr>
+    </w:body></w:document>`;
+    const { sectionChrome, headers } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        undefined,
+        undefined,
+        {
+          'word/header1.xml': hdr('CHAPTER ONE'),
+          'word/header2.xml': hdr('CHAPTER TWO'),
+        },
+      ),
+    );
+    expect(sectionChrome).toHaveLength(3);
+    expect(sectionChrome?.[0].headers['default']?.textContent).toBe(
+      'CHAPTER ONE',
+    );
+    expect(sectionChrome?.[0].titlePg).toBe(true);
+    // Link to Previous: section 2 shows section 1's header, but not titlePg.
+    expect(sectionChrome?.[1].headers['default']?.textContent).toBe(
+      'CHAPTER ONE',
+    );
+    expect(sectionChrome?.[1].titlePg).toBe(false);
+    // Section 3 overrides with its own.
+    expect(sectionChrome?.[2].headers['default']?.textContent).toBe(
+      'CHAPTER TWO',
+    );
+    // Flat fields = the last section's resolved chrome (legacy shape).
+    expect(headers['default']?.textContent).toBe('CHAPTER TWO');
+  });
+
+  it('omits sectionChrome when only the body sectPr declares chrome', async () => {
+    const hdr = `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:r><w:t>H</w:t></w:r></w:p></w:hdr>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdH" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>
+      <w:p><w:pPr><w:sectPr/></w:pPr><w:r><w:t>one</w:t></w:r></w:p>
+      <w:p><w:r><w:t>two</w:t></w:r></w:p>
+      <w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>
+    </w:body></w:document>`;
+    const { sectionChrome, headers } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        undefined,
+        undefined,
+        {
+          'word/header1.xml': hdr,
+        },
+      ),
+    );
+    // Uniform chrome — the flat fields cover every page; no per-section set.
+    expect(sectionChrome).toBeUndefined();
+    expect(headers['default']?.textContent).toBe('H');
   });
 
   it('defaults page geometry to A4 when sectPr omits it', async () => {

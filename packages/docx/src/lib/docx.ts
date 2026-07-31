@@ -73,6 +73,13 @@ interface CommentNode {
   resolved: boolean;
 }
 
+/** One section's effective chrome stories (inheritance already applied). */
+export interface SectionChrome {
+  headers: Record<string, PMNode>;
+  footers: Record<string, PMNode>;
+  titlePg: boolean;
+}
+
 export interface DocxImport {
   doc: PMNode;
   rawDocumentXml: string;
@@ -88,6 +95,12 @@ export interface DocxImport {
   titlePg: boolean;
   /** w:evenAndOddHeaders — even pages use the "even" header/footer. */
   evenAndOdd: boolean;
+  /** Per-section chrome, aligned with doc.attrs.sections, with Word's "Link
+   *  to Previous" resolved: a section without its own w:headerReference of a
+   *  type inherits the previous section's story. Present only when the doc
+   *  has ≥2 sections AND at least one declares its own chrome or titlePg —
+   *  the flat `headers`/`footers` (the LAST section's) cover the rest. */
+  sectionChrome?: SectionChrome[];
   /** Comments referenced by the body (w:commentRange), in appearance order. */
   comments: CommentData[];
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
@@ -802,36 +815,73 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   for (const node of effectiveChildren(p.children)) {
     if (node.name === 'w:r') {
       if (hasPageBreak(node)) pageBreak = true;
-      const fldType = attrOf(child(node, 'w:fldChar'), 'w:fldCharType');
-      if (fldType === 'begin') {
-        field = { instr: '', resultRuns: [], phase: 'instr' };
-        continue;
-      }
-      if (field) {
-        if (fldType === 'separate') {
-          field.phase = 'result';
-        } else if (fldType === 'end') {
-          const kind = fieldKind(field.instr);
-          if (kind) {
-            inline.push(
-              pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
-            );
+      const fldChars = children(node, 'w:fldChar');
+      if (fldChars.length === 0) {
+        if (field) {
+          if (field.phase === 'instr') {
+            field.instr += children(node, 'w:instrText')
+              .map((t) => t.text)
+              .join('');
           } else {
-            // Unknown instruction: keep the cached result text.
-            for (const r of field.resultRuns)
-              inline.push(...runToInline(r, paraBase, ctx, null));
+            field.resultRuns.push(node);
           }
-          field = null;
-        } else if (field.phase === 'instr') {
-          field.instr += children(node, 'w:instrText')
-            .map((t) => t.text)
-            .join('');
-        } else {
-          field.resultRuns.push(node);
+          continue;
         }
+        inline.push(...runToInline(node, paraBase, ctx, null));
         continue;
       }
-      inline.push(...runToInline(node, paraBase, ctx, null));
+      // The run carries fldChar(s). Some producers (Google Docs) pack
+      // begin + instrText + separate + end into a SINGLE run — treating the
+      // run as one fldChar (the old shape) left the field open forever and
+      // swallowed the rest of the paragraph. Walk the run's children in
+      // order through the same state machine instead.
+      const rPr = child(node, 'w:rPr');
+      let plain: OoxmlNode[] = [];
+      const flushPlain = () => {
+        if (plain.length === 0) return;
+        const synth: OoxmlNode = {
+          name: 'w:r',
+          attrs: node.attrs,
+          children: rPr ? [rPr, ...plain] : plain,
+          text: '',
+        };
+        if (field && field.phase === 'result') field.resultRuns.push(synth);
+        else if (!field)
+          inline.push(...runToInline(synth, paraBase, ctx, null));
+        // phase 'instr': stray content between begin and separate is
+        // instruction-side noise — dropped, as Word does.
+        plain = [];
+      };
+      for (const c of node.children) {
+        if (c.name === 'w:fldChar') {
+          const t = attrOf(c, 'w:fldCharType');
+          if (t === 'begin') {
+            flushPlain();
+            field = { instr: '', resultRuns: [], phase: 'instr' };
+          } else if (t === 'separate') {
+            if (field) field.phase = 'result';
+          } else if (t === 'end') {
+            flushPlain(); // result text inside this run, before the end mark
+            if (field) {
+              const kind = fieldKind(field.instr);
+              if (kind) {
+                inline.push(
+                  pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
+                );
+              } else {
+                for (const r of field.resultRuns)
+                  inline.push(...runToInline(r, paraBase, ctx, null));
+              }
+              field = null;
+            }
+          }
+        } else if (c.name === 'w:instrText') {
+          if (field && field.phase === 'instr') field.instr += c.text;
+        } else if (c.name !== 'w:rPr') {
+          plain.push(c);
+        }
+      }
+      flushPlain();
     } else if (node.name === 'w:fldSimple') {
       const kind = fieldKind(attrOf(node, 'w:instr') ?? '');
       const resultRuns = children(node, 'w:r');
@@ -1368,6 +1418,9 @@ interface SectionConfig {
   blockCount: number;
   columns: { count: number; gap: number };
   newPage: boolean;
+  /** Geometry override when this section's w:pgSz/w:pgMar differ from the
+   *  document default (the body sectPr). */
+  page?: PageConfig;
 }
 
 /** Column flow from a section's w:cols (equal-width only). count defaults to 1;
@@ -1409,6 +1462,10 @@ function parseBodyBlocks(
           blockCount: blocks.length - start,
           columns: parseColumns(sectPr),
           newPage: sectionStartsNewPage(sectPr),
+          // Every OOXML sectPr is self-contained — parse its geometry too.
+          // importDocx drops `page` again on sections matching the document
+          // default, so single-geometry docs stay on the fast path.
+          page: parsePageGeometry(sectPr),
         });
         start = blocks.length;
       }
@@ -1681,14 +1738,16 @@ function storyDoc(
   numbering: NumberingDefs | null,
   sections: SectionConfig[] | null = null,
   comments: CommentNode[] | null = null,
+  page: PageConfig | null = null,
 ): PMNode {
   // doc content is `block+` — guarantee at least one paragraph. The numbering
-  // defs (live markers), section column flow, and comment threads ride the doc
-  // as attrs.
+  // defs (live markers), section column flow, page geometry, and comment
+  // threads ride the doc as attrs.
   const attrs: Record<string, unknown> = {};
   if (numbering) attrs['numbering'] = numbering;
   if (sections) attrs['sections'] = sections;
   if (comments && comments.length > 0) attrs['comments'] = comments;
+  if (page) attrs['page'] = page;
   return ctx.schema.nodes['doc'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [ctx.schema.nodes['paragraph'].create()],
@@ -1779,9 +1838,22 @@ export async function importDocx(
   if (endnoteBlocks.length > 0 && sections.length > 0) {
     sections[sections.length - 1].blockCount += endnoteBlocks.length;
   }
-  // Only ride the sections attr when it changes layout (>1 section, or columns).
+  // Sections whose geometry matches the document default carry no override —
+  // the common all-one-geometry doc keeps every `page` absent.
+  const samePage = (a: PageConfig, b: PageConfig) =>
+    a.width === b.width &&
+    a.height === b.height &&
+    a.margin.top === b.margin.top &&
+    a.margin.right === b.margin.right &&
+    a.margin.bottom === b.margin.bottom &&
+    a.margin.left === b.margin.left;
+  for (const s of sections) {
+    if (s.page && samePage(s.page, pageGeom)) delete s.page;
+  }
+  // Only ride the sections attr when it changes layout (>1 section, columns,
+  // or a per-section geometry override).
   const multiSection =
-    sections.length > 1 || sections.some((s) => s.columns.count > 1);
+    sections.length > 1 || sections.some((s) => s.columns.count > 1 || s.page);
   // Comment threads only ride the doc when the schema carries the comment mark
   // (the comment plugin is present); otherwise comment values are filtered out.
   const hasComments = !!ctx.schema.marks['comment'];
@@ -1791,41 +1863,101 @@ export async function importDocx(
     ctx.numbering.defs,
     multiSection ? sections : null,
     hasComments ? buildCommentNodes(ctx) : null,
+    pageGeom, // page geometry rides the doc so page-setup edits are undoable
   );
 
-  // Headers/footers referenced by the section properties.
-  const headers: Record<string, PMNode> = {};
-  const footers: Record<string, PMNode> = {};
-  if (sectPr) {
-    const collect = async (
-      refName: string,
-      store: Record<string, PMNode>,
-      root: string,
-    ) => {
-      for (const ref of children(sectPr, refName)) {
-        const type = attrOf(ref, 'w:type') ?? 'default';
-        const rId = attrOf(ref, 'r:id');
-        const target = rId ? ctx.rels.get(rId)?.target : undefined;
-        if (!target || store[type]) continue;
-        const partPath = `word/${target.replace(/^\/+/, '')}`;
-        const xml = await readPart(zip, partPath);
-        if (!xml) continue;
-        const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
-        const el = child(parseXml(xml), root);
-        store[type] = storyDoc(
-          partCtx,
-          el ? parseBlocks(el, partCtx) : [],
-          ctx.numbering.defs,
-        );
+  // Headers/footers, per section. Every sectPr (paragraph-level breaks +
+  // the body's) is visited in document order; a section that doesn't declare
+  // a w:headerReference/w:footerReference of a type inherits the previous
+  // section's story — Word's "Link to Previous". Parts are parsed once and
+  // shared (memoized by path) across the sections referencing them.
+  const partMemo = new Map<string, PMNode | undefined>();
+  const loadChromePart = async (
+    rId: string | undefined,
+    root: string,
+  ): Promise<PMNode | undefined> => {
+    const target = rId ? ctx.rels.get(rId)?.target : undefined;
+    if (!target) return undefined;
+    const partPath = `word/${target.replace(/^\/+/, '')}`;
+    if (partMemo.has(partPath)) return partMemo.get(partPath);
+    const xml = await readPart(zip, partPath);
+    let story: PMNode | undefined;
+    if (xml) {
+      const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
+      const el = child(parseXml(xml), root);
+      story = storyDoc(
+        partCtx,
+        el ? parseBlocks(el, partCtx) : [],
+        ctx.numbering.defs,
+      );
+    }
+    partMemo.set(partPath, story);
+    return story;
+  };
+  const chromeOf = async (sp: OoxmlNode | undefined) => {
+    const own: SectionChrome = { headers: {}, footers: {}, titlePg: false };
+    let declared = false;
+    if (sp) {
+      const collect = async (
+        refName: string,
+        store: Record<string, PMNode>,
+        root: string,
+      ) => {
+        for (const ref of children(sp, refName)) {
+          const type = attrOf(ref, 'w:type') ?? 'default';
+          if (store[type]) continue;
+          const story = await loadChromePart(attrOf(ref, 'r:id'), root);
+          if (story) {
+            store[type] = story;
+            declared = true;
+          }
+        }
+      };
+      await collect('w:headerReference', own.headers, 'w:hdr');
+      await collect('w:footerReference', own.footers, 'w:ftr');
+      own.titlePg = isToggleOn(child(sp, 'w:titlePg'));
+      if (own.titlePg) declared = true;
+    }
+    return { own, declared };
+  };
+  // sectPrs in document order, aligned with `sections` (the body sectPr is
+  // the last section's — unless the doc ended AT a paragraph break and the
+  // body sectPr closed no section of its own).
+  const sectPrList: (OoxmlNode | undefined)[] = [];
+  if (body) {
+    for (const node of unwrapSdt(body.children)) {
+      if (node.name === 'w:p') {
+        const sp = child(child(node, 'w:pPr'), 'w:sectPr');
+        if (sp) sectPrList.push(sp);
       }
-    };
-    await collect('w:headerReference', headers, 'w:hdr');
-    await collect('w:footerReference', footers, 'w:ftr');
+    }
   }
+  sectPrList.push(sectPr);
+  const sectionChrome: SectionChrome[] = [];
+  let anyDeclaredBeforeLast = false;
+  for (let i = 0; i < sections.length; i++) {
+    const { own, declared } = await chromeOf(sectPrList[i]);
+    const prev = sectionChrome[i - 1];
+    sectionChrome.push({
+      headers: { ...(prev?.headers ?? {}), ...own.headers },
+      footers: { ...(prev?.footers ?? {}), ...own.footers },
+      titlePg: own.titlePg,
+    });
+    if (declared && i < sections.length - 1) anyDeclaredBeforeLast = true;
+  }
+  const lastChrome = sectionChrome[sectionChrome.length - 1] ?? {
+    headers: {},
+    footers: {},
+    titlePg: false,
+  };
+  // The flat fields stay the LAST section's resolved chrome (what the old
+  // body-sectPr-only path produced, plus inheritance).
+  const headers = lastChrome.headers;
+  const footers = lastChrome.footers;
 
   // w:titlePg (section) → page 1 uses the "first" chrome; w:evenAndOddHeaders
   // (document settings) → even pages use the "even" chrome.
-  const titlePg = sectPr ? isToggleOn(child(sectPr, 'w:titlePg')) : false;
+  const titlePg = lastChrome.titlePg;
   const settingsXml = await readPart(zip, 'word/settings.xml');
   const settings = settingsXml
     ? child(parseXml(settingsXml), 'w:settings')
@@ -1834,7 +1966,7 @@ export async function importDocx(
     ? isToggleOn(child(settings, 'w:evenAndOddHeaders'))
     : false;
 
-  return {
+  const out: DocxImport = {
     doc,
     rawDocumentXml,
     headers,
@@ -1846,6 +1978,12 @@ export async function importDocx(
     page: pageGeom,
     raw: zip,
   };
+  // Only when some non-last section declares its own chrome/titlePg does the
+  // per-section set differ from the flat fields.
+  if (sections.length > 1 && anyDeclaredBeforeLast) {
+    out.sectionChrome = sectionChrome;
+  }
+  return out;
 }
 
 /** An OOXML on/off toggle element (w:titlePg, w:evenAndOddHeaders, …): present
@@ -1858,8 +1996,9 @@ function isToggleOn(el: OoxmlNode | undefined): boolean {
 
 /** Page size + margins from w:sectPr (twips→px). Defaults to A4 @96dpi with
  *  1in margins; landscape swaps w/h. Header/footer distances aren't returned —
- *  the layout engine uses its own chrome distance. */
-function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
+ *  the layout engine uses its own chrome distance. Exported for the exporter,
+ *  which re-parses the carried sectPr to detect page-setup edits. */
+export function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
   const A4: PageConfig = {
     width: 794,
     height: 1123,

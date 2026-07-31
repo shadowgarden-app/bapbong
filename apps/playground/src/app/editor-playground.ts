@@ -574,6 +574,24 @@ export class EditorPlayground implements OnDestroy {
           },
           'separator',
           {
+            label: 'Orientation',
+            submenu: [
+              { command: 'orientation-portrait', label: 'Portrait' },
+              { command: 'orientation-landscape', label: 'Landscape' },
+            ],
+          },
+          {
+            label: 'Paper size',
+            submenu: [
+              { command: 'paper-a4', label: 'A4' },
+              { command: 'paper-a5', label: 'A5' },
+              { command: 'paper-a3', label: 'A3' },
+              { command: 'paper-letter', label: 'Letter' },
+              { command: 'paper-legal', label: 'Legal' },
+            ],
+          },
+          'separator',
+          {
             label: 'Print',
             run: () => void this.editor?.print(),
             isEnabled: () => this.pageCount() > 0,
@@ -686,6 +704,10 @@ export class EditorPlayground implements OnDestroy {
               {
                 command: 'section-break-continuous',
                 label: 'Section break (continuous)',
+              },
+              {
+                command: 'insert-landscape-section',
+                label: 'Landscape page',
               },
             ],
           },

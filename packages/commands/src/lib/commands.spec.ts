@@ -38,6 +38,12 @@ import {
   setColumns,
 } from './sections.js';
 import {
+  PAPER_SIZES,
+  insertLandscapeSection,
+  setOrientation,
+  setPaperSize,
+} from './page-setup.js';
+import {
   activeListPresetId,
   applyListPreset,
   listPresets,
@@ -53,7 +59,11 @@ const schema = new Schema({
   nodes: {
     doc: {
       content: 'block+',
-      attrs: { numbering: { default: null }, sections: { default: null } },
+      attrs: {
+        numbering: { default: null },
+        sections: { default: null },
+        page: { default: null },
+      },
     },
     paragraph: {
       group: 'block',
@@ -619,5 +629,103 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(toggleList('ordered').isActive?.(paren)).toBe(true);
     const off = apply(paren, toggleList('ordered'));
     expect(findNode(off, 'paragraph')?.attrs['list']).toBeNull();
+  });
+});
+
+describe('page setup (orientation + paper size)', () => {
+  const oneP = () => {
+    const doc = n('doc', null, n('paragraph', null, schema.text('x')));
+    return EditorState.create({ schema, doc });
+  };
+  const pageOf = (s: EditorState) =>
+    s.doc.attrs['page'] as {
+      width: number;
+      height: number;
+      margin: Record<string, number>;
+    };
+
+  it('setOrientation(landscape) swaps A4 dims and keeps margins', () => {
+    const after = apply(oneP(), setOrientation('landscape'));
+    expect(pageOf(after)).toMatchObject({ width: 1123, height: 794 });
+    expect(pageOf(after).margin).toEqual({
+      top: 96,
+      right: 96,
+      bottom: 96,
+      left: 96,
+    });
+    expect(setOrientation('landscape').isActive?.(after)).toBe(true);
+    expect(setOrientation('portrait').isActive?.(after)).toBe(false);
+    // Back to portrait restores the original dims.
+    const back = apply(after, setOrientation('portrait'));
+    expect(pageOf(back)).toMatchObject({ width: 794, height: 1123 });
+  });
+
+  it('setOrientation is a no-op (no doc change) when already there', () => {
+    const s = oneP();
+    let dispatched = false;
+    setOrientation('portrait').run(s, () => (dispatched = true));
+    expect(dispatched).toBe(false); // portrait already — no undo step
+  });
+
+  it('setPaperSize keeps orientation and margins', () => {
+    const landscape = apply(oneP(), setOrientation('landscape'));
+    const after = apply(landscape, setPaperSize('letter'));
+    // Letter, still landscape.
+    expect(pageOf(after)).toMatchObject({
+      width: PAPER_SIZES.letter.height,
+      height: PAPER_SIZES.letter.width,
+    });
+    expect(setPaperSize('letter').isActive?.(after)).toBe(true);
+    expect(setPaperSize('a4').isActive?.(after)).toBe(false);
+    expect(setOrientation('landscape').isActive?.(after)).toBe(true);
+  });
+
+  it('paper-size default reports A4 active on a fresh doc', () => {
+    expect(setPaperSize('a4').isActive?.(oneP())).toBe(true);
+  });
+});
+
+describe('insertLandscapeSection', () => {
+  const threeP = () => {
+    const doc = n('doc', null, [
+      n('paragraph', null, schema.text('aa')),
+      n('paragraph', null, schema.text('bb')),
+      n('paragraph', null, schema.text('cc')),
+    ]);
+    const s = EditorState.create({ schema, doc });
+    // caret in block 1 ("bb")
+    return s.apply(s.tr.setSelection(TextSelection.create(doc, 5)));
+  };
+
+  it('fences a rotated empty page between the halves of the caret section', () => {
+    const after = apply(threeP(), insertLandscapeSection());
+    expect(after.doc.childCount).toBe(4); // + the landscape paragraph
+    const sections = after.doc.attrs['sections'] as {
+      blockCount: number;
+      newPage: boolean;
+      page?: { width: number; height: number };
+    }[];
+    expect(sections.map((s) => s.blockCount)).toEqual([2, 1, 1]);
+    expect(sections[1].page).toMatchObject({ width: 1123, height: 794 }); // A4 rotated
+    expect(sections[1].newPage).toBe(true);
+    expect(sections[2].newPage).toBe(true); // resume on a fresh portrait page
+    expect(sections[2].page).toBeUndefined();
+    // Caret lands inside the new empty paragraph (block index 2).
+    expect(after.selection.$head.index(0)).toBe(2);
+    // Undo-ability: both the node insert and the section map ride ONE step.
+  });
+
+  it('caret at the doc end appends the landscape page as the last section', () => {
+    const doc = n('doc', null, [n('paragraph', null, schema.text('only'))]);
+    let s = EditorState.create({ schema, doc });
+    s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 3)));
+    const after = apply(s, insertLandscapeSection());
+    const sections = after.doc.attrs['sections'] as { blockCount: number }[];
+    expect(sections.map((x) => x.blockCount)).toEqual([1, 1]); // no empty tail
+  });
+
+  it('is disabled when the document is already landscape', () => {
+    const landscape = apply(threeP(), setOrientation('landscape'));
+    expect(insertLandscapeSection().isEnabled?.(landscape)).toBe(false);
   });
 });

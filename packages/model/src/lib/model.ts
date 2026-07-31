@@ -98,6 +98,10 @@ export const schema = new Schema({
         // SectionConfig[] (contracts) — per-section column flow, delimited by
         // w:sectPr breaks. null/absent → one implicit single-column section.
         sections: { default: null },
+        // PageConfig (contracts) — page size + margins in CSS px, from the
+        // body w:sectPr. Edited via setDocAttribute (page-setup commands) so
+        // orientation/paper-size changes undo cleanly. null → A4 default.
+        page: { default: null },
         // CommentNode[] (contracts) — comment threads keyed to `comment` marks.
         // Edited via setDocAttribute so add/reply/resolve/delete undo cleanly.
         comments: { default: null },
