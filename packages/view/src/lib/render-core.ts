@@ -279,13 +279,17 @@ export class RenderCore {
   /** Lay out (or re-lay, incrementally) `doc` and store it. Does not paint. */
   layoutDoc(doc: ProseMirrorNode): void {
     this.doc = doc;
+    // Page geometry rides the doc (doc.attrs.page) so page-setup edits flow
+    // through dispatch/undo; the import-time `this.page` is the fallback for
+    // docs that predate the attr.
+    const page = (doc.attrs['page'] as PageConfig | null) ?? this.page;
     // Keep the accessible mirror in sync (debounced internally).
     perf.span('a11y.update', () => this.a11y?.update(doc));
     this.resolved = perf.span('layout', () =>
       layout(
         doc,
         {
-          page: this.page,
+          page,
           measureText: this.measureText,
           measureMetrics: this.measureMetrics,
         },

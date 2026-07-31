@@ -515,12 +515,15 @@ describe('importDocx', () => {
         <w:pgMar w:top="720" w:right="1080" w:bottom="720" w:left="1080"/>
       </w:sectPr>
     </w:body></w:document>`;
-    const { page } = await importDocx(await makeDocx(documentXml));
+    const { page, doc } = await importDocx(await makeDocx(documentXml));
     expect(page).toEqual({
       width: 1056, // 15840tw → 1056px (landscape swap)
       height: 816, // 12240tw → 816px
       margin: { top: 48, right: 72, bottom: 48, left: 72 },
     });
+    // The same geometry rides the doc (doc.attrs.page) so page-setup
+    // commands can edit it through dispatch/undo.
+    expect(doc.attrs.page).toEqual(page);
   });
 
   it('parses unit-suffixed pgMar values and never yields NaN margins', async () => {

@@ -1681,14 +1681,16 @@ function storyDoc(
   numbering: NumberingDefs | null,
   sections: SectionConfig[] | null = null,
   comments: CommentNode[] | null = null,
+  page: PageConfig | null = null,
 ): PMNode {
   // doc content is `block+` — guarantee at least one paragraph. The numbering
-  // defs (live markers), section column flow, and comment threads ride the doc
-  // as attrs.
+  // defs (live markers), section column flow, page geometry, and comment
+  // threads ride the doc as attrs.
   const attrs: Record<string, unknown> = {};
   if (numbering) attrs['numbering'] = numbering;
   if (sections) attrs['sections'] = sections;
   if (comments && comments.length > 0) attrs['comments'] = comments;
+  if (page) attrs['page'] = page;
   return ctx.schema.nodes['doc'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [ctx.schema.nodes['paragraph'].create()],
@@ -1791,6 +1793,7 @@ export async function importDocx(
     ctx.numbering.defs,
     multiSection ? sections : null,
     hasComments ? buildCommentNodes(ctx) : null,
+    pageGeom, // page geometry rides the doc so page-setup edits are undoable
   );
 
   // Headers/footers referenced by the section properties.
