@@ -351,15 +351,21 @@ function inlineContent(node: PMNode, ctx: ExportCtx): string {
 
 // ── paragraphs ──────────────────────────────────────────────────────
 
-/** A section break's w:sectPr (column flow + break type). Page geometry is
- *  inherited from the body sectPr, so it isn't repeated here. */
-function sectionSectPr(s: SectionConfig): string {
+/** A section break's w:sectPr (column flow + break type + page geometry).
+ *  Every sectPr is self-contained in OOXML — one without w:pgSz gets the
+ *  READER's default (Word: Letter/A4 by locale; our importer: A4), not the
+ *  body sectPr's values — so the geometry is always emitted: the section's
+ *  own override when present, the document default otherwise. Child order
+ *  (type < pgSz < pgMar < cols) is schema-fixed. */
+function sectionSectPr(s: SectionConfig, docPage: PageConfig): string {
   const type = `<w:type w:val="${s.newPage ? 'nextPage' : 'continuous'}"/>`;
+  const p = s.page ?? docPage;
+  const geom = pgSzXml(p) + pgMarXml(p.margin);
   const cols =
     s.columns.count > 1
       ? `<w:cols w:num="${s.columns.count}" w:space="${pxToTwips(s.columns.gap)}"/>`
       : `<w:cols w:space="${pxToTwips(s.columns.gap)}"/>`;
-  return `<w:sectPr>${type}${cols}</w:sectPr>`;
+  return `<w:sectPr>${type}${geom}${cols}</w:sectPr>`;
 }
 
 /** A paragraph's w:pPr children (no wrapper). */
@@ -669,10 +675,11 @@ function sectionBoundaries(doc: PMNode): Map<number, string> {
   const sections = doc.attrs['sections'] as SectionConfig[] | null;
   const out = new Map<number, string>();
   if (!sections || sections.length < 2) return out;
+  const docPage = (doc.attrs['page'] as PageConfig | null) ?? A4_PAGE;
   let acc = 0;
   for (let i = 0; i < sections.length - 1; i++) {
     acc += sections[i].blockCount;
-    out.set(acc - 1, sectionSectPr(sections[i])); // last block of section i
+    out.set(acc - 1, sectionSectPr(sections[i], docPage)); // last block of section i
   }
   return out;
 }

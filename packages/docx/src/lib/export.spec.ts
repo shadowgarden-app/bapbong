@@ -954,6 +954,43 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
     expect(back.page.width).toBe(1123);
     expect(back.doc.attrs.page).toMatchObject({ width: 1123, height: 794 });
   });
+
+  it('round-trips a per-section geometry override (landscape section)', async () => {
+    const landscape = {
+      width: 1123, // A4 landscape
+      height: 794,
+      margin: { top: 96, right: 96, bottom: 96, left: 96 },
+    };
+    const doc = schema.node(
+      'doc',
+      {
+        sections: [
+          {
+            blockCount: 1,
+            columns: { count: 1, gap: 0 },
+            newPage: true,
+            page: landscape,
+          },
+          { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: true },
+        ],
+      },
+      [para('wide table page'), para('back to portrait')],
+    );
+    const xml = await xmlOf(doc);
+    // The break's sectPr carries the override; the body sectPr stays portrait.
+    expect(xml).toContain(
+      '<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>',
+    );
+    expect(xml).toContain('<w:pgSz w:w="11906" w:h="16838"/>');
+
+    const back = await importDocx(await exportDocx(doc));
+    const sections = back.doc.attrs.sections as {
+      page?: { width: number; height: number };
+    }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].page).toMatchObject({ width: 1123, height: 794 });
+    expect(sections[1].page).toBeUndefined();
+  });
 });
 
 describe('exportDocx (sections + footnotes)', () => {
@@ -981,9 +1018,13 @@ describe('exportDocx (sections + footnotes)', () => {
       ],
     );
     const xml = await docXml(doc);
-    // Section 0's break sits in the first paragraph's pPr.
+    // Section 0's break sits in the first paragraph's pPr. Every sectPr is
+    // self-contained, so it carries the document geometry (A4 default) too.
     expect(xml).toContain(
-      '<w:sectPr><w:type w:val="nextPage"/><w:cols w:num="2" w:space="360"/></w:sectPr>',
+      '<w:sectPr><w:type w:val="nextPage"/><w:pgSz w:w="11906" w:h="16838"/>' +
+        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"' +
+        ' w:header="720" w:footer="720" w:gutter="0"/>' +
+        '<w:cols w:num="2" w:space="360"/></w:sectPr>',
     );
     // The non-last section is serialized inline; the last section's slot is
     // the body sectPr (now always emitted, carrying the page geometry).
