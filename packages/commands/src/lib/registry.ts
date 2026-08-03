@@ -8,6 +8,7 @@ import { pageBreakCommand } from './insert.js';
 import { insertSectionBreak, setColumns } from './sections.js';
 import {
   insertLandscapeSection,
+  setMargins,
   setOrientation,
   setPaperSize,
 } from './page-setup.js';
@@ -58,8 +59,14 @@ export function defaultCommands(): Collection<Command> {
       setPaperSize('a4'),
       setPaperSize('letter'),
       setPaperSize('legal'),
+      setPaperSize('executive'),
       setPaperSize('a3'),
       setPaperSize('a5'),
+      setMargins('normal'),
+      setMargins('narrow'),
+      setMargins('moderate'),
+      setMargins('wide'),
+      setMargins('office2003'),
       insertLandscapeSection(),
     ],
     { idProperty: 'name' },

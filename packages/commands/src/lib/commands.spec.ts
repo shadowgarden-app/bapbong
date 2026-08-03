@@ -1,6 +1,6 @@
 import { Schema, type Node as PMNode } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
-import type { Command } from '@shadow-garden/bapbong-contracts';
+import type { Command, PageConfig } from '@shadow-garden/bapbong-contracts';
 import {
   toggleMarkCommand,
   isMarkActive,
@@ -40,7 +40,10 @@ import {
 import {
   PAPER_SIZES,
   insertLandscapeSection,
+  setMargins,
   setOrientation,
+  setPageDimensions,
+  setPageMargins,
   setPaperSize,
 } from './page-setup.js';
 import {
@@ -727,5 +730,59 @@ describe('insertLandscapeSection', () => {
   it('is disabled when the document is already landscape', () => {
     const landscape = apply(threeP(), setOrientation('landscape'));
     expect(insertLandscapeSection().isEnabled?.(landscape)).toBe(false);
+  });
+});
+
+describe('margins + custom page geometry', () => {
+  const oneP = () => {
+    const doc = n('doc', null, n('paragraph', null, schema.text('x')));
+    return EditorState.create({ schema, doc });
+  };
+  const pageOf = (s: EditorState) => s.doc.attrs['page'] as PageConfig;
+
+  it('setMargins applies a preset and reports active', () => {
+    const after = apply(oneP(), setMargins('narrow'));
+    expect(pageOf(after).margin).toEqual({
+      top: 48,
+      right: 48,
+      bottom: 48,
+      left: 48,
+    });
+    expect(setMargins('narrow').isActive?.(after)).toBe(true);
+    expect(setMargins('normal').isActive?.(after)).toBe(false);
+    // Page size untouched by a margin change.
+    expect(pageOf(after)).toMatchObject({ width: 794, height: 1123 });
+  });
+
+  it('setMargins reports Normal active on a fresh (A4 1in) doc', () => {
+    expect(setMargins('normal').isActive?.(oneP())).toBe(true);
+  });
+
+  it('setPageMargins clamps margins that would leave no content box', () => {
+    // 600px of left+right margin on a 794px page leaves 194px — fine. 900
+    // would leave none: shrunk proportionally to keep MIN_CONTENT across.
+    const after = apply(
+      oneP(),
+      setPageMargins({ top: 96, right: 450, bottom: 96, left: 450 }),
+    );
+    const m = pageOf(after).margin;
+    expect(m.left + m.right).toBeLessThanOrEqual(794 - 48);
+    expect(m.left).toBe(m.right); // equal inputs stay equal
+    expect(m.top).toBe(96); // vertical axis untouched
+  });
+
+  it('setPageDimensions sets an exact size and floors absurd values', () => {
+    const after = apply(oneP(), setPageDimensions(1000, 500));
+    expect(pageOf(after)).toMatchObject({ width: 1000, height: 500 });
+    const tiny = apply(oneP(), setPageDimensions(2, -40));
+    expect(pageOf(tiny).width).toBeGreaterThanOrEqual(96);
+    expect(pageOf(tiny).height).toBeGreaterThanOrEqual(96);
+  });
+
+  it('custom geometry is a no-op (no undo step) when already in effect', () => {
+    const s = apply(oneP(), setPageDimensions(1000, 500));
+    let dispatched = false;
+    setPageDimensions(1000, 500).run(s, () => (dispatched = true));
+    expect(dispatched).toBe(false);
   });
 });
