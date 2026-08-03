@@ -786,3 +786,32 @@ describe('margins + custom page geometry', () => {
     expect(dispatched).toBe(false);
   });
 });
+
+describe('page-setup transactions mark the doc changed', () => {
+  // The desktop shell keys autosave (and the dirty dot, the MCP version, the
+  // preview-tab commit) entirely off EditorChange.docChanged, which is
+  // tr.docChanged. A page-setup command that edited the attr WITHOUT emitting
+  // a step would apply on screen and never reach the .docx.
+  const oneP = () => {
+    const doc = n('doc', null, n('paragraph', null, schema.text('x')));
+    return EditorState.create({ schema, doc });
+  };
+  const trOf = (cmd: Command) => {
+    let seen: import('prosemirror-state').Transaction | null = null;
+    cmd.run(oneP(), (tr) => (seen = tr));
+    return seen as import('prosemirror-state').Transaction | null;
+  };
+
+  it.each([
+    ['orientation-landscape', () => setOrientation('landscape')],
+    ['paper-letter', () => setPaperSize('letter')],
+    ['margins-narrow', () => setMargins('narrow')],
+    ['page-margins-custom', () => setPageMargins({ top: 10, right: 10, bottom: 10, left: 10 })],
+    ['page-size-custom', () => setPageDimensions(900, 1200)],
+    ['insert-landscape-section', () => insertLandscapeSection()],
+  ])('%s dispatches a docChanged transaction', (_name, make) => {
+    const tr = trOf(make());
+    expect(tr).not.toBeNull();
+    expect(tr?.docChanged).toBe(true);
+  });
+});

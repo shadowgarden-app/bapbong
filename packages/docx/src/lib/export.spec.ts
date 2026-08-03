@@ -953,6 +953,27 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
     expect(back.doc.attrs.page).toMatchObject({ width: 1123, height: 794 });
   });
 
+  it('survives the export worker hop (toJSON → nodeFromJSON)', async () => {
+    // The desktop shell autosaves off the main thread: app.ts posts
+    // doc.toJSON() to export.worker.ts, which rebuilds it with
+    // schema.nodeFromJSON before calling exportDocx. Page setup lives in a doc
+    // ATTR, so a serialization that dropped attrs would show the new geometry
+    // on screen and write the old one to disk — the failure a user only
+    // notices after reopening the file.
+    const page = {
+      width: 1123, // A4 landscape
+      height: 794,
+      margin: { top: 48, right: 72, bottom: 48, left: 72 },
+    };
+    const doc = schema.node('doc', { page }, [para('after page setup')]);
+    const rebuilt = schema.nodeFromJSON(JSON.parse(JSON.stringify(doc.toJSON())));
+    expect(rebuilt.attrs['page']).toEqual(page);
+
+    const back = await importDocx(await exportDocx(rebuilt));
+    expect(back.page).toEqual(page);
+    expect(back.doc.child(0).textContent).toBe('after page setup');
+  });
+
   it('round-trips a per-section geometry override (landscape section)', async () => {
     const landscape = {
       width: 1123, // A4 landscape
