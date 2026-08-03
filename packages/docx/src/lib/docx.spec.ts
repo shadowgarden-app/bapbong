@@ -7,7 +7,7 @@ import {
 } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
 import { DocxImportError, IMPORT_ERROR_MESSAGES, sniffDocx } from './sniff';
-import { buildEncryptedDocx } from './crypto-docx.spec-helper';
+import { buildEncryptedDocx, importFailure } from './crypto-docx.spec-helper';
 
 // The comment mark lives in the comment plugin, not the base schema. Comment
 // import tests compose a schema carrying it (minimal local spec — no docx→plugin
@@ -1605,16 +1605,14 @@ describe('importDocx with a password', () => {
   });
 
   it('without a password it is still the encrypted-kind failure', async () => {
-    const err = await importDocx(await protectedDocx('x')).catch(
-      (e) => e as DocxImportError,
-    );
+    const err = await importFailure(importDocx(await protectedDocx('x')));
     expect(err.kind).toBe('encrypted');
   });
 
   it('a wrong password is its own kind, so the prompt can stay open', async () => {
-    const err = await importDocx(await protectedDocx('đúng'), {
-      password: 'sai',
-    }).catch((e) => e as DocxImportError);
+    const err = await importFailure(
+      importDocx(await protectedDocx('đúng'), { password: 'sai' }),
+    );
     expect(err.kind).toBe('wrong-password');
   });
 
@@ -1627,9 +1625,7 @@ describe('importDocx with a password', () => {
     ole.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
     const name = 'EncryptionInfo';
     for (let i = 0; i < name.length; i++) ole[512 + i * 2] = name.charCodeAt(i);
-    const err = await importDocx(ole, { password: 'anything' }).catch(
-      (e) => e as DocxImportError,
-    );
+    const err = await importFailure(importDocx(ole, { password: 'anything' }));
     expect(err.kind).toBe('unsupported-encryption');
   });
 });
@@ -1676,10 +1672,8 @@ describe('sniffDocx + classified import errors', () => {
     expect(await kindOf(bytes('PK then garbage, no central directory'))).toBe(
       'corrupt-zip',
     );
-    const err = await importDocx(bytes('PKgarbage')).catch(
-      (e) => e as DocxImportError,
-    );
-    expect((err as DocxImportError).detail).toBeTruthy();
+    const err = await importFailure(importDocx(bytes('PKgarbage')));
+    expect(err.detail).toBeTruthy();
   });
 
   it('a real zip that is not a docx names the sibling format', async () => {
@@ -1694,10 +1688,8 @@ describe('sniffDocx + classified import errors', () => {
   });
 
   it('every kind carries a human-readable message', async () => {
-    const err = await importDocx(bytes('%PDF-')).catch(
-      (e) => e as DocxImportError,
-    );
-    expect((err as DocxImportError).message).toBe(IMPORT_ERROR_MESSAGES.pdf);
-    expect((err as DocxImportError).message).toContain('PDF');
+    const err = await importFailure(importDocx(bytes('%PDF-')));
+    expect(err.message).toBe(IMPORT_ERROR_MESSAGES.pdf);
+    expect(err.message).toContain('PDF');
   });
 });

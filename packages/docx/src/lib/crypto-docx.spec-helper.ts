@@ -11,6 +11,26 @@
  * suite's tests into their run.
  */
 import { aesCbcEncryptNoPad, bytesToB64, deriveKey } from './crypto-docx.js';
+import type { DocxImportError } from './sniff.js';
+
+/**
+ * Await an import that MUST fail, and hand back its error already typed.
+ *
+ * `importDocx(…).catch((e) => e as DocxImportError)` reads fine but types the
+ * result as `DocxImport | DocxImportError`, so `.kind` does not exist on it —
+ * and had the import ever started succeeding, the assertion would have failed
+ * with a confusing message instead of saying what actually happened.
+ */
+export async function importFailure(
+  p: Promise<unknown>,
+): Promise<DocxImportError> {
+  try {
+    await p;
+  } catch (err) {
+    return err as DocxImportError;
+  }
+  throw new Error('expected the import to fail, but it resolved');
+}
 
 // ── Test fixture builders ───────────────────────────────────────────
 // There is no password-protected .docx checked in (creating one needs Word),

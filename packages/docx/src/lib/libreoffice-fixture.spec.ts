@@ -3,6 +3,7 @@ import { CfbReader } from './cfb';
 import { DocxImportError, sniffDocx } from './sniff';
 import { importDocx } from './docx';
 import { DocxCryptoError, parseEncryptionInfo } from './crypto-docx';
+import { importFailure } from './crypto-docx.spec-helper';
 
 /**
  * A .docx encrypted by LibreOffice — an implementation that had no part in
@@ -44,8 +45,8 @@ describe('a third party’s encrypted .docx', () => {
   });
 
   it('fails as a classified dead end, so no UI loops asking for a password', async () => {
-    const err = await importDocx(FIXTURE, { password: PASSWORD }).catch(
-      (e) => e as DocxImportError,
+    const err = await importFailure(
+      importDocx(FIXTURE, { password: PASSWORD }),
     );
     expect(err).toBeInstanceOf(DocxImportError);
     // NOT 'wrong-password' — the password is right; the scheme is the problem,
