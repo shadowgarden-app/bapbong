@@ -6,6 +6,11 @@ import {
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
+import {
+  DocxImportError,
+  IMPORT_ERROR_MESSAGES,
+  sniffDocx,
+} from './sniff';
 
 // The comment mark lives in the comment plugin, not the base schema. Comment
 // import tests compose a schema carrying it (minimal local spec — no docx→plugin
@@ -1582,6 +1587,74 @@ describe('importDocx', () => {
     zip.file('hello.txt', 'nope');
     await expect(
       importDocx(await zip.generateAsync({ type: 'uint8array' })),
-    ).rejects.toThrow(/document\.xml/);
+    ).rejects.toThrow(/no document content/);
+  });
+});
+
+describe('sniffDocx + classified import errors', () => {
+  const bytes = (s: string) => new TextEncoder().encode(s);
+  /** A minimal OLE header followed by a UTF-16LE stream name somewhere after. */
+  const ole = (streamName?: string) => {
+    const head = new Uint8Array(1024);
+    head.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    if (streamName) {
+      for (let i = 0; i < streamName.length; i++)
+        head[512 + i * 2] = streamName.charCodeAt(i);
+    }
+    return head;
+  };
+  const kindOf = async (input: Uint8Array) =>
+    importDocx(input).then(
+      () => 'OPENED',
+      (e) => (e instanceof DocxImportError ? e.kind : `untyped: ${e}`),
+    );
+
+  it('classifies the common impostors by magic bytes', () => {
+    expect(sniffDocx(bytes('%PDF-1.7 x'))).toBe('pdf');
+    expect(sniffDocx(bytes('{\\rtf1 hello'))).toBe('rtf');
+    expect(sniffDocx(bytes('  <!DOCTYPE html><html>'))).toBe('html');
+    expect(sniffDocx(bytes(''))).toBe('empty');
+    expect(sniffDocx(bytes('just some plain text'))).toBe('unknown');
+    expect(sniffDocx(bytes('PKrest-of-zip'))).toBe('zip');
+    expect(sniffDocx(ole('WordDocument'))).toBe('legacy-doc');
+    expect(sniffDocx(ole('EncryptionInfo'))).toBe('encrypted');
+    expect(sniffDocx(ole())).toBe('ole');
+  });
+
+  it('importDocx throws typed errors for certain non-docx inputs', async () => {
+    expect(await kindOf(bytes('%PDF-1.7'))).toBe('pdf');
+    expect(await kindOf(ole('EncryptionInfo'))).toBe('encrypted');
+    expect(await kindOf(ole('WordDocument'))).toBe('legacy-doc');
+    expect(await kindOf(bytes(''))).toBe('empty');
+    expect(await kindOf(bytes('plain text impostor'))).toBe('unknown');
+  });
+
+  it('a PK header with a broken archive is corrupt-zip (library detail kept)', async () => {
+    expect(await kindOf(bytes('PK then garbage, no central directory'))).toBe(
+      'corrupt-zip',
+    );
+    const err = await importDocx(bytes('PKgarbage')).catch(
+      (e) => e as DocxImportError,
+    );
+    expect((err as DocxImportError).detail).toBeTruthy();
+  });
+
+  it('a real zip that is not a docx names the sibling format', async () => {
+    const mk = async (path: string) => {
+      const zip = new JSZip();
+      zip.file(path, '<x/>');
+      return zip.generateAsync({ type: 'uint8array' as const });
+    };
+    expect(await kindOf(await mk('xl/workbook.xml'))).toBe('xlsx');
+    expect(await kindOf(await mk('ppt/presentation.xml'))).toBe('pptx');
+    expect(await kindOf(await mk('unrelated.txt'))).toBe('no-document');
+  });
+
+  it('every kind carries a human-readable message', async () => {
+    const err = await importDocx(bytes('%PDF-')).catch(
+      (e) => e as DocxImportError,
+    );
+    expect((err as DocxImportError).message).toBe(IMPORT_ERROR_MESSAGES.pdf);
+    expect((err as DocxImportError).message).toContain('PDF');
   });
 });

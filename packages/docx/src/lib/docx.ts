@@ -1,6 +1,12 @@
 import JSZip from 'jszip';
 import { Node as PMNode, Mark, Schema } from 'prosemirror-model';
 import {
+  DocxImportError,
+  IMPORT_ERROR_MESSAGES,
+  errorForSniff,
+  sniffDocx,
+} from './sniff.js';
+import {
   commentSchema,
   schema,
   type Align,
@@ -1781,11 +1787,35 @@ export async function importDocx(
   input: DocxInput,
   opts?: { schema?: Schema },
 ): Promise<DocxImport> {
-  const zip = await JSZip.loadAsync(input);
+  // Classify before parsing: a renamed PDF/.doc/encrypted file fails with a
+  // cause a shell can act on, instead of JSZip's central-directory riddle.
+  const bytes =
+    input instanceof Blob ? new Uint8Array(await input.arrayBuffer()) : input;
+  const sniff = sniffDocx(bytes);
+  if (sniff !== 'zip') throw errorForSniff(sniff);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch (err) {
+    // A PK header whose archive won't open: truncated download/copy.
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new DocxImportError(
+      'corrupt-zip',
+      IMPORT_ERROR_MESSAGES['corrupt-zip'],
+      detail,
+    );
+  }
 
   const rawDocumentXml = await readPart(zip, 'word/document.xml');
   if (rawDocumentXml === undefined) {
-    throw new Error('bapbong-docx: word/document.xml not found in archive');
+    // A real zip without a Word body — most often a sibling Office format
+    // renamed; say which one when its marker part is there.
+    const kind = zip.file('xl/workbook.xml')
+      ? ('xlsx' as const)
+      : zip.file('ppt/presentation.xml')
+        ? ('pptx' as const)
+        : ('no-document' as const);
+    throw new DocxImportError(kind, IMPORT_ERROR_MESSAGES[kind]);
   }
 
   const stylesXml = await readPart(zip, 'word/styles.xml');
