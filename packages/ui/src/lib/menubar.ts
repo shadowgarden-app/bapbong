@@ -201,7 +201,14 @@ export function mountMenubar(
         flyout.setAttribute('role', 'menu');
         if ('widget' in entry) {
           flyout.classList.add('bb-submenu-widget');
-          flyout.appendChild(entry.widget(() => close()));
+          // Built on reveal, and rebuilt on every reveal. A widget that mirrors
+          // document state (the page-setup pickers preview the live geometry
+          // and check the active preset) would otherwise be a snapshot taken
+          // at mount — stale after the first edit, and evaluated before a
+          // document has even loaded.
+          const build = () => flyout.replaceChildren(entry.widget(() => close()));
+          wrap.addEventListener('mouseenter', build);
+          wrap.addEventListener('focusin', build);
         } else {
           buildEntries(entry.submenu, flyout);
         }

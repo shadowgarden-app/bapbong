@@ -269,15 +269,14 @@ export function orientationPicker(
     ['portrait', 'Portrait', short / long],
     ['landscape', 'Landscape', long / short],
   ] as const) {
+    // No measurements here (Word shows none either): they'd have to be derived
+    // from the px geometry, printing 21.008 cm where the Page size flyout —
+    // which knows the paper's nominal size — says 21 cm.
     root.appendChild(
       presetRow(
         pagePreview(ratio),
         label,
-        captionLine(
-          `${fmtCm(pxToCm(key === 'portrait' ? short : long))} x ${fmtCm(
-            pxToCm(key === 'portrait' ? long : short),
-          )}`,
-        ),
+        captionLine(''),
         options.active === key,
         () => options.onPick(key),
       ),
