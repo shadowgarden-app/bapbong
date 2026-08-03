@@ -17,23 +17,24 @@
 # USAGE
 #   scripts/make-encrypted-fixture.sh [output.docx] [password]
 #
-# Requires: Docker (first run builds a ~1 GB image; later runs reuse it).
+# Requires: Docker (the first run builds the image; later runs reuse it).
+# Reclaim that space afterwards with scripts/clean-fixture-image.sh.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=_fixture-common.sh
+source "$SCRIPT_DIR/_fixture-common.sh"
+
 OUT="${1:-$REPO_ROOT/packages/docx/src/lib/__fixtures__/libreoffice-encrypted.docx}"
 PASSWORD="${2:-bapbong-test}"
-IMAGE="bapbong-libreoffice-fixture"
 
-if ! docker info >/dev/null 2>&1; then
-  echo "Docker is not running — start Docker Desktop and try again." >&2
-  exit 1
-fi
+require_docker
 
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo "Building $IMAGE (first run only; a few minutes)…"
-  docker build -q -t "$IMAGE" -f "$REPO_ROOT/scripts/libreoffice.Dockerfile" \
-    "$REPO_ROOT/scripts" >/dev/null
+if ! docker image inspect "$FIXTURE_IMAGE" >/dev/null 2>&1; then
+  echo "Building $FIXTURE_IMAGE (first run only; a few minutes)…"
+  docker build -q -t "$FIXTURE_IMAGE" -f "$SCRIPT_DIR/libreoffice.Dockerfile" \
+    "$SCRIPT_DIR" >/dev/null
 fi
 
 WORK="$(mktemp -d)"
@@ -49,7 +50,7 @@ Decrypting it is what proves our MS-OFFCRYPTO reader agrees with an
 independent implementation.
 TXT
 
-docker run --rm -v "$WORK:/work" "$IMAGE" bash -lc "
+docker run --rm -v "$WORK:/work" "$FIXTURE_IMAGE" bash -lc "
   set -e
   # LibreOffice writes the plain .docx first; the password is applied on the
   # second pass, through UNO (the CLI cannot set one).
