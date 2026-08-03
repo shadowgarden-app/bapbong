@@ -224,6 +224,9 @@ export class RenderCore {
        *  to re-open a document at an in-progress edit state without re-deriving
        *  it from disk. Must share the imported doc's schema. */
       layoutTarget?: ProseMirrorNode;
+      /** Password for an encrypted document — forwarded to importDocx, which
+       *  decrypts to the ordinary .docx before parsing. Never stored. */
+      password?: string;
     } = {},
   ): Promise<{
     doc: ProseMirrorNode;
@@ -241,7 +244,10 @@ export class RenderCore {
       raw,
       sectionChrome,
     } = await perf.spanAsync('importDocx', () =>
-      importDocx(bytes, opts.schema ? { schema: opts.schema } : undefined),
+      importDocx(bytes, {
+        ...(opts.schema ? { schema: opts.schema } : {}),
+        ...(opts.password !== undefined ? { password: opts.password } : {}),
+      }),
     );
     this.docSchema = opts.schema ?? baseSchema;
     this.importedRaw = raw; // carried on export so unmodelled parts survive

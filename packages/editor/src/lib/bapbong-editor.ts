@@ -399,6 +399,8 @@ export class BapbongEditor {
        *  history and selection survive. The state must have been produced by
        *  this editor (same schema) — e.g. captured earlier from `state`. */
       restoreState?: EditorState;
+      /** Password for an encrypted document (forwarded to the importer). */
+      password?: string;
     },
   ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
     // Fresh plugin instances for this document — per-document state (a
@@ -418,6 +420,7 @@ export class BapbongEditor {
         schema: composed ?? undefined,
         paint: false,
         layoutTarget: restore?.doc,
+        ...(opts?.password !== undefined ? { password: opts.password } : {}),
       },
     );
     this.mount(restore?.doc ?? doc, restore);
