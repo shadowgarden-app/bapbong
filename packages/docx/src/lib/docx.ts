@@ -6,6 +6,32 @@ import {
   errorForSniff,
   sniffDocx,
 } from './sniff.js';
+import { decryptOfficeFile, WrongPasswordError } from './crypto-docx.js';
+
+/** Decrypt a password-protected document, mapping the crypto layer's failures
+ *  onto the classified import errors a shell already handles. */
+async function decryptDocx(
+  bytes: Uint8Array,
+  password: string,
+): Promise<Uint8Array> {
+  try {
+    return await decryptOfficeFile(bytes, password);
+  } catch (err) {
+    if (err instanceof WrongPasswordError) {
+      throw new DocxImportError(
+        'wrong-password',
+        IMPORT_ERROR_MESSAGES['wrong-password'],
+      );
+    }
+    // An unsupported scheme (Word 2007 "Standard", a cipher we don't do) is
+    // a dead end for the unlock prompt — say so rather than looping on it.
+    throw new DocxImportError(
+      'unsupported-encryption',
+      IMPORT_ERROR_MESSAGES['unsupported-encryption'],
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
 import {
   commentSchema,
   schema,
@@ -1785,13 +1811,24 @@ async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
  */
 export async function importDocx(
   input: DocxInput,
-  opts?: { schema?: Schema },
+  opts?: { schema?: Schema; password?: string },
 ): Promise<DocxImport> {
   // Classify before parsing: a renamed PDF/.doc/encrypted file fails with a
   // cause a shell can act on, instead of JSZip's central-directory riddle.
-  const bytes =
+  let bytes =
     input instanceof Blob ? new Uint8Array(await input.arrayBuffer()) : input;
-  const sniff = sniffDocx(bytes);
+  let sniff = sniffDocx(bytes);
+  if (sniff === 'encrypted') {
+    // Password-protected: without a password this is still a classified
+    // failure the shell turns into its unlock prompt; with one, decrypting
+    // yields the ordinary .docx zip and the rest of the import is unchanged.
+    if (opts?.password === undefined) throw errorForSniff('encrypted');
+    bytes = await decryptDocx(
+      bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
+      opts.password,
+    );
+    sniff = sniffDocx(bytes);
+  }
   if (sniff !== 'zip') throw errorForSniff(sniff);
   let zip: JSZip;
   try {

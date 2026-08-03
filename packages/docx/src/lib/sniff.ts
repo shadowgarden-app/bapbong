@@ -32,7 +32,9 @@ export type DocxImportErrorKind =
   | 'corrupt-zip' // PK header but the archive won't open (truncated/partial)
   | 'xlsx' // a real zip, but it's an Excel workbook
   | 'pptx' // … or a PowerPoint deck
-  | 'no-document'; // a zip without word/document.xml (damaged docx)
+  | 'no-document' // a zip without word/document.xml (damaged docx)
+  | 'wrong-password' // encrypted, and the supplied password didn't match
+  | 'unsupported-encryption'; // encrypted with a scheme we can't open
 
 /** importDocx failure with a classified cause. `message` stays human-readable
  *  (and is what a shell that doesn't switch on `kind` will show); `detail`
@@ -95,7 +97,7 @@ export function sniffDocx(input: ArrayBuffer | Uint8Array): DocxSniff {
   // an HTML opener within leading whitespace/BOM.
   const leadText = new TextDecoder('utf-8', { fatal: false })
     .decode(b.subarray(0, 512))
-    .replace(/^﻿/, '')
+    .replace(/^\uFEFF/, '')
     .trimStart()
     .slice(0, 15)
     .toLowerCase();
@@ -123,6 +125,9 @@ export const IMPORT_ERROR_MESSAGES: Record<DocxImportErrorKind, string> = {
   pptx: 'This is a PowerPoint presentation renamed to .docx. Renaming it back to .pptx should open it.',
   'no-document':
     'The archive opened but has no document content — the file is likely damaged.',
+  'wrong-password': 'Incorrect password.',
+  'unsupported-encryption':
+    'This document uses an encryption scheme bapbong cannot open. Remove the password in Word, then reopen it.',
 };
 
 /** A classified import failure for a sniff verdict that rules importing out. */

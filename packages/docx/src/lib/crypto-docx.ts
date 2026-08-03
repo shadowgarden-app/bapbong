@@ -16,6 +16,8 @@
  * and Node ≥ 16 — no dependency, no key material outside this module.
  */
 
+import { CfbReader } from './cfb.js';
+
 /** Block keys from MS-OFFCRYPTO §2.3.4.12 — fixed constants that separate the
  *  KDF outputs used for different purposes. */
 const BLOCK_KEY_VERIFIER_INPUT = new Uint8Array([
@@ -157,6 +159,14 @@ export function parseEncryptionInfo(stream: Uint8Array): AgileEncryptionInfo {
   };
 }
 
+/** A standalone ArrayBuffer copy of a view. WebCrypto's BufferSource wants a
+ *  concrete ArrayBuffer; a Uint8Array over ArrayBufferLike (possibly shared)
+ *  no longer satisfies it, and a subarray would hand over its whole backing
+ *  buffer anyway. Inputs here are keys, IVs and 4 KB segments — the copy is
+ *  not worth avoiding. */
+const buf = (b: Uint8Array): ArrayBuffer =>
+  b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+
 const subtle = () => {
   const c = globalThis.crypto;
   if (!c?.subtle)
@@ -165,7 +175,7 @@ const subtle = () => {
 };
 
 const digest = async (alg: string, data: Uint8Array): Promise<Uint8Array> =>
-  new Uint8Array(await subtle().digest(webcryptoHash(alg), data));
+  new Uint8Array(await subtle().digest(webcryptoHash(alg), buf(data)));
 
 function concat(...parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
@@ -233,7 +243,7 @@ async function aesCbcDecryptNoPad(
     throw new DocxCryptoError('ciphertext is not a whole number of blocks');
   const k = await subtle().importKey(
     'raw',
-    key,
+    buf(key),
     { name: 'AES-CBC' },
     false,
     ['decrypt', 'encrypt'],
@@ -242,16 +252,16 @@ async function aesCbcDecryptNoPad(
   const padPlain = new Uint8Array(16).fill(16);
   const padEnc = new Uint8Array(
     await subtle().encrypt(
-      { name: 'AES-CBC', iv: lastBlock },
+      { name: 'AES-CBC', iv: buf(lastBlock) },
       k,
-      padPlain,
+      buf(padPlain),
     ),
   ).subarray(0, 16);
   const full = concat(data, padEnc);
   const plain = await subtle().decrypt(
-    { name: 'AES-CBC', iv: iv },
+    { name: 'AES-CBC', iv: buf(iv) },
     k,
-    full,
+    buf(full),
   );
   return new Uint8Array(plain);
 }
@@ -267,16 +277,16 @@ export async function aesCbcEncryptNoPad(
     throw new DocxCryptoError('plaintext is not a whole number of blocks');
   const k = await subtle().importKey(
     'raw',
-    key,
+    buf(key),
     { name: 'AES-CBC' },
     false,
     ['encrypt'],
   );
   const out = new Uint8Array(
     await subtle().encrypt(
-      { name: 'AES-CBC', iv: iv },
+      { name: 'AES-CBC', iv: buf(iv) },
       k,
-      data,
+      buf(data),
     ),
   );
   return out.subarray(0, data.length);
@@ -316,6 +326,32 @@ export async function verifyPassword(
     spec.encryptedKeyValue,
   );
   return secret.subarray(0, spec.keyBits / 8);
+}
+
+/**
+ * Unwrap a password-protected document to the ordinary .docx zip inside it.
+ * Callers import the result exactly as they would any other .docx.
+ *
+ * Throws {@link WrongPasswordError} for a bad password and
+ * {@link DocxCryptoError} for a container we can't open (the older
+ * "Standard" scheme, an unsupported cipher). The KDF inside is deliberately
+ * slow — run this in a worker.
+ */
+export async function decryptOfficeFile(
+  bytes: Uint8Array,
+  password: string,
+): Promise<Uint8Array> {
+  const cfb = new CfbReader(bytes);
+  const infoStream = cfb.readStream('EncryptionInfo');
+  const packageStream = cfb.readStream('EncryptedPackage');
+  if (!infoStream || !packageStream) {
+    throw new DocxCryptoError(
+      'not an encrypted Office document (no EncryptionInfo/EncryptedPackage)',
+    );
+  }
+  const info = parseEncryptionInfo(infoStream);
+  const secretKey = await verifyPassword(password, info);
+  return decryptPackage(packageStream, secretKey, info.keyData);
 }
 
 /**

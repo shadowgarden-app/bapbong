@@ -11,6 +11,7 @@ import {
   IMPORT_ERROR_MESSAGES,
   sniffDocx,
 } from './sniff';
+import { buildEncryptedDocx } from './crypto-docx.spec';
 
 // The comment mark lives in the comment plugin, not the base schema. Comment
 // import tests compose a schema carrying it (minimal local spec — no docx→plugin
@@ -1588,6 +1589,52 @@ describe('importDocx', () => {
     await expect(
       importDocx(await zip.generateAsync({ type: 'uint8array' })),
     ).rejects.toThrow(/no document content/);
+  });
+});
+
+describe('importDocx with a password', () => {
+  /** A real .docx, encrypted — the whole path a protected file takes. */
+  const protectedDocx = async (password: string) => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>bí mật quý 3</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    return buildEncryptedDocx(await makeDocx(documentXml), password);
+  };
+
+  it('opens a protected document when the password is right', async () => {
+    const { doc } = await importDocx(await protectedDocx('mở ra'), {
+      password: 'mở ra',
+    });
+    expect(doc.child(0).textContent).toBe('bí mật quý 3');
+  });
+
+  it('without a password it is still the encrypted-kind failure', async () => {
+    const err = await importDocx(await protectedDocx('x')).catch(
+      (e) => e as DocxImportError,
+    );
+    expect(err.kind).toBe('encrypted');
+  });
+
+  it('a wrong password is its own kind, so the prompt can stay open', async () => {
+    const err = await importDocx(await protectedDocx('đúng'), {
+      password: 'sai',
+    }).catch((e) => e as DocxImportError);
+    expect(err.kind).toBe('wrong-password');
+  });
+
+  it('an unopenable scheme is a dead end, not a retry loop', async () => {
+    // A Standard-encryption (v3.2) container: real OLE, wrong scheme.
+    const info = new Uint8Array(16);
+    new DataView(info.buffer).setUint16(0, 3, true);
+    new DataView(info.buffer).setUint16(2, 2, true);
+    const ole = new Uint8Array(1024);
+    ole.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    const name = 'EncryptionInfo';
+    for (let i = 0; i < name.length; i++) ole[512 + i * 2] = name.charCodeAt(i);
+    const err = await importDocx(ole, { password: 'anything' }).catch(
+      (e) => e as DocxImportError,
+    );
+    expect(err.kind).toBe('unsupported-encryption');
   });
 });
 

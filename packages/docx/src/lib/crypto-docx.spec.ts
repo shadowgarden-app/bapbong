@@ -2,6 +2,7 @@ import { CfbReader } from './cfb';
 import {
   aesCbcEncryptNoPad,
   bytesToB64,
+  decryptOfficeFile,
   decryptPackage,
   deriveKey,
   parseEncryptionInfo,
@@ -301,6 +302,15 @@ describe('Agile decryption', () => {
     const r = new CfbReader(file);
     const info = parseEncryptionInfo(r.readStream('EncryptionInfo')!);
     await expect(verifyPassword('battery staple', info)).rejects.toBeInstanceOf(
+      WrongPasswordError,
+    );
+  });
+
+  it('decryptOfficeFile unwraps straight to the inner bytes', async () => {
+    const source = plain();
+    const file = await buildEncryptedDocx(source, 'mật khẩu');
+    expect(await decryptOfficeFile(file, 'mật khẩu')).toEqual(source);
+    await expect(decryptOfficeFile(file, 'sai')).rejects.toBeInstanceOf(
       WrongPasswordError,
     );
   });
