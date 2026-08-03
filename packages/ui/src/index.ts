@@ -7,3 +7,4 @@ export * from './lib/context-menu.js';
 export * from './lib/link-panel.js';
 export * from './lib/cell-properties.js';
 export * from './lib/table-grid.js';
+export * from './lib/page-setup.js';
