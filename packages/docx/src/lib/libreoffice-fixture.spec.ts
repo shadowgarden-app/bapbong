@@ -14,7 +14,9 @@ import { DocxCryptoError, parseEncryptionInfo } from './crypto-docx';
  * our own writer is circular, and a wrong constant on both sides cancels out.
  */
 const FIXTURE = new Uint8Array(
-  fs.readFileSync(new URL('./__fixtures__/libreoffice-encrypted.docx', import.meta.url)),
+  fs.readFileSync(
+    new URL('./__fixtures__/libreoffice-encrypted.docx', import.meta.url),
+  ),
 );
 const PASSWORD = 'bapbong-test';
 

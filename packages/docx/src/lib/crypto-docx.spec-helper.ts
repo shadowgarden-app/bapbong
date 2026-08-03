@@ -10,11 +10,7 @@
  * tsconfig.lib.json) while spec files can import it without dragging another
  * suite's tests into their run.
  */
-import {
-  aesCbcEncryptNoPad,
-  bytesToB64,
-  deriveKey,
-} from './crypto-docx.js';
+import { aesCbcEncryptNoPad, bytesToB64, deriveKey } from './crypto-docx.js';
 
 // ── Test fixture builders ───────────────────────────────────────────
 // There is no password-protected .docx checked in (creating one needs Word),
@@ -33,7 +29,9 @@ const MINI_CUTOFF = 4096;
 /** Build a compound file holding the named streams. Streams under the mini
  *  cutoff land in the mini stream (as Word writes EncryptionInfo), larger ones
  *  in ordinary FAT sectors — so both read paths get exercised. */
-export function buildCfb(streams: { name: string; data: Uint8Array }[]): Uint8Array {
+export function buildCfb(
+  streams: { name: string; data: Uint8Array }[],
+): Uint8Array {
   const small = streams.filter((s) => s.data.length < MINI_CUTOFF);
   const large = streams.filter((s) => s.data.length >= MINI_CUTOFF);
 
@@ -41,7 +39,11 @@ export function buildCfb(streams: { name: string; data: Uint8Array }[]): Uint8Ar
   const miniChunks: { name: string; start: number; size: number }[] = [];
   let miniLen = 0;
   for (const s of small) {
-    miniChunks.push({ name: s.name, start: miniLen / MINI, size: s.data.length });
+    miniChunks.push({
+      name: s.name,
+      start: miniLen / MINI,
+      size: s.data.length,
+    });
     miniLen += Math.ceil(s.data.length / MINI) * MINI;
   }
   const miniStream = new Uint8Array(miniLen);
@@ -161,7 +163,11 @@ export function buildCfb(streams: { name: string; data: Uint8Array }[]): Uint8Ar
   if (placed.length) {
     view.setUint32(dirBase + 0 * 128 + 76, placed[0].slot, true); // root child
     for (let i = 0; i + 1 < placed.length; i++)
-      view.setUint32(dirBase + placed[i].slot * 128 + 72, placed[i + 1].slot, true);
+      view.setUint32(
+        dirBase + placed[i].slot * 128 + 72,
+        placed[i + 1].slot,
+        true,
+      );
   }
   return out;
 }
@@ -192,9 +198,15 @@ export async function buildEncryptedDocx(
     encryptedVerifierHashValue: new Uint8Array(),
     encryptedKeyValue: new Uint8Array(),
   };
-  const BK_IN = new Uint8Array([0xfe, 0xa7, 0xd2, 0x76, 0x3b, 0x4b, 0x9e, 0x79]);
-  const BK_VAL = new Uint8Array([0xd7, 0xaa, 0x0f, 0x6d, 0x30, 0x61, 0x34, 0x4e]);
-  const BK_SECRET = new Uint8Array([0x14, 0x6e, 0x0b, 0xe7, 0xab, 0xac, 0xd0, 0xd6]);
+  const BK_IN = new Uint8Array([
+    0xfe, 0xa7, 0xd2, 0x76, 0x3b, 0x4b, 0x9e, 0x79,
+  ]);
+  const BK_VAL = new Uint8Array([
+    0xd7, 0xaa, 0x0f, 0x6d, 0x30, 0x61, 0x34, 0x4e,
+  ]);
+  const BK_SECRET = new Uint8Array([
+    0x14, 0x6e, 0x0b, 0xe7, 0xab, 0xac, 0xd0, 0xd6,
+  ]);
 
   const encVerifierInput = await aesCbcEncryptNoPad(
     await deriveKey(password, spec, BK_IN),
@@ -233,7 +245,10 @@ export async function buildEncryptedDocx(
         })(),
       ),
     );
-    body.set(await aesCbcEncryptNoPad(secretKey, ivFull.subarray(0, 16), chunk), w);
+    body.set(
+      await aesCbcEncryptNoPad(secretKey, ivFull.subarray(0, 16), chunk),
+      w,
+    );
     w += chunk.length;
   }
   const encryptedPackage = new Uint8Array(8 + body.length);
@@ -246,7 +261,10 @@ export async function buildEncryptedDocx(
     const b = new Uint8Array(keySalt.length + bk.length);
     b.set(keySalt);
     b.set(bk, keySalt.length);
-    return new Uint8Array(await crypto.subtle.digest('SHA-512', b)).subarray(0, 16);
+    return new Uint8Array(await crypto.subtle.digest('SHA-512', b)).subarray(
+      0,
+      16,
+    );
   };
   const encHmacKey = await aesCbcEncryptNoPad(
     secretKey,

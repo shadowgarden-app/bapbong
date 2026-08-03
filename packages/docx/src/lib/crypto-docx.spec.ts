@@ -10,7 +10,6 @@ import {
 } from './crypto-docx';
 import { buildCfb, buildEncryptedDocx } from './crypto-docx.spec-helper';
 
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('CfbReader', () => {

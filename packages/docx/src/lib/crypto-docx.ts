@@ -160,8 +160,14 @@ export function parseEncryptionInfo(stream: Uint8Array): AgileEncryptionInfo {
       hashSize: num('encryptedKey', 'hashSize'),
       hashAlgorithm: str('encryptedKey', 'hashAlgorithm'),
       spinCount: num('encryptedKey', 'spinCount'),
-      encryptedVerifierHashInput: bin('encryptedKey', 'encryptedVerifierHashInput'),
-      encryptedVerifierHashValue: bin('encryptedKey', 'encryptedVerifierHashValue'),
+      encryptedVerifierHashInput: bin(
+        'encryptedKey',
+        'encryptedVerifierHashInput',
+      ),
+      encryptedVerifierHashValue: bin(
+        'encryptedKey',
+        'encryptedVerifierHashValue',
+      ),
       encryptedKeyValue: bin('encryptedKey', 'encryptedKeyValue'),
     },
   };
@@ -291,11 +297,7 @@ export async function aesCbcEncryptNoPad(
     ['encrypt'],
   );
   const out = new Uint8Array(
-    await subtle().encrypt(
-      { name: 'AES-CBC', iv: buf(iv) },
-      k,
-      buf(data),
-    ),
+    await subtle().encrypt({ name: 'AES-CBC', iv: buf(iv) }, k, buf(data)),
   );
   return out.subarray(0, data.length);
 }

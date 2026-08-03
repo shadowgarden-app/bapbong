@@ -6,11 +6,7 @@ import {
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
-import {
-  DocxImportError,
-  IMPORT_ERROR_MESSAGES,
-  sniffDocx,
-} from './sniff';
+import { DocxImportError, IMPORT_ERROR_MESSAGES, sniffDocx } from './sniff';
 import { buildEncryptedDocx } from './crypto-docx.spec-helper';
 
 // The comment mark lives in the comment plugin, not the base schema. Comment

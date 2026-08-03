@@ -194,7 +194,12 @@ export class CfbReader {
     let w = 0;
     let s = start;
     let guard = 0;
-    while (s !== ENDOFCHAIN && s !== FREESECT && w < size && guard++ < MAX_CHAIN) {
+    while (
+      s !== ENDOFCHAIN &&
+      s !== FREESECT &&
+      w < size &&
+      guard++ < MAX_CHAIN
+    ) {
       const off = s * this.miniSectorSize;
       const n = Math.min(
         this.miniSectorSize,
@@ -246,7 +251,8 @@ export function writeCfb(
 ): Uint8Array {
   const small = streams.filter((s) => s.data.length < MINI_CUTOFF);
   const large = streams.filter((s) => s.data.length >= MINI_CUTOFF);
-  if (streams.length > 3) throw new CfbError('too many streams for this writer');
+  if (streams.length > 3)
+    throw new CfbError('too many streams for this writer');
 
   // Mini stream: the small streams, each starting on a mini-sector boundary.
   const miniChunks: { name: string; start: number; size: number }[] = [];

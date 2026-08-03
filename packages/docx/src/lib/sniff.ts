@@ -131,6 +131,8 @@ export const IMPORT_ERROR_MESSAGES: Record<DocxImportErrorKind, string> = {
 };
 
 /** A classified import failure for a sniff verdict that rules importing out. */
-export function errorForSniff(kind: Exclude<DocxSniff, 'zip'>): DocxImportError {
+export function errorForSniff(
+  kind: Exclude<DocxSniff, 'zip'>,
+): DocxImportError {
   return new DocxImportError(kind, IMPORT_ERROR_MESSAGES[kind]);
 }
