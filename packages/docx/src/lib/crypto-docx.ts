@@ -29,6 +29,14 @@ const BLOCK_KEY_VERIFIER_VALUE = new Uint8Array([
 const BLOCK_KEY_SECRET = new Uint8Array([
   0x14, 0x6e, 0x0b, 0xe7, 0xab, 0xac, 0xd0, 0xd6,
 ]);
+/** dataIntegrity (§2.3.4.14): the HMAC that lets a reader detect a package
+ *  tampered with after encryption. */
+const BLOCK_KEY_HMAC_KEY = new Uint8Array([
+  0x5f, 0xb2, 0xad, 0x01, 0x0c, 0xb9, 0xe1, 0xf6,
+]);
+const BLOCK_KEY_HMAC_VALUE = new Uint8Array([
+  0xa0, 0x67, 0x7f, 0x02, 0xb2, 0x2c, 0x84, 0x33,
+]);
 
 /** Bulk data is encrypted in independently-IV'd chunks of this size. */
 const SEGMENT_SIZE = 4096;
@@ -456,6 +464,59 @@ async function encryptPackage(
   return out;
 }
 
+/** Pad to a whole number of cipher blocks (dataIntegrity fields are encrypted
+ *  raw, and a hash size like SHA-1's 20 bytes is not block-aligned). */
+function padToBlock(b: Uint8Array, blockSize: number): Uint8Array {
+  const n = Math.ceil(b.length / blockSize) * blockSize;
+  if (n === b.length) return b;
+  const out = new Uint8Array(n);
+  out.set(b);
+  return out;
+}
+
+/**
+ * The dataIntegrity pair for a freshly encrypted package: a random HMAC key
+ * (itself encrypted under the package key) and the HMAC it produces over the
+ * package stream.
+ *
+ * The spec calls the element optional, but real implementations read it
+ * unconditionally — omitting it produces a file they refuse outright — so it
+ * is always written.
+ */
+async function buildDataIntegrity(
+  encryptedPackage: Uint8Array,
+  secretKey: Uint8Array,
+  keyData: KeyDataSpec,
+): Promise<{ key: string; value: string }> {
+  const hmacKey = crypto.getRandomValues(new Uint8Array(keyData.hashSize));
+  const ivFor = async (blockKey: Uint8Array) =>
+    fit(
+      await digest(keyData.hashAlgorithm, concat(keyData.saltValue, blockKey)),
+      keyData.blockSize,
+    );
+  const encryptedKey = await aesCbcEncryptNoPad(
+    secretKey,
+    await ivFor(BLOCK_KEY_HMAC_KEY),
+    padToBlock(hmacKey, keyData.blockSize),
+  );
+  const k = await subtle().importKey(
+    'raw',
+    buf(hmacKey),
+    { name: 'HMAC', hash: webcryptoHash(keyData.hashAlgorithm) },
+    false,
+    ['sign'],
+  );
+  const mac = new Uint8Array(
+    await subtle().sign('HMAC', k, buf(encryptedPackage)),
+  );
+  const encryptedValue = await aesCbcEncryptNoPad(
+    secretKey,
+    await ivFor(BLOCK_KEY_HMAC_VALUE),
+    padToBlock(mac, keyData.blockSize),
+  );
+  return { key: bytesToB64(encryptedKey), value: bytesToB64(encryptedValue) };
+}
+
 /**
  * Re-encrypt edited content back into a container the same password opens.
  *
@@ -508,10 +569,19 @@ export async function reencryptOfficeFile(
     'encryptedKeyValue',
     bytesToB64(encryptedKeyValue),
   );
-  // dataIntegrity is an HMAC over the OLD package; it cannot describe the new
-  // one, and the element is optional (MS-OFFCRYPTO §2.3.4.14). Dropping it is
-  // honest — leaving a stale one would make readers report corruption.
-  outXml = outXml.replace(/<(?:\w+:)?dataIntegrity\b[^>]*\/>/, '');
+  // dataIntegrity describes the OLD package, so it is recomputed for the new
+  // one. (Dropping it instead — the element is nominally optional — produces
+  // files real implementations refuse to open at all.)
+  const integrity = await buildDataIntegrity(encryptedPackage, secretKey, {
+    ...info.keyData,
+    saltValue: keyDataSalt,
+  });
+  const el =
+    `<dataIntegrity encryptedHmacKey="${integrity.key}" ` +
+    `encryptedHmacValue="${integrity.value}"/>`;
+  outXml = /<(?:\w+:)?dataIntegrity\b[^>]*\/>/.test(outXml)
+    ? outXml.replace(/<(?:\w+:)?dataIntegrity\b[^>]*\/>/, el)
+    : outXml.replace('<keyEncryptors', `${el}<keyEncryptors`);
 
   const xmlBytes = new TextEncoder().encode(outXml);
   const infoOut = new Uint8Array(8 + xmlBytes.length);

@@ -354,8 +354,41 @@ export function writeCfb(
     view.setUint32(off + 120, size, true);
   };
   entry(0, 'Root Entry', 5, MINI_START, miniStream.length);
+  const placed: { name: string; slot: number }[] = [];
   let slot = 1;
-  for (const c of miniChunks) entry(slot++, c.name, 2, c.start, c.size);
-  large.forEach((s, i) => entry(slot++, s.name, 2, largeStarts[i], s.data.length));
+  for (const c of miniChunks) {
+    entry(slot, c.name, 2, c.start, c.size);
+    placed.push({ name: c.name, slot: slot++ });
+  }
+  large.forEach((st, i) => {
+    entry(slot, st.name, 2, largeStarts[i], st.data.length);
+    placed.push({ name: st.name, slot: slot++ });
+  });
+
+  // Link the entries into the directory TREE. Readers walk it from the root's
+  // child pointer — leaving the pointers empty (as a linear scan of the
+  // sectors does not need) yields a container whose streams are invisible to
+  // every conforming reader, including Word's.
+  //
+  // MS-CFB §2.6.4 orders siblings by name LENGTH first, then by the uppercased
+  // name. A right-leaning chain is a valid (if unbalanced) binary tree for the
+  // two or three entries written here.
+  placed.sort((a, b) =>
+    a.name.length !== b.name.length
+      ? a.name.length - b.name.length
+      : a.name.toUpperCase() < b.name.toUpperCase()
+        ? -1
+        : 1,
+  );
+  const RIGHT_SIBLING = 72;
+  const CHILD = 76;
+  const field = (s2: number, off: number, v: number) =>
+    view.setUint32(dirBase + s2 * 128 + off, v, true);
+  if (placed.length > 0) {
+    field(0, CHILD, placed[0].slot); // root → first entry
+    for (let i = 0; i + 1 < placed.length; i++) {
+      field(placed[i].slot, RIGHT_SIBLING, placed[i + 1].slot);
+    }
+  }
   return out;
 }

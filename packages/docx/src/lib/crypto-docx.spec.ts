@@ -1,4 +1,4 @@
-import { CfbReader } from './cfb';
+import { CfbReader, writeCfb } from './cfb';
 import {
   decryptOfficeFile,
   decryptPackage,
@@ -29,6 +29,40 @@ describe('CfbReader', () => {
     expect(r.readStream('EncryptionInfo')).toEqual(small);
     expect(r.readStream('EncryptedPackage')).toEqual(big);
     expect(r.readStream('Nope')).toBeNull();
+  });
+
+  it('links the directory tree, so conforming readers can see the streams', () => {
+    // Regression: entries used to be written with empty child/sibling
+    // pointers. A linear scan (ours) still found them; every reader that
+    // walks the tree from the root — Word included — saw an EMPTY container.
+    const file = writeCfb([
+      { name: 'EncryptionInfo', data: new Uint8Array(300).fill(7) },
+      { name: 'EncryptedPackage', data: new Uint8Array(9000).fill(9) },
+    ]);
+    const view = new DataView(file.buffer);
+    const dir = 512 + 1 * 512; // sector 1 holds the directory
+    const CHILD = 76;
+    const RIGHT = 72;
+    const rootChild = view.getUint32(dir + 0 * 128 + CHILD, true);
+    expect(rootChild).not.toBe(0xffffffff); // the root must point at something
+    // …and that entry chains on to the second, ordered by name length
+    // (EncryptionInfo = 14 before EncryptedPackage = 16).
+    const next = view.getUint32(dir + rootChild * 128 + RIGHT, true);
+    expect(next).not.toBe(0xffffffff);
+    const nameAt = (slot: number) => {
+      const off = dir + slot * 128;
+      const len = view.getUint16(off + 64, true);
+      let n = '';
+      for (let i = 0; i + 1 < len - 2; i += 2)
+        n += String.fromCharCode(view.getUint16(off + i, true));
+      return n;
+    };
+    expect(nameAt(rootChild)).toBe('EncryptionInfo');
+    expect(nameAt(next)).toBe('EncryptedPackage');
+    // And it still round-trips through our own reader.
+    const r = new CfbReader(file);
+    expect(r.readStream('EncryptionInfo')?.length).toBe(300);
+    expect(r.readStream('EncryptedPackage')?.length).toBe(9000);
   });
 
   it('rejects bytes that are not a compound file', () => {

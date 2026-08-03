@@ -138,11 +138,31 @@ export function buildCfb(streams: { name: string; data: Uint8Array }[]): Uint8Ar
     view.setUint32(off + 120, size, true);
   };
   writeEntry(0, 'Root Entry', 5, MINI_STREAM_START, miniStream.length);
+  const placed: { name: string; slot: number }[] = [];
   let slot = 1;
-  for (const c of miniChunks) writeEntry(slot++, c.name, 2, c.start, c.size);
-  large.forEach((s, i) =>
-    writeEntry(slot++, s.name, 2, largeStarts[i], s.data.length),
+  for (const c of miniChunks) {
+    writeEntry(slot, c.name, 2, c.start, c.size);
+    placed.push({ name: c.name, slot: slot++ });
+  }
+  large.forEach((s, i) => {
+    writeEntry(slot, s.name, 2, largeStarts[i], s.data.length);
+    placed.push({ name: s.name, slot: slot++ });
+  });
+  // Directory TREE links (MS-CFB §2.6.4: siblings ordered by name length,
+  // then uppercased name). A reader walks from the root's child pointer;
+  // without these the container looks empty to everything but a linear scan.
+  placed.sort((a, b) =>
+    a.name.length !== b.name.length
+      ? a.name.length - b.name.length
+      : a.name.toUpperCase() < b.name.toUpperCase()
+        ? -1
+        : 1,
   );
+  if (placed.length) {
+    view.setUint32(dirBase + 0 * 128 + 76, placed[0].slot, true); // root child
+    for (let i = 0; i + 1 < placed.length; i++)
+      view.setUint32(dirBase + placed[i].slot * 128 + 72, placed[i + 1].slot, true);
+  }
   return out;
 }
 
@@ -220,12 +240,44 @@ export async function buildEncryptedDocx(
   new DataView(encryptedPackage.buffer).setUint32(0, plain.length, true);
   encryptedPackage.set(body, 8);
 
+  // Real files carry dataIntegrity; readers expect it (see buildDataIntegrity).
+  const hmacKey = rand(64);
+  const ivFor = async (bk: number[]) => {
+    const b = new Uint8Array(keySalt.length + bk.length);
+    b.set(keySalt);
+    b.set(bk, keySalt.length);
+    return new Uint8Array(await crypto.subtle.digest('SHA-512', b)).subarray(0, 16);
+  };
+  const encHmacKey = await aesCbcEncryptNoPad(
+    secretKey,
+    await ivFor([0x5f, 0xb2, 0xad, 0x01, 0x0c, 0xb9, 0xe1, 0xf6]),
+    hmacKey,
+  );
+  const macKey = await crypto.subtle.importKey(
+    'raw',
+    hmacKey,
+    { name: 'HMAC', hash: 'SHA-512' },
+    false,
+    ['sign'],
+  );
+  const mac = new Uint8Array(
+    await crypto.subtle.sign('HMAC', macKey, encryptedPackage),
+  );
+  const encHmacValue = await aesCbcEncryptNoPad(
+    secretKey,
+    await ivFor([0xa0, 0x67, 0x7f, 0x02, 0xb2, 0x2c, 0x84, 0x33]),
+    mac,
+  );
+
   const xml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">` +
+    `<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption" ` +
+    `xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">` +
     `<keyData saltSize="16" blockSize="16" keyBits="256" hashSize="64" ` +
     `cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA512" ` +
     `saltValue="${bytesToB64(keySalt)}"/>` +
+    `<dataIntegrity encryptedHmacKey="${bytesToB64(encHmacKey)}" ` +
+    `encryptedHmacValue="${bytesToB64(encHmacValue)}"/>` +
     `<keyEncryptors><keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">` +
     `<p:encryptedKey spinCount="${spinCount}" saltSize="16" blockSize="16" keyBits="256" ` +
     `hashSize="64" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA512" ` +
