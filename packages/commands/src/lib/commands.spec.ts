@@ -806,7 +806,10 @@ describe('page-setup transactions mark the doc changed', () => {
     ['orientation-landscape', () => setOrientation('landscape')],
     ['paper-letter', () => setPaperSize('letter')],
     ['margins-narrow', () => setMargins('narrow')],
-    ['page-margins-custom', () => setPageMargins({ top: 10, right: 10, bottom: 10, left: 10 })],
+    [
+      'page-margins-custom',
+      () => setPageMargins({ top: 10, right: 10, bottom: 10, left: 10 }),
+    ],
     ['page-size-custom', () => setPageDimensions(900, 1200)],
     ['insert-landscape-section', () => insertLandscapeSection()],
   ])('%s dispatches a docChanged transaction', (_name, make) => {

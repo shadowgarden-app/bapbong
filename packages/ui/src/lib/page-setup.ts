@@ -332,10 +332,7 @@ export function marginPresetPicker(options: MarginPickerOptions): HTMLElement {
   root.appendChild(sep);
   root.appendChild(
     customRow(
-      marginPreview(
-        { top: 96, right: 96, bottom: 96, left: 96 },
-        options.page,
-      ),
+      marginPreview({ top: 96, right: 96, bottom: 96, left: 96 }, options.page),
       'Custom margins',
       'Define custom margins',
       options.onCustom,

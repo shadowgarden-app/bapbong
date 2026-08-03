@@ -1,5 +1,9 @@
 import type { Collection, Command } from '@shadow-garden/bapbong-contracts';
-import { type EditorHandle, type EditorStateOf, injectStyle } from './internal.js';
+import {
+  type EditorHandle,
+  type EditorStateOf,
+  injectStyle,
+} from './internal.js';
 
 /** Run a registry command (and read its active/enabled state). */
 export interface CommandEntry {
@@ -24,7 +28,12 @@ export interface WidgetEntry {
   label: string;
   widget: (close: () => void) => HTMLElement;
 }
-export type MenuEntry = 'separator' | CommandEntry | ActionEntry | SubmenuEntry | WidgetEntry;
+export type MenuEntry =
+  | 'separator'
+  | CommandEntry
+  | ActionEntry
+  | SubmenuEntry
+  | WidgetEntry;
 
 /** A top-level menu (its title + dropdown entries). */
 export interface Menu {
@@ -100,7 +109,9 @@ const STYLE = `
  *  only the commands the registry actually has. */
 export function defaultMenus(commands: Collection<Command>): Menu[] {
   const names = [...commands].map((c) => c.name);
-  const marks = ['bold', 'italic', 'underline', 'strike'].filter((n) => commands.has(n));
+  const marks = ['bold', 'italic', 'underline', 'strike'].filter((n) =>
+    commands.has(n),
+  );
   const aligns = names.filter((n) => n.startsWith('align-'));
   const entries: MenuEntry[] = [
     ...marks.map((command) => ({ command })),
@@ -134,8 +145,14 @@ export function mountMenubar(
 
   const panels: Array<{ title: HTMLButtonElement; dropdown: HTMLElement }> = [];
   // Rows whose check / disabled state tracks editor state (any nesting depth).
-  const checks: Array<{ el: HTMLElement; active: (s: EditorStateOf) => boolean }> = [];
-  const enables: Array<{ el: HTMLButtonElement; enabled: (s: EditorStateOf) => boolean }> = [];
+  const checks: Array<{
+    el: HTMLElement;
+    active: (s: EditorStateOf) => boolean;
+  }> = [];
+  const enables: Array<{
+    el: HTMLButtonElement;
+    enabled: (s: EditorStateOf) => boolean;
+  }> = [];
   let openIdx = -1;
   let latest: EditorStateOf | null = null;
 
@@ -155,10 +172,14 @@ export function mountMenubar(
     p.title.setAttribute('aria-expanded', 'true');
     openIdx = idx;
     if (latest) refresh(latest);
-    if (focusFirst) p.dropdown.querySelector<HTMLButtonElement>('.bb-menu-item')?.focus();
+    if (focusFirst)
+      p.dropdown.querySelector<HTMLButtonElement>('.bb-menu-item')?.focus();
   };
 
-  const makeRow = (label: string, opts: { shortcut?: string; hasSub?: boolean }) => {
+  const makeRow = (
+    label: string,
+    opts: { shortcut?: string; hasSub?: boolean },
+  ) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'bb-menu-item' + (opts.hasSub ? ' bb-has-sub' : '');
@@ -206,7 +227,8 @@ export function mountMenubar(
           // and check the active preset) would otherwise be a snapshot taken
           // at mount — stale after the first edit, and evaluated before a
           // document has even loaded.
-          const build = () => flyout.replaceChildren(entry.widget(() => close()));
+          const build = () =>
+            flyout.replaceChildren(entry.widget(() => close()));
           wrap.addEventListener('mouseenter', build);
           wrap.addEventListener('focusin', build);
         } else {
@@ -217,26 +239,40 @@ export function mountMenubar(
       } else if ('command' in entry) {
         const cmd = editor.commands.get(entry.command);
         if (!cmd) continue; // skip commands the schema/registry doesn't provide
-        const { item, check } = makeRow(entry.label ?? labels[entry.command] ?? entry.command, {});
+        const { item, check } = makeRow(
+          entry.label ?? labels[entry.command] ?? entry.command,
+          {},
+        );
         item.setAttribute('role', 'menuitemcheckbox');
         item.addEventListener('click', () => {
-          if (latest) editor.commands.get(entry.command)?.run(latest, (tr) => editor.dispatch(tr));
+          if (latest)
+            editor.commands
+              .get(entry.command)
+              ?.run(latest, (tr) => editor.dispatch(tr));
           close();
           editor.focus();
         });
         checks.push({ el: check, active: (s) => cmd.isActive?.(s) ?? false });
-        if (cmd.isEnabled) enables.push({ el: item, enabled: (s) => cmd.isEnabled!(s) });
+        if (cmd.isEnabled)
+          enables.push({ el: item, enabled: (s) => cmd.isEnabled!(s) });
         container.appendChild(item);
       } else {
         // ActionEntry
-        const { item, check } = makeRow(entry.label, { shortcut: entry.shortcut });
-        item.setAttribute('role', entry.isActive ? 'menuitemcheckbox' : 'menuitem');
+        const { item, check } = makeRow(entry.label, {
+          shortcut: entry.shortcut,
+        });
+        item.setAttribute(
+          'role',
+          entry.isActive ? 'menuitemcheckbox' : 'menuitem',
+        );
         item.addEventListener('click', () => {
           entry.run();
           close();
         });
-        if (entry.isActive) checks.push({ el: check, active: () => entry.isActive!() });
-        if (entry.isEnabled) enables.push({ el: item, enabled: () => entry.isEnabled!() });
+        if (entry.isActive)
+          checks.push({ el: check, active: () => entry.isActive!() });
+        if (entry.isEnabled)
+          enables.push({ el: item, enabled: () => entry.isEnabled!() });
         container.appendChild(item);
       }
     }
@@ -260,13 +296,20 @@ export function mountMenubar(
     dropdown.hidden = true;
 
     title.addEventListener('mousedown', (e) => e.preventDefault());
-    title.addEventListener('click', () => (openIdx === idx ? close() : open(idx)));
+    title.addEventListener('click', () =>
+      openIdx === idx ? close() : open(idx),
+    );
     title.addEventListener('mouseenter', () => {
       if (openIdx >= 0 && openIdx !== idx) open(idx);
     });
     title.addEventListener('keydown', (e) => {
       // Vertical titles open to the right, so ArrowRight also opens there.
-      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ' || (vertical && e.key === 'ArrowRight')) {
+      if (
+        e.key === 'ArrowDown' ||
+        e.key === 'Enter' ||
+        e.key === ' ' ||
+        (vertical && e.key === 'ArrowRight')
+      ) {
         e.preventDefault();
         open(idx, true);
       }

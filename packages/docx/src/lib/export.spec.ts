@@ -966,7 +966,9 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
       margin: { top: 48, right: 72, bottom: 48, left: 72 },
     };
     const doc = schema.node('doc', { page }, [para('after page setup')]);
-    const rebuilt = schema.nodeFromJSON(JSON.parse(JSON.stringify(doc.toJSON())));
+    const rebuilt = schema.nodeFromJSON(
+      JSON.parse(JSON.stringify(doc.toJSON())),
+    );
     expect(rebuilt.attrs['page']).toEqual(page);
 
     const back = await importDocx(await exportDocx(rebuilt));
