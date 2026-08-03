@@ -16,7 +16,7 @@
  * and Node ≥ 16 — no dependency, no key material outside this module.
  */
 
-import { CfbReader } from './cfb.js';
+import { CfbReader, writeCfb } from './cfb.js';
 
 /** Block keys from MS-OFFCRYPTO §2.3.4.12 — fixed constants that separate the
  *  KDF outputs used for different purposes. */
@@ -389,4 +389,137 @@ export async function decryptPackage(
     w += n;
   }
   return out;
+}
+
+// ── Re-encryption (saving a document that was opened with a password) ──
+
+/**
+ * What re-encrypting needs, captured while unlocking so saving never pays the
+ * key derivation again. `keyEncKey` is the password-derived key that wraps the
+ * package key; `encryptionInfo` is the original stream, whose parameters and
+ * verifier are reused so the SAME password still opens the result.
+ *
+ * It is key material: hold it only as long as the document is open, and never
+ * write it anywhere.
+ */
+export interface ReencryptMaterial {
+  encryptionInfo: Uint8Array;
+  keyEncKey: Uint8Array;
+}
+
+/** Unlock, and keep what saving will need. */
+export async function unlockOfficeFile(
+  bytes: Uint8Array,
+  password: string,
+): Promise<{ plain: Uint8Array; material: ReencryptMaterial }> {
+  const cfb = new CfbReader(bytes);
+  const infoStream = cfb.readStream('EncryptionInfo');
+  const packageStream = cfb.readStream('EncryptedPackage');
+  if (!infoStream || !packageStream) {
+    throw new DocxCryptoError(
+      'not an encrypted Office document (no EncryptionInfo/EncryptedPackage)',
+    );
+  }
+  const info = parseEncryptionInfo(infoStream);
+  const secretKey = await verifyPassword(password, info);
+  const plain = await decryptPackage(packageStream, secretKey, info.keyData);
+  const keyEncKey = await deriveKey(password, info.password, BLOCK_KEY_SECRET);
+  return { plain, material: { encryptionInfo: infoStream, keyEncKey } };
+}
+
+/** Encrypt `plain` into a package stream (8-byte size prefix + segments). */
+async function encryptPackage(
+  plain: Uint8Array,
+  secretKey: Uint8Array,
+  keyData: KeyDataSpec,
+): Promise<Uint8Array> {
+  // Segments are whole cipher blocks; the size prefix is what tells a reader
+  // where the real content ends.
+  const padded = new Uint8Array(Math.ceil(plain.length / 16) * 16);
+  padded.set(plain);
+  const body = new Uint8Array(padded.length);
+  for (let i = 0, w = 0; w < padded.length; i++) {
+    const chunk = padded.subarray(i * SEGMENT_SIZE, (i + 1) * SEGMENT_SIZE);
+    if (chunk.length === 0) break;
+    const iv = fit(
+      await digest(keyData.hashAlgorithm, concat(keyData.saltValue, le32(i))),
+      keyData.blockSize,
+    );
+    body.set(await aesCbcEncryptNoPad(secretKey, iv, chunk), w);
+    w += chunk.length;
+  }
+  const out = new Uint8Array(8 + body.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, plain.length % 2 ** 32, true);
+  view.setUint32(4, Math.floor(plain.length / 2 ** 32), true);
+  out.set(body, 8);
+  return out;
+}
+
+/**
+ * Re-encrypt edited content back into a container the same password opens.
+ *
+ * A FRESH package key and keyData salt are generated on every save: the salt
+ * derives the per-segment IVs, so reusing them would encrypt successive
+ * versions of the document under the same key and IVs — which reveals to
+ * anyone holding two versions exactly which 4 KB segments changed. Generating
+ * them costs only random bytes plus one AES block, because the expensive part
+ * (deriving the key that WRAPS the package key from the password) was done
+ * once at unlock and lives in `material`.
+ *
+ * The password-side fields — salt, spin count, verifier — are copied verbatim,
+ * which is what keeps the original password valid.
+ */
+export async function reencryptOfficeFile(
+  plain: Uint8Array,
+  material: ReencryptMaterial,
+): Promise<Uint8Array> {
+  const info = parseEncryptionInfo(material.encryptionInfo);
+  const xml = new TextDecoder().decode(material.encryptionInfo.subarray(8));
+
+  const keyDataSalt = crypto.getRandomValues(
+    new Uint8Array(info.keyData.saltValue.length || 16),
+  );
+  const secretKey = crypto.getRandomValues(
+    new Uint8Array(info.keyData.keyBits / 8),
+  );
+  const encryptedPackage = await encryptPackage(plain, secretKey, {
+    ...info.keyData,
+    saltValue: keyDataSalt,
+  });
+  // Wrap the new package key with the (already derived) password key.
+  const encryptedKeyValue = await aesCbcEncryptNoPad(
+    material.keyEncKey,
+    info.password.saltValue,
+    secretKey,
+  );
+
+  // Rewrite exactly two attributes, so every other parameter the original
+  // chose (spin count, hash, key size) survives untouched.
+  const setAttr = (src: string, tag: string, name: string, value: string) =>
+    src.replace(
+      new RegExp(`(<(?:\\w+:)?${tag}\\b[^>]*?\\b${name}=")[^"]*(")`),
+      `$1${value}$2`,
+    );
+  let outXml = setAttr(xml, 'keyData', 'saltValue', bytesToB64(keyDataSalt));
+  outXml = setAttr(
+    outXml,
+    'encryptedKey',
+    'encryptedKeyValue',
+    bytesToB64(encryptedKeyValue),
+  );
+  // dataIntegrity is an HMAC over the OLD package; it cannot describe the new
+  // one, and the element is optional (MS-OFFCRYPTO §2.3.4.14). Dropping it is
+  // honest — leaving a stale one would make readers report corruption.
+  outXml = outXml.replace(/<(?:\w+:)?dataIntegrity\b[^>]*\/>/, '');
+
+  const xmlBytes = new TextEncoder().encode(outXml);
+  const infoOut = new Uint8Array(8 + xmlBytes.length);
+  infoOut.set(material.encryptionInfo.subarray(0, 8)); // version + flags
+  infoOut.set(xmlBytes, 8);
+
+  return writeCfb([
+    { name: 'EncryptionInfo', data: infoOut },
+    { name: 'EncryptedPackage', data: encryptedPackage },
+  ]);
 }

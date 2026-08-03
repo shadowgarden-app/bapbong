@@ -11,7 +11,7 @@ import {
   IMPORT_ERROR_MESSAGES,
   sniffDocx,
 } from './sniff';
-import { buildEncryptedDocx } from './crypto-docx.spec';
+import { buildEncryptedDocx } from './crypto-docx.spec-helper';
 
 // The comment mark lives in the comment plugin, not the base schema. Comment
 // import tests compose a schema carrying it (minimal local spec — no docx→plugin

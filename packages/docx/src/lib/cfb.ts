@@ -225,3 +225,137 @@ export class CfbReader {
       : this.readFromFat(e.startSector, e.size);
   }
 }
+
+// ── Writing ──────────────────────────────────────────────────────────
+
+const FATSECT = 0xfffffffd;
+const SECTOR = 512;
+const MINI_SECTOR = 64;
+/** Streams smaller than this live in the mini stream (MS-CFB §2.2). */
+const MINI_CUTOFF = 4096;
+
+/**
+ * Write a compound file holding `streams` — the container an encrypted
+ * document needs (EncryptionInfo + EncryptedPackage). Deliberately minimal:
+ * one FAT sector, one mini-FAT sector and a flat directory, which covers
+ * documents up to ~64 MB. Larger inputs throw rather than emit a file that
+ * would silently truncate.
+ */
+export function writeCfb(
+  streams: { name: string; data: Uint8Array }[],
+): Uint8Array {
+  const small = streams.filter((s) => s.data.length < MINI_CUTOFF);
+  const large = streams.filter((s) => s.data.length >= MINI_CUTOFF);
+  if (streams.length > 3) throw new CfbError('too many streams for this writer');
+
+  // Mini stream: the small streams, each starting on a mini-sector boundary.
+  const miniChunks: { name: string; start: number; size: number }[] = [];
+  let miniLen = 0;
+  for (const s of small) {
+    miniChunks.push({
+      name: s.name,
+      start: miniLen / MINI_SECTOR,
+      size: s.data.length,
+    });
+    miniLen += Math.ceil(s.data.length / MINI_SECTOR) * MINI_SECTOR;
+  }
+  const miniStream = new Uint8Array(miniLen);
+  {
+    let w = 0;
+    for (const s of small) {
+      miniStream.set(s.data, w);
+      w += Math.ceil(s.data.length / MINI_SECTOR) * MINI_SECTOR;
+    }
+  }
+
+  const miniStreamSectors = Math.ceil(miniStream.length / SECTOR);
+  const largeSectors = large.map((s) => Math.ceil(s.data.length / SECTOR));
+  // Sector 0 = FAT, 1 = directory, 2 = mini-FAT, 3… = mini stream, then the
+  // large streams in order.
+  const MINI_START = 3;
+  const totalSectors =
+    3 + miniStreamSectors + largeSectors.reduce((a, b) => a + b, 0);
+  const fatCapacity = SECTOR / 4;
+  if (totalSectors > fatCapacity)
+    throw new CfbError('document too large for this writer');
+  if (miniStream.length / MINI_SECTOR > fatCapacity)
+    throw new CfbError('too many mini sectors for this writer');
+
+  const fat = new Uint32Array(fatCapacity).fill(FREESECT);
+  fat[0] = FATSECT;
+  fat[1] = ENDOFCHAIN;
+  fat[2] = ENDOFCHAIN;
+  const chainRange = (start: number, count: number) => {
+    for (let i = 0; i < count; i++)
+      fat[start + i] = i === count - 1 ? ENDOFCHAIN : start + i + 1;
+  };
+  chainRange(MINI_START, miniStreamSectors);
+  const largeStarts: number[] = [];
+  let next = MINI_START + miniStreamSectors;
+  for (const n of largeSectors) {
+    largeStarts.push(next);
+    chainRange(next, n);
+    next += n;
+  }
+
+  const miniFat = new Uint32Array(fatCapacity).fill(FREESECT);
+  for (const c of miniChunks) {
+    const n = Math.ceil(c.size / MINI_SECTOR);
+    for (let i = 0; i < n; i++)
+      miniFat[c.start + i] = i === n - 1 ? ENDOFCHAIN : c.start + i + 1;
+  }
+
+  const out = new Uint8Array((1 + totalSectors) * SECTOR);
+  const view = new DataView(out.buffer);
+  const sectorAt = (n: number) => SECTOR + n * SECTOR;
+
+  out.set(SIGNATURE, 0);
+  view.setUint16(24, 0x003e, true); // minor version
+  view.setUint16(26, 0x0003, true); // major version (512-byte sectors)
+  view.setUint16(28, 0xfffe, true); // byte-order marker
+  view.setUint16(30, 9, true); // sector shift → 512
+  view.setUint16(32, 6, true); // mini-sector shift → 64
+  view.setUint32(44, 1, true); // FAT sector count
+  view.setUint32(48, 1, true); // first directory sector
+  view.setUint32(56, MINI_CUTOFF, true);
+  view.setUint32(60, 2, true); // first mini-FAT sector
+  view.setUint32(64, 1, true); // mini-FAT sector count
+  view.setUint32(68, ENDOFCHAIN, true); // first DIFAT sector
+  view.setUint32(72, 0, true); // DIFAT sector count
+  for (let i = 0; i < 109; i++) view.setUint32(76 + i * 4, FREESECT, true);
+  view.setUint32(76, 0, true); // DIFAT[0] → the FAT sector
+
+  for (let i = 0; i < fat.length; i++)
+    view.setUint32(sectorAt(0) + i * 4, fat[i], true);
+  for (let i = 0; i < miniFat.length; i++)
+    view.setUint32(sectorAt(2) + i * 4, miniFat[i], true);
+  out.set(miniStream, sectorAt(MINI_START));
+  large.forEach((s, i) => out.set(s.data, sectorAt(largeStarts[i])));
+
+  const dirBase = sectorAt(1);
+  const entry = (
+    slot: number,
+    name: string,
+    type: number,
+    start: number,
+    size: number,
+  ) => {
+    const off = dirBase + slot * 128;
+    for (let i = 0; i < name.length; i++)
+      view.setUint16(off + i * 2, name.charCodeAt(i), true);
+    view.setUint16(off + name.length * 2, 0, true);
+    view.setUint16(off + 64, (name.length + 1) * 2, true);
+    view.setUint8(off + 66, type);
+    view.setUint8(off + 67, 1); // colour: black
+    view.setUint32(off + 68, FREESECT, true); // left sibling
+    view.setUint32(off + 72, FREESECT, true); // right sibling
+    view.setUint32(off + 76, FREESECT, true); // child
+    view.setUint32(off + 116, start, true);
+    view.setUint32(off + 120, size, true);
+  };
+  entry(0, 'Root Entry', 5, MINI_START, miniStream.length);
+  let slot = 1;
+  for (const c of miniChunks) entry(slot++, c.name, 2, c.start, c.size);
+  large.forEach((s, i) => entry(slot++, s.name, 2, largeStarts[i], s.data.length));
+  return out;
+}
