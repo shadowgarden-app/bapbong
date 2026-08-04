@@ -28,6 +28,7 @@ function pastedParagraphAttrs(el: unknown, heading: number | null) {
     heading,
     align: m ? m[1].toLowerCase() : null,
     borders: dataJson(el, 'data-borders'),
+    carry: dataJson(el, 'data-carry'),
   };
 }
 
@@ -75,6 +76,7 @@ function pastedCellAttrs(el: unknown) {
     vAlign: e.getAttribute('data-valign'),
     borders: dataJson(el, 'data-borders'),
     padding: dataJson(el, 'data-padding'),
+    carry: dataJson(el, 'data-carry'),
   };
 }
 
@@ -142,6 +144,12 @@ export const schema = new Schema({
         // w:pBdr — { top?, bottom?, left?, right? } of BorderSide, or null.
         // Importer-set; painted as a box around the paragraph's lines.
         borders: { default: null },
+        // Carry-through fidelity (docx round-trip): OOXML paragraph
+        // properties the model does NOT represent, preserved verbatim so a
+        // customer's save never drops them. { pPr?: string, markRPr?: string }
+        // — raw XML fragments (pPr extras / the paragraph-mark w:rPr), or
+        // null. Importer-set; the exporter splices them back into w:pPr.
+        carry: { default: null },
       },
       // HTML paste path: recover heading level from h1–h6 and alignment from
       // inline style. Other attrs (list/indent/tabs/spacing) stay importer-only
@@ -161,6 +169,10 @@ export const schema = new Schema({
         if (attrs.styleId) dom['data-style'] = attrs.styleId;
         if (node.attrs['borders'])
           dom['data-borders'] = JSON.stringify(node.attrs['borders']);
+        // Round-trip fidelity survives in-app copy/paste (PM's clipboard is
+        // DOM-serialized); external HTML paste simply has no such attribute.
+        if (node.attrs['carry'])
+          dom['data-carry'] = JSON.stringify(node.attrs['carry']);
         return [tag, dom, 0];
       },
     },
@@ -248,6 +260,11 @@ export const schema = new Schema({
         borders: { default: null },
         // w:tblPr/w:jc — 'center' | 'right' table alignment, or null (left).
         align: { default: null },
+        // Carry-through fidelity: unmodelled w:tblPr children (tblStyle,
+        // tblLayout, tblLook, tblInd, floating tblpPr, …) as one raw XML
+        // string ({ tblPr: string }), or null. Importer-set; the exporter
+        // splices it back so a save never drops them.
+        carry: { default: null },
       },
       // Complex attrs round-trip as data-* JSON — ProseMirror's clipboard is
       // a toDOM → parseDOM pass, so without this an internal copy/paste
@@ -259,6 +276,7 @@ export const schema = new Schema({
             borders: dataJson(el, 'data-borders'),
             cellPadding: dataJson(el, 'data-cell-padding'),
             align: (el as DomEl).getAttribute('data-align'),
+            carry: dataJson(el, 'data-carry'),
           }),
         },
       ],
@@ -269,6 +287,7 @@ export const schema = new Schema({
         if (a['cellPadding'])
           dom['data-cell-padding'] = JSON.stringify(a['cellPadding']);
         if (a['align']) dom['data-align'] = String(a['align']);
+        if (a['carry']) dom['data-carry'] = JSON.stringify(a['carry']);
         return ['table', dom, ['tbody', 0]];
       },
     },
@@ -281,6 +300,9 @@ export const schema = new Schema({
         cantSplit: { default: false },
         // w:trHeight — { value: px, exact: boolean } or null (auto).
         height: { default: null },
+        // Carry-through fidelity: unmodelled w:trPr children ({ trPr: string
+        // } — gridBefore/wBefore, cnfStyle, …), or null. Importer-set.
+        carry: { default: null },
       },
       parseDOM: [
         {
@@ -289,6 +311,7 @@ export const schema = new Schema({
             header: (el as DomEl).getAttribute('data-header') === 'true',
             cantSplit: (el as DomEl).getAttribute('data-cant-split') === 'true',
             height: dataJson(el, 'data-height'),
+            carry: dataJson(el, 'data-carry'),
           }),
         },
       ],
@@ -298,6 +321,8 @@ export const schema = new Schema({
         if (node.attrs['cantSplit']) dom['data-cant-split'] = 'true';
         if (node.attrs['height'])
           dom['data-height'] = JSON.stringify(node.attrs['height']);
+        if (node.attrs['carry'])
+          dom['data-carry'] = JSON.stringify(node.attrs['carry']);
         return ['tr', dom, 0];
       },
     },
@@ -312,6 +337,9 @@ export const schema = new Schema({
         vAlign: { default: null }, // w:vAlign — 'center' | 'bottom' (top default)
         borders: { default: null }, // w:tcBorders per-side visibility override
         padding: { default: null }, // w:tcMar per-side margin override (px)
+        // Carry-through fidelity: unmodelled w:tcPr children ({ tcPr: string
+        // } — textDirection, noWrap, tcFitText, …), or null. Importer-set.
+        carry: { default: null },
       },
       parseDOM: [
         { tag: 'td', getAttrs: pastedCellAttrs },
@@ -333,6 +361,8 @@ export const schema = new Schema({
           attrs['data-borders'] = JSON.stringify(node.attrs['borders']);
         if (node.attrs['padding'])
           attrs['data-padding'] = JSON.stringify(node.attrs['padding']);
+        if (node.attrs['carry'])
+          attrs['data-carry'] = JSON.stringify(node.attrs['carry']);
         return ['td', attrs, 0];
       },
     },
@@ -481,6 +511,31 @@ export const schema = new Schema({
           0,
         ];
       },
+    },
+    // Carry-through fidelity (docx round-trip): run properties the model does
+    // NOT represent (w:rtl, w:kern, w:szCs, …), preserved verbatim as one raw
+    // XML fragment so saving a customer's file never drops them. Invisible —
+    // no rendering; the docx exporter splices `xml` back into the run's rPr.
+    // Typing inside/at the edge of a carried run extends the mark (inclusive
+    // default), which is the faithful behavior for properties like w:rtl.
+    carryRPr: {
+      attrs: { xml: {} },
+      toDOM(mark) {
+        // Ride the clipboard (in-app copy/paste keeps fidelity); renders as
+        // an unstyled span otherwise.
+        return ['span', { 'data-carry-rpr': String(mark.attrs['xml']) }, 0];
+      },
+      parseDOM: [
+        {
+          tag: 'span[data-carry-rpr]',
+          getAttrs: (el) => ({
+            xml:
+              (el as { getAttribute(n: string): string | null }).getAttribute(
+                'data-carry-rpr',
+              ) ?? '',
+          }),
+        },
+      ],
     },
     // The `comment` mark (w:commentRangeStart/End) is contributed by the comment
     // plugin (@shadow-garden/bapbong-comments) via the editor's schema

@@ -1,3 +1,4 @@
+import { audit } from './audit.js';
 import { attrOf, child, findDescendant, OoxmlNode } from './ooxml.js';
 
 /** Resolve an OOXML `w:themeColor` (+ optional tint/shade hex) to "#RRGGBB". */
@@ -60,6 +61,7 @@ export function buildThemeResolver(themeRoot: OoxmlNode | undefined): ThemeResol
   const map = new Map<string, string>();
   const scheme = findDescendant(themeRoot, 'a:clrScheme');
   for (const el of scheme?.children ?? []) {
+    audit.mark(el);
     const key = el.name.startsWith('a:') ? el.name.slice(2) : el.name;
     const color = schemeColor(el);
     if (!color) continue;

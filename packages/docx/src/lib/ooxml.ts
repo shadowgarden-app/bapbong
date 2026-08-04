@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
+import { audit } from './audit.js';
 
 /**
  * A normalized OOXML element. We parse with `preserveOrder: true` (so the
@@ -62,28 +63,73 @@ export function parseXml(xml: string): OoxmlNode {
   return { name: '#root', attrs: {}, children, text: '' };
 }
 
+// The four accessors below are the importer's only doorway into the parsed
+// tree, so they double as the XML-audit's coverage probes (see audit.ts) —
+// one boolean check each when the audit flag is off.
+
+const escText = (s: string): string =>
+  s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] as string);
+const escAttrVal = (s: string): string =>
+  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
+
+/** Serialize a parsed node back to XML (carry-through fidelity). `keep`
+ *  filters elements AND attribute names — carried fragments are re-embedded
+ *  into a generated document whose root declares only OUR namespaces, so
+ *  callers restrict to prefixes that stay well-formed there. Mixed content
+ *  order is not preserved (children first, then text) — the OOXML property
+ *  bags this serves have no mixed content. */
+export function serializeOoxml(
+  node: OoxmlNode,
+  keep: { element(name: string): boolean; attr(name: string): boolean },
+): string {
+  if (!keep.element(node.name)) return '';
+  const attrs = Object.entries(node.attrs)
+    .filter(([k]) => keep.attr(k))
+    .map(([k, v]) => ` ${k}="${escAttrVal(v)}"`)
+    .join('');
+  const inner =
+    node.children.map((c) => serializeOoxml(c, keep)).join('') +
+    (node.text ? escText(node.text) : '');
+  return inner
+    ? `<${node.name}${attrs}>${inner}</${node.name}>`
+    : `<${node.name}${attrs}/>`;
+}
+
 /** First child element with the given tag name. */
 export function child(node: OoxmlNode | undefined, name: string): OoxmlNode | undefined {
-  return node?.children.find((c) => c.name === name);
+  const found = node?.children.find((c) => c.name === name);
+  audit.mark(found);
+  return found;
 }
 
 /** All child elements with the given tag name (in document order). */
 export function children(node: OoxmlNode | undefined, name: string): OoxmlNode[] {
-  return node ? node.children.filter((c) => c.name === name) : [];
+  const out = node ? node.children.filter((c) => c.name === name) : [];
+  audit.markAll(out);
+  return out;
 }
 
 /** An attribute value (name without the `@_`/`w:` mangling, e.g. "w:val"). */
 export function attrOf(node: OoxmlNode | undefined, name: string): string | undefined {
+  audit.markAttr(node, name);
   return node?.attrs[name];
 }
 
-/** Depth-first search for the first descendant with the given tag name. */
+/** Depth-first search for the first descendant with the given tag name.
+ *  Audit: the found node AND the container chain leading to it are marked —
+ *  the containers were structurally traversed to reach a consumed node. */
 export function findDescendant(node: OoxmlNode | undefined, name: string): OoxmlNode | undefined {
   if (!node) return undefined;
   for (const c of node.children) {
-    if (c.name === name) return c;
+    if (c.name === name) {
+      audit.mark(c);
+      return c;
+    }
     const found = findDescendant(c, name);
-    if (found) return found;
+    if (found) {
+      audit.mark(c);
+      return found;
+    }
   }
   return undefined;
 }

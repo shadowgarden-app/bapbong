@@ -314,6 +314,9 @@ export interface BorderSide {
   style: BorderStyle;
   /** Hex colour, e.g. "#000000". */
   color: string;
+  /** OOXML w:space — gap between the border and the content, in px. Optional
+   *  (0/absent for the common case); round-tripped, not yet painted. */
+  space?: number;
 }
 
 /**

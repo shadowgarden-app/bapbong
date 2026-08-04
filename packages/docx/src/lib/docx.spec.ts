@@ -508,6 +508,28 @@ describe('importDocx', () => {
     expect(doc.child(2).attrs.pageBreakBefore).toBe(true); // w:pageBreakBefore
   });
 
+  it('honors w:pageBreakBefore toggle values (val="false"/"0" = no break)', async () => {
+    // An inline w:val="false" cancels the break — including one inherited
+    // from a style layer (the override is the LAST cascade layer with the
+    // element, and its value must be read, not just its presence).
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Breaky"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pageBreakBefore w:val="0"/></w:pPr><w:r><w:t>b</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pageBreakBefore w:val="true"/></w:pPr><w:r><w:t>c</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Breaky"/><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>d</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Breaky"/></w:pPr><w:r><w:t>e</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.pageBreakBefore).toBeFalsy(); // val=false
+    expect(doc.child(1).attrs.pageBreakBefore).toBeFalsy(); // val=0
+    expect(doc.child(2).attrs.pageBreakBefore).toBe(true); // val=true
+    expect(doc.child(3).attrs.pageBreakBefore).toBeFalsy(); // inline false beats style
+    expect(doc.child(4).attrs.pageBreakBefore).toBe(true); // style alone
+  });
+
   it('imports page size and margins from w:sectPr', async () => {
     // US Letter (12240×15840 twips) landscape, 0.5in (720tw) margins.
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
