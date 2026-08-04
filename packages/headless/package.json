@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-headless",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "bapbong — headless backend façade: one install re-exporting contracts + model + docx + commands (isomorphic, no DOM). Import .docx → edit via commands on an EditorState → export .docx, server-side.",
   "license": "MIT",
   "repository": {
