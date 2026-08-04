@@ -138,7 +138,8 @@ const KNOWN_MARKS = new Set([
 /** A run's w:rPr from its marks (character marks only; link is a wrapper). */
 function runProps(marks: readonly Mark[]): string {
   for (const m of marks)
-    if (!KNOWN_MARKS.has(m.type.name)) audit.exportUnhandled('mark', m.type.name);
+    if (!KNOWN_MARKS.has(m.type.name))
+      audit.exportUnhandled('mark', m.type.name);
   const byName = new Map(marks.map((m) => [m.type.name, m]));
   const out: string[] = [];
   const fam = byName.get('fontFamily')?.attrs['family'] as string | undefined;
@@ -736,8 +737,7 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
  *  paragraph after a table. */
 function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
   if (node.type.name === 'paragraph') return paragraphXml(node, ctx, sectPr);
-  if (node.type.name !== 'table')
-    audit.exportUnhandled('node', node.type.name);
+  if (node.type.name !== 'table') audit.exportUnhandled('node', node.type.name);
   let out = node.type.name === 'table' ? tableXml(node, ctx) : '';
   if (sectPr) out += `<w:p><w:pPr>${sectPr}</w:pPr></w:p>`;
   return out;

@@ -58,9 +58,15 @@ export function buildStyleRegistry(
 ): StyleRegistry {
   const stylesEl = child(stylesRoot, 'w:styles');
 
-  const rPrDefault = child(child(child(stylesEl, 'w:docDefaults'), 'w:rPrDefault'), 'w:rPr');
+  const rPrDefault = child(
+    child(child(stylesEl, 'w:docDefaults'), 'w:rPrDefault'),
+    'w:rPr',
+  );
   const docDefaults = parseRunProps(rPrDefault, resolveTheme);
-  const docDefaultsPPr = child(child(child(stylesEl, 'w:docDefaults'), 'w:pPrDefault'), 'w:pPr');
+  const docDefaultsPPr = child(
+    child(child(stylesEl, 'w:docDefaults'), 'w:pPrDefault'),
+    'w:pPr',
+  );
 
   const defs = new Map<string, StyleDef>();
   for (const style of children(stylesEl, 'w:style')) {
@@ -73,7 +79,9 @@ export function buildStyleRegistry(
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
       el: style,
-      isDefault: attrOf(style, 'w:default') === '1' || attrOf(style, 'w:default') === 'true',
+      isDefault:
+        attrOf(style, 'w:default') === '1' ||
+        attrOf(style, 'w:default') === 'true',
     });
   }
 
@@ -91,7 +99,10 @@ export function buildStyleRegistry(
     return mergeRunProps(base, def.rPr);
   }
 
-  function resolvePPr(styleId: string | undefined, seen: Set<string>): OoxmlNode[] {
+  function resolvePPr(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): OoxmlNode[] {
     if (!styleId || seen.has(styleId)) return [];
     const def = defs.get(styleId);
     if (!def) return [];
@@ -101,7 +112,10 @@ export function buildStyleRegistry(
     return def.pPr ? [...base, def.pPr] : base;
   }
 
-  function resolveTblBorders(styleId: string | undefined, seen: Set<string>): OoxmlNode | undefined {
+  function resolveTblBorders(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): OoxmlNode | undefined {
     if (!styleId || seen.has(styleId)) return undefined;
     const def = defs.get(styleId);
     if (!def) return undefined;
@@ -110,7 +124,10 @@ export function buildStyleRegistry(
     return def.tblBorders ?? resolveTblBorders(def.basedOn, seen);
   }
 
-  function resolveTblCellMar(styleId: string | undefined, seen: Set<string>): OoxmlNode | undefined {
+  function resolveTblCellMar(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): OoxmlNode | undefined {
     if (!styleId || seen.has(styleId)) return undefined;
     const def = defs.get(styleId);
     if (!def) return undefined;
@@ -124,8 +141,10 @@ export function buildStyleRegistry(
     docDefaultsPPr,
     resolveStyle: (styleId) => resolve(styleId, new Set<string>()),
     resolveStylePPr: (styleId) => resolvePPr(styleId, new Set<string>()),
-    resolveTableBorders: (styleId) => resolveTblBorders(styleId, new Set<string>()),
-    resolveTableCellMar: (styleId) => resolveTblCellMar(styleId, new Set<string>()),
+    resolveTableBorders: (styleId) =>
+      resolveTblBorders(styleId, new Set<string>()),
+    resolveTableCellMar: (styleId) =>
+      resolveTblCellMar(styleId, new Set<string>()),
     auditMarkUnusedStyles: () => {
       if (!audit.enabled) return;
       for (const [id, def] of defs) {

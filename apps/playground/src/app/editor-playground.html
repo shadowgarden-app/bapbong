@@ -1,17 +1,40 @@
 <main class="wrap">
   <h1>bapbong playground</h1>
-  <p class="sub">Import a <code>.docx</code> and inspect what <code>&#64;shadow-garden/bapbong-docx</code> parses.</p>
+  <p class="sub">
+    Import a <code>.docx</code> and inspect what
+    <code>&#64;shadow-garden/bapbong-docx</code> parses.
+  </p>
 
   <div class="actions">
     <label class="file">
       <input type="file" accept=".docx" (change)="onFile($event)" />
       <span>Choose a .docx file…</span>
     </label>
-    <button type="button" class="sample" (click)="loadSample()">Load sample</button>
-    <button type="button" class="sample" (click)="loadSample('large_sample.docx')">Load large sample</button>
-    <button type="button" class="sample" (click)="loadSample('khtn6.docx')">Load khtn6</button>
-    <button type="button" class="sample" (click)="loadSample('tab-stops.docx')" title="LibreOffice-generated: right+leader, center, decimal and default tabs">Load tab stops</button>
-    <label class="dev-toggle" title="Log every OOXML tag/attribute the converter never read">
+    <button type="button" class="sample" (click)="loadSample()">
+      Load sample
+    </button>
+    <button
+      type="button"
+      class="sample"
+      (click)="loadSample('large_sample.docx')"
+    >
+      Load large sample
+    </button>
+    <button type="button" class="sample" (click)="loadSample('khtn6.docx')">
+      Load khtn6
+    </button>
+    <button
+      type="button"
+      class="sample"
+      (click)="loadSample('tab-stops.docx')"
+      title="LibreOffice-generated: right+leader, center, decimal and default tabs"
+    >
+      Load tab stops
+    </button>
+    <label
+      class="dev-toggle"
+      title="Log every OOXML tag/attribute the converter never read"
+    >
       <input
         type="checkbox"
         [checked]="xmlAudit()"
@@ -22,53 +45,56 @@
   </div>
 
   @if (xmlAudit() && (auditUnknown().length || auditIgnored().length)) {
-    <div class="audit">
-      <div class="audit-head">
-        <strong>{{ auditUnknown().length }}</strong> UNKNOWN
-        · {{ auditIgnored().length }} ignored-by-design
-        @if (auditIgnored().length) {
-          <button type="button" class="audit-more" (click)="showAuditIgnored.set(!showAuditIgnored())">
-            {{ showAuditIgnored() ? 'hide ignored' : 'show ignored' }}
-          </button>
-        }
-      </div>
-      @for (e of auditUnknown(); track e.part + e.key) {
-        <div class="audit-row">
-          <span class="a-kind unknown">UNKNOWN</span>
-          <span class="a-part">{{ e.part }}</span>
-          <span class="a-key">{{ e.key }}</span>
-          <span class="a-count">×{{ e.count }}</span>
-        </div>
-      }
-      @if (showAuditIgnored()) {
-        @for (e of auditIgnored(); track e.part + e.key) {
-          <div class="audit-row is-ignored">
-            <span class="a-kind">ignored</span>
-            <span class="a-part">{{ e.part }}</span>
-            <span class="a-key">{{ e.key }}</span>
-            <span class="a-count">×{{ e.count }}</span>
-          </div>
-        }
+  <div class="audit">
+    <div class="audit-head">
+      <strong>{{ auditUnknown().length }}</strong> UNKNOWN · {{
+      auditIgnored().length }} ignored-by-design @if (auditIgnored().length) {
+      <button
+        type="button"
+        class="audit-more"
+        (click)="showAuditIgnored.set(!showAuditIgnored())"
+      >
+        {{ showAuditIgnored() ? 'hide ignored' : 'show ignored' }}
+      </button>
       }
     </div>
-  }
-
-  @if (loading()) {
-    <p class="hint">Parsing…</p>
-  }
-  @if (error(); as e) {
-    <p class="err">⚠ {{ e }}</p>
-  }
-  @if (fileName(); as name) {
-    <p class="meta">
-      <strong>{{ name }}</strong>
-      · headers: {{ headerKeys().length ? headerKeys().join(', ') : 'none' }}
-      · footers: {{ footerKeys().length ? footerKeys().join(', ') : 'none' }}
-    </p>
+    @for (e of auditUnknown(); track e.part + e.key) {
+    <div class="audit-row">
+      <span class="a-kind unknown">UNKNOWN</span>
+      <span class="a-part">{{ e.part }}</span>
+      <span class="a-key">{{ e.key }}</span>
+      <span class="a-count">×{{ e.count }}</span>
+    </div>
+    } @if (showAuditIgnored()) { @for (e of auditIgnored(); track e.part +
+    e.key) {
+    <div class="audit-row is-ignored">
+      <span class="a-kind">ignored</span>
+      <span class="a-part">{{ e.part }}</span>
+      <span class="a-key">{{ e.key }}</span>
+      <span class="a-count">×{{ e.count }}</span>
+    </div>
+    } }
+  </div>
+  } @if (loading()) {
+  <p class="hint">Parsing…</p>
+  } @if (error(); as e) {
+  <p class="err">⚠ {{ e }}</p>
+  } @if (fileName(); as name) {
+  <p class="meta">
+    <strong>{{ name }}</strong>
+    · headers: {{ headerKeys().length ? headerKeys().join(', ') : 'none' }} ·
+    footers: {{ footerKeys().length ? footerKeys().join(', ') : 'none' }}
+  </p>
   }
 
   <section [hidden]="!pageCount()">
-    <h2>Canvas <span class="dim">(editable — click to place the caret, type, undo with ⌘Z · {{ pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span></h2>
+    <h2>
+      Canvas
+      <span class="dim"
+        >(editable — click to place the caret, type, undo with ⌘Z · {{
+        pageCount() }} page{{ pageCount() === 1 ? '' : 's' }})</span
+      >
+    </h2>
 
     <!-- Menubar + formatting toolbar: bapbong-ui fills these host elements; the
          shell only provides the <div>s and mounts/destroys them (see app.ts). -->
@@ -90,7 +116,7 @@
   <div #preview class="preview"></div>
 
   @if (json(); as j) {
-    <h2>Document model <span class="dim">(JSON)</span></h2>
-    <pre class="json">{{ j }}</pre>
+  <h2>Document model <span class="dim">(JSON)</span></h2>
+  <pre class="json">{{ j }}</pre>
   }
 </main>

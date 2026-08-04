@@ -38,7 +38,9 @@ function buildNode(entry: Record<string, unknown>): OoxmlNode {
   }
 
   const raw = entry[name];
-  const rawChildren = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
+  const rawChildren = Array.isArray(raw)
+    ? (raw as Record<string, unknown>[])
+    : [];
   const children: OoxmlNode[] = [];
   let text = '';
   for (const c of rawChildren) {
@@ -68,9 +70,16 @@ export function parseXml(xml: string): OoxmlNode {
 // one boolean check each when the audit flag is off.
 
 const escText = (s: string): string =>
-  s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] as string);
+  s.replace(
+    /[&<>]/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] as string,
+  );
 const escAttrVal = (s: string): string =>
-  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
+  s.replace(
+    /[&<>"]/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string,
+  );
 
 /** Serialize a parsed node back to XML (carry-through fidelity). `keep`
  *  filters elements AND attribute names — carried fragments are re-embedded
@@ -96,21 +105,30 @@ export function serializeOoxml(
 }
 
 /** First child element with the given tag name. */
-export function child(node: OoxmlNode | undefined, name: string): OoxmlNode | undefined {
+export function child(
+  node: OoxmlNode | undefined,
+  name: string,
+): OoxmlNode | undefined {
   const found = node?.children.find((c) => c.name === name);
   audit.mark(found);
   return found;
 }
 
 /** All child elements with the given tag name (in document order). */
-export function children(node: OoxmlNode | undefined, name: string): OoxmlNode[] {
+export function children(
+  node: OoxmlNode | undefined,
+  name: string,
+): OoxmlNode[] {
   const out = node ? node.children.filter((c) => c.name === name) : [];
   audit.markAll(out);
   return out;
 }
 
 /** An attribute value (name without the `@_`/`w:` mangling, e.g. "w:val"). */
-export function attrOf(node: OoxmlNode | undefined, name: string): string | undefined {
+export function attrOf(
+  node: OoxmlNode | undefined,
+  name: string,
+): string | undefined {
   audit.markAttr(node, name);
   return node?.attrs[name];
 }
@@ -118,7 +136,10 @@ export function attrOf(node: OoxmlNode | undefined, name: string): string | unde
 /** Depth-first search for the first descendant with the given tag name.
  *  Audit: the found node AND the container chain leading to it are marked —
  *  the containers were structurally traversed to reach a consumed node. */
-export function findDescendant(node: OoxmlNode | undefined, name: string): OoxmlNode | undefined {
+export function findDescendant(
+  node: OoxmlNode | undefined,
+  name: string,
+): OoxmlNode | undefined {
   if (!node) return undefined;
   for (const c of node.children) {
     if (c.name === name) {
@@ -166,11 +187,22 @@ export interface RunProps {
 
 /** Word's 16 named highlight colors → hex. */
 const HIGHLIGHT_COLORS: Record<string, string> = {
-  yellow: '#FFFF00', green: '#00FF00', cyan: '#00FFFF', magenta: '#FF00FF',
-  blue: '#0000FF', red: '#FF0000', darkBlue: '#000080', darkCyan: '#008080',
-  darkGreen: '#008000', darkMagenta: '#800080', darkRed: '#800000',
-  darkYellow: '#808000', darkGray: '#808080', lightGray: '#C0C0C0',
-  black: '#000000', white: '#FFFFFF',
+  yellow: '#FFFF00',
+  green: '#00FF00',
+  cyan: '#00FFFF',
+  magenta: '#FF00FF',
+  blue: '#0000FF',
+  red: '#FF0000',
+  darkBlue: '#000080',
+  darkCyan: '#008080',
+  darkGreen: '#008000',
+  darkMagenta: '#800080',
+  darkRed: '#800000',
+  darkYellow: '#808000',
+  darkGray: '#808080',
+  lightGray: '#C0C0C0',
+  black: '#000000',
+  white: '#FFFFFF',
 };
 
 /** Normalize an OOXML hex color ("FF0000" or "#ff0000") to "#FF0000". */
@@ -206,7 +238,9 @@ export function parseRunProps(
   const colorEl = child(rPr, 'w:color');
   const colorVal = attrOf(colorEl, 'w:val');
   if (colorVal && colorVal.toLowerCase() !== 'auto') {
-    props.color = colorVal.startsWith('#') ? colorVal.toUpperCase() : `#${colorVal.toUpperCase()}`;
+    props.color = colorVal.startsWith('#')
+      ? colorVal.toUpperCase()
+      : `#${colorVal.toUpperCase()}`;
   } else if (resolveTheme) {
     const themeColor = attrOf(colorEl, 'w:themeColor');
     if (themeColor) {

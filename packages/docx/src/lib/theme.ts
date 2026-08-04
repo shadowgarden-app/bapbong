@@ -35,7 +35,8 @@ function schemeColor(el: OoxmlNode): string | undefined {
 }
 
 const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
-const hex2 = (n: number) => clamp(n).toString(16).padStart(2, '0').toUpperCase();
+const hex2 = (n: number) =>
+  clamp(n).toString(16).padStart(2, '0').toUpperCase();
 
 /** Word's tint/shade as a simple linear RGB approximation (good enough for now). */
 function applyTintShade(hex: string, tint?: string, shade?: string): string {
@@ -57,7 +58,9 @@ function applyTintShade(hex: string, tint?: string, shade?: string): string {
   return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
 }
 
-export function buildThemeResolver(themeRoot: OoxmlNode | undefined): ThemeResolver {
+export function buildThemeResolver(
+  themeRoot: OoxmlNode | undefined,
+): ThemeResolver {
   const map = new Map<string, string>();
   const scheme = findDescendant(themeRoot, 'a:clrScheme');
   for (const el of scheme?.children ?? []) {
@@ -72,6 +75,8 @@ export function buildThemeResolver(themeRoot: OoxmlNode | undefined): ThemeResol
   return (themeColor, tint, shade) => {
     const base = map.get(themeColor);
     if (!base) return undefined;
-    return tint === undefined && shade === undefined ? base : applyTintShade(base, tint, shade);
+    return tint === undefined && shade === undefined
+      ? base
+      : applyTintShade(base, tint, shade);
   };
 }

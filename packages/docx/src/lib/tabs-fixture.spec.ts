@@ -19,12 +19,17 @@ const FIXTURE = new Uint8Array(
 /** Paragraphs that actually contain a tab character, in document order. */
 async function tabParagraphs() {
   const { doc } = await importDocx(FIXTURE.buffer as ArrayBuffer);
-  const out: { text: string; tabs: { pos: number; val: string; leader?: string }[] | null }[] = [];
+  const out: {
+    text: string;
+    tabs: { pos: number; val: string; leader?: string }[] | null;
+  }[] = [];
   doc.descendants((n) => {
     if (n.type.name === 'paragraph' && n.textContent.includes('\t')) {
       out.push({
         text: n.textContent,
-        tabs: n.attrs['tabs'] as { pos: number; val: string; leader?: string }[] | null,
+        tabs: n.attrs['tabs'] as
+          | { pos: number; val: string; leader?: string }[]
+          | null,
       });
     }
   });
@@ -49,25 +54,39 @@ describe('a third party’s tab stops', () => {
   });
 
   it('reads centred stops (signature block)', async () => {
-    const sign = (await tabParagraphs()).find((p) => p.text.startsWith('NGƯỜI LẬP'));
+    const sign = (await tabParagraphs()).find((p) =>
+      p.text.startsWith('NGƯỜI LẬP'),
+    );
     expect(sign?.text).toBe('NGƯỜI LẬP\tKẾ TOÁN\tGIÁM ĐỐC');
-    expect(sign?.tabs?.map((t) => t.val)).toEqual(['center', 'center', 'center']);
+    expect(sign?.tabs?.map((t) => t.val)).toEqual([
+      'center',
+      'center',
+      'center',
+    ]);
     // Ascending and evenly spaced across the text width. Within 2px: the
     // stops travel cm → twips → px and each rounds independently.
     const pos = sign?.tabs?.map((t) => t.pos) ?? [];
     expect(pos[0]).toBeLessThan(pos[1]);
     expect(pos[1]).toBeLessThan(pos[2]);
-    expect(Math.abs(pos[1] - pos[0] - (pos[2] - pos[1]))).toBeLessThanOrEqual(2);
+    expect(Math.abs(pos[1] - pos[0] - (pos[2] - pos[1]))).toBeLessThanOrEqual(
+      2,
+    );
   });
 
   it('reads a decimal stop (price column aligned on the comma)', async () => {
-    const price = (await tabParagraphs()).find((p) => p.text.startsWith('Phí khởi tạo'));
+    const price = (await tabParagraphs()).find((p) =>
+      p.text.startsWith('Phí khởi tạo'),
+    );
     expect(price?.tabs?.map((t) => t.val)).toEqual(['left', 'decimal']);
   });
 
   it('leaves a paragraph without declared stops on the default grid', async () => {
-    const plain = (await tabParagraphs()).find((p) => p.text.startsWith('Cột A'));
-    expect(plain?.text).toBe('Cột A\tCột B\tCột C — rơi vào lưới tab mặc định.');
+    const plain = (await tabParagraphs()).find((p) =>
+      p.text.startsWith('Cột A'),
+    );
+    expect(plain?.text).toBe(
+      'Cột A\tCột B\tCột C — rơi vào lưới tab mặc định.',
+    );
     // No w:tabs of its own: the layout engine falls back to its 0.5in grid.
     expect(plain?.tabs).toBeNull();
   });

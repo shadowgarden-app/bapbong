@@ -105,7 +105,9 @@ describe('exportDocx (round-trip)', () => {
     const { doc, raw } = await importDocx(source);
     const run = doc.child(0).child(0);
     const carryMark = run.marks.find((m) => m.type.name === 'carryRPr');
-    expect(carryMark?.attrs['xml']).toBe('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
+    expect(carryMark?.attrs['xml']).toBe(
+      '<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>',
+    );
     expect(doc.child(0).attrs['carry']).toEqual({
       pPr: '<w:keepNext/><w:contextualSpacing/>',
       markRPr: '<w:b/><w:sz w:val="16"/>',
@@ -127,9 +129,9 @@ describe('exportDocx (round-trip)', () => {
     // Second trip: everything carried again, byte-identical fragments.
     const { doc: doc2 } = await importDocx(outBytes);
     const run2 = doc2.child(0).child(0);
-    expect(run2.marks.find((m) => m.type.name === 'carryRPr')?.attrs['xml']).toBe(
-      '<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>',
-    );
+    expect(
+      run2.marks.find((m) => m.type.name === 'carryRPr')?.attrs['xml'],
+    ).toBe('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
     expect(doc2.child(0).attrs['carry']).toEqual(doc.child(0).attrs['carry']);
   });
 
@@ -188,7 +190,9 @@ describe('exportDocx (round-trip)', () => {
 
     const out = await exportDocx(doc, { carry: raw });
     const xml =
-      (await (await JSZip.loadAsync(out)).file('word/document.xml')?.async('string')) ?? '';
+      (await (await JSZip.loadAsync(out))
+        .file('word/document.xml')
+        ?.async('string')) ?? '';
     // tblPr: carried extras first (tblStyle at the head), modelled after, no dupes.
     expect(xml).toContain('<w:tblPr><w:tblStyle w:val="TableGrid"/>');
     expect(xml).toContain('<w:tblLayout w:type="fixed"/>');
@@ -196,9 +200,13 @@ describe('exportDocx (round-trip)', () => {
     expect(xml.match(/<w:jc w:val="center"\/>/g)?.length).toBe(1);
     expect(xml).not.toContain('w:tblPrChange'); // revision record dropped
     // Border w:space round-trips (4pt → px → 4pt).
-    expect(xml).toMatch(/<w:top w:val="single" w:sz="\d+" w:space="4" w:color="FF0000"\/>/);
+    expect(xml).toMatch(
+      /<w:top w:val="single" w:sz="\d+" w:space="4" w:color="FF0000"\/>/,
+    );
     // trPr/tcPr extras.
-    expect(xml).toContain('<w:gridBefore w:val="1"/><w:wBefore w:w="500" w:type="dxa"/>');
+    expect(xml).toContain(
+      '<w:gridBefore w:val="1"/><w:wBefore w:w="500" w:type="dxa"/>',
+    );
     expect(xml).toContain('<w:tblHeader/>');
     expect(xml).toContain('<w:textDirection w:val="btLr"/><w:noWrap/>');
   });

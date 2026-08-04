@@ -686,8 +686,16 @@ function parseTextbox(
 /** rPr children whose VALUE already lives in the model (re-emitted from
  *  marks on export) — carrying them too would duplicate or contradict. */
 const CONSUMED_RPR = new Set([
-  'w:b', 'w:i', 'w:u', 'w:strike', 'w:color', 'w:sz', 'w:rFonts',
-  'w:vertAlign', 'w:highlight', 'w:shd',
+  'w:b',
+  'w:i',
+  'w:u',
+  'w:strike',
+  'w:color',
+  'w:sz',
+  'w:rFonts',
+  'w:vertAlign',
+  'w:highlight',
+  'w:shd',
   // w:rStyle: resolved into the cascade. NOT carried on purpose — re-emitting
   // it beside flattened direct props would resurrect style formatting the
   // user removed (style bold + user unbolds → bold comes back). Known loss.
@@ -696,8 +704,15 @@ const CONSUMED_RPR = new Set([
 
 /** Inline pPr children the model represents (or handles elsewhere). */
 const CONSUMED_PPR = new Set([
-  'w:pStyle', 'w:numPr', 'w:jc', 'w:ind', 'w:spacing', 'w:tabs', 'w:pBdr',
-  'w:pageBreakBefore', 'w:outlineLvl',
+  'w:pStyle',
+  'w:numPr',
+  'w:jc',
+  'w:ind',
+  'w:spacing',
+  'w:tabs',
+  'w:pBdr',
+  'w:pageBreakBefore',
+  'w:outlineLvl',
   'w:sectPr', // section breaks — parsed by parseBodyBlocks
   'w:rPr', // the paragraph mark's run props — carried separately (markRPr)
 ]);
@@ -714,14 +729,25 @@ const CONSUMED_TRPR = new Set(['w:tblHeader', 'w:trHeight', 'w:cantSplit']);
 
 /** tcPr children the model represents. */
 const CONSUMED_TCPR = new Set([
-  'w:tcW', 'w:gridSpan', 'w:vMerge', 'w:shd', 'w:vAlign', 'w:tcBorders', 'w:tcMar',
+  'w:tcW',
+  'w:gridSpan',
+  'w:vMerge',
+  'w:shd',
+  'w:vAlign',
+  'w:tcBorders',
+  'w:tcMar',
 ]);
 
 /** Property records of tracked changes: after the user edits, replaying them
  *  would be a lie. Never carried (the accept-all view dropped their runs). */
 const CARRY_NEVER = new Set([
-  'w:rPrChange', 'w:pPrChange', 'w:sectPrChange',
-  'w:tblPrChange', 'w:trPrChange', 'w:tcPrChange', 'w:tblGridChange',
+  'w:rPrChange',
+  'w:pPrChange',
+  'w:sectPrChange',
+  'w:tblPrChange',
+  'w:trPrChange',
+  'w:tcPrChange',
+  'w:tblGridChange',
 ]);
 
 // Carried fragments are embedded into OUR generated document.xml, whose root
