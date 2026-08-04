@@ -50,6 +50,7 @@ import {
   createFontRegistryMetrics,
   type FontRegistry,
 } from '@shadow-garden/bapbong-measuring';
+import { audit, type AuditEntry } from '@shadow-garden/bapbong-docx';
 import { loadBundledFonts } from './fonts';
 import {
   createFindDialog,
@@ -152,6 +153,14 @@ export class EditorPlayground implements OnDestroy {
   protected readonly headerKeys = signal<string[]>([]);
   protected readonly footerKeys = signal<string[]>([]);
   protected readonly loading = signal(false);
+  /** Dev mode: run the XML coverage audit on every import and show its
+   *  report inline (the playground's whole point is inspecting conversion —
+   *  no console needed). Persisted under the audit's own localStorage key,
+   *  so it also survives into a plain `globalThis.__BAPBONG_XML_AUDIT__`. */
+  protected readonly xmlAudit = signal(audit.enabled);
+  protected readonly auditUnknown = signal<AuditEntry[]>([]);
+  protected readonly auditIgnored = signal<AuditEntry[]>([]);
+  protected readonly showAuditIgnored = signal(false);
   protected readonly pageCount = signal(0);
 
   private readonly previewHost =
@@ -239,10 +248,35 @@ export class EditorPlayground implements OnDestroy {
       const { headerKeys, footerKeys } = await editor.loadDocx(bytes);
       this.headerKeys.set(headerKeys);
       this.footerKeys.set(footerKeys);
+      this.readAuditReport();
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : String(err));
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  /** Pull the report the import just produced (null unless the flag is on). */
+  private readAuditReport(): void {
+    const report = audit.enabled ? audit.lastReport : null;
+    this.auditUnknown.set(report?.unknown ?? []);
+    this.auditIgnored.set(report?.ignored ?? []);
+  }
+
+  /** Toggle the XML coverage audit. Takes effect on the NEXT import — the
+   *  audit resolves its flag once per import, so the open document keeps the
+   *  report it was parsed with. */
+  protected toggleXmlAudit(on: boolean): void {
+    audit.setEnabled(on);
+    try {
+      localStorage.setItem('bapbong.xmlAudit', on ? '1' : '0');
+    } catch {
+      /* private mode — session only */
+    }
+    this.xmlAudit.set(on);
+    if (!on) {
+      this.auditUnknown.set([]);
+      this.auditIgnored.set([]);
     }
   }
 

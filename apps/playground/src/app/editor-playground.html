@@ -10,7 +10,47 @@
     <button type="button" class="sample" (click)="loadSample()">Load sample</button>
     <button type="button" class="sample" (click)="loadSample('large_sample.docx')">Load large sample</button>
     <button type="button" class="sample" (click)="loadSample('khtn6.docx')">Load khtn6</button>
+    <label class="dev-toggle" title="Log every OOXML tag/attribute the converter never read">
+      <input
+        type="checkbox"
+        [checked]="xmlAudit()"
+        (change)="toggleXmlAudit($any($event.target).checked)"
+      />
+      <span>XML audit</span>
+    </label>
   </div>
+
+  @if (xmlAudit() && (auditUnknown().length || auditIgnored().length)) {
+    <div class="audit">
+      <div class="audit-head">
+        <strong>{{ auditUnknown().length }}</strong> UNKNOWN
+        · {{ auditIgnored().length }} ignored-by-design
+        @if (auditIgnored().length) {
+          <button type="button" class="audit-more" (click)="showAuditIgnored.set(!showAuditIgnored())">
+            {{ showAuditIgnored() ? 'hide ignored' : 'show ignored' }}
+          </button>
+        }
+      </div>
+      @for (e of auditUnknown(); track e.part + e.key) {
+        <div class="audit-row">
+          <span class="a-kind unknown">UNKNOWN</span>
+          <span class="a-part">{{ e.part }}</span>
+          <span class="a-key">{{ e.key }}</span>
+          <span class="a-count">×{{ e.count }}</span>
+        </div>
+      }
+      @if (showAuditIgnored()) {
+        @for (e of auditIgnored(); track e.part + e.key) {
+          <div class="audit-row is-ignored">
+            <span class="a-kind">ignored</span>
+            <span class="a-part">{{ e.part }}</span>
+            <span class="a-key">{{ e.key }}</span>
+            <span class="a-count">×{{ e.count }}</span>
+          </div>
+        }
+      }
+    </div>
+  }
 
   @if (loading()) {
     <p class="hint">Parsing…</p>

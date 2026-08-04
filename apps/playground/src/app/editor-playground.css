@@ -76,3 +76,93 @@ h2 {
   position: relative;
   flex: none;
 }
+
+/* ── Dev mode: XML coverage audit (toggle + inline report) ───────────── */
+.dev-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid #d9d5cc;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.dev-toggle:hover {
+  background: #f4f1ea;
+}
+.dev-toggle input {
+  margin: 0;
+  accent-color: #e8722a;
+}
+
+.audit {
+  margin: 10px 0 0;
+  border: 1px solid #d9d5cc;
+  border-radius: 10px;
+  overflow: hidden;
+  font: 11.5px/1.7 ui-monospace, 'SF Mono', Menlo, monospace;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.audit-head {
+  position: sticky;
+  top: 0;
+  background: #f4f1ea;
+  border-bottom: 1px solid #d9d5cc;
+  padding: 6px 10px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 12.5px;
+}
+.audit-head strong {
+  color: #b4531b;
+}
+.audit-more {
+  float: right;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 1px 8px;
+  border: 1px solid #d9d5cc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.audit-row {
+  display: flex;
+  gap: 10px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.audit-row:hover {
+  background: #faf8f3;
+}
+.a-kind {
+  flex: none;
+  width: 62px;
+  font-weight: 700;
+  color: #8a8a84;
+}
+.a-kind.unknown {
+  color: #b4531b;
+}
+.a-part {
+  flex: none;
+  width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #6f6d66;
+}
+.a-key {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.a-count {
+  flex: none;
+  color: #8a8a84;
+}
+.audit-row.is-ignored {
+  color: #8a8a84;
+}
