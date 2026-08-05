@@ -415,7 +415,9 @@ export const schema = new Schema({
       ],
       toDOM: () => [
         'span',
-        { style: 'text-decoration: line-through; text-decoration-style: double' },
+        {
+          style: 'text-decoration: line-through; text-decoration-style: double',
+        },
         0,
       ],
     },

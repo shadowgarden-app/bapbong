@@ -22,9 +22,7 @@ export interface FieldInfo {
 /** An href pointing inside this document (`#name`) → the bookmark name, or
  *  null for external/absent links. */
 export function anchorName(href: string | null | undefined): string | null {
-  return href && href.startsWith('#') && href.length > 1
-    ? href.slice(1)
-    : null;
+  return href && href.startsWith('#') && href.length > 1 ? href.slice(1) : null;
 }
 
 /** Position of the paragraph anchoring `name`, or null when no paragraph

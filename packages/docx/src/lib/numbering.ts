@@ -129,8 +129,7 @@ export function buildNumbering(
         : abstract.get(absId)?.get(ilvl);
       if (!base) continue;
       const entry: LevelEntry = { ...base };
-      if (startOverride !== undefined)
-        entry.start = Number(startOverride) || 1;
+      if (startOverride !== undefined) entry.start = Number(startOverride) || 1;
       let ov = numOverrides.get(numId);
       if (!ov) numOverrides.set(numId, (ov = new Map()));
       ov.set(ilvl, entry);
@@ -152,7 +151,10 @@ export function buildNumbering(
     }
     // An overridden num counts independently from its siblings on the same
     // abstract (that is what startOverride is FOR) — give it its own key.
-    (defs ??= {})[numId] = { key: ov ? `${absId}#${numId}` : absId, levels: plain };
+    (defs ??= {})[numId] = {
+      key: ov ? `${absId}#${numId}` : absId,
+      levels: plain,
+    };
   }
 
   const usedPPr = new Set<OoxmlNode>();
@@ -184,10 +186,12 @@ export function buildNumbering(
       if (!audit.enabled) return;
       for (const levels of abstract.values())
         for (const entry of levels.values())
-          if (entry.pPr && !usedPPr.has(entry.pPr)) audit.markSubtree(entry.pPr);
+          if (entry.pPr && !usedPPr.has(entry.pPr))
+            audit.markSubtree(entry.pPr);
       for (const levels of numOverrides.values())
         for (const entry of levels.values())
-          if (entry.pPr && !usedPPr.has(entry.pPr)) audit.markSubtree(entry.pPr);
+          if (entry.pPr && !usedPPr.has(entry.pPr))
+            audit.markSubtree(entry.pPr);
     },
   };
 }

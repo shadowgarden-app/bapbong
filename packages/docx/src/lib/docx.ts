@@ -1238,7 +1238,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     const done: FieldState = field;
     field = done.parent;
     sink().push(...done.result);
-    spans.unshift({ kind: fieldSpanKind(done.instr), instr: done.instr.trim() });
+    spans.unshift({
+      kind: fieldSpanKind(done.instr),
+      instr: done.instr.trim(),
+    });
   }
   ctx.openFields.push(...spans);
   // w:pBdr from the most-derived cascade layer: keep visible sides only

@@ -2096,7 +2096,6 @@ function placeBlocks(
       for (
         let yy = y;
         fit < remaining && yy + drafts[i + fit].height <= colBottom();
-
       ) {
         yy += drafts[i + fit].height;
         fit++;
@@ -3118,8 +3117,7 @@ export function layout(
     const sh = chromeIndex != null ? setBandH[chromeIndex] : undefined;
     if (sh) {
       if (sh.header > 0) t = Math.max(t, headerDist(p) + sh.header);
-      if (sh.footer > 0)
-        b = Math.min(b, p.height - footerDist(p) - sh.footer);
+      if (sh.footer > 0) b = Math.min(b, p.height - footerDist(p) - sh.footer);
       return { top: t, bottom: b };
     }
     if (headers.default || headers.first || headers.even)

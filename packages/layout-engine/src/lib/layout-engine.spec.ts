@@ -1,6 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import type {
   FlowBlock,
+  FlowParagraph,
   FlowTableCell,
   FontSpec,
   LayoutConfig,
@@ -24,7 +25,9 @@ const font = (over: Partial<FontSpec> = {}): FontSpec => ({
   ...over,
 });
 
-const para = (text: string, marker?: string): FlowBlock => ({
+// Typed as FlowParagraph, not FlowBlock: tests spread paragraph-only fields
+// (keepNext, widowControl…) onto it, which the block union wouldn't allow.
+const para = (text: string, marker?: string): FlowParagraph => ({
   type: 'paragraph',
   runs: [{ text, font: font() }],
   marker,
@@ -214,7 +217,8 @@ describe('layoutBlocks', () => {
 
   // Pagination keeps. Page height 100 → band y ∈ [20, 80], 16px lines: 3 fit.
   // 15-char words wrap one per line, so word count = line count.
-  const words = (n: number) => Array.from({ length: n }, () => 'a'.repeat(15)).join(' ');
+  const words = (n: number) =>
+    Array.from({ length: n }, () => 'a'.repeat(15)).join(' ');
   const keepCfg = () => config({ height: 100 });
 
   it('widow/orphan control never strands a lone line on either side', () => {

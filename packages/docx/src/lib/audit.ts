@@ -230,7 +230,13 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'a:lnRef' && name === 'idx') ||
     // Anchor toggles Word's own layouter consults; we place by offset/align.
     (tag === 'wp:anchor' &&
-      ['allowOverlap', 'layoutInCell', 'locked', 'relativeHeight', 'simplePos'].includes(name)) ||
+      [
+        'allowOverlap',
+        'layoutInCell',
+        'locked',
+        'relativeHeight',
+        'simplePos',
+      ].includes(name)) ||
     // CJK disambiguation hint — the explicit rFonts attrs are all read.
     (tag === 'w:rFonts' && name === 'w:hint')
   );

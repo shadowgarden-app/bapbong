@@ -1559,7 +1559,9 @@ describe('importDocx', () => {
     expect(fieldAt(doc, span.to + 2)).toBeNull(); // the heading is outside
     // The heading anchors its bookmark; Word's cursor bookmark is dropped.
     expect(doc.child(2).attrs.bookmarks).toEqual(['_Toc1']);
-    expect(findBookmark(doc, '_Toc1')).toBe(2 + doc.child(0).nodeSize + doc.child(1).nodeSize - 1);
+    expect(findBookmark(doc, '_Toc1')).toBe(
+      2 + doc.child(0).nodeSize + doc.child(1).nodeSize - 1,
+    );
     expect(bookmarkLabel(doc, '_Toc1')).toBe('Chapter one');
     expect(findBookmark(doc, '_Toc2')).toBeNull(); // no paragraph claims it
   });
