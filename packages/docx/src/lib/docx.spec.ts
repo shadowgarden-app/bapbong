@@ -1,7 +1,10 @@
 import JSZip from 'jszip';
 import { Mark, Schema } from 'prosemirror-model';
 import {
+  bookmarkLabel,
   createNumberingCounter,
+  fieldAt,
+  findBookmark,
   schema,
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
@@ -1522,6 +1525,43 @@ describe('importDocx', () => {
     const unknown = p.child(1);
     expect(unknown.text).toBe(String.fromCodePoint(0xf0cf)); // PUA kept…
     expect(markMap(unknown.marks).fontFamily.family).toBe('Wingdings'); // …in its font
+  });
+
+  it('anchors bookmarks on their paragraph and spans the TOC field across them', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+        <w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h </w:instrText></w:r>
+        <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+        <w:hyperlink w:anchor="_Toc1"><w:r><w:t>Entry one</w:t></w:r></w:hyperlink>
+      </w:p>
+      <w:p>
+        <w:hyperlink w:anchor="_Toc2"><w:r><w:t>Entry two</w:t></w:r></w:hyperlink>
+        <w:r><w:fldChar w:fldCharType="end"/></w:r>
+      </w:p>
+      <w:p><w:bookmarkStart w:id="1" w:name="_Toc1"/><w:bookmarkStart w:id="2" w:name="_GoBack"/><w:bookmarkEnd w:id="1"/>
+        <w:r><w:t>Chapter one</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    // Both TOC entry paragraphs — the one that OPENS the field included —
+    // carry the same field object; the heading after it does not.
+    const f0 = doc.child(0).attrs.field;
+    expect(f0).toMatchObject({ kind: 'toc' });
+    expect(f0.instr).toContain('TOC');
+    expect(doc.child(1).attrs.field).toBe(f0); // identity marks the span
+    expect(doc.child(2).attrs.field).toBeNull();
+    // The span covers BOTH entry paragraphs from anywhere inside it — the
+    // caret sitting in the first must not shrink it to that paragraph.
+    const span = { from: 0, to: doc.child(0).nodeSize + doc.child(1).nodeSize };
+    expect(fieldAt(doc, 1)).toMatchObject(span);
+    expect(fieldAt(doc, span.to - 1)).toMatchObject(span);
+    expect(fieldAt(doc, span.to + 2)).toBeNull(); // the heading is outside
+    // The heading anchors its bookmark; Word's cursor bookmark is dropped.
+    expect(doc.child(2).attrs.bookmarks).toEqual(['_Toc1']);
+    expect(findBookmark(doc, '_Toc1')).toBe(2 + doc.child(0).nodeSize + doc.child(1).nodeSize - 1);
+    expect(bookmarkLabel(doc, '_Toc1')).toBe('Chapter one');
+    expect(findBookmark(doc, '_Toc2')).toBeNull(); // no paragraph claims it
   });
 
   it('keeps cached results of nested and cross-paragraph fields (TOC)', async () => {

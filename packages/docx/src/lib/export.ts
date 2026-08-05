@@ -522,7 +522,18 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
 function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
   const props = paraProps(node, ctx) + sectPr;
   const pPr = props ? `<w:pPr>${props}</w:pPr>` : '';
-  return `<w:p>${pPr}${inlineContent(node, ctx)}</w:p>`;
+  // Named anchors wrap the paragraph's content: dropping them would break
+  // every "#name" hyperlink pointing here — a saved TOC whose entries no
+  // longer jump anywhere. Ids are local to the part and regenerated.
+  const names = (node.attrs['bookmarks'] as string[] | null) ?? [];
+  let open = '';
+  let close = '';
+  for (const name of names) {
+    const id = ctx.nextId++;
+    open += `<w:bookmarkStart w:id="${id}" w:name="${esc(name)}"/>`;
+    close += `<w:bookmarkEnd w:id="${id}"/>`;
+  }
+  return `<w:p>${pPr}${open}${inlineContent(node, ctx)}${close}</w:p>`;
 }
 
 // ── tables ──────────────────────────────────────────────────────────

@@ -36,6 +36,7 @@ import {
   commentSchema,
   schema,
   type Align,
+  type FieldInfo,
   type Indent,
   type ListInfo,
   type NumberingDefs,
@@ -203,6 +204,13 @@ interface Ctx {
   /** Page content-box width in px (page minus side margins) — what
    *  percentage-based table widths (w:tblW/w:tcW type="pct") resolve against. */
   contentWidth: number;
+  /** Generated fields open across paragraph boundaries. A TOC field begins in
+   *  its first entry's paragraph and closes many paragraphs later, so the span
+   *  can't live in parseParagraph's local state: while this stack is non-empty
+   *  every paragraph parsed belongs to the innermost field and is stamped with
+   *  that SHARED object — identity is what marks the span (see the model's
+   *  `fieldAt`). */
+  openFields: FieldInfo[];
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -886,6 +894,13 @@ function fieldKind(instr: string): 'page' | 'pages' | null {
   return null;
 }
 
+/** Kind for a field whose result SPANS paragraphs. Only the table of contents
+ *  is modelled by name (its entries are regenerated on update); anything else
+ *  is still generated content and shades the same, just anonymously. */
+function fieldSpanKind(instr: string): string {
+  return /^\s*TOC\b/i.test(instr) ? 'toc' : 'field';
+}
+
 /** A page_field node formatted like `formatRun` (the field's result run). */
 function pageFieldNode(
   kind: 'page' | 'pages',
@@ -1050,6 +1065,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const heading = headingLevel(pStyleId, pPrChain);
 
   const inline: PMNode[] = [];
+  let bookmarks: string[] | null = null;
+  // The generated field this paragraph sits in: one already open when it
+  // starts, else one it opens itself (resolved after the run loop).
+  const fieldAtStart = ctx.openFields[0] ?? null;
   let field: FieldState | null = null;
   // Toggle-valued: w:pageBreakBefore w:val="false" (an override cancelling an
   // inherited break) must count as OFF — presence alone read it backwards.
@@ -1141,6 +1160,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
                 ? [pageFieldNode(kind, done.firstResultRun, paraBase, ctx)]
                 : done.result),
             );
+          } else if (ctx.openFields.length > 0) {
+            // Closes a field that OPENED in an earlier paragraph (a TOC ends
+            // in its last entry) — the span stops with this paragraph.
+            ctx.openFields.pop();
           }
         }
       } else if (c.name === 'w:instrText') {
@@ -1197,16 +1220,27 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     } else if (node.name === 'w:commentRangeEnd') {
       const id = Number(attrOf(node, 'w:id'));
       if (!Number.isNaN(id)) ctx.comments.active.delete(id);
+    } else if (node.name === 'w:bookmarkStart') {
+      // Named anchor: link hrefs "#name" resolve to this paragraph. Word's
+      // own cursor bookmark is noise.
+      audit.mark(node);
+      const name = attrOf(node, 'w:name');
+      if (name && name !== '_GoBack') (bookmarks ??= []).push(name);
     }
   }
   // A field still open here spans paragraphs (the TOC field wraps ALL its
   // entry paragraphs; each parseParagraph sees only its slice) — keep the
-  // cached result content instead of dropping it.
+  // cached result content, and register the span so the FOLLOWING paragraphs
+  // know they are inside it too. Registered outermost-first (the loop unwinds
+  // innermost-first) to match the stack's own order.
+  const spans: FieldInfo[] = [];
   while (field) {
     const done: FieldState = field;
     field = done.parent;
     sink().push(...done.result);
+    spans.unshift({ kind: fieldSpanKind(done.instr), instr: done.instr.trim() });
   }
+  ctx.openFields.push(...spans);
   // w:pBdr from the most-derived cascade layer: keep visible sides only
   // ('between' isn't modelled; w:val="none" sides drop out).
   const pBdrLayer = lastWith(pPrChain, 'w:pBdr');
@@ -1227,6 +1261,8 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     indent?: Indent;
     spacing?: Spacing;
     tabs?: { pos: number; val: string; leader?: string }[];
+    bookmarks?: string[];
+    field?: FieldInfo;
     pageBreakBefore?: boolean;
     keepNext?: boolean;
     keepLines?: boolean;
@@ -1257,6 +1293,11 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (indent) attrs.indent = indent;
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
+  if (bookmarks) attrs.bookmarks = bookmarks;
+  // A paragraph that OPENS a spanning field belongs to it as much as the ones
+  // that follow (the TOC's first entry is part of the TOC).
+  const fieldForPara = fieldAtStart ?? ctx.openFields[0] ?? null;
+  if (fieldForPara) attrs.field = fieldForPara;
   if (pageBreak) attrs.pageBreakBefore = true;
   if (keepNext) attrs.keepNext = true;
   if (keepLines) attrs.keepLines = true;
@@ -2271,6 +2312,8 @@ async function importDocxImpl(
     comments,
     schema: opts?.schema ?? schema,
     contentWidth,
+    // Per-story: a field opened in the body can't leak into a header.
+    openFields: [],
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');

@@ -139,6 +139,15 @@ export const schema = new Schema({
         tabs: { default: null },
         // w:spacing — { before?, after?, line?, lineRule? }, or null.
         spacing: { default: null },
+        // w:bookmarkStart names anchored in this paragraph (["_Toc89595219"]),
+        // or null. Link hrefs of the form "#name" resolve against these —
+        // paragraph-level is the right altitude: Word's TOC bookmarks wrap a
+        // heading's text, and jumping to the heading is what a reader wants.
+        bookmarks: { default: null },
+        // The generated field this paragraph belongs to ({ kind: 'toc',
+        // instr } for a TOC entry), or null for ordinary content. Word paints
+        // such content with field shading and regenerates it on update.
+        field: { default: null },
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
         // w:keepNext — stay on the same page as the next block's first line.

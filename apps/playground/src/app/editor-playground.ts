@@ -841,6 +841,22 @@ export class EditorPlayground implements OnDestroy {
         run: () => this.exec(deleteSelectionCommand()),
       },
     ];
+    // Inside a generated field (a table of contents), Word's menu is about
+    // the FIELD, not the text under the pointer — its entries are regenerated
+    // output, so "update" is the only edit that survives.
+    const activeField = ed.plugin('toc').fieldAt();
+    if (activeField?.field.kind === 'toc') {
+      entries.push('separator', {
+        label: 'Cập nhật mục lục (số trang)',
+        run: () => {
+          const n = ed.plugin('toc').updatePageNumbers();
+          this.error.set(
+            n > 0 ? null : 'Mục lục đã khớp với số trang hiện tại.',
+          );
+          ed.focus();
+        },
+      });
+    }
     const cell = cellAt(ed.state);
     if (cell) {
       // Act on the selected block if there is one, else the clicked cell (1×1).
@@ -975,10 +991,27 @@ export class EditorPlayground implements OnDestroy {
     const anchor = editor.caretViewportRect(info ? info.from : undefined);
     if (!anchor) return;
     this.linkPanelKey = info ? `${info.from}:${info.to}` : null;
+    // An in-document anchor (`#_Toc…`, every TOC entry) shows its DESTINATION
+    // rather than the machine-generated bookmark id, and offers a jump. When
+    // the link is field output, editing it alone is meaningless — the panel
+    // drops those actions (see LinkPanelOptions.internal).
+    const link = editor.plugin('hyperlink');
+    const internal =
+      info?.href && link.isInternal(info.href)
+        ? {
+            label: link.describe(info.href),
+            generated: editor.plugin('toc').fieldAt(info.from) !== null,
+            onGo: () => {
+              link.follow(info.href as string);
+              editor.focus();
+            },
+          }
+        : null;
     this.linkPanel = showLinkPanel({
       anchor,
       key: this.linkPanelKey ?? undefined,
       existing: info?.href ? { href: info.href, text: info.text } : null,
+      internal,
       hasSelection: !state.selection.empty,
       onApply: (href, text) => {
         this.exec(setLink(href, text));

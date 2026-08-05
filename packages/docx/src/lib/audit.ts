@@ -64,8 +64,8 @@ const IGNORED_TAGS = new Set([
   'w:noProof',
   'w:lang',
   'w:lastRenderedPageBreak',
-  // Bookmarks (incl. the _GoBack cursor bookmark) aren't modelled.
-  'w:bookmarkStart',
+  // The paired end marker of a bookmark: the START carries name + id and IS
+  // read (paragraph `bookmarks` attr); the end is a bare id we regenerate.
   'w:bookmarkEnd',
   // Style-gallery metadata: affects Word's styles UI, never rendering.
   'w:name',
@@ -206,6 +206,10 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'Relationship' && name === 'Type') ||
     // Word's visited-link tracking flag — UI state, not content.
     (tag === 'w:hyperlink' && name === 'w:history') ||
+    // A bookmark's numeric id pairs start/end within the part; the NAME is
+    // what links point at, and the exporter renumbers on the way out.
+    (tag === 'w:bookmarkStart' &&
+      (name === 'w:id' || name === 'w:displacedByCustomXml')) ||
     // Drawing object ids/names are display metadata; export regenerates them.
     (tag === 'wp:docPr' && (name === 'id' || name === 'name')) ||
     // Inline-drawing gaps: Word hard-codes 0 on wp:inline (the float-side
