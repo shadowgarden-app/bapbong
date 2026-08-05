@@ -8,6 +8,7 @@ import {
   parseRunProps,
   RunProps,
   ThemeColorResolver,
+  ThemeFontResolver,
 } from './ooxml.js';
 
 interface StyleDef {
@@ -55,6 +56,7 @@ const EMPTY: RunProps = {};
 export function buildStyleRegistry(
   stylesRoot: OoxmlNode | undefined,
   resolveTheme?: ThemeColorResolver,
+  resolveFont?: ThemeFontResolver,
 ): StyleRegistry {
   const stylesEl = child(stylesRoot, 'w:styles');
 
@@ -62,7 +64,7 @@ export function buildStyleRegistry(
     child(child(stylesEl, 'w:docDefaults'), 'w:rPrDefault'),
     'w:rPr',
   );
-  const docDefaults = parseRunProps(rPrDefault, resolveTheme);
+  const docDefaults = parseRunProps(rPrDefault, resolveTheme, resolveFont);
   const docDefaultsPPr = child(
     child(child(stylesEl, 'w:docDefaults'), 'w:pPrDefault'),
     'w:pPr',
@@ -74,7 +76,7 @@ export function buildStyleRegistry(
     if (id === undefined) continue;
     defs.set(id, {
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
-      rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme),
+      rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme, resolveFont),
       pPr: child(style, 'w:pPr'),
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),

@@ -218,10 +218,14 @@ export type ThemeColorResolver = (
   shade?: string,
 ) => string | undefined;
 
+/** Resolve a `w:asciiTheme`-style slot token to the theme's typeface. */
+export type ThemeFontResolver = (slot: string) => string | undefined;
+
 /** Parse a `w:rPr` element into normalized run properties (only present keys). */
 export function parseRunProps(
   rPr: OoxmlNode | undefined,
   resolveTheme?: ThemeColorResolver,
+  resolveFont?: ThemeFontResolver,
 ): RunProps {
   if (!rPr) return {};
   const props: RunProps = {};
@@ -259,8 +263,31 @@ export function parseRunProps(
     if (!Number.isNaN(halfPoints)) props.sizePt = halfPoints / 2;
   }
 
+  // Font family: literal attrs first (ascii → hAnsi → eastAsia → cs), then
+  // their theme-slot twins via the theme's fontScheme — Word often writes
+  // ONLY `w:asciiTheme="minorHAnsi"` and no literal name at all. All eight
+  // attrs are read up front (not short-circuited) — each is genuinely part
+  // of the fallback chain.
   const rFonts = child(rPr, 'w:rFonts');
-  const family = attrOf(rFonts, 'w:ascii') ?? attrOf(rFonts, 'w:hAnsi');
+  const ascii = attrOf(rFonts, 'w:ascii');
+  const hAnsi = attrOf(rFonts, 'w:hAnsi');
+  const eastAsia = attrOf(rFonts, 'w:eastAsia');
+  const cs = attrOf(rFonts, 'w:cs');
+  const asciiTheme = attrOf(rFonts, 'w:asciiTheme');
+  const hAnsiTheme = attrOf(rFonts, 'w:hAnsiTheme');
+  const eastAsiaTheme = attrOf(rFonts, 'w:eastAsiaTheme');
+  const cstheme = attrOf(rFonts, 'w:cstheme');
+  const themed = (slot: string | undefined): string | undefined =>
+    slot !== undefined && resolveFont ? resolveFont(slot) : undefined;
+  const family =
+    ascii ??
+    hAnsi ??
+    themed(asciiTheme) ??
+    themed(hAnsiTheme) ??
+    eastAsia ??
+    themed(eastAsiaTheme) ??
+    cs ??
+    themed(cstheme);
   if (family) props.fontFamily = family;
 
   const va = attrOf(child(rPr, 'w:vertAlign'), 'w:val');

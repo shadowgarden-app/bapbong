@@ -64,7 +64,12 @@ import { audit } from './audit.js';
 import { buildStyleRegistry, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
-import { buildThemeResolver, ThemeResolver } from './theme.js';
+import {
+  buildThemeFontResolver,
+  buildThemeResolver,
+  ThemeFontResolver,
+  ThemeResolver,
+} from './theme.js';
 
 export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 
@@ -179,6 +184,7 @@ interface Ctx {
   rels: Map<string, Relationship>;
   media: Map<string, string>; // zip path → data URL
   resolveTheme: ThemeResolver;
+  resolveFont: ThemeFontResolver;
   notes: NotesRegistry;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
@@ -791,7 +797,7 @@ function runMarks(
   const effective = [
     paraBase,
     ctx.styles.resolveStyle(rStyleId),
-    parseRunProps(rPr, ctx.resolveTheme),
+    parseRunProps(rPr, ctx.resolveTheme, ctx.resolveFont),
   ].reduce(mergeRunProps, {} as RunProps);
   const marks = propsToMarks(effective, ctx);
   // Unmodelled INLINE rPr children (w:rtl, w:kern, w:szCs, …) ride a carry
@@ -2092,12 +2098,15 @@ async function importDocxImpl(
   };
 
   // Stateless/shared pieces; numbering counters are per-story (built fresh below).
-  const resolveTheme = buildThemeResolver(
-    themeXml ? parsePart('word/theme/theme1.xml', themeXml) : undefined,
-  );
+  const themeRoot = themeXml
+    ? parsePart('word/theme/theme1.xml', themeXml)
+    : undefined;
+  const resolveTheme = buildThemeResolver(themeRoot);
+  const resolveFont = buildThemeFontResolver(themeRoot);
   const styles = buildStyleRegistry(
     stylesXml ? parsePart('word/styles.xml', stylesXml) : undefined,
     resolveTheme,
+    resolveFont,
   );
   const numberingRoot = numberingXml
     ? parsePart('word/numbering.xml', numberingXml)
@@ -2122,6 +2131,7 @@ async function importDocxImpl(
     rels,
     media,
     resolveTheme,
+    resolveFont,
     notes,
     comments,
     schema: opts?.schema ?? schema,

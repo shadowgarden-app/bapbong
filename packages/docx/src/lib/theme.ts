@@ -58,6 +58,41 @@ function applyTintShade(hex: string, tint?: string, shade?: string): string {
   return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
 }
 
+/** Resolve a `w:asciiTheme`-style slot token (majorHAnsi, minorEastAsia, …)
+ *  to the theme's typeface name. */
+export type ThemeFontResolver = (slot: string) => string | undefined;
+
+/** Parse `a:fontScheme` (major/minor latin + eastAsia + cs typefaces). Word
+ *  writes runs with ONLY `w:asciiTheme="minorHAnsi"` etc. — without this the
+ *  run has no family at all and falls back to the app default font. */
+export function buildThemeFontResolver(
+  themeRoot: OoxmlNode | undefined,
+): ThemeFontResolver {
+  const scheme = findDescendant(themeRoot, 'a:fontScheme');
+  const face = (
+    group: OoxmlNode | undefined,
+    tag: string,
+  ): string | undefined => attrOf(child(group, tag), 'typeface') || undefined;
+
+  const major = child(scheme, 'a:majorFont');
+  const minor = child(scheme, 'a:minorFont');
+  const map = new Map<string, string | undefined>([
+    ['majorAscii', face(major, 'a:latin')],
+    ['majorHAnsi', face(major, 'a:latin')],
+    ['majorEastAsia', face(major, 'a:ea')],
+    ['majorBidi', face(major, 'a:cs')],
+    ['minorAscii', face(minor, 'a:latin')],
+    ['minorHAnsi', face(minor, 'a:latin')],
+    ['minorEastAsia', face(minor, 'a:ea')],
+    ['minorBidi', face(minor, 'a:cs')],
+  ]);
+  // Script-specific alternates (a:font script="Hans" …) are deliberately not
+  // itemized — one typeface per slot is what we render with.
+  if (scheme) audit.markSubtree(scheme);
+
+  return (slot) => map.get(slot);
+}
+
 export function buildThemeResolver(
   themeRoot: OoxmlNode | undefined,
 ): ThemeResolver {

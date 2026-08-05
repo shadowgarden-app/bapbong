@@ -1350,6 +1350,40 @@ describe('importDocx', () => {
     );
   });
 
+  it('resolves theme fonts (w:asciiTheme) via a:fontScheme', async () => {
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:fontScheme name="Office">
+        <a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>
+        <a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>
+      </a:fontScheme>
+    </a:themeElements></a:theme>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:rPr><w:rFonts w:asciiTheme="majorHAnsi" w:hAnsiTheme="majorHAnsi"/></w:rPr><w:t>heading</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi"/></w:rPr><w:t>body</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:asciiTheme="minorHAnsi"/></w:rPr><w:t>literal wins</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    expect(markMap(doc.child(0).child(0).marks).fontFamily.family).toBe(
+      'Calibri Light',
+    );
+    expect(markMap(doc.child(1).child(0).marks).fontFamily.family).toBe(
+      'Calibri',
+    );
+    expect(markMap(doc.child(2).child(0).marks).fontFamily.family).toBe(
+      'Arial',
+    );
+  });
+
   it('parses header/footer parts referenced by sectPr', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>
       <w:p><w:r><w:t>body</w:t></w:r></w:p>
