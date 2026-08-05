@@ -123,6 +123,8 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   };
   if (findMark(marks, 'underline')) run.underline = true;
   if (findMark(marks, 'strike')) run.strike = true;
+  if (findMark(marks, 'dstrike')) run.dstrike = true;
+  if (findMark(marks, 'smallCaps')) run.smallCaps = true;
   const highlight = findMark(marks, 'highlight');
   if (highlight) run.background = String(highlight.attrs['color']);
   const va = findMark(marks, 'vertAlign');
@@ -421,6 +423,7 @@ interface Token {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  dstrike?: boolean;
   background?: string;
   vertAlign?: 'super' | 'sub';
   footnoteRef?: number;
@@ -438,6 +441,40 @@ interface Token {
   pos?: number;
   /** Size in PM positions (text length, or 1 for an image atom). */
   size: number;
+}
+
+/** Small-caps glyph scale (the synthesized lowercase→uppercase size). */
+const SMALLCAPS_SCALE = 0.8;
+
+/** Expand a small-caps run into case-spans: lowercase spans become their
+ *  uppercase at a reduced size, everything else passes through unchanged.
+ *  Per-char mapping keeps the 1:1 text↔PM-position correspondence (a char
+ *  whose uppercase form isn't a single char — ß→SS — stays as-is). */
+function expandSmallCaps(run: InlineRun): InlineRun[] {
+  const isLower = (ch: string): boolean => {
+    const up = ch.toUpperCase();
+    return up !== ch && up.length === 1;
+  };
+  const out: InlineRun[] = [];
+  const text = run.text;
+  let i = 0;
+  while (i < text.length) {
+    const lower = isLower(text[i]);
+    let j = i + 1;
+    while (j < text.length && isLower(text[j]) === lower) j++;
+    const slice = text.slice(i, j);
+    out.push({
+      ...run,
+      smallCaps: undefined,
+      text: lower ? slice.toUpperCase() : slice,
+      font: lower
+        ? { ...run.font, sizePt: run.font.sizePt * SMALLCAPS_SCALE }
+        : run.font,
+      pos: run.pos != null ? run.pos + i : undefined,
+    });
+    i = j;
+  }
+  return out;
 }
 
 /** Tokenize one inline item: words / spaces / tabs for text, a single atom for
@@ -482,6 +519,9 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
       },
     ];
   }
+  // Small caps: split into case-spans first (each re-enters as a plain run).
+  if (inline.smallCaps)
+    return expandSmallCaps(inline).flatMap((r) => tokenizeInline(r, ctx));
   // Super/subscript render at a reduced size — apply once, here.
   const font = inline.vertAlign
     ? { ...inline.font, sizePt: inline.font.sizePt * SUPERSUB_SCALE }
@@ -502,6 +542,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         link: inline.link,
         underline: inline.underline,
         strike: inline.strike,
+        dstrike: inline.dstrike,
         background: inline.background,
         vertAlign: inline.vertAlign,
         footnoteRef: inline.footnoteRef,
@@ -795,6 +836,7 @@ function wrapParagraph(
           width: t.width,
           pos: t.pos,
         };
+        if (t.dstrike) seg.dstrike = true;
         if (t.field) seg.field = t.field;
         if (t.footnoteRef != null) seg.footnoteRef = t.footnoteRef;
         if (t.commentIds) seg.commentIds = t.commentIds;

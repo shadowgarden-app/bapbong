@@ -71,6 +71,23 @@ describe('exportDocx (round-trip)', () => {
     expect(italicRun?.marks.map((m) => m.type.name)).toContain('em');
   });
 
+  it('round-trips smallCaps and dstrike marks', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'Heading', marks: ['smallCaps'] },
+        { text: 'removed', marks: ['dstrike'] },
+      ],
+    ]);
+
+    const bytes = await exportDocx(doc);
+    const { doc: back } = await importDocx(bytes);
+
+    const sc = [...range(back.child(0))].find((n) => n.text === 'Heading');
+    expect(sc?.marks.map((m) => m.type.name)).toContain('smallCaps');
+    const ds = [...range(back.child(0))].find((n) => n.text === 'removed');
+    expect(ds?.marks.map((m) => m.type.name)).toContain('dstrike');
+  });
+
   it('carry-through: unmodelled rPr/pPr props survive import → export', async () => {
     // A source docx with properties the model does NOT represent: run-level
     // w:rtl/w:kern/w:szCs, paragraph-level w:contextualSpacing/w:keepNext and

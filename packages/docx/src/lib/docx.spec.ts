@@ -1464,6 +1464,22 @@ describe('importDocx', () => {
     expect(markMap(p.child(0).marks).link.href).toBe('#_Toc1');
   });
 
+  it('imports w:smallCaps and w:dstrike as marks (toggle-aware)', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:smallCaps/></w:rPr><w:t>caps</w:t></w:r>
+        <w:r><w:rPr><w:dstrike/></w:rPr><w:t>gone</w:t></w:r>
+        <w:r><w:rPr><w:smallCaps w:val="0"/></w:rPr><w:t>off</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(markMap(p.child(0).marks).smallCaps).toBeTruthy();
+    expect(markMap(p.child(1).marks).dstrike).toBeTruthy();
+    expect(markMap(p.child(2).marks).smallCaps).toBeUndefined();
+  });
+
   it('maps known w:sym codes to Unicode, tags unknown ones with the symbol font', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r>

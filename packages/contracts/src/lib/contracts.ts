@@ -101,6 +101,10 @@ export interface InlineRun {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  /** Double strikethrough (w:dstrike). */
+  dstrike?: boolean;
+  /** Small caps (w:smallCaps): lowercase renders as reduced uppercase. */
+  smallCaps?: boolean;
   /** Highlight / shading background color, e.g. "#FFFF00". */
   background?: string;
   /** Superscript / subscript (font already reduced; painter shifts baseline). */
@@ -402,6 +406,8 @@ export interface LayoutSegment {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  /** Double strikethrough (w:dstrike): the painter draws two thin lines. */
+  dstrike?: boolean;
   /** Highlight / shading background painted behind the text. */
   background?: string;
   /** Superscript / subscript: the painter shifts the baseline (font is

@@ -243,6 +243,8 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   if (p.italic) marks.push(ctx.schema.marks['em'].create());
   if (p.underline) marks.push(ctx.schema.marks['underline'].create());
   if (p.strike) marks.push(ctx.schema.marks['strike'].create());
+  if (p.dstrike) marks.push(ctx.schema.marks['dstrike'].create());
+  if (p.smallCaps) marks.push(ctx.schema.marks['smallCaps'].create());
   if (p.color)
     marks.push(ctx.schema.marks['textColor'].create({ color: p.color }));
   if (p.sizePt !== undefined)
@@ -736,6 +738,8 @@ const CONSUMED_RPR = new Set([
   'w:i',
   'w:u',
   'w:strike',
+  'w:dstrike',
+  'w:smallCaps',
   'w:color',
   'w:sz',
   'w:rFonts',

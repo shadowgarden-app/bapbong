@@ -389,6 +389,30 @@ export const schema = new Schema({
       parseDOM: [{ tag: 's' }, { tag: 'strike' }],
       toDOM: () => ['s', 0],
     },
+    // w:dstrike — double strikethrough
+    dstrike: {
+      parseDOM: [
+        {
+          style: 'text-decoration-style=double',
+          getAttrs: (value) => (value === 'double' ? {} : false),
+        },
+      ],
+      toDOM: () => [
+        'span',
+        { style: 'text-decoration: line-through; text-decoration-style: double' },
+        0,
+      ],
+    },
+    // w:smallCaps
+    smallCaps: {
+      parseDOM: [
+        {
+          style: 'font-variant-caps',
+          getAttrs: (value) => (value === 'small-caps' ? {} : false),
+        },
+      ],
+      toDOM: () => ['span', { style: 'font-variant-caps: small-caps' }, 0],
+    },
 
     // w:color — hex "#RRGGBB"
     textColor: {

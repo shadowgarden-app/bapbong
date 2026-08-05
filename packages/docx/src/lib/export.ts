@@ -125,6 +125,8 @@ const KNOWN_MARKS = new Set([
   'em',
   'underline',
   'strike',
+  'dstrike',
+  'smallCaps',
   'textColor',
   'fontSize',
   'highlight',
@@ -148,6 +150,8 @@ function runProps(marks: readonly Mark[]): string {
   if (byName.has('em')) out.push('<w:i/>');
   if (byName.has('underline')) out.push('<w:u w:val="single"/>');
   if (byName.has('strike')) out.push('<w:strike/>');
+  if (byName.has('dstrike')) out.push('<w:dstrike/>');
+  if (byName.has('smallCaps')) out.push('<w:smallCaps/>');
   const color = byName.get('textColor')?.attrs['color'] as string | undefined;
   if (color) out.push(`<w:color w:val="${color.replace(/^#/, '')}"/>`);
   const size = byName.get('fontSize')?.attrs['size'] as number | undefined;

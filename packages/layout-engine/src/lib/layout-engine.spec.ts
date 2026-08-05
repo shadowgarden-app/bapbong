@@ -175,6 +175,30 @@ describe('layoutBlocks', () => {
     expect(textSeg).toMatchObject({ text: 'hi', x: 60 });
   });
 
+  it('renders small caps as case-split segments (reduced uppercase)', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'Ab cD', font: font(), smallCaps: true, pos: 100 }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    const segs = pages[0].lines[0].segments;
+    // "A" full size · "B" reduced+uppercased · " " neutral · "C" reduced ·
+    // "D" full.
+    expect(segs.map((s) => s.text)).toEqual(['A', 'B', ' ', 'C', 'D']);
+    expect(segs.map((s) => s.font.sizePt)).toEqual([10, 8, 10, 8, 10]);
+    // PM positions still map 1:1 to the ORIGINAL characters.
+    expect(segs.map((s) => s.pos)).toEqual([100, 101, 102, 103, 104]);
+  });
+
+  it('carries dstrike through to the painted segment', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'gone', font: font(), dstrike: true }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].lines[0].segments[0].dstrike).toBe(true);
+  });
+
   it("suff 'nothing' keeps the text tight against the label", () => {
     const block: FlowBlock = {
       type: 'paragraph',

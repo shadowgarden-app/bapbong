@@ -178,6 +178,8 @@ export interface RunProps {
   italic?: boolean;
   underline?: boolean;
   strike?: boolean;
+  dstrike?: boolean; // w:dstrike — double strikethrough
+  smallCaps?: boolean; // w:smallCaps
   color?: string; // "#RRGGBB"
   sizePt?: number; // points
   fontFamily?: string;
@@ -265,6 +267,10 @@ export function parseRunProps(
   if (u !== undefined) props.underline = u;
   const s = toggle(child(rPr, 'w:strike'));
   if (s !== undefined) props.strike = s;
+  const ds = toggle(child(rPr, 'w:dstrike'));
+  if (ds !== undefined) props.dstrike = ds;
+  const sc = toggle(child(rPr, 'w:smallCaps'));
+  if (sc !== undefined) props.smallCaps = sc;
 
   // Color: the literal w:val is Word's own baked rendering of the theme
   // reference, so it wins (no tint/shade approximation error); the theme
