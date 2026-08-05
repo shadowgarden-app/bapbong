@@ -24,6 +24,7 @@ import type {
   LayoutImageSegment,
   LayoutLine,
   LayoutSegment,
+  MarkerStyle,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -183,6 +184,7 @@ function paragraphToFlow(
   nodePos: number,
   allowFloats = false,
   marker?: string,
+  markerStyle?: MarkerStyle,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   // A heading paragraph sizes its runs from the level by default (bigger +
@@ -252,6 +254,7 @@ function paragraphToFlow(
     type: 'paragraph',
     runs,
     marker: marker ?? (list?.marker || undefined),
+    ...(markerStyle && { markerStyle }),
     align: align ?? undefined,
     indent: indent ?? undefined,
     pos: contentStart,
@@ -278,18 +281,38 @@ function nodeHasFloats(node: PMNode): boolean {
 }
 
 /** The live marker for a list paragraph: counted from the doc's numbering
- *  defs, falling back to a legacy pre-resolved marker on the attr. */
+ *  defs, falling back to a legacy pre-resolved marker on the attr. Carries
+ *  the level's label styling (lvlJc / suff / label rPr) alongside the text. */
 function markerFor(
   node: PMNode,
   counter: NumberingCounter | undefined,
-): string | undefined {
+): { text: string; style?: MarkerStyle } | undefined {
   const list = node.attrs['list'] as {
     numId: string;
     level: number;
     marker?: string;
   } | null;
   if (!list) return undefined;
-  return (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
+  const text =
+    (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
+  if (text === undefined) return undefined;
+  const def = counter?.def(list.numId, list.level);
+  if (!def || (!def.jc && !def.suff && !def.rPr)) return { text };
+  const style: MarkerStyle = {};
+  if (def.jc) style.jc = def.jc;
+  if (def.suff) style.suff = def.suff;
+  if (def.rPr) {
+    const { bold, italic, sizePt, family, color } = def.rPr;
+    const font: Partial<FontSpec> = {
+      ...(bold !== undefined && { bold }),
+      ...(italic !== undefined && { italic }),
+      ...(sizePt !== undefined && { sizePt }),
+      ...(family !== undefined && { family }),
+    };
+    if (Object.keys(font).length > 0) style.font = font;
+    if (color) style.color = color;
+  }
+  return { text, style };
 }
 
 /** Flatten a block-level node (paragraph or table) into a FlowBlock, or null
@@ -301,14 +324,10 @@ function nodeToBlock(
   allowFloats = false,
   counter?: NumberingCounter,
 ): FlowBlock | null {
-  if (node.type.name === 'paragraph')
-    return paragraphToFlow(
-      node,
-      base,
-      nodePos,
-      allowFloats,
-      markerFor(node, counter),
-    );
+  if (node.type.name === 'paragraph') {
+    const m = markerFor(node, counter);
+    return paragraphToFlow(node, base, nodePos, allowFloats, m?.text, m?.style);
+  }
   if (node.type.name === 'table')
     return tableToFlow(node, base, nodePos, counter);
   return null;
@@ -578,17 +597,45 @@ function wrapParagraph(
   let lineRight = band.right - indentRight;
 
   // List marker hangs at the first line's start; text follows after it, and
-  // wrapped lines align under that text (hanging indent).
+  // wrapped lines align under that text (hanging indent). The label draws
+  // with its own font/color (lvl rPr), aligns against the anchor (lvlJc) and
+  // separates from the text per w:suff — tab (default) jumps to the hanging
+  // text position like Word, space/nothing stay tight.
+  const mStyle = block.markerStyle;
+  const markerFont: FontSpec = mStyle?.font
+    ? { ...base, ...mStyle.font }
+    : base;
   let marker: LayoutSegment | null = null;
   let markerTextX = 0;
+  const placeMarker = (): void => {
+    if (!marker) return;
+    const anchor = lineLeft + firstLineDelta;
+    const w = marker.width ?? 0;
+    marker.x =
+      mStyle?.jc === 'right'
+        ? anchor - w
+        : mStyle?.jc === 'center'
+          ? anchor - w / 2
+          : anchor;
+    const end = marker.x + w;
+    markerTextX =
+      mStyle?.suff === 'nothing'
+        ? end
+        : mStyle?.suff === 'space'
+          ? end + measure(' ', markerFont)
+          : end <= lineLeft
+            ? lineLeft
+            : end + measure(' ', markerFont);
+  };
   if (block.marker) {
     marker = {
-      x: lineLeft + firstLineDelta,
+      x: 0,
       text: block.marker,
-      font: base,
-      width: measure(block.marker, base),
+      font: markerFont,
+      width: measure(block.marker, markerFont),
+      ...(mStyle?.color ? { color: mStyle.color } : {}),
     };
-    markerTextX = marker.x + measure(`${block.marker} `, base);
+    placeMarker();
   }
   // `let`: re-derived if the first line's band is re-queried for a wide image.
   let firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
@@ -925,10 +972,7 @@ function wrapParagraph(
       );
       lineLeft = band.left + indentLeft;
       lineRight = band.right - indentRight;
-      if (marker) {
-        marker.x = lineLeft + firstLineDelta;
-        markerTextX = marker.x + measure(`${block.marker} `, base);
-      }
+      placeMarker();
       firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
       contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
     }
@@ -2794,7 +2838,9 @@ export function layout(
       return item;
     };
     if (node.type.name === 'paragraph') {
-      const marker = markerFor(node, counter); // advances numbering every pass
+      const m = markerFor(node, counter); // advances numbering every pass
+      const marker = m?.text;
+      const markerStyle = m?.style;
       const contentStart = offset + 1;
       // Fast path: an unchanged paragraph reuses its cached item outright, and a
       // moved one shifts its drafts in place — neither allocates a ParaItem,
@@ -2824,7 +2870,7 @@ export function layout(
       // Miss (or float-anchoring paragraph, never cached): build fresh.
       const hasFloats = nodeHasFloats(node);
       const getFlow = () =>
-        paragraphToFlow(node, ctx.base, offset, true, marker);
+        paragraphToFlow(node, ctx.base, offset, true, marker, markerStyle);
       const sp = node.attrs['spacing'] as ParagraphSpacing | null;
       const mkItem = (drafts: LineDraft[] | null): ParaItem => ({
         getFlow,
@@ -2842,7 +2888,14 @@ export function layout(
         return;
       }
       perf.bump('para.miss');
-      const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
+      const flow = paragraphToFlow(
+        node,
+        ctx.base,
+        offset,
+        true,
+        marker,
+        markerStyle,
+      );
       const drafts = layoutParagraph(flow, bLeft, colRight, ctx);
       const item: ParaItem = { ...mkItem(drafts), getFlow: () => flow };
       cache?.paragraphs.set(node, {

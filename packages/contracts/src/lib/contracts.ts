@@ -243,6 +243,20 @@ export interface ParagraphSpacing {
   lineRule?: 'auto' | 'exact' | 'atLeast';
 }
 
+/** List label styling from the numbering level (w:lvlJc / w:suff / lvl rPr).
+ *  All fields default to Word's own defaults: left-aligned, tab suffix,
+ *  label drawn with the paragraph's base font. */
+export interface MarkerStyle {
+  /** Label alignment against its anchor. */
+  jc?: 'center' | 'right';
+  /** Separator between label and text. */
+  suff?: 'space' | 'nothing';
+  /** Label font overrides (family/size/bold/italic from the lvl rPr). */
+  font?: Partial<FontSpec>;
+  /** Label color ("#RRGGBB"). */
+  color?: string;
+}
+
 /** A block flattened and ready for layout (paragraph only, for now). */
 export interface FlowParagraph {
   type: 'paragraph';
@@ -250,6 +264,8 @@ export interface FlowParagraph {
   runs: FlowInline[];
   /** List marker text (e.g. "1.", "•") if this paragraph is a list item. */
   marker?: string;
+  /** Styling for `marker` (alignment, suffix, its own font/color). */
+  markerStyle?: MarkerStyle;
   /** Horizontal alignment; defaults to 'left' when omitted. */
   align?: Align;
   /** Indentation in CSS px; defaults to no indent when omitted. */

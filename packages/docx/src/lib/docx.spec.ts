@@ -316,6 +316,42 @@ describe('importDocx', () => {
     expect(counter.next('2', 0)).toBe('5.');
   });
 
+  it('parses label styling (w:lvlJc / w:suff / w:isLgl / lvl rPr) into the defs', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0">
+          <w:numFmt w:val="upperRoman"/><w:lvlText w:val="%1."/><w:start w:val="1"/>
+          <w:lvlJc w:val="right"/><w:suff w:val="space"/>
+          <w:rPr><w:b/><w:color w:val="C00000"/><w:rFonts w:ascii="Georgia"/><w:sz w:val="20"/></w:rPr>
+        </w:lvl>
+        <w:lvl w:ilvl="1">
+          <w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/><w:start w:val="1"/><w:isLgl/>
+        </w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'one')}
+      ${listP('1', 1, 'sub')}
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
+    const defs = doc.attrs.numbering as NumberingDefs;
+    expect(defs['1'].levels[0]).toMatchObject({
+      jc: 'right',
+      suff: 'space',
+      rPr: { bold: true, color: '#C00000', family: 'Georgia', sizePt: 10 },
+    });
+    expect(defs['1'].levels[1].isLgl).toBe(true);
+    // Legal numbering: the level-1 placeholder %1 renders decimal even
+    // though level 0 is upperRoman.
+    const counter = createNumberingCounter(defs);
+    expect(counter.next('1', 0)).toBe('I.');
+    expect(counter.next('1', 1)).toBe('1.1');
+  });
+
   it('formats bullet and roman markers, with independent counters per numId', async () => {
     const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
       <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl></w:abstractNum>

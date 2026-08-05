@@ -2218,7 +2218,7 @@ async function importDocxImpl(
 
   // Stateless — markers are recounted by the layout engine, so one resolver
   // serves every story (and its audit usage-tracking sees them all).
-  const numbering = buildNumbering(numberingRoot);
+  const numbering = buildNumbering(numberingRoot, resolveTheme, resolveFont);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     styles,
     numbering,

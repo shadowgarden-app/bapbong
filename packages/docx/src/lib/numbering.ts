@@ -1,6 +1,18 @@
-import type { NumberingDefs } from '@shadow-garden/bapbong-model';
+import type {
+  MarkerRunProps,
+  NumberingDefs,
+  NumberingLevelDef,
+} from '@shadow-garden/bapbong-model';
 import { audit } from './audit.js';
-import { attrOf, child, children, OoxmlNode } from './ooxml.js';
+import {
+  attrOf,
+  child,
+  children,
+  OoxmlNode,
+  parseRunProps,
+  ThemeColorResolver,
+  ThemeFontResolver,
+} from './ooxml.js';
 
 /** Parsed view of `word/numbering.xml`. Markers are NOT computed at import —
  *  the defs ride the document (doc attr) and the layout engine recounts them
@@ -18,24 +30,59 @@ export interface NumberingResolver {
   auditMarkUnusedLevels(): void;
 }
 
-interface LevelEntry {
-  numFmt: string;
-  lvlText: string;
-  start: number;
-  pPr?: OoxmlNode;
+/** A parsed w:lvl: the plain-data level def plus its pPr (cascade layer). */
+type LevelEntry = NumberingLevelDef & { pPr?: OoxmlNode };
+
+/** Strip the OoxmlNode so the entry is attr-safe plain data. */
+function plainDef(entry: LevelEntry): NumberingLevelDef {
+  const { pPr: _pPr, ...plain } = entry;
+  return plain;
 }
 
-function parseLvl(lvl: OoxmlNode): LevelEntry {
-  return {
+function parseLvl(
+  lvl: OoxmlNode,
+  resolveTheme?: ThemeColorResolver,
+  resolveFont?: ThemeFontResolver,
+): LevelEntry {
+  const entry: LevelEntry = {
     numFmt: attrOf(child(lvl, 'w:numFmt'), 'w:val') ?? 'decimal',
     lvlText: attrOf(child(lvl, 'w:lvlText'), 'w:val') ?? '',
     start: Number(attrOf(child(lvl, 'w:start'), 'w:val') ?? '1') || 1,
     pPr: child(lvl, 'w:pPr'),
   };
+  // Label alignment (w:lvlJc). left/start is the default — omitted.
+  const jc = attrOf(child(lvl, 'w:lvlJc'), 'w:val');
+  if (jc === 'right' || jc === 'end') entry.jc = 'right';
+  else if (jc === 'center') entry.jc = 'center';
+  // Label→text separator (w:suff). tab is the default — omitted.
+  const suff = attrOf(child(lvl, 'w:suff'), 'w:val');
+  if (suff === 'space' || suff === 'nothing') entry.suff = suff;
+  // Legal numbering (w:isLgl).
+  const isLgl = child(lvl, 'w:isLgl');
+  if (isLgl && attrOf(isLgl, 'w:val') !== '0') entry.isLgl = true;
+  // Label formatting (w:lvl > w:rPr) — the number/bullet's own font.
+  const rPrEl = child(lvl, 'w:rPr');
+  if (rPrEl) {
+    const props = parseRunProps(rPrEl, resolveTheme, resolveFont);
+    const rPr: MarkerRunProps = {
+      ...(props.bold !== undefined && { bold: props.bold }),
+      ...(props.italic !== undefined && { italic: props.italic }),
+      ...(props.sizePt !== undefined && { sizePt: props.sizePt }),
+      ...(props.fontFamily !== undefined && { family: props.fontFamily }),
+      ...(props.color !== undefined && { color: props.color }),
+    };
+    if (Object.keys(rPr).length > 0) entry.rPr = rPr;
+    // Underline/strike/highlight on labels are not painted — a decision;
+    // the properties survive in the carried numbering.xml either way.
+    audit.markSubtree(rPrEl);
+  }
+  return entry;
 }
 
 export function buildNumbering(
   numberingRoot: OoxmlNode | undefined,
+  resolveTheme?: ThemeColorResolver,
+  resolveFont?: ThemeFontResolver,
 ): NumberingResolver {
   const numberingEl = child(numberingRoot, 'w:numbering');
 
@@ -46,7 +93,10 @@ export function buildNumbering(
     const levels = new Map<number, LevelEntry>();
     for (const lvl of children(abstractNum, 'w:lvl')) {
       const ilvl = Number(attrOf(lvl, 'w:ilvl') ?? '0');
-      levels.set(Number.isNaN(ilvl) ? 0 : ilvl, parseLvl(lvl));
+      levels.set(
+        Number.isNaN(ilvl) ? 0 : ilvl,
+        parseLvl(lvl, resolveTheme, resolveFont),
+      );
     }
     abstract.set(id, levels);
   }
@@ -66,7 +116,7 @@ export function buildNumbering(
       const startOverride = attrOf(child(o, 'w:startOverride'), 'w:val');
       const fullLvl = child(o, 'w:lvl');
       const base = fullLvl
-        ? parseLvl(fullLvl)
+        ? parseLvl(fullLvl, resolveTheme, resolveFont)
         : abstract.get(absId)?.get(ilvl);
       if (!base) continue;
       const entry: LevelEntry = { ...base };
@@ -83,14 +133,13 @@ export function buildNumbering(
     const levels = abstract.get(absId);
     if (!levels) continue;
     const ov = numOverrides.get(numId);
-    const plain: Record<number, { numFmt: string; lvlText: string; start: number }> = {};
+    const plain: Record<number, NumberingLevelDef> = {};
     for (const [ilvl, def] of levels) {
-      const eff = ov?.get(ilvl) ?? def;
-      plain[ilvl] = { numFmt: eff.numFmt, lvlText: eff.lvlText, start: eff.start };
+      plain[ilvl] = plainDef(ov?.get(ilvl) ?? def);
     }
     for (const [ilvl, def] of ov ?? []) {
       // Overrides for levels the abstract never declared.
-      plain[ilvl] ??= { numFmt: def.numFmt, lvlText: def.lvlText, start: def.start };
+      plain[ilvl] ??= plainDef(def);
     }
     // An overridden num counts independently from its siblings on the same
     // abstract (that is what startOverride is FOR) — give it its own key.

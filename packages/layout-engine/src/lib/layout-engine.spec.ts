@@ -149,6 +149,45 @@ describe('layoutBlocks', () => {
     expect(line1.segments[0]).toMatchObject({ text: 'dddd', x: 50 });
   });
 
+  it('styles the list label per markerStyle (jc / suff / own font+color)', () => {
+    // Hanging indent: text at left=60, marker anchored at 60-30=30.
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+      marker: '9.',
+      markerStyle: {
+        jc: 'right',
+        font: { bold: true, sizePt: 8 },
+        color: '#C00000',
+      },
+      indent: { left: 40, hanging: 30 },
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [markerSeg, textSeg] = pages[0].lines[0].segments;
+    // anchor = 20 + 40 - 30 = 30; jc=right → right edge AT the anchor.
+    expect(markerSeg).toMatchObject({
+      text: '9.',
+      x: 10, // 30 - width(20)
+      color: '#C00000',
+    });
+    expect(markerSeg.font).toMatchObject({ bold: true, sizePt: 8 });
+    // suff defaults to tab: marker end (30) ≤ text position (60) → jump there.
+    expect(textSeg).toMatchObject({ text: 'hi', x: 60 });
+  });
+
+  it("suff 'nothing' keeps the text tight against the label", () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+      marker: '1.',
+      markerStyle: { suff: 'nothing' },
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [markerSeg, textSeg] = pages[0].lines[0].segments;
+    expect(markerSeg.x).toBe(20);
+    expect(textSeg.x).toBe(40); // straight after "1." (20px), no gap
+  });
+
   it('applies left + firstLine indent to the first line', () => {
     const block: FlowBlock = {
       type: 'paragraph',
