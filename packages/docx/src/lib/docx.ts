@@ -247,25 +247,40 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   return marks;
 }
 
-/** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode. Unknown codes
- *  map to the raw code point; symbol-font fidelity is out of scope. */
+/** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode equivalents
+ *  that render in ANY text font. */
 const SYMBOL_MAP: Record<string, string> = {
   F0B7: '•',
   F06C: '●',
+  F06E: '■',
+  F06F: '□',
+  F075: '◆',
   F0A7: '▪',
   F0A8: '▫',
   F0FC: '✔',
   F0FB: '✗',
   F0E0: '→',
+  F04A: '☺',
+  F04B: '😐',
+  F04C: '☹',
+  F04D: '💣',
+  F04E: '☠',
+  F051: '✈',
 };
-function symbolChar(code: string | undefined): string {
-  if (!code) return '';
+/** A w:sym char: mapped codes become font-independent Unicode; unknown codes
+ *  keep their PUA code point and remember the symbol font — the caller tags
+ *  them with a fontFamily mark so the glyph renders where the font exists
+ *  (and survives a save either way). */
+function symbolChar(
+  code: string | undefined,
+  font: string | undefined,
+): { text: string; font?: string } {
+  if (!code) return { text: '' };
   const upper = code.toUpperCase();
-  if (SYMBOL_MAP[upper]) return SYMBOL_MAP[upper];
+  if (SYMBOL_MAP[upper]) return { text: SYMBOL_MAP[upper] };
   const n = parseInt(code, 16);
-  return Number.isNaN(n)
-    ? ''
-    : String.fromCodePoint(n >= 0xf000 ? n - 0xf000 + 0x20 : n);
+  if (Number.isNaN(n)) return { text: '' };
+  return { text: String.fromCodePoint(n), ...(font && { font }) };
 }
 
 /** Whether a run carries an explicit page break (w:br w:type="page"). */
@@ -347,8 +362,23 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     if (RUN_CHILD_TAGS.has(node.name)) audit.mark(node);
     if (node.name === 'w:t') buf += node.text;
     else if (node.name === 'w:tab') buf += '\t';
-    else if (node.name === 'w:sym') buf += symbolChar(attrOf(node, 'w:char'));
-    else if (
+    else if (node.name === 'w:sym') {
+      const sym = symbolChar(attrOf(node, 'w:char'), attrOf(node, 'w:font'));
+      if (!sym.text) continue;
+      if (sym.font) {
+        // Unmapped symbol: its glyph lives in the symbol font's PUA range —
+        // switch just this character to that font.
+        flush();
+        out.push(
+          ctx.schema.text(sym.text, [
+            ...marks.filter((m) => m.type.name !== 'fontFamily'),
+            ctx.schema.marks['fontFamily'].create({ family: sym.font }),
+          ]),
+        );
+      } else {
+        buf += sym.text;
+      }
+    } else if (
       node.name === 'w:footnoteReference' ||
       node.name === 'w:endnoteReference'
     ) {

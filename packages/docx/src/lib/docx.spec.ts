@@ -1399,6 +1399,22 @@ describe('importDocx', () => {
     expect(markMap(p.child(0).marks).link.href).toBe('#_Toc1');
   });
 
+  it('maps known w:sym codes to Unicode, tags unknown ones with the symbol font', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r>
+        <w:sym w:font="Wingdings" w:char="F0FC"/>
+        <w:sym w:font="Wingdings" w:char="F0CF"/>
+      </w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(p.child(0).text).toBe('✔'); // known → font-independent Unicode
+    const unknown = p.child(1);
+    expect(unknown.text).toBe(String.fromCodePoint(0xf0cf)); // PUA kept…
+    expect(markMap(unknown.marks).fontFamily.family).toBe('Wingdings'); // …in its font
+  });
+
   it('keeps cached results of nested and cross-paragraph fields (TOC)', async () => {
     // Word's real TOC shape: the TOC field OPENS in the first entry paragraph
     // and its end lives paragraphs later; each entry nests a PAGEREF field.
