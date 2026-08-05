@@ -84,6 +84,12 @@ export interface PageConfig {
   width: number;
   height: number;
   margin: { top: number; right: number; bottom: number; left: number };
+  /** Header/footer band distance from the page edge (w:pgMar @w:header/
+   *  @w:footer). Absent → Word's default 720 twips (48px). */
+  headerDistance?: number;
+  footerDistance?: number;
+  /** Binding gutter (w:pgMar @w:gutter) added to the left content edge. */
+  gutter?: number;
 }
 
 /** A document comment (structurally a bapbong-contracts CommentData). */
@@ -145,6 +151,9 @@ export interface DocxImport {
   comments: CommentData[];
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
   page: PageConfig;
+  /** Default tab interval in px (settings w:defaultTabStop); absent → the
+   *  layout engine's 0.5" default. */
+  tabWidth?: number;
   /** The loaded source package — pass to `exportDocx(doc, { carry })` so the
    *  parts bapbong doesn't model yet (styles, numbering, headers/footers, …)
    *  survive the round-trip instead of being dropped. */
@@ -1019,7 +1028,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   }
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
-  const spacing = resolveSpacing(pPrChain);
+  const spacing = resolveSpacing(pPrChain, list !== null);
   const tabs = resolveTabs(pPrChain);
   const heading = headingLevel(pStyleId, pPrChain);
 
@@ -1315,7 +1324,10 @@ function resolveIndent(chain: (OoxmlNode | undefined)[]): Indent | null {
 /** Resolve w:spacing through the cascade: the last layer with each attribute
  *  wins. before/after are twips→px; line is 240ths of a line for lineRule
  *  'auto' (→ multiplier), else twips→px for 'exact'/'atLeast'. */
-function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
+function resolveSpacing(
+  chain: (OoxmlNode | undefined)[],
+  isList = false,
+): Spacing | null {
   const out: Spacing = {};
   for (const pPr of chain) {
     const sp = child(pPr, 'w:spacing');
@@ -1324,8 +1336,18 @@ function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
     const after = attrOf(sp, 'w:after');
     const line = attrOf(sp, 'w:line');
     const rule = attrOf(sp, 'w:lineRule');
-    if (before !== undefined) out.before = twipsToPx(Number(before));
-    if (after !== undefined) out.after = twipsToPx(Number(after));
+    // HTML-era auto spacing: the literal value is Word's own cached auto
+    // amount, so it stands — except list items, which drop auto spacing.
+    const onFlag = (name: string): boolean => {
+      const v = attrOf(sp, name);
+      return v !== undefined && v !== '0' && v.toLowerCase() !== 'false';
+    };
+    const beforeAuto = onFlag('w:beforeAutospacing');
+    const afterAuto = onFlag('w:afterAutospacing');
+    if (before !== undefined || beforeAuto)
+      out.before = beforeAuto && isList ? 0 : twipsToPx(Number(before ?? '0'));
+    if (after !== undefined || afterAuto)
+      out.after = afterAuto && isList ? 0 : twipsToPx(Number(after ?? '0'));
     if (line !== undefined) {
       const lineRule = rule === 'exact' || rule === 'atLeast' ? rule : 'auto';
       out.lineRule = lineRule;
@@ -2355,6 +2377,15 @@ async function importDocxImpl(
   const evenAndOdd = settings
     ? isToggleOn(child(settings, 'w:evenAndOddHeaders'))
     : false;
+  // Default tab interval (w:defaultTabStop, twips) — drives the layout's
+  // implicit tab grid when a paragraph has no explicit stops.
+  const defaultTabStop = settings
+    ? Number(attrOf(child(settings, 'w:defaultTabStop'), 'w:val'))
+    : NaN;
+  const tabWidth =
+    Number.isFinite(defaultTabStop) && defaultTabStop > 0
+      ? twipsToPx(defaultTabStop)
+      : undefined;
 
   // Audit: with every story parsed (body, notes, headers/footers), styles
   // and numbering levels nothing referenced are swept out of the report —
@@ -2372,6 +2403,7 @@ async function importDocxImpl(
     evenAndOdd,
     comments: hasComments ? buildCommentsList(ctx) : [],
     page: pageGeom,
+    ...(tabWidth !== undefined && { tabWidth }),
     raw: zip,
   };
   // Only when some non-last section declares its own chrome/titlePg does the
@@ -2427,7 +2459,7 @@ export function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
   if (attrOf(pgSz, 'w:orient') === 'landscape' && height > width) {
     [width, height] = [height, width];
   }
-  return {
+  const geom: PageConfig = {
     width,
     height,
     margin: {
@@ -2437,4 +2469,13 @@ export function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
       left: px(pgMar, 'w:left', 96),
     },
   };
+  // Chrome distances + binding gutter: set only when declared (the layout
+  // falls back to Word's defaults), so untouched docs stay byte-stable.
+  if (pgMar && attrOf(pgMar, 'w:header') !== undefined)
+    geom.headerDistance = px(pgMar, 'w:header', 48);
+  if (pgMar && attrOf(pgMar, 'w:footer') !== undefined)
+    geom.footerDistance = px(pgMar, 'w:footer', 48);
+  const gutter = pgMar ? px(pgMar, 'w:gutter', 0) : 0;
+  if (gutter > 0) geom.gutter = gutter;
+  return geom;
 }

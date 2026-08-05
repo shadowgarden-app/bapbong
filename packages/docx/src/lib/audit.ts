@@ -153,6 +153,9 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'w:hyperlink' && name === 'w:history') ||
     // Drawing object ids/names are display metadata; export regenerates them.
     (tag === 'wp:docPr' && (name === 'id' || name === 'name')) ||
+    // Inline-drawing gaps: Word hard-codes 0 on wp:inline (the float-side
+    // dist* on wp:anchor IS read and applied).
+    (tag === 'wp:inline' && name.startsWith('dist')) ||
     // graphicData is dispatched by its CHILD tag (pic:pic / wps:wsp), not uri.
     (tag === 'a:graphicData' && name === 'uri') ||
     // Theme scheme names ("Office", …) — gallery labels, not content.

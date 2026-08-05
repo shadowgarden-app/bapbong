@@ -78,9 +78,10 @@ describe('xml audit (import)', () => {
     // audit rightly counts them consumed.)
     expect(unknown).not.toContain('w:keepNext');
     expect(unknown).toContain('w:fictional');
-    expect(unknown).toContain('w:pgMar @w:header');
-    expect(unknown).toContain('w:pgMar @w:footer');
-    expect(unknown).toContain('w:pgMar @w:gutter');
+    // pgMar chrome distances + gutter are read into PageConfig now.
+    expect(unknown).not.toContain('w:pgMar @w:header');
+    expect(unknown).not.toContain('w:pgMar @w:footer');
+    expect(unknown).not.toContain('w:pgMar @w:gutter');
 
     // Deliberately-skipped noise is classified, not flagged.
     expect(ignored).toContain('w:proofErr');
@@ -161,14 +162,11 @@ describe('xml audit (export + round-trip baseline)', () => {
       // Read in general, but headingLevel() short-circuits on the "Heading2"
       // style id before asking for outlineLvl — unread in THIS document.
       'w:outlineLvl',
-      'w:pgMar @w:footer',
-      'w:pgMar @w:gutter',
-      'w:pgMar @w:header',
-      // NOTE w:style @w:default no longer appears: the registry now reads it
-      // for the unused-style sweep. The FUNCTIONAL gap (default styles are
-      // not applied to unstyled content) still exists — the audit just can't
-      // see an attr that is read for classification; tracked in the support
-      // plan instead.
+      // NOTE the pgMar chrome distances/gutter no longer appear (read into
+      // PageConfig), and w:style @w:default is read for the unused-style
+      // sweep. The FUNCTIONAL gap (default styles are not applied to
+      // unstyled content) still exists — the audit just can't see an attr
+      // that is read for classification; tracked in the support plan.
       'w:style @w:type',
     ]);
   });

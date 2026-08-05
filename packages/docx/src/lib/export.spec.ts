@@ -1112,7 +1112,13 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
     expect(rebuilt.attrs['page']).toEqual(page);
 
     const back = await importDocx(await exportDocx(rebuilt));
-    expect(back.page).toEqual(page);
+    // The exporter writes Word-default chrome distances (720 twips), which
+    // the importer now reads back as explicit 48px distances.
+    expect(back.page).toEqual({
+      ...page,
+      headerDistance: 48,
+      footerDistance: 48,
+    });
     expect(back.doc.child(0).textContent).toBe('after page setup');
   });
 

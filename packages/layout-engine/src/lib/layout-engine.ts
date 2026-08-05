@@ -1669,7 +1669,7 @@ function placeBlocks(
   // break with differing geometry is promoted to next-page, as Word does).
   let curPage = page;
   let { top, bottom } = bandOf(page);
-  let contentLeft = page.margin.left;
+  let contentLeft = contentLeftOf(page);
   let contentRight = page.width - page.margin.right;
 
   const pages: ResolvedPage[] = [];
@@ -1744,7 +1744,7 @@ function placeBlocks(
    *  called at a page boundary (after finalizePage, or before any content). */
   const setGeometry = (p: PageConfig) => {
     curPage = p;
-    contentLeft = p.margin.left;
+    contentLeft = contentLeftOf(p);
     contentRight = p.width - p.margin.right;
     contentWidth = contentRight - contentLeft;
     restartBand();
@@ -2288,7 +2288,14 @@ function sanitizePage(p: PageConfig): PageConfig {
     margin.right === p.margin.right &&
     margin.bottom === p.margin.bottom &&
     margin.left === p.margin.left;
-  return same ? p : { width, height, margin };
+  if (same) return p;
+  const out: PageConfig = { width, height, margin };
+  if (p.headerDistance !== undefined)
+    out.headerDistance = num(p.headerDistance, 48);
+  if (p.footerDistance !== undefined)
+    out.footerDistance = num(p.footerDistance, 48);
+  if (p.gutter !== undefined) out.gutter = num(p.gutter, 0);
+  return out;
 }
 
 function sanitizeConfig(config: LayoutConfig): LayoutConfig {
@@ -2305,7 +2312,10 @@ function sameGeom(a: PageConfig, b: PageConfig): boolean {
     a.margin.top === b.margin.top &&
     a.margin.right === b.margin.right &&
     a.margin.bottom === b.margin.bottom &&
-    a.margin.left === b.margin.left
+    a.margin.left === b.margin.left &&
+    a.headerDistance === b.headerDistance &&
+    a.footerDistance === b.footerDistance &&
+    a.gutter === b.gutter
   );
 }
 
@@ -2315,7 +2325,7 @@ export function layoutBlocks(
 ): ResolvedLayout {
   config = sanitizeConfig(config);
   const ctx = buildCtx(config);
-  const left = config.page.margin.left;
+  const left = contentLeftOf(config.page);
   const right = config.page.width - config.page.margin.right;
   // Whole-document column flow: lay every block at the column content width.
   const cols: ColumnConfig = config.columns ?? { count: 1, gap: 0 };
@@ -2462,6 +2472,13 @@ export function createLayoutCache(): LayoutCache {
 
 /** Word's default header/footer distance from the page edge (720 twips). */
 const CHROME_DISTANCE = 48;
+/** Effective chrome distances / left content edge for a page config. */
+const headerDist = (p: PageConfig): number =>
+  p.headerDistance ?? CHROME_DISTANCE;
+const footerDist = (p: PageConfig): number =>
+  p.footerDistance ?? CHROME_DISTANCE;
+const contentLeftOf = (p: PageConfig): number =>
+  p.margin.left + (p.gutter ?? 0);
 
 /** Repeating page furniture passed alongside the body document. `header`/
  *  `footer` are the default (odd-page) bands; the `*First`/`*Even` variants
@@ -2578,16 +2595,17 @@ function layoutChrome(
   return band;
 }
 
-/** Lay out a footer document pinned `CHROME_DISTANCE` from the page bottom. */
+/** Lay out a footer document pinned `dist` px from the page bottom. */
 function layoutFooterChrome(
   doc: PMNode,
   pageHeight: number,
+  dist: number,
   left: number,
   right: number,
   ctx: Ctx,
 ): ResolvedChrome {
   const flow = layoutChrome(doc, 0, left, right, ctx);
-  const topY = pageHeight - CHROME_DISTANCE - flow.height;
+  const topY = pageHeight - dist - flow.height;
   const band: ResolvedChrome = {
     lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
     tables: flow.tables,
@@ -2637,7 +2655,7 @@ export function layout(
   config = sanitizeConfig(config);
   const ctx = buildCtx(config);
   const { page } = config;
-  const left = page.margin.left;
+  const left = contentLeftOf(page);
   const right = page.width - page.margin.right;
 
   // Page chrome first — a tall header/footer pushes the body band inward. The
@@ -2655,11 +2673,11 @@ export function layout(
   };
   const layHeaders = (c: Ctx) =>
     layVariants(headerDocs, (d) =>
-      layoutChrome(d, CHROME_DISTANCE, left, right, c),
+      layoutChrome(d, headerDist(page), left, right, c),
     );
   const layFooters = (c: Ctx) =>
     layVariants(footerDocs, (d) =>
-      layoutFooterChrome(d, page.height, left, right, c),
+      layoutFooterChrome(d, page.height, footerDist(page), left, right, c),
     );
   let headers = perf.span('chrome-headers', () => layHeaders(ctx));
   let footers = perf.span('chrome-footers', () => layFooters(ctx));
@@ -2727,15 +2745,15 @@ export function layout(
       const p = sections[i].page
         ? sanitizePage(sections[i].page as PageConfig)
         : page;
-      const l = p.margin.left;
+      const l = contentLeftOf(p);
       const r = p.width - p.margin.right;
       const hb = layVariants(
         { default: cs.header, first: cs.headerFirst, even: cs.headerEven },
-        (d) => layoutChrome(d, CHROME_DISTANCE, l, r, c),
+        (d) => layoutChrome(d, headerDist(p), l, r, c),
       );
       const fb = layVariants(
         { default: cs.footer, first: cs.footerFirst, even: cs.footerEven },
-        (d) => layoutFooterChrome(d, p.height, l, r, c),
+        (d) => layoutFooterChrome(d, p.height, footerDist(p), l, r, c),
       );
       chromeSets.push({
         header: hb.default,
@@ -2764,7 +2782,7 @@ export function layout(
     // `colRight` are the cache key, so a geometry change re-measures exactly
     // the affected sections.
     const secPage = bs.page ?? page;
-    const bLeft = secPage.margin.left;
+    const bLeft = contentLeftOf(secPage);
     const bRight = secPage.width - secPage.margin.right;
     const colRight = bLeft + columnWidth(bRight - bLeft, bs.columns);
     const tag = (item: BlockItem): BlockItem => {
@@ -2894,15 +2912,15 @@ export function layout(
     let b = p.height - p.margin.bottom;
     const sh = chromeIndex != null ? setBandH[chromeIndex] : undefined;
     if (sh) {
-      if (sh.header > 0) t = Math.max(t, CHROME_DISTANCE + sh.header);
+      if (sh.header > 0) t = Math.max(t, headerDist(p) + sh.header);
       if (sh.footer > 0)
-        b = Math.min(b, p.height - CHROME_DISTANCE - sh.footer);
+        b = Math.min(b, p.height - footerDist(p) - sh.footer);
       return { top: t, bottom: b };
     }
     if (headers.default || headers.first || headers.even)
-      t = Math.max(t, CHROME_DISTANCE + maxBandHeight(headers));
+      t = Math.max(t, headerDist(p) + maxBandHeight(headers));
     if (footers.default || footers.first || footers.even)
-      b = Math.min(b, p.height - CHROME_DISTANCE - maxBandHeight(footers));
+      b = Math.min(b, p.height - footerDist(p) - maxBandHeight(footers));
     return { top: t, bottom: b };
   };
   const resolved = perf.span('placeBlocks', () =>

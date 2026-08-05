@@ -108,6 +108,8 @@ export class RenderCore {
   private docSchema: Schema = baseSchema;
   // Page geometry from the imported docx's sectPr (A4 until imported).
   private page: PageConfig = A4;
+  /** Default tab interval from the imported settings (px), if declared. */
+  private tabWidth: number | undefined;
 
   // Incremental re-layout: unchanged paragraphs skip measuring on each change.
   // Replaced wholesale when late-loading fonts invalidate every measurement.
@@ -241,6 +243,7 @@ export class RenderCore {
       titlePg,
       evenAndOdd,
       page,
+      tabWidth,
       raw,
       sectionChrome,
     } = await perf.spanAsync('importDocx', () =>
@@ -258,6 +261,7 @@ export class RenderCore {
     this.sectionChrome = sectionChrome ?? null;
     this.footnotes = footnotes;
     this.page = page;
+    this.tabWidth = tabWidth;
     // Body to lay out: the caller's restored doc when given, else the freshly
     // imported one. Fonts are measured against whichever body will actually
     // render (an edit may have introduced a family the disk doc lacked).
@@ -318,6 +322,7 @@ export class RenderCore {
           page,
           measureText: this.measureText,
           measureMetrics: this.measureMetrics,
+          ...(this.tabWidth !== undefined && { tabWidth: this.tabWidth }),
         },
         this.layoutCache,
         {

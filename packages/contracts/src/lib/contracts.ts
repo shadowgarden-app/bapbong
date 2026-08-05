@@ -5,6 +5,13 @@ export interface PageConfig {
   width: number;
   height: number;
   margin: { top: number; right: number; bottom: number; left: number };
+  /** Header/footer band distance from the page edge (w:pgMar @w:header/
+   *  @w:footer). Absent → Word's default 720 twips (48px). */
+  headerDistance?: number;
+  footerDistance?: number;
+  /** Binding gutter (w:pgMar @w:gutter) added to the left content edge.
+   *  Absent → 0. */
+  gutter?: number;
 }
 
 /** Multi-column layout (w:cols): `count` equal-width columns separated by
