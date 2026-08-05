@@ -99,9 +99,57 @@ const IGNORED_TAGS = new Set([
   // Drawing chrome around pictures (ids, stretch/crop boilerplate) — the
   // content (blip, extent, wrap, alt text) is read where it matters.
   'pic:nvPicPr',
+  'pic:cNvPicPr',
   'a:stretch',
   'wp:effectExtent',
   'wp:cNvGraphicFramePr',
+  // Non-visual shape/connector/group properties — pure editor metadata.
+  'wps:cNvSpPr',
+  'wps:cNvCnPr',
+  'wpg:cNvGrpSpPr',
+  // xfrm offsets/extents on single pictures mirror wp:extent (which IS
+  // read); groups DO read their xfrm through parseGroup.
+  'a:off',
+  'a:ext',
+  // Vendor extension lists and preset-geometry adjustment defaults.
+  'a:extLst',
+  'a:avLst',
+  // Line-end/join/effect cosmetics on outlines we already paint solid.
+  'a:headEnd',
+  'a:tailEnd',
+  'a:miter',
+  'a:round',
+  'a:lum',
+  'a:noAutofit',
+  // Shape style refs beyond a:lnRef (which IS read for outline color):
+  // effects (shadows) and themed shape text fonts are out of paint scope.
+  'a:effectRef',
+  'a:fontRef',
+  // Picture-frame geometry: Word writes prstGeom rect boilerplate on every
+  // photo; wps SHAPE prstGeom is read and drives ShapeSpec.
+  'a:prstGeom',
+  // spPr background "no fill" boilerplate on pictures (a:ln noFill IS
+  // absence-checked where outlines are painted).
+  'a:noFill',
+  // Anchor positioning we place by posOffset/align: simplePos is the
+  // legacy fallback scheme, wrapNone is the fall-through of the wrap probe.
+  'wp:simplePos',
+  'wp:wrapNone',
+  // Settings that tune Word's own editing/proofing UI, not rendering; the
+  // whole settings.xml part is carried on export.
+  'w:compat',
+  'w:decimalSymbol',
+  'w:characterSpacingControl',
+  'w:hideSpellingErrors',
+  'w:hideGrammaticalErrors',
+  'w:displayBackgroundShape',
+  'w:formProt',
+  // Hyphenation is out of layout scope by decision.
+  'w:autoHyphenation',
+  'w:hyphenationZone',
+  'w:suppressAutoHyphens',
+  // OMML is flattened to plain text by design — math defaults are moot.
+  'm:mathPr',
   // Tracked-change record of an older table grid — the current grid is read.
   'w:tblGridChange',
   // Per-cell width copies of the grid: w:tblGrid is the width authority
@@ -126,7 +174,14 @@ const IGNORED_TAGS = new Set([
 
 /** Tag prefixes skipped on purpose (markup-compat wrappers, w14/w15 extras —
  *  the w15 comments-extended part we DO read is visited, so never reported). */
-const IGNORED_TAG_PREFIXES = ['mc:', 'w14:', 'w15:', 'w16cid:', 'w16se:'];
+const IGNORED_TAG_PREFIXES = [
+  'mc:',
+  'w14:',
+  'w15:',
+  'w16cid:',
+  'w16se:',
+  'wp14:', // sizeRelH/V etc. — 2010 drawing extensions
+];
 
 function isIgnoredTag(name: string): boolean {
   if (IGNORED_TAGS.has(name)) return true;
@@ -159,7 +214,21 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     // graphicData is dispatched by its CHILD tag (pic:pic / wps:wsp), not uri.
     (tag === 'a:graphicData' && name === 'uri') ||
     // Theme scheme names ("Office", …) — gallery labels, not content.
-    (tag.startsWith('a:') && name === 'name')
+    (tag.startsWith('a:') && name === 'name') ||
+    // AlternateContent is dispatched by CHILD content (pic/wps), not by the
+    // Requires namespace list.
+    (tag.startsWith('mc:') && name === 'Requires') ||
+    // Drawing object ids/names and paint hints; export regenerates them.
+    (tag === 'pic:cNvPr' && (name === 'id' || name === 'name')) ||
+    (tag.endsWith(':spPr') && name === 'bwMode') ||
+    (tag === 'a:blip' && name === 'cstate') ||
+    (tag === 'pic:blipFill' && name === 'rotWithShape') ||
+    (tag === 'a:lnRef' && name === 'idx') ||
+    // Anchor toggles Word's own layouter consults; we place by offset/align.
+    (tag === 'wp:anchor' &&
+      ['allowOverlap', 'layoutInCell', 'locked', 'relativeHeight', 'simplePos'].includes(name)) ||
+    // CJK disambiguation hint — the explicit rFonts attrs are all read.
+    (tag === 'w:rFonts' && name === 'w:hint')
   );
 }
 
