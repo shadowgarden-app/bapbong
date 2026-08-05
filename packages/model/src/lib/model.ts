@@ -141,6 +141,13 @@ export const schema = new Schema({
         spacing: { default: null },
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
+        // w:keepNext — stay on the same page as the next block's first line.
+        keepNext: { default: false },
+        // w:keepLines — never split this paragraph across pages.
+        keepLines: { default: false },
+        // w:widowControl — Word's default is ON; false only when the document
+        // explicitly disables widow/orphan control for this paragraph.
+        widowControl: { default: true },
         // w:pBdr — { top?, bottom?, left?, right? } of BorderSide, or null.
         // Importer-set; painted as a box around the paragraph's lines.
         borders: { default: null },

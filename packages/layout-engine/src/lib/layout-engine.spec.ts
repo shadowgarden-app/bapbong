@@ -212,6 +212,64 @@ describe('layoutBlocks', () => {
     expect(textSeg.x).toBe(40); // straight after "1." (20px), no gap
   });
 
+  // Pagination keeps. Page height 100 → band y ∈ [20, 80], 16px lines: 3 fit.
+  // 15-char words wrap one per line, so word count = line count.
+  const words = (n: number) => Array.from({ length: n }, () => 'a'.repeat(15)).join(' ');
+  const keepCfg = () => config({ height: 100 });
+
+  it('widow/orphan control never strands a lone line on either side', () => {
+    // 1 filler line + a 4-line paragraph: 2 lines fit after the filler and 2
+    // move — a clean 2/2 split needs no adjustment.
+    const even = layoutBlocks([para(words(1)), para(words(4))], keepCfg());
+    expect(even.pages[0].lines).toHaveLength(3); // filler + 2
+    expect(even.pages[1].lines).toHaveLength(2);
+    // 2 filler lines + a 3-line paragraph: only 1 line would fit — an orphan —
+    // so the whole paragraph moves.
+    const orphan = layoutBlocks([para(words(2)), para(words(3))], keepCfg());
+    expect(orphan.pages[0].lines).toHaveLength(2); // filler only
+    expect(orphan.pages[1].lines).toHaveLength(3);
+    // 1 filler line + a 3-line paragraph: 2 fit but the LAST line would sit
+    // alone up top (widow) → give it company → but that strands an orphan →
+    // the whole paragraph moves.
+    const widow = layoutBlocks([para(words(1)), para(words(3))], keepCfg());
+    expect(widow.pages[0].lines).toHaveLength(1);
+    expect(widow.pages[1].lines).toHaveLength(3);
+  });
+
+  it('w:widowControl off splits wherever the band ends', () => {
+    const { pages } = layoutBlocks(
+      [para(words(1)), { ...para(words(3)), widowControl: false }],
+      keepCfg(),
+    );
+    expect(pages[0].lines).toHaveLength(3); // filler + 2 — lone tail allowed
+    expect(pages[1].lines).toHaveLength(1);
+  });
+
+  it('keepLines moves the whole paragraph instead of splitting', () => {
+    const { pages } = layoutBlocks(
+      [
+        para(words(1)),
+        { ...para(words(3)), keepLines: true, widowControl: false },
+      ],
+      keepCfg(),
+    );
+    expect(pages[0].lines).toHaveLength(1);
+    expect(pages[1].lines).toHaveLength(3);
+  });
+
+  it('keepNext keeps a heading with the opening of what follows', () => {
+    // 2 filler lines + heading + 4-line body: the heading alone still fits,
+    // but the body's orphan-legal opening (2 lines) would not — the heading
+    // moves and opens the next page with the body.
+    const { pages } = layoutBlocks(
+      [para(words(2)), { ...para(words(1)), keepNext: true }, para(words(4))],
+      keepCfg(),
+    );
+    expect(pages[0].lines).toHaveLength(2); // filler only
+    expect(pages[1].lines).toHaveLength(3); // heading + body's first 2 lines
+    expect(pages[2].lines).toHaveLength(2); // body's last 2 lines
+  });
+
   it('applies left + firstLine indent to the first line', () => {
     const block: FlowBlock = {
       type: 'paragraph',

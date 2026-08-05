@@ -268,6 +268,9 @@ function paragraphToFlow(
   const spacing = node.attrs['spacing'] as ParagraphSpacing | null;
   if (spacing) flow.spacing = spacing;
   if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
+  if (node.attrs['keepNext'] === true) flow.keepNext = true;
+  if (node.attrs['keepLines'] === true) flow.keepLines = true;
+  if (node.attrs['widowControl'] === false) flow.widowControl = false;
   const pBorders = node.attrs['borders'] as ParagraphBorders | null;
   if (pBorders) flow.borders = pBorders;
   return flow;
@@ -1492,6 +1495,10 @@ type ParaItem = {
   before?: number;
   after?: number;
   pageBreakBefore?: boolean;
+  /** Pagination keeps (w:keepNext / w:keepLines / w:widowControl off). */
+  keepNext?: boolean;
+  keepLines?: boolean;
+  widowControl?: boolean;
   /** w:pBdr — a border box painted around the paragraph's lines. */
   borders?: ParagraphBorders;
 };
@@ -1728,7 +1735,8 @@ function buildCtx(config: LayoutConfig): Ctx {
  *  vertical content bounds for a page geometry (e.g. pushed in by a tall page
  *  header/footer) — a function because sections can override the geometry. */
 function placeBlocks(
-  items: Iterable<BlockItem>,
+  // An ARRAY (not just an iterable): the keepNext look-ahead indexes forward.
+  items: BlockItem[],
   config: LayoutConfig,
   ctx: Ctx,
   bandFor?: (
@@ -2030,6 +2038,84 @@ function placeBlocks(
   const pageHasContent = () =>
     lines.length > 0 || tables.length > 0 || pageFloats.length > 0;
 
+  // ── Pagination keeps (w:keepNext / w:keepLines / w:widowControl) ────
+  const nominalH = (() => {
+    const bm = ctx.metrics ? ctx.metrics(ctx.base) : null;
+    return bm ? bm.ascent + bm.descent : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
+  })();
+  const draftsTotal = (d: LineDraft[] | null | undefined): number =>
+    d?.reduce((s, x) => s + x.height, 0) ?? 0;
+
+  /** The smallest slice of a paragraph that may legally open a band: its
+   *  first line, or the first TWO with widow control on (orphan rule) — and
+   *  the whole thing when it cannot split at all (keepLines, or ≤3 lines
+   *  under widow control, where every split strands a lone line). */
+  const minChunkH = (p: ParaItem): number => {
+    const d = p.drafts;
+    if (!d || d.length === 0) return nominalH;
+    if (p.keepLines) return draftsTotal(d);
+    if (p.widowControl === false) return d[0].height;
+    if (d.length <= 3) return draftsTotal(d);
+    return d[0].height + d[1].height;
+  };
+
+  /** Height that must follow a keepNext paragraph on its band: consecutive
+   *  keepNext blocks in full, then the minimum legal slice of the block that
+   *  ends the chain. Tables and un-drafted paragraphs approximate as one
+   *  line. */
+  const keepAheadH = (idx: number): number => {
+    let need = 0;
+    for (let j = idx + 1; j < items.length; j++) {
+      const it = items[j];
+      if (it.section) break; // a section boundary ends the chain
+      if ('para' in it) {
+        need += it.para.before ?? 0;
+        if (it.para.keepNext && it.para.drafts && j + 1 < items.length) {
+          need += draftsTotal(it.para.drafts) + (it.para.after ?? 0);
+          continue;
+        }
+        need += minChunkH(it.para);
+      } else {
+        need += nominalH;
+      }
+      break;
+    }
+    return need;
+  };
+
+  /** Emit a paragraph's pre-wrapped lines with widow/orphan control: when
+   *  the paragraph must split, neither side of the split keeps a lone line
+   *  (Word's w:widowControl, on by default). Splits force the band break
+   *  here; emitLine's own overflow check stays as the footnote-reserve
+   *  fallback. */
+  const emitParaDrafts = (drafts: LineDraft[], widowOn: boolean): void => {
+    let i = 0;
+    while (i < drafts.length) {
+      const remaining = drafts.length - i;
+      let fit = 0;
+      for (
+        let yy = y;
+        fit < remaining && yy + drafts[i + fit].height <= colBottom();
+
+      ) {
+        yy += drafts[i + fit].height;
+        fit++;
+      }
+      if (fit >= remaining) {
+        for (; i < drafts.length; i++) emitLine(drafts[i]);
+        return;
+      }
+      if (widowOn && remaining >= 2) {
+        if (remaining - fit === 1) fit = remaining - 2; // no widow up top
+        if (i === 0 && fit === 1) fit = 0; // no orphan down here
+        if (fit < 0) fit = 0;
+      }
+      if (fit === 0 && !colDirty) fit = 1; // an empty band must progress
+      for (let k = 0; k < fit; k++, i++) emitLine(drafts[i]);
+      breakBand();
+    }
+  };
+
   /** Pin a paragraph's floats relative to its start; register text exclusions. */
   const registerFloats = (flow: FlowParagraph, yPara: number) => {
     for (const f of flow.floats ?? []) {
@@ -2160,7 +2246,8 @@ function placeBlocks(
   };
 
   let firstItem = true;
-  for (const item of items) {
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
     // Section boundary: switch column flow (and break) before the block.
     if (item.section) {
       const nextPage = item.section.page ?? page;
@@ -2214,6 +2301,23 @@ function placeBlocks(
         finalizePage();
         rebalance();
       }
+      // Pagination keeps: break the band early when this paragraph
+      // (keepLines) — or this paragraph plus the head of what must follow
+      // it (keepNext) — cannot finish here but WOULD fit a fresh band.
+      // A chain taller than a whole band gives up, as Word does.
+      if (colDirty && item.para.drafts) {
+        const selfH = (item.para.before ?? 0) + draftsTotal(item.para.drafts);
+        const bandH = colBottom() - bandTop;
+        const avail = colBottom() - y;
+        const needKL = item.para.keepLines && selfH > avail && selfH <= bandH;
+        const needKN =
+          item.para.keepNext &&
+          (() => {
+            const need = selfH + (item.para.after ?? 0) + keepAheadH(idx);
+            return need > avail && need <= bandH;
+          })();
+        if (needKL || needKN) breakBand();
+      }
       // Space-before: a gap above the paragraph (collapsed away at a band top).
       if (item.para.before && colDirty) {
         y += item.para.before;
@@ -2232,7 +2336,7 @@ function placeBlocks(
         (ex) => ex.bottom > y && ex.top < y + draftsHeight,
       );
       if (drafts && !floatsAhead) {
-        for (const d of drafts) emitLine(d);
+        emitParaDrafts(drafts, item.para.widowControl !== false);
       } else {
         placeParaBanded(item.para.getFlow());
       }
@@ -2429,6 +2533,9 @@ export function layoutBlocks(
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
+              keepNext: block.keepNext,
+              keepLines: block.keepLines,
+              widowControl: block.widowControl,
               borders: block.borders,
             },
           }
@@ -2920,6 +3027,9 @@ export function layout(
         before: sp?.before,
         after: sp?.after,
         pageBreakBefore: node.attrs['pageBreakBefore'] === true,
+        keepNext: node.attrs['keepNext'] === true,
+        keepLines: node.attrs['keepLines'] === true,
+        widowControl: node.attrs['widowControl'] !== false,
         borders:
           (node.attrs['borders'] as ParagraphBorders | null) ?? undefined,
       });

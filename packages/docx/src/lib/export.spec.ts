@@ -125,8 +125,11 @@ describe('exportDocx (round-trip)', () => {
     expect(carryMark?.attrs['xml']).toBe(
       '<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>',
     );
+    // keepNext is MODELLED now (an attr, re-emitted by the exporter) — only
+    // contextualSpacing still rides the carry.
+    expect(doc.child(0).attrs['keepNext']).toBe(true);
     expect(doc.child(0).attrs['carry']).toEqual({
-      pPr: '<w:keepNext/><w:contextualSpacing/>',
+      pPr: '<w:contextualSpacing/>',
       markRPr: '<w:b/><w:sz w:val="16"/>',
     });
 
@@ -137,8 +140,10 @@ describe('exportDocx (round-trip)', () => {
     expect(xml).toContain('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
     expect(xml.match(/<w:b\/>/g)?.length).toBe(2); // run rPr + mark rPr — no dupes
     expect(xml).not.toContain('w14:glow');
-    // Paragraph: pPr extras + the paragraph-mark rPr; revision record dropped.
-    expect(xml).toContain('<w:keepNext/><w:contextualSpacing/>');
+    // Paragraph: modelled keepNext re-emitted (schema-first in pPr), the
+    // carried extra + the paragraph-mark rPr; revision record dropped.
+    expect(xml).toContain('<w:keepNext/>');
+    expect(xml).toContain('<w:contextualSpacing/>');
     expect(xml).toContain('<w:rPr><w:b/><w:sz w:val="16"/></w:rPr>');
     expect(xml).not.toContain('w:pPrChange');
     expect(xml).toContain('ab&lt;c'); // escaping intact through the trip

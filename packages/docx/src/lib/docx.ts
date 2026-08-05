@@ -762,6 +762,9 @@ const CONSUMED_PPR = new Set([
   'w:tabs',
   'w:pBdr',
   'w:pageBreakBefore',
+  'w:keepNext',
+  'w:keepLines',
+  'w:widowControl',
   'w:outlineLvl',
   'w:sectPr', // section breaks — parsed by parseBodyBlocks
   'w:rPr', // the paragraph mark's run props — carried separately (markRPr)
@@ -1054,6 +1057,15 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   let pageBreak = pbLayer
     ? isToggleOn(child(pbLayer, 'w:pageBreakBefore'))
     : false;
+  // Pagination keeps, same toggle semantics. widowControl defaults ON in
+  // Word — only an explicit off is worth an attr.
+  const toggleLayer = (name: string, dflt: boolean): boolean => {
+    const layer = lastWith(pPrChain, name);
+    return layer ? isToggleOn(child(layer, name)) : dflt;
+  };
+  const keepNext = toggleLayer('w:keepNext', false);
+  const keepLines = toggleLayer('w:keepLines', false);
+  const widowControl = toggleLayer('w:widowControl', true);
   // Where rendered inline content lands: the open field's result if we're
   // past its separate mark, the paragraph otherwise.
   const sink = (): PMNode[] =>
@@ -1216,6 +1228,9 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     spacing?: Spacing;
     tabs?: { pos: number; val: string; leader?: string }[];
     pageBreakBefore?: boolean;
+    keepNext?: boolean;
+    keepLines?: boolean;
+    widowControl?: boolean;
     heading?: number;
     styleId?: string;
     borders?: Record<string, BorderSide>;
@@ -1243,6 +1258,9 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
   if (pageBreak) attrs.pageBreakBefore = true;
+  if (keepNext) attrs.keepNext = true;
+  if (keepLines) attrs.keepLines = true;
+  if (!widowControl) attrs.widowControl = false;
   if (Object.keys(paraBorders).length > 0) attrs.borders = paraBorders;
   return ctx.schema.nodes['paragraph'].create(attrs, inline);
 }

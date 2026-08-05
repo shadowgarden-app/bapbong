@@ -158,7 +158,6 @@ describe('xml audit (export + round-trip baseline)', () => {
     // exporter started writing something the importer doesn't read back.
     const unknown = keys(audit.lastReport?.unknown ?? []).sort();
     expect(unknown).toEqual([
-      'w:keepNext',
       // Read in general, but headingLevel() short-circuits on the "Heading2"
       // style id before asking for outlineLvl — unread in THIS document.
       'w:outlineLvl',

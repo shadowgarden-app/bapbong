@@ -437,7 +437,11 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
   if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
   else if (styleId === 'Title' || styleId === 'Subtitle')
     out.push(`<w:pStyle w:val="${styleId}"/>`);
+  // CT_PPr schema order: keepNext, keepLines, pageBreakBefore, widowControl.
+  if (a['keepNext']) out.push('<w:keepNext/>');
+  if (a['keepLines']) out.push('<w:keepLines/>');
   if (a['pageBreakBefore']) out.push('<w:pageBreakBefore/>');
+  if (a['widowControl'] === false) out.push('<w:widowControl w:val="0"/>');
   const list = a['list'] as { numId: string; level: number } | null;
   if (list) {
     const outId = ctx.numIdMap.get(list.numId) ?? list.numId;

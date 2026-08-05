@@ -1464,6 +1464,34 @@ describe('importDocx', () => {
     expect(markMap(p.child(0).marks).link.href).toBe('#_Toc1');
   });
 
+  it('resolves pagination keeps through the style cascade (toggle-aware)', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Glue">
+        <w:pPr><w:keepNext/><w:keepLines/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Glue"/></w:pPr><w:r><w:t>from style</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Glue"/><w:keepNext w:val="0"/></w:pPr><w:r><w:t>inline off wins</w:t></w:r></w:p>
+      <w:p><w:pPr><w:widowControl w:val="0"/></w:pPr><w:r><w:t>widows allowed</w:t></w:r></w:p>
+      <w:p><w:r><w:t>defaults</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs).toMatchObject({
+      keepNext: true,
+      keepLines: true,
+    });
+    expect(doc.child(1).attrs.keepNext).toBe(false); // inline w:val="0" wins
+    expect(doc.child(1).attrs.keepLines).toBe(true); // untouched by the override
+    expect(doc.child(2).attrs.widowControl).toBe(false);
+    expect(doc.child(3).attrs).toMatchObject({
+      keepNext: false,
+      keepLines: false,
+      widowControl: true,
+    });
+  });
+
   it('imports w:smallCaps and w:dstrike as marks (toggle-aware)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

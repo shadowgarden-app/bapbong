@@ -279,6 +279,14 @@ export interface FlowParagraph {
   /** Force this paragraph to start a new page (w:pageBreakBefore / a page
    *  break run at its head). */
   pageBreakBefore?: boolean;
+  /** w:keepNext — stay on the same page as the next block's first line. */
+  keepNext?: boolean;
+  /** w:keepLines — never split this paragraph across pages when it fits a
+   *  full band. */
+  keepLines?: boolean;
+  /** w:widowControl — false disables widow/orphan control (Word's default
+   *  is ON; absent means on). */
+  widowControl?: boolean;
   /** Absolute PM position where the paragraph's content starts (nodePos + 1). */
   pos?: number;
   /** Absolute PM position after the paragraph's last character. */
