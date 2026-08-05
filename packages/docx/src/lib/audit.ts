@@ -149,6 +149,8 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'w:lvl' && (name === 'w:tplc' || name === 'w:tentative')) ||
     // Rels are resolved by Id; the relationship Type is package plumbing.
     (tag === 'Relationship' && name === 'Type') ||
+    // Word's visited-link tracking flag — UI state, not content.
+    (tag === 'w:hyperlink' && name === 'w:history') ||
     // Drawing object ids/names are display metadata; export regenerates them.
     (tag === 'wp:docPr' && (name === 'id' || name === 'name')) ||
     // graphicData is dispatched by its CHILD tag (pic:pic / wps:wsp), not uri.

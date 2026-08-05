@@ -1377,6 +1377,57 @@ describe('importDocx', () => {
     );
   });
 
+  it('runs the field machine inside w:hyperlink (TOC PAGEREF entries)', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:hyperlink w:anchor="_Toc1" w:history="1">
+          <w:r><w:t>Chapter one</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+          <w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r>
+          <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+          <w:r><w:t>7</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        </w:hyperlink>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    // Instruction plumbing dropped, entry text + cached page number kept —
+    // and the result keeps the hyperlink (same marks ⇒ PM merges the nodes).
+    expect(p.textContent).toBe('Chapter one7');
+    expect(markMap(p.child(0).marks).link.href).toBe('#_Toc1');
+  });
+
+  it('keeps cached results of nested and cross-paragraph fields (TOC)', async () => {
+    // Word's real TOC shape: the TOC field OPENS in the first entry paragraph
+    // and its end lives paragraphs later; each entry nests a PAGEREF field.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+        <w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h </w:instrText></w:r>
+        <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+        <w:hyperlink w:anchor="_Toc1">
+          <w:r><w:t>Entry one</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+          <w:r><w:instrText> PAGEREF _Toc1 </w:instrText></w:r>
+          <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+          <w:r><w:t>3</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        </w:hyperlink>
+      </w:p>
+      <w:p>
+        <w:hyperlink w:anchor="_Toc2"><w:r><w:t>Entry two</w:t></w:r></w:hyperlink>
+        <w:r><w:fldChar w:fldCharType="end"/></w:r>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    expect(doc.child(0).textContent).toBe('Entry one3');
+    expect(doc.child(1).textContent).toBe('Entry two');
+    expect(markMap(doc.child(0).child(0).marks).link.href).toBe('#_Toc1');
+  });
+
   it('falls back to first-row dxa w:tcW when w:tblGrid is missing', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

@@ -852,11 +852,18 @@ function pageFieldNode(
     .mark(runMarks(formatRun, paraBase, ctx, null));
 }
 
-/** State for a complex field (w:fldChar begin … instrText … separate … end). */
+/** State for a complex field (w:fldChar begin … instrText … separate … end).
+ *  Fields NEST (a TOC field wraps a PAGEREF per entry) — `parent` is the
+ *  enclosing open field, and result content renders eagerly into `result`
+ *  so an inner field's output lands inside the outer field's result. */
 interface FieldState {
   instr: string;
-  resultRuns: OoxmlNode[];
+  /** Rendered result content (cached field result, kept as-is). */
+  result: PMNode[];
+  /** First result run's XML — formatting source for PAGE/NUMPAGES nodes. */
+  firstResultRun?: OoxmlNode;
   phase: 'instr' | 'result';
+  parent: FieldState | null;
 }
 
 /** Heading level (1–6) for a paragraph, from its style id ("Heading1"…) or an
@@ -994,85 +1001,96 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   let pageBreak = pbLayer
     ? isToggleOn(child(pbLayer, 'w:pageBreakBefore'))
     : false;
+  // Where rendered inline content lands: the open field's result if we're
+  // past its separate mark, the paragraph otherwise.
+  const sink = (): PMNode[] =>
+    field && field.phase === 'result' ? field.result : inline;
+  const emitRun = (run: OoxmlNode, href: string | null): void => {
+    if (field && field.phase === 'result' && !field.firstResultRun)
+      field.firstResultRun = run;
+    sink().push(...runToInline(run, paraBase, ctx, href));
+  };
+
+  // One run through the field state machine. `href` marks runs living inside
+  // a w:hyperlink wrapper — TOC entries put whole PAGEREF fields there, so
+  // the machine must run for them too (they used to bypass it entirely).
+  const handleRun = (node: OoxmlNode, href: string | null): void => {
+    if (hasPageBreak(node)) pageBreak = true;
+    const fldChars = children(node, 'w:fldChar');
+    if (fldChars.length === 0) {
+      if (field && field.phase === 'instr') {
+        field.instr += children(node, 'w:instrText')
+          .map((t) => t.text)
+          .join('');
+        // Anything else in an instruction-side run is field plumbing we
+        // drop as Word does — consumed by design, not a coverage gap.
+        audit.markSubtree(node);
+        return;
+      }
+      emitRun(node, href);
+      return;
+    }
+    // The run carries fldChar(s). Some producers (Google Docs) pack
+    // begin + instrText + separate + end into a SINGLE run — treating the
+    // run as one fldChar (the old shape) left the field open forever and
+    // swallowed the rest of the paragraph. Walk the run's children in
+    // order through the same state machine instead.
+    const rPr = child(node, 'w:rPr');
+    // A marker-only run's rPr formats the invisible field mark — dropped by
+    // design (any actual content is re-read through the synth run below).
+    if (rPr) audit.markSubtree(rPr);
+    let plain: OoxmlNode[] = [];
+    const flushPlain = () => {
+      if (plain.length === 0) return;
+      const synth: OoxmlNode = {
+        name: 'w:r',
+        attrs: node.attrs,
+        children: rPr ? [rPr, ...plain] : plain,
+        text: '',
+      };
+      // phase 'instr': stray content between begin and separate is
+      // instruction-side noise — dropped, as Word does.
+      if (!field || field.phase === 'result') emitRun(synth, href);
+      plain = [];
+    };
+    for (const c of node.children) {
+      if (c.name === 'w:fldChar' || c.name === 'w:instrText') audit.mark(c);
+      if (c.name === 'w:fldChar') {
+        const t = attrOf(c, 'w:fldCharType');
+        if (t === 'begin') {
+          flushPlain();
+          field = { instr: '', result: [], phase: 'instr', parent: field };
+        } else if (t === 'separate') {
+          if (field) field.phase = 'result';
+        } else if (t === 'end') {
+          flushPlain(); // result text inside this run, before the end mark
+          if (field) {
+            const done = field;
+            field = done.parent;
+            const kind = fieldKind(done.instr);
+            // PAGE/NUMPAGES: the cached result is recomputed by our layout —
+            // only the first result run's formatting is read; everything
+            // else keeps the cached rendering.
+            sink().push(
+              ...(kind
+                ? [pageFieldNode(kind, done.firstResultRun, paraBase, ctx)]
+                : done.result),
+            );
+          }
+        }
+      } else if (c.name === 'w:instrText') {
+        if (field && field.phase === 'instr') field.instr += c.text;
+      } else if (c.name !== 'w:rPr') {
+        plain.push(c);
+      }
+    }
+    flushPlain();
+  };
+
   for (const node of effectiveChildren(p.children)) {
     if (PARA_CHILD_TAGS.has(node.name)) audit.mark(node);
     if (node.name === 'w:r') {
-      if (hasPageBreak(node)) pageBreak = true;
-      const fldChars = children(node, 'w:fldChar');
-      if (fldChars.length === 0) {
-        if (field) {
-          if (field.phase === 'instr') {
-            field.instr += children(node, 'w:instrText')
-              .map((t) => t.text)
-              .join('');
-            // Anything else in an instruction-side run is field plumbing we
-            // drop as Word does — consumed by design, not a coverage gap.
-            audit.markSubtree(node);
-          } else {
-            field.resultRuns.push(node);
-          }
-          continue;
-        }
-        inline.push(...runToInline(node, paraBase, ctx, null));
-        continue;
-      }
-      // The run carries fldChar(s). Some producers (Google Docs) pack
-      // begin + instrText + separate + end into a SINGLE run — treating the
-      // run as one fldChar (the old shape) left the field open forever and
-      // swallowed the rest of the paragraph. Walk the run's children in
-      // order through the same state machine instead.
-      const rPr = child(node, 'w:rPr');
-      let plain: OoxmlNode[] = [];
-      const flushPlain = () => {
-        if (plain.length === 0) return;
-        const synth: OoxmlNode = {
-          name: 'w:r',
-          attrs: node.attrs,
-          children: rPr ? [rPr, ...plain] : plain,
-          text: '',
-        };
-        if (field && field.phase === 'result') field.resultRuns.push(synth);
-        else if (!field)
-          inline.push(...runToInline(synth, paraBase, ctx, null));
-        // phase 'instr': stray content between begin and separate is
-        // instruction-side noise — dropped, as Word does.
-        plain = [];
-      };
-      for (const c of node.children) {
-        if (c.name === 'w:fldChar' || c.name === 'w:instrText') audit.mark(c);
-        if (c.name === 'w:fldChar') {
-          const t = attrOf(c, 'w:fldCharType');
-          if (t === 'begin') {
-            flushPlain();
-            field = { instr: '', resultRuns: [], phase: 'instr' };
-          } else if (t === 'separate') {
-            if (field) field.phase = 'result';
-          } else if (t === 'end') {
-            flushPlain(); // result text inside this run, before the end mark
-            if (field) {
-              const kind = fieldKind(field.instr);
-              if (kind) {
-                // PAGE/NUMPAGES: the cached result text is recomputed by our
-                // layout — only resultRuns[0]'s formatting is read; the rest
-                // is a deliberate drop, not lost content.
-                for (const r of field.resultRuns) audit.markSubtree(r);
-                inline.push(
-                  pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
-                );
-              } else {
-                for (const r of field.resultRuns)
-                  inline.push(...runToInline(r, paraBase, ctx, null));
-              }
-              field = null;
-            }
-          }
-        } else if (c.name === 'w:instrText') {
-          if (field && field.phase === 'instr') field.instr += c.text;
-        } else if (c.name !== 'w:rPr') {
-          plain.push(c);
-        }
-      }
-      flushPlain();
+      handleRun(node, null);
     } else if (node.name === 'w:fldSimple') {
       const kind = fieldKind(attrOf(node, 'w:instr') ?? '');
       const resultRuns = children(node, 'w:r');
@@ -1091,7 +1109,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       const anchor = attrOf(node, 'w:anchor');
       const href = rel?.target ?? (anchor ? `#${anchor}` : null);
       for (const run of children(node, 'w:r')) {
-        inline.push(...runToInline(run, paraBase, ctx, href));
+        handleRun(run, href);
       }
     } else if (node.name === 'm:oMath' || node.name === 'm:oMathPara') {
       // OMML equations, flattened to a plain-text run (v1: content over
@@ -1115,6 +1133,14 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       const id = Number(attrOf(node, 'w:id'));
       if (!Number.isNaN(id)) ctx.comments.active.delete(id);
     }
+  }
+  // A field still open here spans paragraphs (the TOC field wraps ALL its
+  // entry paragraphs; each parseParagraph sees only its slice) — keep the
+  // cached result content instead of dropping it.
+  while (field) {
+    const done: FieldState = field;
+    field = done.parent;
+    sink().push(...done.result);
   }
   // w:pBdr from the most-derived cascade layer: keep visible sides only
   // ('between' isn't modelled; w:val="none" sides drop out).
