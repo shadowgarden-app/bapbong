@@ -36,6 +36,7 @@ import {
   commentSchema,
   schema,
   type Align,
+  type FieldInfo,
   type Indent,
   type ListInfo,
   type NumberingDefs,
@@ -52,6 +53,8 @@ import {
   parseRunProps,
   parseXml,
   RunProps,
+  serializeOoxml,
+  shdFill,
 } from './ooxml.js';
 import type {
   BorderSide,
@@ -59,10 +62,16 @@ import type {
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
+import { audit } from './audit.js';
 import { buildStyleRegistry, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
-import { buildThemeResolver, ThemeResolver } from './theme.js';
+import {
+  buildThemeFontResolver,
+  buildThemeResolver,
+  ThemeFontResolver,
+  ThemeResolver,
+} from './theme.js';
 
 export type DocxInput = ArrayBuffer | Uint8Array | Blob;
 
@@ -76,6 +85,12 @@ export interface PageConfig {
   width: number;
   height: number;
   margin: { top: number; right: number; bottom: number; left: number };
+  /** Header/footer band distance from the page edge (w:pgMar @w:header/
+   *  @w:footer). Absent → Word's default 720 twips (48px). */
+  headerDistance?: number;
+  footerDistance?: number;
+  /** Binding gutter (w:pgMar @w:gutter) added to the left content edge. */
+  gutter?: number;
 }
 
 /** A document comment (structurally a bapbong-contracts CommentData). */
@@ -137,6 +152,9 @@ export interface DocxImport {
   comments: CommentData[];
   /** Page size + margins from w:sectPr (A4 @96dpi when unspecified). */
   page: PageConfig;
+  /** Default tab interval in px (settings w:defaultTabStop); absent → the
+   *  layout engine's 0.5" default. */
+  tabWidth?: number;
   /** The loaded source package — pass to `exportDocx(doc, { carry })` so the
    *  parts bapbong doesn't model yet (styles, numbering, headers/footers, …)
    *  survive the round-trip instead of being dropped. */
@@ -177,6 +195,7 @@ interface Ctx {
   rels: Map<string, Relationship>;
   media: Map<string, string>; // zip path → data URL
   resolveTheme: ThemeResolver;
+  resolveFont: ThemeFontResolver;
   notes: NotesRegistry;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
@@ -185,6 +204,13 @@ interface Ctx {
   /** Page content-box width in px (page minus side margins) — what
    *  percentage-based table widths (w:tblW/w:tcW type="pct") resolve against. */
   contentWidth: number;
+  /** Generated fields open across paragraph boundaries. A TOC field begins in
+   *  its first entry's paragraph and closes many paragraphs later, so the span
+   *  can't live in parseParagraph's local state: while this stack is non-empty
+   *  every paragraph parsed belongs to the innermost field and is stamped with
+   *  that SHARED object — identity is what marks the span (see the model's
+   *  `fieldAt`). */
+  openFields: FieldInfo[];
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -225,6 +251,8 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   if (p.italic) marks.push(ctx.schema.marks['em'].create());
   if (p.underline) marks.push(ctx.schema.marks['underline'].create());
   if (p.strike) marks.push(ctx.schema.marks['strike'].create());
+  if (p.dstrike) marks.push(ctx.schema.marks['dstrike'].create());
+  if (p.smallCaps) marks.push(ctx.schema.marks['smallCaps'].create());
   if (p.color)
     marks.push(ctx.schema.marks['textColor'].create({ color: p.color }));
   if (p.sizePt !== undefined)
@@ -238,25 +266,40 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   return marks;
 }
 
-/** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode. Unknown codes
- *  map to the raw code point; symbol-font fidelity is out of scope. */
+/** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode equivalents
+ *  that render in ANY text font. */
 const SYMBOL_MAP: Record<string, string> = {
   F0B7: '•',
   F06C: '●',
+  F06E: '■',
+  F06F: '□',
+  F075: '◆',
   F0A7: '▪',
   F0A8: '▫',
   F0FC: '✔',
   F0FB: '✗',
   F0E0: '→',
+  F04A: '☺',
+  F04B: '😐',
+  F04C: '☹',
+  F04D: '💣',
+  F04E: '☠',
+  F051: '✈',
 };
-function symbolChar(code: string | undefined): string {
-  if (!code) return '';
+/** A w:sym char: mapped codes become font-independent Unicode; unknown codes
+ *  keep their PUA code point and remember the symbol font — the caller tags
+ *  them with a fontFamily mark so the glyph renders where the font exists
+ *  (and survives a save either way). */
+function symbolChar(
+  code: string | undefined,
+  font: string | undefined,
+): { text: string; font?: string } {
+  if (!code) return { text: '' };
   const upper = code.toUpperCase();
-  if (SYMBOL_MAP[upper]) return SYMBOL_MAP[upper];
+  if (SYMBOL_MAP[upper]) return { text: SYMBOL_MAP[upper] };
   const n = parseInt(code, 16);
-  return Number.isNaN(n)
-    ? ''
-    : String.fromCodePoint(n >= 0xf000 ? n - 0xf000 + 0x20 : n);
+  if (Number.isNaN(n)) return { text: '' };
+  return { text: String.fromCodePoint(n), ...(font && { font }) };
 }
 
 /** Whether a run carries an explicit page break (w:br w:type="page"). */
@@ -273,8 +316,13 @@ function hasPageBreak(run: OoxmlNode): boolean {
 function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
   const out: OoxmlNode[] = [];
   for (const node of nodes) {
-    if (node.name === 'w:del' || node.name === 'w:moveFrom') continue;
+    if (node.name === 'w:del' || node.name === 'w:moveFrom') {
+      // Deliberately dropped (accept-all-changes view) — subtree included.
+      audit.markSubtree(node);
+      continue;
+    }
     if (node.name === 'w:ins' || node.name === 'w:moveTo') {
+      audit.mark(node);
       out.push(...effectiveChildren(node.children));
     } else if (node.name === 'w:sdt') {
       out.push(...effectiveChildren(unwrapSdt([node])));
@@ -293,6 +341,7 @@ function unwrapSdt(nodes: OoxmlNode[]): OoxmlNode[] {
   const out: OoxmlNode[] = [];
   for (const node of nodes) {
     if (node.name === 'w:sdt') {
+      audit.mark(node);
       const content = child(node, 'w:sdtContent');
       if (content) out.push(...unwrapSdt(content.children));
     } else {
@@ -301,6 +350,17 @@ function unwrapSdt(nodes: OoxmlNode[]): OoxmlNode[] {
   }
   return out;
 }
+
+// Run children the loop below consumes (page-type w:br is handled at the
+// paragraph level via hasPageBreak, but it IS handled — audit-marked here).
+const RUN_CHILD_TAGS = new Set([
+  'w:t',
+  'w:tab',
+  'w:sym',
+  'w:footnoteReference',
+  'w:endnoteReference',
+  'w:br',
+]);
 
 /** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
  *  (page breaks are handled at the paragraph level, not here). */
@@ -318,10 +378,26 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     buf = '';
   };
   for (const node of run.children) {
+    if (RUN_CHILD_TAGS.has(node.name)) audit.mark(node);
     if (node.name === 'w:t') buf += node.text;
     else if (node.name === 'w:tab') buf += '\t';
-    else if (node.name === 'w:sym') buf += symbolChar(attrOf(node, 'w:char'));
-    else if (
+    else if (node.name === 'w:sym') {
+      const sym = symbolChar(attrOf(node, 'w:char'), attrOf(node, 'w:font'));
+      if (!sym.text) continue;
+      if (sym.font) {
+        // Unmapped symbol: its glyph lives in the symbol font's PUA range —
+        // switch just this character to that font.
+        flush();
+        out.push(
+          ctx.schema.text(sym.text, [
+            ...marks.filter((m) => m.type.name !== 'fontFamily'),
+            ctx.schema.marks['fontFamily'].create({ family: sym.font }),
+          ]),
+        );
+      } else {
+        buf += sym.text;
+      }
+    } else if (
       node.name === 'w:footnoteReference' ||
       node.name === 'w:endnoteReference'
     ) {
@@ -657,6 +733,113 @@ function parseTextbox(
   return inset ? { paragraphs, inset } : { paragraphs };
 }
 
+// ── carry-through fidelity ──────────────────────────────────────────
+// Body XML is REGENERATED on export, so any property the model doesn't
+// represent would be lost the moment a customer saves. Unmodelled rPr/pPr
+// children are therefore preserved verbatim (raw XML on a mark / paragraph
+// attr) and spliced back by the exporter. See model.ts `carryRPr` / `carry`.
+
+/** rPr children whose VALUE already lives in the model (re-emitted from
+ *  marks on export) — carrying them too would duplicate or contradict. */
+const CONSUMED_RPR = new Set([
+  'w:b',
+  'w:i',
+  'w:u',
+  'w:strike',
+  'w:dstrike',
+  'w:smallCaps',
+  'w:color',
+  'w:sz',
+  'w:rFonts',
+  'w:vertAlign',
+  'w:highlight',
+  'w:shd',
+  // w:rStyle: resolved into the cascade. NOT carried on purpose — re-emitting
+  // it beside flattened direct props would resurrect style formatting the
+  // user removed (style bold + user unbolds → bold comes back). Known loss.
+  'w:rStyle',
+]);
+
+/** Inline pPr children the model represents (or handles elsewhere). */
+const CONSUMED_PPR = new Set([
+  'w:pStyle',
+  'w:numPr',
+  'w:jc',
+  'w:ind',
+  'w:spacing',
+  'w:tabs',
+  'w:pBdr',
+  'w:pageBreakBefore',
+  'w:keepNext',
+  'w:keepLines',
+  'w:widowControl',
+  'w:outlineLvl',
+  'w:sectPr', // section breaks — parsed by parseBodyBlocks
+  'w:rPr', // the paragraph mark's run props — carried separately (markRPr)
+]);
+
+/** tblPr children the model represents and re-emits. Everything else —
+ *  including w:tblStyle — is carried: unlike w:rStyle (whose re-emit could
+ *  resurrect character formatting the user removed via the always-visible
+ *  toggle buttons), table styles are rarely edited away in-app, and dropping
+ *  the link visibly strips banding/theme colors the moment a customer saves. */
+const CONSUMED_TBLPR = new Set(['w:tblBorders', 'w:tblCellMar', 'w:jc']);
+
+/** trPr children the model represents (header / height / cantSplit). */
+const CONSUMED_TRPR = new Set(['w:tblHeader', 'w:trHeight', 'w:cantSplit']);
+
+/** tcPr children the model represents. */
+const CONSUMED_TCPR = new Set([
+  'w:tcW',
+  'w:gridSpan',
+  'w:vMerge',
+  'w:shd',
+  'w:vAlign',
+  'w:tcBorders',
+  'w:tcMar',
+]);
+
+/** Property records of tracked changes: after the user edits, replaying them
+ *  would be a lie. Never carried (the accept-all view dropped their runs). */
+const CARRY_NEVER = new Set([
+  'w:rPrChange',
+  'w:pPrChange',
+  'w:sectPrChange',
+  'w:tblPrChange',
+  'w:trPrChange',
+  'w:tcPrChange',
+  'w:tblGridChange',
+]);
+
+// Carried fragments are embedded into OUR generated document.xml, whose root
+// declares a fixed namespace set — only elements/attrs that stay well-formed
+// there may pass. (w14:/wp14: etc. would be undeclared → invalid XML.)
+const CARRY_FILTER = {
+  element: (name: string) => name.startsWith('w:') && !CARRY_NEVER.has(name),
+  attr: (name: string) =>
+    name.startsWith('w:') || name === 'xml:space' || !name.includes(':'),
+};
+
+/** The unmodelled children of a property bag as one XML string (original
+ *  order), or null. Carried nodes count as consumed for the audit — they are
+ *  preserved, not lost; remaining RENDER gaps are tracked in the plan. */
+function collectCarry(
+  bag: OoxmlNode | undefined,
+  consumed: Set<string>,
+): string | null {
+  if (!bag) return null;
+  let out = '';
+  for (const c of bag.children) {
+    if (consumed.has(c.name) || !CARRY_FILTER.element(c.name)) continue;
+    const xml = serializeOoxml(c, CARRY_FILTER);
+    if (xml) {
+      out += xml;
+      audit.markSubtree(c);
+    }
+  }
+  return out || null;
+}
+
 /** Effective marks for a run (docDefaults+paraStyle → run style → inline rPr). */
 function runMarks(
   run: OoxmlNode | undefined,
@@ -669,9 +852,15 @@ function runMarks(
   const effective = [
     paraBase,
     ctx.styles.resolveStyle(rStyleId),
-    parseRunProps(rPr, ctx.resolveTheme),
+    parseRunProps(rPr, ctx.resolveTheme, ctx.resolveFont),
   ].reduce(mergeRunProps, {} as RunProps);
   const marks = propsToMarks(effective, ctx);
+  // Unmodelled INLINE rPr children (w:rtl, w:kern, w:szCs, …) ride a carry
+  // mark so a save keeps them. Style-layer properties stay in styles.xml.
+  const carryXml = collectCarry(rPr, CONSUMED_RPR);
+  if (carryXml && ctx.schema.marks['carryRPr']) {
+    marks.push(ctx.schema.marks['carryRPr'].create({ xml: carryXml }));
+  }
   if (href) marks.push(ctx.schema.marks['link'].create({ href }));
   // Comments active over this run (w:commentRangeStart/End) become a comment
   // mark — only when the schema in use actually has it (the comment plugin
@@ -705,6 +894,13 @@ function fieldKind(instr: string): 'page' | 'pages' | null {
   return null;
 }
 
+/** Kind for a field whose result SPANS paragraphs. Only the table of contents
+ *  is modelled by name (its entries are regenerated on update); anything else
+ *  is still generated content and shades the same, just anonymously. */
+function fieldSpanKind(instr: string): string {
+  return /^\s*TOC\b/i.test(instr) ? 'toc' : 'field';
+}
+
 /** A page_field node formatted like `formatRun` (the field's result run). */
 function pageFieldNode(
   kind: 'page' | 'pages',
@@ -717,11 +913,18 @@ function pageFieldNode(
     .mark(runMarks(formatRun, paraBase, ctx, null));
 }
 
-/** State for a complex field (w:fldChar begin … instrText … separate … end). */
+/** State for a complex field (w:fldChar begin … instrText … separate … end).
+ *  Fields NEST (a TOC field wraps a PAGEREF per entry) — `parent` is the
+ *  enclosing open field, and result content renders eagerly into `result`
+ *  so an inner field's output lands inside the outer field's result. */
 interface FieldState {
   instr: string;
-  resultRuns: OoxmlNode[];
+  /** Rendered result content (cached field result, kept as-is). */
+  result: PMNode[];
+  /** First result run's XML — formatting source for PAGE/NUMPAGES nodes. */
+  firstResultRun?: OoxmlNode;
   phase: 'instr' | 'result';
+  parent: FieldState | null;
 }
 
 /** Heading level (1–6) for a paragraph, from its style id ("Heading1"…) or an
@@ -814,6 +1017,16 @@ function flattenOmml(node: OoxmlNode): string {
   }
 }
 
+// Paragraph children the loop in parseParagraph consumes (w:pPr is marked by
+// the child() accessor; OMML branches are subtree-marked where flattened).
+const PARA_CHILD_TAGS = new Set([
+  'w:r',
+  'w:fldSimple',
+  'w:hyperlink',
+  'w:commentRangeStart',
+  'w:commentRangeEnd',
+]);
+
 function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const pPr = child(p, 'w:pPr');
   const pStyleId = attrOf(child(pPr, 'w:pStyle'), 'w:val');
@@ -830,94 +1043,148 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     ...ctx.styles.resolveStylePPr(pStyleId),
     pPr,
   ];
-  const list = parseList(lastWith(pPrChain, 'w:numPr'));
-  if (list) {
+  const parsedList = parseList(lastWith(pPrChain, 'w:numPr'));
+  let list: ListInfo | null = null;
+  if (parsedList) {
+    const { explicitLevel, ...info } = parsedList;
+    list = info;
+    // Numbered heading styles: a lvl carrying w:pStyle claims paragraphs of
+    // that style for ITS level. Only a written w:ilvl (direct intent) wins
+    // over the link — the style-chain numPr usually has none.
+    if (!explicitLevel && pStyleId !== undefined) {
+      const linked = ctx.numbering.levelForStyle(info.numId, pStyleId);
+      if (linked !== undefined) list.level = linked;
+    }
     const lvlPPr = ctx.numbering.levelPPr(list.numId, list.level);
     if (lvlPPr) pPrChain.splice(pPrChain.length - 1, 0, lvlPPr);
   }
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
-  const spacing = resolveSpacing(pPrChain);
+  const spacing = resolveSpacing(pPrChain, list !== null);
   const tabs = resolveTabs(pPrChain);
   const heading = headingLevel(pStyleId, pPrChain);
 
   const inline: PMNode[] = [];
+  let bookmarks: string[] | null = null;
+  // The generated field this paragraph sits in: one already open when it
+  // starts, else one it opens itself (resolved after the run loop).
+  const fieldAtStart = ctx.openFields[0] ?? null;
   let field: FieldState | null = null;
-  let pageBreak = lastWith(pPrChain, 'w:pageBreakBefore') !== undefined;
-  for (const node of effectiveChildren(p.children)) {
-    if (node.name === 'w:r') {
-      if (hasPageBreak(node)) pageBreak = true;
-      const fldChars = children(node, 'w:fldChar');
-      if (fldChars.length === 0) {
-        if (field) {
-          if (field.phase === 'instr') {
-            field.instr += children(node, 'w:instrText')
-              .map((t) => t.text)
-              .join('');
-          } else {
-            field.resultRuns.push(node);
-          }
-          continue;
-        }
-        inline.push(...runToInline(node, paraBase, ctx, null));
-        continue;
+  // Toggle-valued: w:pageBreakBefore w:val="false" (an override cancelling an
+  // inherited break) must count as OFF — presence alone read it backwards.
+  const pbLayer = lastWith(pPrChain, 'w:pageBreakBefore');
+  let pageBreak = pbLayer
+    ? isToggleOn(child(pbLayer, 'w:pageBreakBefore'))
+    : false;
+  // Pagination keeps, same toggle semantics. widowControl defaults ON in
+  // Word — only an explicit off is worth an attr.
+  const toggleLayer = (name: string, dflt: boolean): boolean => {
+    const layer = lastWith(pPrChain, name);
+    return layer ? isToggleOn(child(layer, name)) : dflt;
+  };
+  const keepNext = toggleLayer('w:keepNext', false);
+  const keepLines = toggleLayer('w:keepLines', false);
+  const widowControl = toggleLayer('w:widowControl', true);
+  // Where rendered inline content lands: the open field's result if we're
+  // past its separate mark, the paragraph otherwise.
+  const sink = (): PMNode[] =>
+    field && field.phase === 'result' ? field.result : inline;
+  const emitRun = (run: OoxmlNode, href: string | null): void => {
+    if (field && field.phase === 'result' && !field.firstResultRun)
+      field.firstResultRun = run;
+    sink().push(...runToInline(run, paraBase, ctx, href));
+  };
+
+  // One run through the field state machine. `href` marks runs living inside
+  // a w:hyperlink wrapper — TOC entries put whole PAGEREF fields there, so
+  // the machine must run for them too (they used to bypass it entirely).
+  const handleRun = (node: OoxmlNode, href: string | null): void => {
+    if (hasPageBreak(node)) pageBreak = true;
+    const fldChars = children(node, 'w:fldChar');
+    if (fldChars.length === 0) {
+      if (field && field.phase === 'instr') {
+        field.instr += children(node, 'w:instrText')
+          .map((t) => t.text)
+          .join('');
+        // Anything else in an instruction-side run is field plumbing we
+        // drop as Word does — consumed by design, not a coverage gap.
+        audit.markSubtree(node);
+        return;
       }
-      // The run carries fldChar(s). Some producers (Google Docs) pack
-      // begin + instrText + separate + end into a SINGLE run — treating the
-      // run as one fldChar (the old shape) left the field open forever and
-      // swallowed the rest of the paragraph. Walk the run's children in
-      // order through the same state machine instead.
-      const rPr = child(node, 'w:rPr');
-      let plain: OoxmlNode[] = [];
-      const flushPlain = () => {
-        if (plain.length === 0) return;
-        const synth: OoxmlNode = {
-          name: 'w:r',
-          attrs: node.attrs,
-          children: rPr ? [rPr, ...plain] : plain,
-          text: '',
-        };
-        if (field && field.phase === 'result') field.resultRuns.push(synth);
-        else if (!field)
-          inline.push(...runToInline(synth, paraBase, ctx, null));
-        // phase 'instr': stray content between begin and separate is
-        // instruction-side noise — dropped, as Word does.
-        plain = [];
+      emitRun(node, href);
+      return;
+    }
+    // The run carries fldChar(s). Some producers (Google Docs) pack
+    // begin + instrText + separate + end into a SINGLE run — treating the
+    // run as one fldChar (the old shape) left the field open forever and
+    // swallowed the rest of the paragraph. Walk the run's children in
+    // order through the same state machine instead.
+    const rPr = child(node, 'w:rPr');
+    // A marker-only run's rPr formats the invisible field mark — dropped by
+    // design (any actual content is re-read through the synth run below).
+    if (rPr) audit.markSubtree(rPr);
+    let plain: OoxmlNode[] = [];
+    const flushPlain = () => {
+      if (plain.length === 0) return;
+      const synth: OoxmlNode = {
+        name: 'w:r',
+        attrs: node.attrs,
+        children: rPr ? [rPr, ...plain] : plain,
+        text: '',
       };
-      for (const c of node.children) {
-        if (c.name === 'w:fldChar') {
-          const t = attrOf(c, 'w:fldCharType');
-          if (t === 'begin') {
-            flushPlain();
-            field = { instr: '', resultRuns: [], phase: 'instr' };
-          } else if (t === 'separate') {
-            if (field) field.phase = 'result';
-          } else if (t === 'end') {
-            flushPlain(); // result text inside this run, before the end mark
-            if (field) {
-              const kind = fieldKind(field.instr);
-              if (kind) {
-                inline.push(
-                  pageFieldNode(kind, field.resultRuns[0], paraBase, ctx),
-                );
-              } else {
-                for (const r of field.resultRuns)
-                  inline.push(...runToInline(r, paraBase, ctx, null));
-              }
-              field = null;
-            }
+      // phase 'instr': stray content between begin and separate is
+      // instruction-side noise — dropped, as Word does.
+      if (!field || field.phase === 'result') emitRun(synth, href);
+      plain = [];
+    };
+    for (const c of node.children) {
+      if (c.name === 'w:fldChar' || c.name === 'w:instrText') audit.mark(c);
+      if (c.name === 'w:fldChar') {
+        const t = attrOf(c, 'w:fldCharType');
+        if (t === 'begin') {
+          flushPlain();
+          field = { instr: '', result: [], phase: 'instr', parent: field };
+        } else if (t === 'separate') {
+          if (field) field.phase = 'result';
+        } else if (t === 'end') {
+          flushPlain(); // result text inside this run, before the end mark
+          if (field) {
+            const done = field;
+            field = done.parent;
+            const kind = fieldKind(done.instr);
+            // PAGE/NUMPAGES: the cached result is recomputed by our layout —
+            // only the first result run's formatting is read; everything
+            // else keeps the cached rendering.
+            sink().push(
+              ...(kind
+                ? [pageFieldNode(kind, done.firstResultRun, paraBase, ctx)]
+                : done.result),
+            );
+          } else if (ctx.openFields.length > 0) {
+            // Closes a field that OPENED in an earlier paragraph (a TOC ends
+            // in its last entry) — the span stops with this paragraph.
+            ctx.openFields.pop();
           }
-        } else if (c.name === 'w:instrText') {
-          if (field && field.phase === 'instr') field.instr += c.text;
-        } else if (c.name !== 'w:rPr') {
-          plain.push(c);
         }
+      } else if (c.name === 'w:instrText') {
+        if (field && field.phase === 'instr') field.instr += c.text;
+      } else if (c.name !== 'w:rPr') {
+        plain.push(c);
       }
-      flushPlain();
+    }
+    flushPlain();
+  };
+
+  for (const node of effectiveChildren(p.children)) {
+    if (PARA_CHILD_TAGS.has(node.name)) audit.mark(node);
+    if (node.name === 'w:r') {
+      handleRun(node, null);
     } else if (node.name === 'w:fldSimple') {
       const kind = fieldKind(attrOf(node, 'w:instr') ?? '');
       const resultRuns = children(node, 'w:r');
       if (kind) {
+        // Same as the fldChar path: cached PAGE/NUMPAGES text is recomputed.
+        for (const r of resultRuns) audit.markSubtree(r);
         inline.push(pageFieldNode(kind, resultRuns[0], paraBase, ctx));
       } else {
         for (const r of resultRuns)
@@ -930,11 +1197,13 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       const anchor = attrOf(node, 'w:anchor');
       const href = rel?.target ?? (anchor ? `#${anchor}` : null);
       for (const run of children(node, 'w:r')) {
-        inline.push(...runToInline(run, paraBase, ctx, href));
+        handleRun(run, href);
       }
     } else if (node.name === 'm:oMath' || node.name === 'm:oMathPara') {
       // OMML equations, flattened to a plain-text run (v1: content over
       // typesetting — see flattenOmml). Formatted like the first math run.
+      // Deliberate wholesale flattening — the whole subtree counts consumed.
+      audit.markSubtree(node);
       const text = flattenOmml(node);
       if (text.length > 0) {
         const first = findDescendant(node, 'm:r');
@@ -951,8 +1220,30 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     } else if (node.name === 'w:commentRangeEnd') {
       const id = Number(attrOf(node, 'w:id'));
       if (!Number.isNaN(id)) ctx.comments.active.delete(id);
+    } else if (node.name === 'w:bookmarkStart') {
+      // Named anchor: link hrefs "#name" resolve to this paragraph. Word's
+      // own cursor bookmark is noise.
+      audit.mark(node);
+      const name = attrOf(node, 'w:name');
+      if (name && name !== '_GoBack') (bookmarks ??= []).push(name);
     }
   }
+  // A field still open here spans paragraphs (the TOC field wraps ALL its
+  // entry paragraphs; each parseParagraph sees only its slice) — keep the
+  // cached result content, and register the span so the FOLLOWING paragraphs
+  // know they are inside it too. Registered outermost-first (the loop unwinds
+  // innermost-first) to match the stack's own order.
+  const spans: FieldInfo[] = [];
+  while (field) {
+    const done: FieldState = field;
+    field = done.parent;
+    sink().push(...done.result);
+    spans.unshift({
+      kind: fieldSpanKind(done.instr),
+      instr: done.instr.trim(),
+    });
+  }
+  ctx.openFields.push(...spans);
   // w:pBdr from the most-derived cascade layer: keep visible sides only
   // ('between' isn't modelled; w:val="none" sides drop out).
   const pBdrLayer = lastWith(pPrChain, 'w:pBdr');
@@ -973,11 +1264,27 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     indent?: Indent;
     spacing?: Spacing;
     tabs?: { pos: number; val: string; leader?: string }[];
+    bookmarks?: string[];
+    field?: FieldInfo;
     pageBreakBefore?: boolean;
+    keepNext?: boolean;
+    keepLines?: boolean;
+    widowControl?: boolean;
     heading?: number;
     styleId?: string;
     borders?: Record<string, BorderSide>;
+    carry?: { pPr?: string; markRPr?: string };
   } = {};
+  // Carry-through: unmodelled INLINE pPr children + the paragraph mark's
+  // w:rPr, preserved verbatim for export (see collectCarry).
+  const carryPPr = collectCarry(pPr, CONSUMED_PPR);
+  const carryMarkRPr = collectCarry(child(pPr, 'w:rPr'), new Set());
+  if (carryPPr || carryMarkRPr) {
+    attrs.carry = {
+      ...(carryPPr && { pPr: carryPPr }),
+      ...(carryMarkRPr && { markRPr: carryMarkRPr }),
+    };
+  }
   if (list) attrs.list = list;
   if (align) attrs.align = align;
   if (heading) attrs.heading = heading;
@@ -989,7 +1296,15 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (indent) attrs.indent = indent;
   if (spacing) attrs.spacing = spacing;
   if (tabs) attrs.tabs = tabs;
+  if (bookmarks) attrs.bookmarks = bookmarks;
+  // A paragraph that OPENS a spanning field belongs to it as much as the ones
+  // that follow (the TOC's first entry is part of the TOC).
+  const fieldForPara = fieldAtStart ?? ctx.openFields[0] ?? null;
+  if (fieldForPara) attrs.field = fieldForPara;
   if (pageBreak) attrs.pageBreakBefore = true;
+  if (keepNext) attrs.keepNext = true;
+  if (keepLines) attrs.keepLines = true;
+  if (!widowControl) attrs.widowControl = false;
   if (Object.keys(paraBorders).length > 0) attrs.borders = paraBorders;
   return ctx.schema.nodes['paragraph'].create(attrs, inline);
 }
@@ -1085,7 +1400,10 @@ function resolveIndent(chain: (OoxmlNode | undefined)[]): Indent | null {
 /** Resolve w:spacing through the cascade: the last layer with each attribute
  *  wins. before/after are twips→px; line is 240ths of a line for lineRule
  *  'auto' (→ multiplier), else twips→px for 'exact'/'atLeast'. */
-function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
+function resolveSpacing(
+  chain: (OoxmlNode | undefined)[],
+  isList = false,
+): Spacing | null {
   const out: Spacing = {};
   for (const pPr of chain) {
     const sp = child(pPr, 'w:spacing');
@@ -1094,8 +1412,18 @@ function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
     const after = attrOf(sp, 'w:after');
     const line = attrOf(sp, 'w:line');
     const rule = attrOf(sp, 'w:lineRule');
-    if (before !== undefined) out.before = twipsToPx(Number(before));
-    if (after !== undefined) out.after = twipsToPx(Number(after));
+    // HTML-era auto spacing: the literal value is Word's own cached auto
+    // amount, so it stands — except list items, which drop auto spacing.
+    const onFlag = (name: string): boolean => {
+      const v = attrOf(sp, name);
+      return v !== undefined && v !== '0' && v.toLowerCase() !== 'false';
+    };
+    const beforeAuto = onFlag('w:beforeAutospacing');
+    const afterAuto = onFlag('w:afterAutospacing');
+    if (before !== undefined || beforeAuto)
+      out.before = beforeAuto && isList ? 0 : twipsToPx(Number(before ?? '0'));
+    if (after !== undefined || afterAuto)
+      out.after = afterAuto && isList ? 0 : twipsToPx(Number(after ?? '0'));
     if (line !== undefined) {
       const lineRule = rule === 'exact' || rule === 'atLeast' ? rule : 'auto';
       out.lineRule = lineRule;
@@ -1128,12 +1456,21 @@ function parseAlign(pPr: OoxmlNode | undefined): Align | null {
 /** Read a paragraph's list membership (w:numPr). The marker string is NOT
  *  resolved here — the layout engine recounts markers from the doc's
  *  numbering defs every pass, so edits renumber live. */
-function parseList(pPr: OoxmlNode | undefined): ListInfo | null {
+function parseList(
+  pPr: OoxmlNode | undefined,
+): (ListInfo & { explicitLevel: boolean }) | null {
   const numPr = child(pPr, 'w:numPr');
   const numId = attrOf(child(numPr, 'w:numId'), 'w:val');
   if (numId === undefined || numId === '0') return null; // 0 cancels numbering
-  const ilvl = Number(attrOf(child(numPr, 'w:ilvl'), 'w:val') ?? '0');
-  return { numId, level: Number.isNaN(ilvl) ? 0 : ilvl };
+  const ilvlAttr = attrOf(child(numPr, 'w:ilvl'), 'w:val');
+  const ilvl = Number(ilvlAttr ?? '0');
+  return {
+    numId,
+    level: Number.isNaN(ilvl) ? 0 : ilvl,
+    // A written w:ilvl is direct intent; its absence leaves room for the
+    // lvl w:pStyle link to pick the level (numbered heading styles).
+    explicitLevel: ilvlAttr !== undefined,
+  };
 }
 
 interface LogicalCell {
@@ -1150,6 +1487,8 @@ interface LogicalCell {
     top?: number;
     bottom?: number;
   } | null;
+  /** Unmodelled tcPr children, carried verbatim (see collectCarry). */
+  carry: string | null;
   content: PMNode[];
 }
 
@@ -1188,8 +1527,16 @@ function parseMarginsEl(
 /** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults. */
 function parseCellMargins(
   tbl: OoxmlNode,
+  ctx: Ctx,
 ): { left?: number; right?: number; top?: number; bottom?: number } | null {
-  return parseMarginsEl(child(child(tbl, 'w:tblPr'), 'w:tblCellMar'));
+  const tblPr = child(tbl, 'w:tblPr');
+  const inline = parseMarginsEl(child(tblPr, 'w:tblCellMar'));
+  if (inline) return inline;
+  // No inline margins: the table STYLE's w:tblCellMar applies (Word default
+  // styles carry 108-twip side margins there — dropping them cramped text
+  // against the cell borders).
+  const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
+  return parseMarginsEl(ctx.styles.resolveTableCellMar(styleId));
 }
 
 /** OOXML w:val border styles → our {@link BorderStyle} (unknowns → solid). */
@@ -1208,7 +1555,14 @@ const BORDER_STYLE_IN: Record<string, BorderStyle> = {
  *  w:sz is eighths of a point; w:color "auto"/absent keeps the default grey. */
 function parseBorderSide(el: OoxmlNode): BorderSide | false {
   const val = attrOf(el, 'w:val');
-  if (val === 'none' || val === 'nil') return false;
+  if (val === 'none' || val === 'nil') {
+    // Hidden side: its sz/color/space are meaningless, but "ask" them so the
+    // coverage audit doesn't flag decoration attrs on borders we DID handle.
+    attrOf(el, 'w:sz');
+    attrOf(el, 'w:color');
+    attrOf(el, 'w:space');
+    return false;
+  }
   const sz = Number(attrOf(el, 'w:sz') ?? '4');
   const width = Math.max(0.75, (sz / 8) * (96 / 72));
   const style = BORDER_STYLE_IN[val ?? 'single'] ?? 'solid';
@@ -1217,7 +1571,11 @@ function parseBorderSide(el: OoxmlNode): BorderSide | false {
     colorAttr && colorAttr !== 'auto'
       ? (normalizeHex(colorAttr) ?? '#b0b0b0')
       : '#b0b0b0';
-  return { width, style, color };
+  const side: BorderSide = { width, style, color };
+  // w:space (points) — border-to-content gap; kept for round-trip fidelity.
+  const sp = Number(attrOf(el, 'w:space') ?? '0');
+  if (Number.isFinite(sp) && sp > 0) side.space = Math.round(sp * (96 / 72));
+  return side;
 }
 
 /** Per-side border appearance from a w:tblBorders / w:tcBorders node. An absent
@@ -1277,12 +1635,24 @@ function tableColumnWidths(tbl: OoxmlNode, grid: number[], ctx: Ctx): number[] {
   const cells = firstRow
     ? children(firstRow, 'w:tc').map((tc) => {
         const tcPr = child(tc, 'w:tcPr');
+        const tcW = child(tcPr, 'w:tcW');
         return {
-          pct: pctWidth(child(tcPr, 'w:tcW')),
+          pct: pctWidth(tcW),
+          // dxa width — the fallback grid when w:tblGrid is missing or
+          // degenerate (some producers write no grid at all).
+          dxa:
+            attrOf(tcW, 'w:type') !== 'pct'
+              ? Number(attrOf(tcW, 'w:w') ?? '0') || 0
+              : 0,
           span: Number(attrOf(child(tcPr, 'w:gridSpan'), 'w:val') ?? '1') || 1,
         };
       })
     : [];
+  if (!grid.some((w) => w > 0) && cells.some((c) => c.dxa > 0)) {
+    grid = cells.flatMap((c) =>
+      new Array<number>(c.span).fill(Math.round(c.dxa / c.span)),
+    );
+  }
   const spanSum = cells.reduce((s, c) => s + c.span, 0);
   const cols = grid.length || spanSum;
   if (tablePct === null && !cells.some((c) => c.pct !== null)) {
@@ -1330,12 +1700,13 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
           : 'continue'; // omitted w:val defaults to continue
       const widths = colPx.length ? colPx.slice(col, col + colspan) : [];
       const background =
-        normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
+        shdFill(child(tcPr, 'w:shd'), ctx.resolveTheme) ?? null;
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
       const vAlign =
         vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
       const borders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
       const padding = parseMarginsEl(child(tcPr, 'w:tcMar'));
+      const carry = collectCarry(tcPr, CONSUMED_TCPR);
       const content = parseBlocks(tc, ctx);
       if (content.length === 0)
         content.push(ctx.schema.nodes['paragraph'].create());
@@ -1348,6 +1719,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         vAlign,
         borders,
         padding,
+        carry,
         content,
       });
       col += colspan;
@@ -1358,10 +1730,8 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   // Per-row trPr: w:tblHeader (on/off) + w:trHeight (px floor / exact).
   const rowProps = children(tbl, 'w:tr').map((tr) => {
     const trPr = child(tr, 'w:trPr');
-    const hdr = child(trPr, 'w:tblHeader');
-    const header = hdr
-      ? attrOf(hdr, 'w:val') !== 'false' && attrOf(hdr, 'w:val') !== '0'
-      : false;
+    // isToggleOn: also treats w:val="off" as off (the ad-hoc checks missed it).
+    const header = isToggleOn(child(trPr, 'w:tblHeader'));
     const trH = child(trPr, 'w:trHeight');
     const hv = attrOf(trH, 'w:val');
     const height =
@@ -1371,11 +1741,9 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
             exact: attrOf(trH, 'w:hRule') === 'exact',
           }
         : null;
-    const cs = child(trPr, 'w:cantSplit');
-    const cantSplit = cs
-      ? attrOf(cs, 'w:val') !== 'false' && attrOf(cs, 'w:val') !== '0'
-      : false;
-    return { header, height, cantSplit };
+    const cantSplit = isToggleOn(child(trPr, 'w:cantSplit'));
+    const carry = collectCarry(trPr, CONSUMED_TRPR);
+    return { header, height, cantSplit, carry };
   });
 
   const colIndex = logicalRows.map(
@@ -1404,6 +1772,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
             vAlign: cell.vAlign,
             borders: cell.borders,
             padding: cell.padding,
+            carry: cell.carry ? { tcPr: cell.carry } : null,
           },
           cell.content,
         ),
@@ -1414,13 +1783,14 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     if (rp.header) rowAttrs['header'] = true;
     if (rp.height) rowAttrs['height'] = rp.height;
     if (rp.cantSplit) rowAttrs['cantSplit'] = true;
+    if (rp.carry) rowAttrs['carry'] = { trPr: rp.carry };
     return ctx.schema.nodes['table_row'].create(
       Object.keys(rowAttrs).length > 0 ? rowAttrs : null,
       emitted.length > 0 ? emitted : [emptyCell(ctx)],
     );
   });
 
-  const cellPadding = parseCellMargins(tbl);
+  const cellPadding = parseCellMargins(tbl, ctx);
   const borders = parseTableBorders(tbl, ctx);
   const jc = attrOf(child(child(tbl, 'w:tblPr'), 'w:jc'), 'w:val');
   const attrs: Record<string, unknown> = {};
@@ -1428,6 +1798,9 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   if (borders) attrs['borders'] = borders;
   if (jc === 'center' || jc === 'right' || jc === 'end')
     attrs['align'] = jc === 'end' ? 'right' : jc;
+  // Carry-through: tblStyle/tblW/tblLayout/tblInd/tblLook/… survive the save.
+  const tblCarry = collectCarry(child(tbl, 'w:tblPr'), CONSUMED_TBLPR);
+  if (tblCarry) attrs['carry'] = { tblPr: tblCarry };
   return ctx.schema.nodes['table'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     rows.length > 0
@@ -1440,6 +1813,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   const blocks: PMNode[] = [];
   for (const node of unwrapSdt(parent.children)) {
+    if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') blocks.push(parseParagraph(node, ctx));
     else if (node.name === 'w:tbl') blocks.push(parseTable(node, ctx));
   }
@@ -1486,6 +1860,7 @@ function parseBodyBlocks(
   const sections: SectionConfig[] = [];
   let start = 0;
   for (const node of unwrapSdt(body.children)) {
+    if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
       blocks.push(parseParagraph(node, ctx));
       const sectPr = child(child(node, 'w:pPr'), 'w:sectPr');
@@ -1530,7 +1905,10 @@ async function readPartRels(
   const slash = partPath.lastIndexOf('/');
   const relsPath = `${partPath.slice(0, slash + 1)}_rels/${partPath.slice(slash + 1)}.rels`;
   const xml = await readPart(zip, relsPath);
-  return xml ? parseXml(xml) : undefined;
+  if (!xml) return undefined;
+  const root = parseXml(xml);
+  audit.registerPart(relsPath, root);
+  return root;
 }
 
 /** Load footnotes.xml / endnotes.xml into a numbering registry. Separator
@@ -1548,11 +1926,16 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
   ) => {
     const xml = await readPart(zip, path);
     if (!xml) return;
-    for (const note of children(child(parseXml(xml), root), tag)) {
+    const parsed = parseXml(xml);
+    audit.registerPart(path, parsed);
+    for (const note of children(child(parsed, root), tag)) {
       const id = attrOf(note, 'w:id');
       const type = attrOf(note, 'w:type');
-      if (id === undefined || Number(id) < 1 || (type && type !== 'normal'))
+      if (id === undefined || Number(id) < 1 || (type && type !== 'normal')) {
+        // Separator/continuation chrome — skipped by design, subtree and all.
+        audit.markSubtree(note);
         continue;
+      }
       into.set(id, note);
     }
   };
@@ -1586,7 +1969,12 @@ async function buildCommentsRegistry(zip: JSZip): Promise<CommentsRegistry> {
   const paraToId = new Map<string, number>();
   const xml = await readPart(zip, 'word/comments.xml');
   if (xml) {
-    for (const c of children(child(parseXml(xml), 'w:comments'), 'w:comment')) {
+    const parsed = parseXml(xml);
+    audit.registerPart('word/comments.xml', parsed);
+    for (const c of children(child(parsed, 'w:comments'), 'w:comment')) {
+      // Comment bodies are deliberately flattened to plain text (collectText)
+      // — their formatting subtree counts as consumed.
+      audit.markSubtree(c);
       const id = Number(attrOf(c, 'w:id'));
       if (Number.isNaN(id)) continue;
       const paraIds = children(c, 'w:p')
@@ -1606,8 +1994,10 @@ async function buildCommentsRegistry(zip: JSZip): Promise<CommentsRegistry> {
   const ext = new Map<string, { parentParaId: string | null; done: boolean }>();
   const extXml = await readPart(zip, 'word/commentsExtended.xml');
   if (extXml) {
+    const parsed = parseXml(extXml);
+    audit.registerPart('word/commentsExtended.xml', parsed);
     for (const ex of children(
-      child(parseXml(extXml), 'w15:commentsEx'),
+      child(parsed, 'w15:commentsEx'),
       'w15:commentEx',
     )) {
       const paraId = attrOf(ex, 'w15:paraId');
@@ -1813,6 +2203,24 @@ export async function importDocx(
   input: DocxInput,
   opts?: { schema?: Schema; password?: string },
 ): Promise<DocxImport> {
+  // XML-audit session (no-op unless the flag is on): every part parsed inside
+  // registers its root; endImport sweeps for untouched tags/attrs. Paired in
+  // try/finally so a failed import can't wedge the audit's depth counter —
+  // overlapping imports merge into one report (see audit.ts).
+  const size =
+    input instanceof Blob ? input.size : (input.byteLength ?? undefined);
+  audit.beginImport(`document.xml (${size ?? '?'} bytes)`);
+  try {
+    return await importDocxImpl(input, opts);
+  } finally {
+    audit.endImport();
+  }
+}
+
+async function importDocxImpl(
+  input: DocxInput,
+  opts?: { schema?: Schema; password?: string },
+): Promise<DocxImport> {
   // Classify before parsing: a renamed PDF/.doc/encrypted file fails with a
   // cause a shell can act on, instead of JSZip's central-directory riddle.
   let bytes =
@@ -1859,40 +2267,64 @@ export async function importDocx(
   const numberingXml = await readPart(zip, 'word/numbering.xml');
   const themeXml = await readPart(zip, 'word/theme/theme1.xml');
 
+  const parsePart = (name: string, xml: string): OoxmlNode => {
+    const root = parseXml(xml);
+    audit.registerPart(name, root);
+    return root;
+  };
+
   // Stateless/shared pieces; numbering counters are per-story (built fresh below).
-  const resolveTheme = buildThemeResolver(
-    themeXml ? parseXml(themeXml) : undefined,
-  );
+  const themeRoot = themeXml
+    ? parsePart('word/theme/theme1.xml', themeXml)
+    : undefined;
+  const resolveTheme = buildThemeResolver(themeRoot);
+  const resolveFont = buildThemeFontResolver(themeRoot);
   const styles = buildStyleRegistry(
-    stylesXml ? parseXml(stylesXml) : undefined,
+    stylesXml ? parsePart('word/styles.xml', stylesXml) : undefined,
     resolveTheme,
+    resolveFont,
   );
-  const numberingRoot = numberingXml ? parseXml(numberingXml) : undefined;
+  const numberingRoot = numberingXml
+    ? parsePart('word/numbering.xml', numberingXml)
+    : undefined;
   const media = await extractMedia(zip);
   const notes = await buildNotesRegistry(zip);
   const comments = await buildCommentsRegistry(zip);
   // Page geometry up front: pct-based table widths need the content width
   // while the body is being parsed.
-  const body = child(child(parseXml(rawDocumentXml), 'w:document'), 'w:body');
+  const body = child(
+    child(parsePart('word/document.xml', rawDocumentXml), 'w:document'),
+    'w:body',
+  );
   const sectPr = body ? child(body, 'w:sectPr') : undefined;
   const pageGeom = parsePageGeometry(sectPr);
   const contentWidth =
     pageGeom.width - pageGeom.margin.left - pageGeom.margin.right;
 
+  // Stateless — markers are recounted by the layout engine, so one resolver
+  // serves every story (and its audit usage-tracking sees them all).
+  const numbering = buildNumbering(numberingRoot, resolveTheme, resolveFont);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     styles,
-    numbering: buildNumbering(numberingRoot),
+    numbering,
     rels,
     media,
     resolveTheme,
+    resolveFont,
     notes,
     comments,
     schema: opts?.schema ?? schema,
     contentWidth,
+    // Per-story: a field opened in the body can't leak into a header.
+    openFields: [],
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
-  const ctx = makeCtx(buildRels(docRels ? parseXml(docRels) : undefined));
+  const ctx = makeCtx(
+    buildRels(
+      docRels ? parsePart('word/_rels/document.xml.rels', docRels) : undefined,
+    ),
+  );
 
   const parsed = body
     ? parseBodyBlocks(body, ctx)
@@ -1951,7 +2383,7 @@ export async function importDocx(
     let story: PMNode | undefined;
     if (xml) {
       const partCtx = makeCtx(buildRels(await readPartRels(zip, partPath)));
-      const el = child(parseXml(xml), root);
+      const el = child(parsePart(partPath, xml), root);
       story = storyDoc(
         partCtx,
         el ? parseBlocks(el, partCtx) : [],
@@ -2027,11 +2459,26 @@ export async function importDocx(
   const titlePg = lastChrome.titlePg;
   const settingsXml = await readPart(zip, 'word/settings.xml');
   const settings = settingsXml
-    ? child(parseXml(settingsXml), 'w:settings')
+    ? child(parsePart('word/settings.xml', settingsXml), 'w:settings')
     : undefined;
   const evenAndOdd = settings
     ? isToggleOn(child(settings, 'w:evenAndOddHeaders'))
     : false;
+  // Default tab interval (w:defaultTabStop, twips) — drives the layout's
+  // implicit tab grid when a paragraph has no explicit stops.
+  const defaultTabStop = settings
+    ? Number(attrOf(child(settings, 'w:defaultTabStop'), 'w:val'))
+    : NaN;
+  const tabWidth =
+    Number.isFinite(defaultTabStop) && defaultTabStop > 0
+      ? twipsToPx(defaultTabStop)
+      : undefined;
+
+  // Audit: with every story parsed (body, notes, headers/footers), styles
+  // and numbering levels nothing referenced are swept out of the report —
+  // see StyleRegistry / NumberingResolver.
+  styles.auditMarkUnusedStyles();
+  numbering.auditMarkUnusedLevels();
 
   const out: DocxImport = {
     doc,
@@ -2043,6 +2490,7 @@ export async function importDocx(
     evenAndOdd,
     comments: hasComments ? buildCommentsList(ctx) : [],
     page: pageGeom,
+    ...(tabWidth !== undefined && { tabWidth }),
     raw: zip,
   };
   // Only when some non-last section declares its own chrome/titlePg does the
@@ -2098,7 +2546,7 @@ export function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
   if (attrOf(pgSz, 'w:orient') === 'landscape' && height > width) {
     [width, height] = [height, width];
   }
-  return {
+  const geom: PageConfig = {
     width,
     height,
     margin: {
@@ -2108,4 +2556,13 @@ export function parsePageGeometry(sectPr: OoxmlNode | undefined): PageConfig {
       left: px(pgMar, 'w:left', 96),
     },
   };
+  // Chrome distances + binding gutter: set only when declared (the layout
+  // falls back to Word's defaults), so untouched docs stay byte-stable.
+  if (pgMar && attrOf(pgMar, 'w:header') !== undefined)
+    geom.headerDistance = px(pgMar, 'w:header', 48);
+  if (pgMar && attrOf(pgMar, 'w:footer') !== undefined)
+    geom.footerDistance = px(pgMar, 'w:footer', 48);
+  const gutter = pgMar ? px(pgMar, 'w:gutter', 0) : 0;
+  if (gutter > 0) geom.gutter = gutter;
+  return geom;
 }

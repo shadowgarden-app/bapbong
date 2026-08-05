@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Source for the tab-stops fixture (scripts/make-tabs-fixture.sh).
+
+  Flat ODF, not .docx, on purpose: this is the INPUT LibreOffice converts, so
+  the tab stops in the output are LibreOffice's own w:tabs markup rather than
+  something bapbong wrote. Flat XML (as opposed to a zipped .odt) keeps the
+  source reviewable in a diff.
+
+  Covers the four tab kinds a Vietnamese office document actually uses:
+  right + dot leader (table of contents), centred columns (signature block),
+  decimal alignment (price list), and a plain left stop.
+-->
+<office:document
+  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+  xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+  office:version="1.3"
+  office:mimetype="application/vnd.oasis.opendocument.text">
+
+  <office:automatic-styles>
+    <!-- Table of contents: title, then a right stop at the text edge with a
+         dotted leader running up to the page number. -->
+    <style:style style:name="Toc" style:family="paragraph">
+      <style:paragraph-properties>
+        <style:tab-stops>
+          <style:tab-stop style:position="16cm" style:type="right"
+                          style:leader-style="dotted" style:leader-text="."/>
+        </style:tab-stops>
+      </style:paragraph-properties>
+    </style:style>
+
+    <!-- Signature block: three centred columns across the text width. -->
+    <style:style style:name="Sign" style:family="paragraph">
+      <style:paragraph-properties>
+        <style:tab-stops>
+          <style:tab-stop style:position="5.3cm" style:type="center"/>
+          <style:tab-stop style:position="10.6cm" style:type="center"/>
+          <style:tab-stop style:position="15.9cm" style:type="center"/>
+        </style:tab-stops>
+      </style:paragraph-properties>
+    </style:style>
+
+    <!-- Price list: a left stop for the label column, then a decimal stop so
+         the amounts line up on the comma (Vietnamese decimal separator). -->
+    <style:style style:name="Price" style:family="paragraph">
+      <style:paragraph-properties>
+        <style:tab-stops>
+          <style:tab-stop style:position="7cm" style:type="left"/>
+          <style:tab-stop style:position="14cm" style:type="char" style:char=","/>
+        </style:tab-stops>
+      </style:paragraph-properties>
+    </style:style>
+
+    <style:style style:name="Head" style:family="paragraph">
+      <style:text-properties fo:font-weight="bold" fo:font-size="14pt"/>
+    </style:style>
+  </office:automatic-styles>
+
+  <office:body>
+    <office:text>
+      <text:p text:style-name="Head">Tab stops — fixture</text:p>
+      <text:p>Bốn kiểu tab stop trong một tài liệu: phải + dot leader, canh
+        giữa, canh theo dấu thập phân, và tab trái mặc định.</text:p>
+
+      <text:p text:style-name="Head">1. Mục lục (right + dot leader)</text:p>
+      <text:p text:style-name="Toc">Chương 1 — Mở đầu<text:tab/>3</text:p>
+      <text:p text:style-name="Toc">Chương 2 — Kiến trúc canvas<text:tab/>12</text:p>
+      <text:p text:style-name="Toc">Chương 3 — Ngắt trang bảng<text:tab/>27</text:p>
+
+      <text:p text:style-name="Head">2. Khối chữ ký (center tabs)</text:p>
+      <text:p text:style-name="Sign">NGƯỜI LẬP<text:tab/>KẾ TOÁN<text:tab/>GIÁM ĐỐC</text:p>
+      <text:p text:style-name="Sign">(ký, ghi rõ họ tên)<text:tab/>(ký, ghi rõ họ tên)<text:tab/>(ký, đóng dấu)</text:p>
+
+      <text:p text:style-name="Head">3. Bảng giá (decimal tab)</text:p>
+      <text:p text:style-name="Price">Phí khởi tạo<text:tab/>một lần<text:tab/>1.250,00 đ</text:p>
+      <text:p text:style-name="Price">Thuê bao tháng<text:tab/>hàng tháng<text:tab/>99,50 đ</text:p>
+      <text:p text:style-name="Price">Phụ phí vùng xa<text:tab/>theo đơn<text:tab/>12,345 đ</text:p>
+
+      <text:p text:style-name="Head">4. Tab mặc định (không khai stop)</text:p>
+      <text:p>Cột A<text:tab/>Cột B<text:tab/>Cột C — rơi vào lưới tab mặc định.</text:p>
+    </office:text>
+  </office:body>
+</office:document>

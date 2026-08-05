@@ -5,6 +5,13 @@ export interface PageConfig {
   width: number;
   height: number;
   margin: { top: number; right: number; bottom: number; left: number };
+  /** Header/footer band distance from the page edge (w:pgMar @w:header/
+   *  @w:footer). Absent → Word's default 720 twips (48px). */
+  headerDistance?: number;
+  footerDistance?: number;
+  /** Binding gutter (w:pgMar @w:gutter) added to the left content edge.
+   *  Absent → 0. */
+  gutter?: number;
 }
 
 /** Multi-column layout (w:cols): `count` equal-width columns separated by
@@ -94,6 +101,10 @@ export interface InlineRun {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  /** Double strikethrough (w:dstrike). */
+  dstrike?: boolean;
+  /** Small caps (w:smallCaps): lowercase renders as reduced uppercase. */
+  smallCaps?: boolean;
   /** Highlight / shading background color, e.g. "#FFFF00". */
   background?: string;
   /** Superscript / subscript (font already reduced; painter shifts baseline). */
@@ -236,6 +247,20 @@ export interface ParagraphSpacing {
   lineRule?: 'auto' | 'exact' | 'atLeast';
 }
 
+/** List label styling from the numbering level (w:lvlJc / w:suff / lvl rPr).
+ *  All fields default to Word's own defaults: left-aligned, tab suffix,
+ *  label drawn with the paragraph's base font. */
+export interface MarkerStyle {
+  /** Label alignment against its anchor. */
+  jc?: 'center' | 'right';
+  /** Separator between label and text. */
+  suff?: 'space' | 'nothing';
+  /** Label font overrides (family/size/bold/italic from the lvl rPr). */
+  font?: Partial<FontSpec>;
+  /** Label color ("#RRGGBB"). */
+  color?: string;
+}
+
 /** A block flattened and ready for layout (paragraph only, for now). */
 export interface FlowParagraph {
   type: 'paragraph';
@@ -243,6 +268,8 @@ export interface FlowParagraph {
   runs: FlowInline[];
   /** List marker text (e.g. "1.", "•") if this paragraph is a list item. */
   marker?: string;
+  /** Styling for `marker` (alignment, suffix, its own font/color). */
+  markerStyle?: MarkerStyle;
   /** Horizontal alignment; defaults to 'left' when omitted. */
   align?: Align;
   /** Indentation in CSS px; defaults to no indent when omitted. */
@@ -252,6 +279,14 @@ export interface FlowParagraph {
   /** Force this paragraph to start a new page (w:pageBreakBefore / a page
    *  break run at its head). */
   pageBreakBefore?: boolean;
+  /** w:keepNext — stay on the same page as the next block's first line. */
+  keepNext?: boolean;
+  /** w:keepLines — never split this paragraph across pages when it fits a
+   *  full band. */
+  keepLines?: boolean;
+  /** w:widowControl — false disables widow/orphan control (Word's default
+   *  is ON; absent means on). */
+  widowControl?: boolean;
   /** Absolute PM position where the paragraph's content starts (nodePos + 1). */
   pos?: number;
   /** Absolute PM position after the paragraph's last character. */
@@ -314,6 +349,9 @@ export interface BorderSide {
   style: BorderStyle;
   /** Hex colour, e.g. "#000000". */
   color: string;
+  /** OOXML w:space — gap between the border and the content, in px. Optional
+   *  (0/absent for the common case); round-tripped, not yet painted. */
+  space?: number;
 }
 
 /**
@@ -376,6 +414,8 @@ export interface LayoutSegment {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  /** Double strikethrough (w:dstrike): the painter draws two thin lines. */
+  dstrike?: boolean;
   /** Highlight / shading background painted behind the text. */
   background?: string;
   /** Superscript / subscript: the painter shifts the baseline (font is

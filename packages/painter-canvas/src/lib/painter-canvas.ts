@@ -540,7 +540,7 @@ export class CanvasPainter {
       // Text decorations use the width measured at layout time — the painter
       // never measures.
       const underline = seg.underline || (!!seg.link && !seg.color);
-      if ((underline || seg.strike) && seg.width) {
+      if ((underline || seg.strike || seg.dstrike) && seg.width) {
         const em = seg.font.sizePt * (96 / 72);
         const thickness = Math.max(1, em * 0.05);
         if (underline)
@@ -552,6 +552,12 @@ export class CanvasPainter {
           );
         if (seg.strike)
           ctx.fillRect(seg.x, baselineY - em * 0.27, seg.width, thickness);
+        if (seg.dstrike) {
+          // Double strikethrough: two thin lines straddling the single-strike
+          // position.
+          ctx.fillRect(seg.x, baselineY - em * 0.34, seg.width, thickness);
+          ctx.fillRect(seg.x, baselineY - em * 0.2, seg.width, thickness);
+        }
       }
     }
     for (const img of line.images ?? []) {

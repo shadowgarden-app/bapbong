@@ -71,6 +71,168 @@ describe('exportDocx (round-trip)', () => {
     expect(italicRun?.marks.map((m) => m.type.name)).toContain('em');
   });
 
+  it('round-trips smallCaps and dstrike marks', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'Heading', marks: ['smallCaps'] },
+        { text: 'removed', marks: ['dstrike'] },
+      ],
+    ]);
+
+    const bytes = await exportDocx(doc);
+    const { doc: back } = await importDocx(bytes);
+
+    const sc = [...range(back.child(0))].find((n) => n.text === 'Heading');
+    expect(sc?.marks.map((m) => m.type.name)).toContain('smallCaps');
+    const ds = [...range(back.child(0))].find((n) => n.text === 'removed');
+    expect(ds?.marks.map((m) => m.type.name)).toContain('dstrike');
+  });
+
+  it('carry-through: unmodelled rPr/pPr props survive import → export', async () => {
+    // A source docx with properties the model does NOT represent: run-level
+    // w:rtl/w:kern/w:szCs, paragraph-level w:contextualSpacing/w:keepNext and
+    // a paragraph-mark w:rPr. Saving must not drop any of them.
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><w:body>
+        <w:p>
+          <w:pPr>
+            <w:keepNext/><w:contextualSpacing/><w:jc w:val="center"/>
+            <w:rPr><w:b/><w:sz w:val="16"/></w:rPr>
+            <w:pPrChange w:id="1" w:author="x"><w:pPr/></w:pPrChange>
+          </w:pPr>
+          <w:r>
+            <w:rPr><w:b/><w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/><w14:glow w14:rad="1"/></w:rPr>
+            <w:t>ab&lt;c</w:t>
+          </w:r>
+        </w:p>
+      </w:body></w:document>`,
+    );
+    const source = await zip.generateAsync({ type: 'uint8array' });
+
+    const { doc, raw } = await importDocx(source);
+    const run = doc.child(0).child(0);
+    const carryMark = run.marks.find((m) => m.type.name === 'carryRPr');
+    expect(carryMark?.attrs['xml']).toBe(
+      '<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>',
+    );
+    // keepNext is MODELLED now (an attr, re-emitted by the exporter) — only
+    // contextualSpacing still rides the carry.
+    expect(doc.child(0).attrs['keepNext']).toBe(true);
+    expect(doc.child(0).attrs['carry']).toEqual({
+      pPr: '<w:contextualSpacing/>',
+      markRPr: '<w:b/><w:sz w:val="16"/>',
+    });
+
+    const outBytes = await exportDocx(doc, { carry: raw });
+    const outZip = await JSZip.loadAsync(outBytes);
+    const xml = (await outZip.file('word/document.xml')?.async('string')) ?? '';
+    // Run: modelled bold once, carried extras present, foreign ns dropped.
+    expect(xml).toContain('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
+    expect(xml.match(/<w:b\/>/g)?.length).toBe(2); // run rPr + mark rPr — no dupes
+    expect(xml).not.toContain('w14:glow');
+    // Paragraph: modelled keepNext re-emitted (schema-first in pPr), the
+    // carried extra + the paragraph-mark rPr; revision record dropped.
+    expect(xml).toContain('<w:keepNext/>');
+    expect(xml).toContain('<w:contextualSpacing/>');
+    expect(xml).toContain('<w:rPr><w:b/><w:sz w:val="16"/></w:rPr>');
+    expect(xml).not.toContain('w:pPrChange');
+    expect(xml).toContain('ab&lt;c'); // escaping intact through the trip
+
+    // Second trip: everything carried again, byte-identical fragments.
+    const { doc: doc2 } = await importDocx(outBytes);
+    const run2 = doc2.child(0).child(0);
+    expect(
+      run2.marks.find((m) => m.type.name === 'carryRPr')?.attrs['xml'],
+    ).toBe('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
+    expect(doc2.child(0).attrs['carry']).toEqual(doc.child(0).attrs['carry']);
+  });
+
+  it('carry-through: unmodelled table props survive import → export', async () => {
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+        <w:tbl>
+          <w:tblPr>
+            <w:tblStyle w:val="TableGrid"/>
+            <w:tblW w:w="5000" w:type="dxa"/>
+            <w:jc w:val="center"/>
+            <w:tblInd w:w="720" w:type="dxa"/>
+            <w:tblBorders><w:top w:val="single" w:sz="8" w:space="4" w:color="FF0000"/></w:tblBorders>
+            <w:tblLayout w:type="fixed"/>
+            <w:tblLook w:val="04A0" w:firstRow="1"/>
+            <w:tblPrChange w:id="9" w:author="x"><w:tblPr/></w:tblPrChange>
+          </w:tblPr>
+          <w:tblGrid><w:gridCol w:w="2500"/><w:gridCol w:w="2500"/></w:tblGrid>
+          <w:tr>
+            <w:trPr><w:gridBefore w:val="1"/><w:wBefore w:w="500" w:type="dxa"/><w:tblHeader/></w:trPr>
+            <w:tc>
+              <w:tcPr><w:tcW w:w="2500" w:type="dxa"/><w:textDirection w:val="btLr"/><w:noWrap/></w:tcPr>
+              <w:p><w:r><w:t>A</w:t></w:r></w:p>
+            </w:tc>
+            <w:tc><w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc>
+          </w:tr>
+        </w:tbl>
+      </w:body></w:document>`,
+    );
+    const source = await zip.generateAsync({ type: 'uint8array' });
+
+    const { doc, raw } = await importDocx(source);
+    const tbl = doc.child(0);
+    expect((tbl.attrs['carry'] as { tblPr: string }).tblPr).toBe(
+      '<w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="dxa"/><w:tblInd w:w="720" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1"/>',
+    );
+    const row = tbl.child(0);
+    expect((row.attrs['carry'] as { trPr: string }).trPr).toBe(
+      '<w:gridBefore w:val="1"/><w:wBefore w:w="500" w:type="dxa"/>',
+    );
+    expect(row.attrs['header']).toBe(true); // modelled prop still modelled
+    expect((row.child(0).attrs['carry'] as { tcPr: string }).tcPr).toBe(
+      '<w:textDirection w:val="btLr"/><w:noWrap/>',
+    );
+    expect(row.child(1).attrs['carry']).toBeNull();
+
+    const out = await exportDocx(doc, { carry: raw });
+    const xml =
+      (await (await JSZip.loadAsync(out))
+        .file('word/document.xml')
+        ?.async('string')) ?? '';
+    // tblPr: carried extras first (tblStyle at the head), modelled after, no dupes.
+    expect(xml).toContain('<w:tblPr><w:tblStyle w:val="TableGrid"/>');
+    expect(xml).toContain('<w:tblLayout w:type="fixed"/>');
+    expect(xml).toContain('<w:tblLook w:val="04A0" w:firstRow="1"/>');
+    expect(xml.match(/<w:jc w:val="center"\/>/g)?.length).toBe(1);
+    expect(xml).not.toContain('w:tblPrChange'); // revision record dropped
+    // Border w:space round-trips (4pt → px → 4pt).
+    expect(xml).toMatch(
+      /<w:top w:val="single" w:sz="\d+" w:space="4" w:color="FF0000"\/>/,
+    );
+    // trPr/tcPr extras.
+    expect(xml).toContain(
+      '<w:gridBefore w:val="1"/><w:wBefore w:w="500" w:type="dxa"/>',
+    );
+    expect(xml).toContain('<w:tblHeader/>');
+    expect(xml).toContain('<w:textDirection w:val="btLr"/><w:noWrap/>');
+  });
+
   it('round-trips color, size, vertAlign, paragraph alignment + page break', async () => {
     const doc = makeDoc(
       [
@@ -972,7 +1134,13 @@ describe('exportDocx (page setup: w:pgSz / w:pgMar)', () => {
     expect(rebuilt.attrs['page']).toEqual(page);
 
     const back = await importDocx(await exportDocx(rebuilt));
-    expect(back.page).toEqual(page);
+    // The exporter writes Word-default chrome distances (720 twips), which
+    // the importer now reads back as explicit 48px distances.
+    expect(back.page).toEqual({
+      ...page,
+      headerDistance: 48,
+      footerDistance: 48,
+    });
     expect(back.doc.child(0).textContent).toBe('after page setup');
   });
 

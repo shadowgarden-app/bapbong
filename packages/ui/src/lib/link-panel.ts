@@ -26,6 +26,17 @@ export interface LinkPanelOptions {
   anchor: LinkPanelAnchor;
   /** Existing link under the caret → open in view mode (prefills the form). */
   existing?: { href: string; text: string } | null;
+  /** The existing link points inside the document (`#bookmark`). Word never
+   *  shows the raw anchor — it shows where the link GOES — so the panel
+   *  displays `label` and offers a jump instead of a copyable URL.
+   *  `generated` marks a link that is field output (a TOC entry): Word won't
+   *  let you edit or unlink those one by one, and neither do we — updating
+   *  the field is the way to change them. */
+  internal?: {
+    label: string | null;
+    generated: boolean;
+    onGo(): void;
+  } | null;
   /** A text range is selected → the Text field is hidden (the selection is
    *  the text). */
   hasSelection?: boolean;
@@ -56,6 +67,8 @@ const STYLE = `
 .bb-linkpanel-field svg{flex:none;opacity:.55}
 .bb-linkpanel-input{flex:1;min-width:0;height:30px;border:0;background:transparent;color:inherit;font:inherit;font-size:13px;outline:none}
 .bb-linkpanel-href{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--bb-ui-accent,#d85a30)}
+.bb-linkpanel-icon{display:inline-flex;flex:none;opacity:.55}
+.bb-linkpanel-stale{opacity:.6;font-style:italic;color:inherit}
 .bb-linkpanel-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;flex:none}
 .bb-linkpanel-btn:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-linkpanel-apply{font:inherit;font-size:13px;font-weight:600;color:var(--bb-ui-accent,#d85a30);background:transparent;border:0;border-radius:6px;padding:6px 8px;cursor:pointer;flex:none}
@@ -70,6 +83,9 @@ const ICONS = {
   edit: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 3.5 3 3L6 13l-3.5.5L3 10z"/><path d="m11 2 .9-.9a1.55 1.55 0 0 1 2.2 0l.8.8a1.55 1.55 0 0 1 0 2.2L14 5"/></svg>',
   unlink:
     '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 4.5 9 3a2.47 2.47 0 0 1 3.5 0L13 3.5a2.47 2.47 0 0 1 0 3.5l-1.5 1.5"/><path d="M8.5 11.5 7 13a2.47 2.47 0 0 1-3.5 0L3 12.5a2.47 2.47 0 0 1 0-3.5l1.5-1.5"/><path d="m3 3 10 10"/></svg>',
+  bookmark:
+    '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2.5h8v11l-4-3-4 3z"/></svg>',
+  goTo: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h9"/><path d="m8.5 4.5 4 3.5-4 3.5"/></svg>',
 };
 
 let current: (() => void) | null = null;
@@ -171,28 +187,58 @@ export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
     el.textContent = '';
     const row = document.createElement('div');
     row.className = 'bb-linkpanel-row';
-    const href = document.createElement('span');
-    href.className = 'bb-linkpanel-href';
-    href.textContent = existing.href;
-    href.title = existing.href;
-    row.appendChild(href);
-    row.appendChild(
-      iconBtn(ICONS.copy, 'Copy link', () => {
-        void navigator.clipboard
-          ?.writeText(existing.href)
-          .catch(() => undefined);
-        closeCurrent();
-      }),
-    );
-    row.appendChild(
-      iconBtn(ICONS.edit, 'Edit link', () => renderForm(existing)),
-    );
-    row.appendChild(
-      iconBtn(ICONS.unlink, 'Remove link', () => {
-        closeCurrent();
-        opts.onUnlink?.();
-      }),
-    );
+    const internal = opts.internal;
+
+    if (internal) {
+      // In-document target: show WHERE it goes, never the bookmark id.
+      const icon = document.createElement('span');
+      icon.className = 'bb-linkpanel-icon';
+      icon.innerHTML = ICONS.bookmark;
+      row.appendChild(icon);
+      const label = document.createElement('span');
+      label.className = 'bb-linkpanel-href';
+      label.textContent = internal.label ?? 'Vị trí không còn trong tài liệu';
+      label.title = internal.label ?? existing.href;
+      if (!internal.label) label.classList.add('bb-linkpanel-stale');
+      row.appendChild(label);
+      if (internal.label) {
+        row.appendChild(
+          iconBtn(ICONS.goTo, 'Đi tới vị trí này', () => {
+            closeCurrent();
+            internal.onGo();
+          }),
+        );
+      }
+    } else {
+      const href = document.createElement('span');
+      href.className = 'bb-linkpanel-href';
+      href.textContent = existing.href;
+      href.title = existing.href;
+      row.appendChild(href);
+      row.appendChild(
+        iconBtn(ICONS.copy, 'Copy link', () => {
+          void navigator.clipboard
+            ?.writeText(existing.href)
+            .catch(() => undefined);
+          closeCurrent();
+        }),
+      );
+    }
+
+    // Field output (a TOC entry) is regenerated wholesale — editing or
+    // unlinking one entry would be undone by the next update, so Word
+    // doesn't offer it here and neither do we.
+    if (!internal?.generated) {
+      row.appendChild(
+        iconBtn(ICONS.edit, 'Edit link', () => renderForm(existing)),
+      );
+      row.appendChild(
+        iconBtn(ICONS.unlink, 'Remove link', () => {
+          closeCurrent();
+          opts.onUnlink?.();
+        }),
+      );
+    }
     el.appendChild(row);
     place(el, opts.anchor);
   };

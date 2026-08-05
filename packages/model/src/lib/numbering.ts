@@ -6,11 +6,29 @@
  * list items renumbers everything, like Word.
  */
 
+/** Label (marker) run formatting from the lvl's w:rPr (plain data). */
+export interface MarkerRunProps {
+  bold?: boolean;
+  italic?: boolean;
+  sizePt?: number;
+  family?: string;
+  color?: string;
+}
+
 /** One w:lvl of an abstract numbering definition (plain data — attr-safe). */
 export interface NumberingLevelDef {
   numFmt: string;
   lvlText: string;
   start: number;
+  /** Label alignment against its anchor (w:lvlJc); 'left' when omitted. */
+  jc?: 'center' | 'right';
+  /** What separates the label from the text (w:suff); 'tab' when omitted. */
+  suff?: 'space' | 'nothing';
+  /** Legal numbering (w:isLgl): every %n placeholder renders as decimal
+   *  regardless of the referenced level's own numFmt. */
+  isLgl?: boolean;
+  /** Label formatting (w:lvl > w:rPr) — the number/bullet's own font. */
+  rPr?: MarkerRunProps;
 }
 
 /** Definitions keyed by numId. `key` groups numIds that share one abstract
@@ -25,6 +43,8 @@ export interface NumberingDefs {
 /** Stateful counter: call `next` once per list paragraph, in document order. */
 export interface NumberingCounter {
   next(numId: string, level: number): string;
+  /** The level's definition (label styling for the layout), if any. */
+  def(numId: string, level: number): NumberingLevelDef | undefined;
 }
 
 function toLetters(n: number): string {
@@ -105,12 +125,16 @@ export function createNumberingCounter(
     if (lvlDef.numFmt === 'bullet') return lvlDef.lvlText || '•';
 
     // Substitute %1..%9 with the formatted counter of that 1-based level.
+    // Legal numbering (w:isLgl) forces every placeholder to decimal.
     return lvlDef.lvlText.replace(/%(\d)/g, (_match, digit: string) => {
       const lvl = Number(digit) - 1;
       const value = arr[lvl] ?? startOf(lvl);
-      return formatCounter(value, def.levels[lvl]?.numFmt ?? 'decimal');
+      const fmt = lvlDef.isLgl
+        ? 'decimal'
+        : (def.levels[lvl]?.numFmt ?? 'decimal');
+      return formatCounter(value, fmt);
     });
   }
 
-  return { next };
+  return { next, def: (numId, level) => defs?.[numId]?.levels[level] };
 }

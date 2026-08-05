@@ -1,7 +1,10 @@
 import JSZip from 'jszip';
 import { Mark, Schema } from 'prosemirror-model';
 import {
+  bookmarkLabel,
   createNumberingCounter,
+  fieldAt,
+  findBookmark,
   schema,
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
@@ -289,6 +292,98 @@ describe('importDocx', () => {
     expect(doc.child(5).attrs.list).toBeNull();
   });
 
+  it('applies w:lvlOverride / w:startOverride per numId', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+      <w:num w:numId="2"><w:abstractNumId w:val="0"/>
+        <w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride>
+      </w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'one')}
+      ${listP('2', 0, 'five')}
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
+    const defs = doc.attrs.numbering as NumberingDefs;
+    // The overridden num restarts at 5 and counts independently of numId 1.
+    expect(defs['2'].levels[0].start).toBe(5);
+    expect(defs['2'].key).not.toBe(defs['1'].key);
+    const counter = createNumberingCounter(defs);
+    expect(counter.next('1', 0)).toBe('1.');
+    expect(counter.next('2', 0)).toBe('5.');
+  });
+
+  it('links paragraph styles to their numbering level via lvl w:pStyle', async () => {
+    // Numbered heading styles: the style's numPr names only the numId; the
+    // LEVEL comes from whichever lvl claims the style with w:pStyle.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Heading2">
+        <w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/><w:start w:val="1"/><w:pStyle w:val="Heading1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/><w:start w:val="1"/><w:pStyle w:val="Heading2"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>linked heading</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Heading2"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>explicit ilvl wins</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, stylesXml, numberingXml),
+    );
+    // No written ilvl → the lvl>pStyle link picks level 1 (not the default 0).
+    expect(doc.child(0).attrs.list).toEqual({ numId: '1', level: 1 });
+    // A written w:ilvl is direct intent and beats the link.
+    expect(doc.child(1).attrs.list).toEqual({ numId: '1', level: 0 });
+  });
+
+  it('parses label styling (w:lvlJc / w:suff / w:isLgl / lvl rPr) into the defs', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0">
+          <w:numFmt w:val="upperRoman"/><w:lvlText w:val="%1."/><w:start w:val="1"/>
+          <w:lvlJc w:val="right"/><w:suff w:val="space"/>
+          <w:rPr><w:b/><w:color w:val="C00000"/><w:rFonts w:ascii="Georgia"/><w:sz w:val="20"/></w:rPr>
+        </w:lvl>
+        <w:lvl w:ilvl="1">
+          <w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/><w:start w:val="1"/><w:isLgl/>
+        </w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'one')}
+      ${listP('1', 1, 'sub')}
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
+    const defs = doc.attrs.numbering as NumberingDefs;
+    expect(defs['1'].levels[0]).toMatchObject({
+      jc: 'right',
+      suff: 'space',
+      rPr: { bold: true, color: '#C00000', family: 'Georgia', sizePt: 10 },
+    });
+    expect(defs['1'].levels[1].isLgl).toBe(true);
+    // Legal numbering: the level-1 placeholder %1 renders decimal even
+    // though level 0 is upperRoman.
+    const counter = createNumberingCounter(defs);
+    expect(counter.next('1', 0)).toBe('I.');
+    expect(counter.next('1', 1)).toBe('1.1');
+  });
+
   it('formats bullet and roman markers, with independent counters per numId', async () => {
     const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
       <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl></w:abstractNum>
@@ -506,6 +601,28 @@ describe('importDocx', () => {
     expect(p0.child(2).text).toBe('line2');
     expect(doc.child(1).attrs.pageBreakBefore).toBe(true); // w:br type=page
     expect(doc.child(2).attrs.pageBreakBefore).toBe(true); // w:pageBreakBefore
+  });
+
+  it('honors w:pageBreakBefore toggle values (val="false"/"0" = no break)', async () => {
+    // An inline w:val="false" cancels the break — including one inherited
+    // from a style layer (the override is the LAST cascade layer with the
+    // element, and its value must be read, not just its presence).
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Breaky"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pageBreakBefore w:val="0"/></w:pPr><w:r><w:t>b</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pageBreakBefore w:val="true"/></w:pPr><w:r><w:t>c</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Breaky"/><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>d</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Breaky"/></w:pPr><w:r><w:t>e</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.pageBreakBefore).toBeFalsy(); // val=false
+    expect(doc.child(1).attrs.pageBreakBefore).toBeFalsy(); // val=0
+    expect(doc.child(2).attrs.pageBreakBefore).toBe(true); // val=true
+    expect(doc.child(3).attrs.pageBreakBefore).toBeFalsy(); // inline false beats style
+    expect(doc.child(4).attrs.pageBreakBefore).toBe(true); // style alone
   });
 
   it('imports page size and margins from w:sectPr', async () => {
@@ -1325,6 +1442,233 @@ describe('importDocx', () => {
     // shade 0x80/255 ≈ 0.502 → 4472C4 darkened ≈ 223962
     expect(markMap(doc.child(1).child(0).marks).textColor.color).toBe(
       '#223962',
+    );
+  });
+
+  it('runs the field machine inside w:hyperlink (TOC PAGEREF entries)', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:hyperlink w:anchor="_Toc1" w:history="1">
+          <w:r><w:t>Chapter one</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+          <w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r>
+          <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+          <w:r><w:t>7</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        </w:hyperlink>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    // Instruction plumbing dropped, entry text + cached page number kept —
+    // and the result keeps the hyperlink (same marks ⇒ PM merges the nodes).
+    expect(p.textContent).toBe('Chapter one7');
+    expect(markMap(p.child(0).marks).link.href).toBe('#_Toc1');
+  });
+
+  it('resolves pagination keeps through the style cascade (toggle-aware)', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Glue">
+        <w:pPr><w:keepNext/><w:keepLines/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Glue"/></w:pPr><w:r><w:t>from style</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Glue"/><w:keepNext w:val="0"/></w:pPr><w:r><w:t>inline off wins</w:t></w:r></w:p>
+      <w:p><w:pPr><w:widowControl w:val="0"/></w:pPr><w:r><w:t>widows allowed</w:t></w:r></w:p>
+      <w:p><w:r><w:t>defaults</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs).toMatchObject({
+      keepNext: true,
+      keepLines: true,
+    });
+    expect(doc.child(1).attrs.keepNext).toBe(false); // inline w:val="0" wins
+    expect(doc.child(1).attrs.keepLines).toBe(true); // untouched by the override
+    expect(doc.child(2).attrs.widowControl).toBe(false);
+    expect(doc.child(3).attrs).toMatchObject({
+      keepNext: false,
+      keepLines: false,
+      widowControl: true,
+    });
+  });
+
+  it('imports w:smallCaps and w:dstrike as marks (toggle-aware)', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:smallCaps/></w:rPr><w:t>caps</w:t></w:r>
+        <w:r><w:rPr><w:dstrike/></w:rPr><w:t>gone</w:t></w:r>
+        <w:r><w:rPr><w:smallCaps w:val="0"/></w:rPr><w:t>off</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(markMap(p.child(0).marks).smallCaps).toBeTruthy();
+    expect(markMap(p.child(1).marks).dstrike).toBeTruthy();
+    expect(markMap(p.child(2).marks).smallCaps).toBeUndefined();
+  });
+
+  it('maps known w:sym codes to Unicode, tags unknown ones with the symbol font', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r>
+        <w:sym w:font="Wingdings" w:char="F0FC"/>
+        <w:sym w:font="Wingdings" w:char="F0CF"/>
+      </w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(p.child(0).text).toBe('✔'); // known → font-independent Unicode
+    const unknown = p.child(1);
+    expect(unknown.text).toBe(String.fromCodePoint(0xf0cf)); // PUA kept…
+    expect(markMap(unknown.marks).fontFamily.family).toBe('Wingdings'); // …in its font
+  });
+
+  it('anchors bookmarks on their paragraph and spans the TOC field across them', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+        <w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h </w:instrText></w:r>
+        <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+        <w:hyperlink w:anchor="_Toc1"><w:r><w:t>Entry one</w:t></w:r></w:hyperlink>
+      </w:p>
+      <w:p>
+        <w:hyperlink w:anchor="_Toc2"><w:r><w:t>Entry two</w:t></w:r></w:hyperlink>
+        <w:r><w:fldChar w:fldCharType="end"/></w:r>
+      </w:p>
+      <w:p><w:bookmarkStart w:id="1" w:name="_Toc1"/><w:bookmarkStart w:id="2" w:name="_GoBack"/><w:bookmarkEnd w:id="1"/>
+        <w:r><w:t>Chapter one</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    // Both TOC entry paragraphs — the one that OPENS the field included —
+    // carry the same field object; the heading after it does not.
+    const f0 = doc.child(0).attrs.field;
+    expect(f0).toMatchObject({ kind: 'toc' });
+    expect(f0.instr).toContain('TOC');
+    expect(doc.child(1).attrs.field).toBe(f0); // identity marks the span
+    expect(doc.child(2).attrs.field).toBeNull();
+    // The span covers BOTH entry paragraphs from anywhere inside it — the
+    // caret sitting in the first must not shrink it to that paragraph.
+    const span = { from: 0, to: doc.child(0).nodeSize + doc.child(1).nodeSize };
+    expect(fieldAt(doc, 1)).toMatchObject(span);
+    expect(fieldAt(doc, span.to - 1)).toMatchObject(span);
+    expect(fieldAt(doc, span.to + 2)).toBeNull(); // the heading is outside
+    // The heading anchors its bookmark; Word's cursor bookmark is dropped.
+    expect(doc.child(2).attrs.bookmarks).toEqual(['_Toc1']);
+    expect(findBookmark(doc, '_Toc1')).toBe(
+      2 + doc.child(0).nodeSize + doc.child(1).nodeSize - 1,
+    );
+    expect(bookmarkLabel(doc, '_Toc1')).toBe('Chapter one');
+    expect(findBookmark(doc, '_Toc2')).toBeNull(); // no paragraph claims it
+  });
+
+  it('keeps cached results of nested and cross-paragraph fields (TOC)', async () => {
+    // Word's real TOC shape: the TOC field OPENS in the first entry paragraph
+    // and its end lives paragraphs later; each entry nests a PAGEREF field.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+        <w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h </w:instrText></w:r>
+        <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+        <w:hyperlink w:anchor="_Toc1">
+          <w:r><w:t>Entry one</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+          <w:r><w:instrText> PAGEREF _Toc1 </w:instrText></w:r>
+          <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+          <w:r><w:t>3</w:t></w:r>
+          <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        </w:hyperlink>
+      </w:p>
+      <w:p>
+        <w:hyperlink w:anchor="_Toc2"><w:r><w:t>Entry two</w:t></w:r></w:hyperlink>
+        <w:r><w:fldChar w:fldCharType="end"/></w:r>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    expect(doc.child(0).textContent).toBe('Entry one3');
+    expect(doc.child(1).textContent).toBe('Entry two');
+    expect(markMap(doc.child(0).child(0).marks).link.href).toBe('#_Toc1');
+  });
+
+  it('falls back to first-row dxa w:tcW when w:tblGrid is missing', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tr>
+          <w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>
+          <w:tc><w:tcPr><w:tcW w:w="6000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const row = doc.child(0).child(0);
+    expect(row.child(0).attrs.colwidth).toEqual([200]); // 3000 twips
+    expect(row.child(1).attrs.colwidth).toEqual([400]); // 6000 twips
+  });
+
+  it('resolves w:shd solid patterns and theme fills', async () => {
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
+      <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+    </a:clrScheme></a:themeElements></a:theme>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:rPr><w:shd w:val="solid" w:color="FF0000" w:fill="auto"/></w:rPr><w:t>solid</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:shd w:val="clear" w:color="auto" w:themeFill="accent1"/></w:rPr><w:t>themed</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    expect(markMap(doc.child(0).child(0).marks).highlight.color).toBe(
+      '#FF0000',
+    );
+    expect(markMap(doc.child(1).child(0).marks).highlight.color).toBe(
+      '#4472C4',
+    );
+  });
+
+  it('resolves theme fonts (w:asciiTheme) via a:fontScheme', async () => {
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:fontScheme name="Office">
+        <a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>
+        <a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>
+      </a:fontScheme>
+    </a:themeElements></a:theme>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:rPr><w:rFonts w:asciiTheme="majorHAnsi" w:hAnsiTheme="majorHAnsi"/></w:rPr><w:t>heading</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi"/></w:rPr><w:t>body</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:asciiTheme="minorHAnsi"/></w:rPr><w:t>literal wins</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    expect(markMap(doc.child(0).child(0).marks).fontFamily.family).toBe(
+      'Calibri Light',
+    );
+    expect(markMap(doc.child(1).child(0).marks).fontFamily.family).toBe(
+      'Calibri',
+    );
+    expect(markMap(doc.child(2).child(0).marks).fontFamily.family).toBe(
+      'Arial',
     );
   });
 

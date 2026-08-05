@@ -74,6 +74,8 @@ export type {
   SelectedCell,
 } from './table-selection-plugin';
 export type { FindPlugin, FindState } from './find-plugin';
+export type { HyperlinkPlugin } from './hyperlink-plugin';
+export type { ActiveField, TocPlugin } from './toc-plugin';
 
 const CARET_BLINK_MS = 530;
 

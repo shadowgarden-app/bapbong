@@ -4,6 +4,7 @@ import { imageResizePlugin } from './image-resize-plugin';
 import { tableResizePlugin } from './table-resize-plugin';
 import { tableSelectionPlugin } from './table-selection-plugin';
 import { hyperlinkPlugin } from './hyperlink-plugin';
+import { tocPlugin } from './toc-plugin';
 
 /**
  * Built-in ("internal") plugins — shipped with the editor, no install needed
@@ -20,5 +21,12 @@ export function createBuiltins(): EditorPlugin[] {
   // Order matters for the pointer hook: hyperlink claims modifier-clicks
   // first, then the resizers claim their geometry (table column borders,
   // then image boxes) before table selection.
-  return [hyperlinkPlugin(), findPlugin(), tableResizePlugin(), imageResizePlugin(), tableSelectionPlugin()];
+  return [
+    hyperlinkPlugin(),
+    tocPlugin(),
+    findPlugin(),
+    tableResizePlugin(),
+    imageResizePlugin(),
+    tableSelectionPlugin(),
+  ];
 }

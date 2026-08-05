@@ -24,6 +24,7 @@ import type {
   LayoutImageSegment,
   LayoutLine,
   LayoutSegment,
+  MarkerStyle,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -122,6 +123,8 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   };
   if (findMark(marks, 'underline')) run.underline = true;
   if (findMark(marks, 'strike')) run.strike = true;
+  if (findMark(marks, 'dstrike')) run.dstrike = true;
+  if (findMark(marks, 'smallCaps')) run.smallCaps = true;
   const highlight = findMark(marks, 'highlight');
   if (highlight) run.background = String(highlight.attrs['color']);
   const va = findMark(marks, 'vertAlign');
@@ -183,6 +186,7 @@ function paragraphToFlow(
   nodePos: number,
   allowFloats = false,
   marker?: string,
+  markerStyle?: MarkerStyle,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   // A heading paragraph sizes its runs from the level by default (bigger +
@@ -252,6 +256,7 @@ function paragraphToFlow(
     type: 'paragraph',
     runs,
     marker: marker ?? (list?.marker || undefined),
+    ...(markerStyle && { markerStyle }),
     align: align ?? undefined,
     indent: indent ?? undefined,
     pos: contentStart,
@@ -263,6 +268,9 @@ function paragraphToFlow(
   const spacing = node.attrs['spacing'] as ParagraphSpacing | null;
   if (spacing) flow.spacing = spacing;
   if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
+  if (node.attrs['keepNext'] === true) flow.keepNext = true;
+  if (node.attrs['keepLines'] === true) flow.keepLines = true;
+  if (node.attrs['widowControl'] === false) flow.widowControl = false;
   const pBorders = node.attrs['borders'] as ParagraphBorders | null;
   if (pBorders) flow.borders = pBorders;
   return flow;
@@ -278,18 +286,38 @@ function nodeHasFloats(node: PMNode): boolean {
 }
 
 /** The live marker for a list paragraph: counted from the doc's numbering
- *  defs, falling back to a legacy pre-resolved marker on the attr. */
+ *  defs, falling back to a legacy pre-resolved marker on the attr. Carries
+ *  the level's label styling (lvlJc / suff / label rPr) alongside the text. */
 function markerFor(
   node: PMNode,
   counter: NumberingCounter | undefined,
-): string | undefined {
+): { text: string; style?: MarkerStyle } | undefined {
   const list = node.attrs['list'] as {
     numId: string;
     level: number;
     marker?: string;
   } | null;
   if (!list) return undefined;
-  return (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
+  const text =
+    (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
+  if (text === undefined) return undefined;
+  const def = counter?.def(list.numId, list.level);
+  if (!def || (!def.jc && !def.suff && !def.rPr)) return { text };
+  const style: MarkerStyle = {};
+  if (def.jc) style.jc = def.jc;
+  if (def.suff) style.suff = def.suff;
+  if (def.rPr) {
+    const { bold, italic, sizePt, family, color } = def.rPr;
+    const font: Partial<FontSpec> = {
+      ...(bold !== undefined && { bold }),
+      ...(italic !== undefined && { italic }),
+      ...(sizePt !== undefined && { sizePt }),
+      ...(family !== undefined && { family }),
+    };
+    if (Object.keys(font).length > 0) style.font = font;
+    if (color) style.color = color;
+  }
+  return { text, style };
 }
 
 /** Flatten a block-level node (paragraph or table) into a FlowBlock, or null
@@ -301,14 +329,10 @@ function nodeToBlock(
   allowFloats = false,
   counter?: NumberingCounter,
 ): FlowBlock | null {
-  if (node.type.name === 'paragraph')
-    return paragraphToFlow(
-      node,
-      base,
-      nodePos,
-      allowFloats,
-      markerFor(node, counter),
-    );
+  if (node.type.name === 'paragraph') {
+    const m = markerFor(node, counter);
+    return paragraphToFlow(node, base, nodePos, allowFloats, m?.text, m?.style);
+  }
   if (node.type.name === 'table')
     return tableToFlow(node, base, nodePos, counter);
   return null;
@@ -402,6 +426,7 @@ interface Token {
   link?: string;
   underline?: boolean;
   strike?: boolean;
+  dstrike?: boolean;
   background?: string;
   vertAlign?: 'super' | 'sub';
   footnoteRef?: number;
@@ -419,6 +444,40 @@ interface Token {
   pos?: number;
   /** Size in PM positions (text length, or 1 for an image atom). */
   size: number;
+}
+
+/** Small-caps glyph scale (the synthesized lowercase→uppercase size). */
+const SMALLCAPS_SCALE = 0.8;
+
+/** Expand a small-caps run into case-spans: lowercase spans become their
+ *  uppercase at a reduced size, everything else passes through unchanged.
+ *  Per-char mapping keeps the 1:1 text↔PM-position correspondence (a char
+ *  whose uppercase form isn't a single char — ß→SS — stays as-is). */
+function expandSmallCaps(run: InlineRun): InlineRun[] {
+  const isLower = (ch: string): boolean => {
+    const up = ch.toUpperCase();
+    return up !== ch && up.length === 1;
+  };
+  const out: InlineRun[] = [];
+  const text = run.text;
+  let i = 0;
+  while (i < text.length) {
+    const lower = isLower(text[i]);
+    let j = i + 1;
+    while (j < text.length && isLower(text[j]) === lower) j++;
+    const slice = text.slice(i, j);
+    out.push({
+      ...run,
+      smallCaps: undefined,
+      text: lower ? slice.toUpperCase() : slice,
+      font: lower
+        ? { ...run.font, sizePt: run.font.sizePt * SMALLCAPS_SCALE }
+        : run.font,
+      pos: run.pos != null ? run.pos + i : undefined,
+    });
+    i = j;
+  }
+  return out;
 }
 
 /** Tokenize one inline item: words / spaces / tabs for text, a single atom for
@@ -463,6 +522,9 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
       },
     ];
   }
+  // Small caps: split into case-spans first (each re-enters as a plain run).
+  if (inline.smallCaps)
+    return expandSmallCaps(inline).flatMap((r) => tokenizeInline(r, ctx));
   // Super/subscript render at a reduced size — apply once, here.
   const font = inline.vertAlign
     ? { ...inline.font, sizePt: inline.font.sizePt * SUPERSUB_SCALE }
@@ -483,6 +545,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         link: inline.link,
         underline: inline.underline,
         strike: inline.strike,
+        dstrike: inline.dstrike,
         background: inline.background,
         vertAlign: inline.vertAlign,
         footnoteRef: inline.footnoteRef,
@@ -578,17 +641,45 @@ function wrapParagraph(
   let lineRight = band.right - indentRight;
 
   // List marker hangs at the first line's start; text follows after it, and
-  // wrapped lines align under that text (hanging indent).
+  // wrapped lines align under that text (hanging indent). The label draws
+  // with its own font/color (lvl rPr), aligns against the anchor (lvlJc) and
+  // separates from the text per w:suff — tab (default) jumps to the hanging
+  // text position like Word, space/nothing stay tight.
+  const mStyle = block.markerStyle;
+  const markerFont: FontSpec = mStyle?.font
+    ? { ...base, ...mStyle.font }
+    : base;
   let marker: LayoutSegment | null = null;
   let markerTextX = 0;
+  const placeMarker = (): void => {
+    if (!marker) return;
+    const anchor = lineLeft + firstLineDelta;
+    const w = marker.width ?? 0;
+    marker.x =
+      mStyle?.jc === 'right'
+        ? anchor - w
+        : mStyle?.jc === 'center'
+          ? anchor - w / 2
+          : anchor;
+    const end = marker.x + w;
+    markerTextX =
+      mStyle?.suff === 'nothing'
+        ? end
+        : mStyle?.suff === 'space'
+          ? end + measure(' ', markerFont)
+          : end <= lineLeft
+            ? lineLeft
+            : end + measure(' ', markerFont);
+  };
   if (block.marker) {
     marker = {
-      x: lineLeft + firstLineDelta,
+      x: 0,
       text: block.marker,
-      font: base,
-      width: measure(block.marker, base),
+      font: markerFont,
+      width: measure(block.marker, markerFont),
+      ...(mStyle?.color ? { color: mStyle.color } : {}),
     };
-    markerTextX = marker.x + measure(`${block.marker} `, base);
+    placeMarker();
   }
   // `let`: re-derived if the first line's band is re-queried for a wide image.
   let firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
@@ -748,6 +839,7 @@ function wrapParagraph(
           width: t.width,
           pos: t.pos,
         };
+        if (t.dstrike) seg.dstrike = true;
         if (t.field) seg.field = t.field;
         if (t.footnoteRef != null) seg.footnoteRef = t.footnoteRef;
         if (t.commentIds) seg.commentIds = t.commentIds;
@@ -925,10 +1017,7 @@ function wrapParagraph(
       );
       lineLeft = band.left + indentLeft;
       lineRight = band.right - indentRight;
-      if (marker) {
-        marker.x = lineLeft + firstLineDelta;
-        markerTextX = marker.x + measure(`${block.marker} `, base);
-      }
+      placeMarker();
       firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
       contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
     }
@@ -1406,6 +1495,10 @@ type ParaItem = {
   before?: number;
   after?: number;
   pageBreakBefore?: boolean;
+  /** Pagination keeps (w:keepNext / w:keepLines / w:widowControl off). */
+  keepNext?: boolean;
+  keepLines?: boolean;
+  widowControl?: boolean;
   /** w:pBdr — a border box painted around the paragraph's lines. */
   borders?: ParagraphBorders;
 };
@@ -1642,7 +1735,8 @@ function buildCtx(config: LayoutConfig): Ctx {
  *  vertical content bounds for a page geometry (e.g. pushed in by a tall page
  *  header/footer) — a function because sections can override the geometry. */
 function placeBlocks(
-  items: Iterable<BlockItem>,
+  // An ARRAY (not just an iterable): the keepNext look-ahead indexes forward.
+  items: BlockItem[],
   config: LayoutConfig,
   ctx: Ctx,
   bandFor?: (
@@ -1669,7 +1763,7 @@ function placeBlocks(
   // break with differing geometry is promoted to next-page, as Word does).
   let curPage = page;
   let { top, bottom } = bandOf(page);
-  let contentLeft = page.margin.left;
+  let contentLeft = contentLeftOf(page);
   let contentRight = page.width - page.margin.right;
 
   const pages: ResolvedPage[] = [];
@@ -1744,7 +1838,7 @@ function placeBlocks(
    *  called at a page boundary (after finalizePage, or before any content). */
   const setGeometry = (p: PageConfig) => {
     curPage = p;
-    contentLeft = p.margin.left;
+    contentLeft = contentLeftOf(p);
     contentRight = p.width - p.margin.right;
     contentWidth = contentRight - contentLeft;
     restartBand();
@@ -1944,6 +2038,83 @@ function placeBlocks(
   const pageHasContent = () =>
     lines.length > 0 || tables.length > 0 || pageFloats.length > 0;
 
+  // ── Pagination keeps (w:keepNext / w:keepLines / w:widowControl) ────
+  const nominalH = (() => {
+    const bm = ctx.metrics ? ctx.metrics(ctx.base) : null;
+    return bm ? bm.ascent + bm.descent : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
+  })();
+  const draftsTotal = (d: LineDraft[] | null | undefined): number =>
+    d?.reduce((s, x) => s + x.height, 0) ?? 0;
+
+  /** The smallest slice of a paragraph that may legally open a band: its
+   *  first line, or the first TWO with widow control on (orphan rule) — and
+   *  the whole thing when it cannot split at all (keepLines, or ≤3 lines
+   *  under widow control, where every split strands a lone line). */
+  const minChunkH = (p: ParaItem): number => {
+    const d = p.drafts;
+    if (!d || d.length === 0) return nominalH;
+    if (p.keepLines) return draftsTotal(d);
+    if (p.widowControl === false) return d[0].height;
+    if (d.length <= 3) return draftsTotal(d);
+    return d[0].height + d[1].height;
+  };
+
+  /** Height that must follow a keepNext paragraph on its band: consecutive
+   *  keepNext blocks in full, then the minimum legal slice of the block that
+   *  ends the chain. Tables and un-drafted paragraphs approximate as one
+   *  line. */
+  const keepAheadH = (idx: number): number => {
+    let need = 0;
+    for (let j = idx + 1; j < items.length; j++) {
+      const it = items[j];
+      if (it.section) break; // a section boundary ends the chain
+      if ('para' in it) {
+        need += it.para.before ?? 0;
+        if (it.para.keepNext && it.para.drafts && j + 1 < items.length) {
+          need += draftsTotal(it.para.drafts) + (it.para.after ?? 0);
+          continue;
+        }
+        need += minChunkH(it.para);
+      } else {
+        need += nominalH;
+      }
+      break;
+    }
+    return need;
+  };
+
+  /** Emit a paragraph's pre-wrapped lines with widow/orphan control: when
+   *  the paragraph must split, neither side of the split keeps a lone line
+   *  (Word's w:widowControl, on by default). Splits force the band break
+   *  here; emitLine's own overflow check stays as the footnote-reserve
+   *  fallback. */
+  const emitParaDrafts = (drafts: LineDraft[], widowOn: boolean): void => {
+    let i = 0;
+    while (i < drafts.length) {
+      const remaining = drafts.length - i;
+      let fit = 0;
+      for (
+        let yy = y;
+        fit < remaining && yy + drafts[i + fit].height <= colBottom();
+      ) {
+        yy += drafts[i + fit].height;
+        fit++;
+      }
+      if (fit >= remaining) {
+        for (; i < drafts.length; i++) emitLine(drafts[i]);
+        return;
+      }
+      if (widowOn && remaining >= 2) {
+        if (remaining - fit === 1) fit = remaining - 2; // no widow up top
+        if (i === 0 && fit === 1) fit = 0; // no orphan down here
+        if (fit < 0) fit = 0;
+      }
+      if (fit === 0 && !colDirty) fit = 1; // an empty band must progress
+      for (let k = 0; k < fit; k++, i++) emitLine(drafts[i]);
+      breakBand();
+    }
+  };
+
   /** Pin a paragraph's floats relative to its start; register text exclusions. */
   const registerFloats = (flow: FlowParagraph, yPara: number) => {
     for (const f of flow.floats ?? []) {
@@ -2074,7 +2245,8 @@ function placeBlocks(
   };
 
   let firstItem = true;
-  for (const item of items) {
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
     // Section boundary: switch column flow (and break) before the block.
     if (item.section) {
       const nextPage = item.section.page ?? page;
@@ -2128,6 +2300,23 @@ function placeBlocks(
         finalizePage();
         rebalance();
       }
+      // Pagination keeps: break the band early when this paragraph
+      // (keepLines) — or this paragraph plus the head of what must follow
+      // it (keepNext) — cannot finish here but WOULD fit a fresh band.
+      // A chain taller than a whole band gives up, as Word does.
+      if (colDirty && item.para.drafts) {
+        const selfH = (item.para.before ?? 0) + draftsTotal(item.para.drafts);
+        const bandH = colBottom() - bandTop;
+        const avail = colBottom() - y;
+        const needKL = item.para.keepLines && selfH > avail && selfH <= bandH;
+        const needKN =
+          item.para.keepNext &&
+          (() => {
+            const need = selfH + (item.para.after ?? 0) + keepAheadH(idx);
+            return need > avail && need <= bandH;
+          })();
+        if (needKL || needKN) breakBand();
+      }
       // Space-before: a gap above the paragraph (collapsed away at a band top).
       if (item.para.before && colDirty) {
         y += item.para.before;
@@ -2146,7 +2335,7 @@ function placeBlocks(
         (ex) => ex.bottom > y && ex.top < y + draftsHeight,
       );
       if (drafts && !floatsAhead) {
-        for (const d of drafts) emitLine(d);
+        emitParaDrafts(drafts, item.para.widowControl !== false);
       } else {
         placeParaBanded(item.para.getFlow());
       }
@@ -2288,7 +2477,14 @@ function sanitizePage(p: PageConfig): PageConfig {
     margin.right === p.margin.right &&
     margin.bottom === p.margin.bottom &&
     margin.left === p.margin.left;
-  return same ? p : { width, height, margin };
+  if (same) return p;
+  const out: PageConfig = { width, height, margin };
+  if (p.headerDistance !== undefined)
+    out.headerDistance = num(p.headerDistance, 48);
+  if (p.footerDistance !== undefined)
+    out.footerDistance = num(p.footerDistance, 48);
+  if (p.gutter !== undefined) out.gutter = num(p.gutter, 0);
+  return out;
 }
 
 function sanitizeConfig(config: LayoutConfig): LayoutConfig {
@@ -2305,7 +2501,10 @@ function sameGeom(a: PageConfig, b: PageConfig): boolean {
     a.margin.top === b.margin.top &&
     a.margin.right === b.margin.right &&
     a.margin.bottom === b.margin.bottom &&
-    a.margin.left === b.margin.left
+    a.margin.left === b.margin.left &&
+    a.headerDistance === b.headerDistance &&
+    a.footerDistance === b.footerDistance &&
+    a.gutter === b.gutter
   );
 }
 
@@ -2315,7 +2514,7 @@ export function layoutBlocks(
 ): ResolvedLayout {
   config = sanitizeConfig(config);
   const ctx = buildCtx(config);
-  const left = config.page.margin.left;
+  const left = contentLeftOf(config.page);
   const right = config.page.width - config.page.margin.right;
   // Whole-document column flow: lay every block at the column content width.
   const cols: ColumnConfig = config.columns ?? { count: 1, gap: 0 };
@@ -2333,6 +2532,9 @@ export function layoutBlocks(
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
+              keepNext: block.keepNext,
+              keepLines: block.keepLines,
+              widowControl: block.widowControl,
               borders: block.borders,
             },
           }
@@ -2462,6 +2664,13 @@ export function createLayoutCache(): LayoutCache {
 
 /** Word's default header/footer distance from the page edge (720 twips). */
 const CHROME_DISTANCE = 48;
+/** Effective chrome distances / left content edge for a page config. */
+const headerDist = (p: PageConfig): number =>
+  p.headerDistance ?? CHROME_DISTANCE;
+const footerDist = (p: PageConfig): number =>
+  p.footerDistance ?? CHROME_DISTANCE;
+const contentLeftOf = (p: PageConfig): number =>
+  p.margin.left + (p.gutter ?? 0);
 
 /** Repeating page furniture passed alongside the body document. `header`/
  *  `footer` are the default (odd-page) bands; the `*First`/`*Even` variants
@@ -2578,16 +2787,17 @@ function layoutChrome(
   return band;
 }
 
-/** Lay out a footer document pinned `CHROME_DISTANCE` from the page bottom. */
+/** Lay out a footer document pinned `dist` px from the page bottom. */
 function layoutFooterChrome(
   doc: PMNode,
   pageHeight: number,
+  dist: number,
   left: number,
   right: number,
   ctx: Ctx,
 ): ResolvedChrome {
   const flow = layoutChrome(doc, 0, left, right, ctx);
-  const topY = pageHeight - CHROME_DISTANCE - flow.height;
+  const topY = pageHeight - dist - flow.height;
   const band: ResolvedChrome = {
     lines: flow.lines.map((l) => ({ ...l, y: l.y + topY })),
     tables: flow.tables,
@@ -2637,7 +2847,7 @@ export function layout(
   config = sanitizeConfig(config);
   const ctx = buildCtx(config);
   const { page } = config;
-  const left = page.margin.left;
+  const left = contentLeftOf(page);
   const right = page.width - page.margin.right;
 
   // Page chrome first — a tall header/footer pushes the body band inward. The
@@ -2655,11 +2865,11 @@ export function layout(
   };
   const layHeaders = (c: Ctx) =>
     layVariants(headerDocs, (d) =>
-      layoutChrome(d, CHROME_DISTANCE, left, right, c),
+      layoutChrome(d, headerDist(page), left, right, c),
     );
   const layFooters = (c: Ctx) =>
     layVariants(footerDocs, (d) =>
-      layoutFooterChrome(d, page.height, left, right, c),
+      layoutFooterChrome(d, page.height, footerDist(page), left, right, c),
     );
   let headers = perf.span('chrome-headers', () => layHeaders(ctx));
   let footers = perf.span('chrome-footers', () => layFooters(ctx));
@@ -2727,15 +2937,15 @@ export function layout(
       const p = sections[i].page
         ? sanitizePage(sections[i].page as PageConfig)
         : page;
-      const l = p.margin.left;
+      const l = contentLeftOf(p);
       const r = p.width - p.margin.right;
       const hb = layVariants(
         { default: cs.header, first: cs.headerFirst, even: cs.headerEven },
-        (d) => layoutChrome(d, CHROME_DISTANCE, l, r, c),
+        (d) => layoutChrome(d, headerDist(p), l, r, c),
       );
       const fb = layVariants(
         { default: cs.footer, first: cs.footerFirst, even: cs.footerEven },
-        (d) => layoutFooterChrome(d, p.height, l, r, c),
+        (d) => layoutFooterChrome(d, p.height, footerDist(p), l, r, c),
       );
       chromeSets.push({
         header: hb.default,
@@ -2764,7 +2974,7 @@ export function layout(
     // `colRight` are the cache key, so a geometry change re-measures exactly
     // the affected sections.
     const secPage = bs.page ?? page;
-    const bLeft = secPage.margin.left;
+    const bLeft = contentLeftOf(secPage);
     const bRight = secPage.width - secPage.margin.right;
     const colRight = bLeft + columnWidth(bRight - bLeft, bs.columns);
     const tag = (item: BlockItem): BlockItem => {
@@ -2776,7 +2986,9 @@ export function layout(
       return item;
     };
     if (node.type.name === 'paragraph') {
-      const marker = markerFor(node, counter); // advances numbering every pass
+      const m = markerFor(node, counter); // advances numbering every pass
+      const marker = m?.text;
+      const markerStyle = m?.style;
       const contentStart = offset + 1;
       // Fast path: an unchanged paragraph reuses its cached item outright, and a
       // moved one shifts its drafts in place — neither allocates a ParaItem,
@@ -2806,7 +3018,7 @@ export function layout(
       // Miss (or float-anchoring paragraph, never cached): build fresh.
       const hasFloats = nodeHasFloats(node);
       const getFlow = () =>
-        paragraphToFlow(node, ctx.base, offset, true, marker);
+        paragraphToFlow(node, ctx.base, offset, true, marker, markerStyle);
       const sp = node.attrs['spacing'] as ParagraphSpacing | null;
       const mkItem = (drafts: LineDraft[] | null): ParaItem => ({
         getFlow,
@@ -2814,6 +3026,9 @@ export function layout(
         before: sp?.before,
         after: sp?.after,
         pageBreakBefore: node.attrs['pageBreakBefore'] === true,
+        keepNext: node.attrs['keepNext'] === true,
+        keepLines: node.attrs['keepLines'] === true,
+        widowControl: node.attrs['widowControl'] !== false,
         borders:
           (node.attrs['borders'] as ParagraphBorders | null) ?? undefined,
       });
@@ -2824,7 +3039,14 @@ export function layout(
         return;
       }
       perf.bump('para.miss');
-      const flow = paragraphToFlow(node, ctx.base, offset, true, marker);
+      const flow = paragraphToFlow(
+        node,
+        ctx.base,
+        offset,
+        true,
+        marker,
+        markerStyle,
+      );
       const drafts = layoutParagraph(flow, bLeft, colRight, ctx);
       const item: ParaItem = { ...mkItem(drafts), getFlow: () => flow };
       cache?.paragraphs.set(node, {
@@ -2894,15 +3116,14 @@ export function layout(
     let b = p.height - p.margin.bottom;
     const sh = chromeIndex != null ? setBandH[chromeIndex] : undefined;
     if (sh) {
-      if (sh.header > 0) t = Math.max(t, CHROME_DISTANCE + sh.header);
-      if (sh.footer > 0)
-        b = Math.min(b, p.height - CHROME_DISTANCE - sh.footer);
+      if (sh.header > 0) t = Math.max(t, headerDist(p) + sh.header);
+      if (sh.footer > 0) b = Math.min(b, p.height - footerDist(p) - sh.footer);
       return { top: t, bottom: b };
     }
     if (headers.default || headers.first || headers.even)
-      t = Math.max(t, CHROME_DISTANCE + maxBandHeight(headers));
+      t = Math.max(t, headerDist(p) + maxBandHeight(headers));
     if (footers.default || footers.first || footers.even)
-      b = Math.min(b, p.height - CHROME_DISTANCE - maxBandHeight(footers));
+      b = Math.min(b, p.height - footerDist(p) - maxBandHeight(footers));
     return { top: t, bottom: b };
   };
   const resolved = perf.span('placeBlocks', () =>

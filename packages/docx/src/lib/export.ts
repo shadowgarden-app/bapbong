@@ -10,6 +10,7 @@ import type {
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
+import { audit } from './audit.js';
 import { parsePageGeometry } from './docx.js';
 import { child, parseXml } from './ooxml.js';
 
@@ -114,8 +115,33 @@ const EXT_MIME: Record<string, string> = {
 
 // ── runs ────────────────────────────────────────────────────────────
 
+// Every mark the serializer handles — the character marks written by runProps
+// below plus the wrapper marks handled elsewhere (link → w:hyperlink,
+// footnote → w:footnoteReference, comment → comment ranges). Anything else on
+// a run is silently dropped; the XML audit flags it when the flag is on.
+const KNOWN_MARKS = new Set([
+  'fontFamily',
+  'strong',
+  'em',
+  'underline',
+  'strike',
+  'dstrike',
+  'smallCaps',
+  'textColor',
+  'fontSize',
+  'highlight',
+  'vertAlign',
+  'link',
+  'comment',
+  'footnote',
+  'carryRPr',
+]);
+
 /** A run's w:rPr from its marks (character marks only; link is a wrapper). */
 function runProps(marks: readonly Mark[]): string {
+  for (const m of marks)
+    if (!KNOWN_MARKS.has(m.type.name))
+      audit.exportUnhandled('mark', m.type.name);
   const byName = new Map(marks.map((m) => [m.type.name, m]));
   const out: string[] = [];
   const fam = byName.get('fontFamily')?.attrs['family'] as string | undefined;
@@ -124,6 +150,8 @@ function runProps(marks: readonly Mark[]): string {
   if (byName.has('em')) out.push('<w:i/>');
   if (byName.has('underline')) out.push('<w:u w:val="single"/>');
   if (byName.has('strike')) out.push('<w:strike/>');
+  if (byName.has('dstrike')) out.push('<w:dstrike/>');
+  if (byName.has('smallCaps')) out.push('<w:smallCaps/>');
   const color = byName.get('textColor')?.attrs['color'] as string | undefined;
   if (color) out.push(`<w:color w:val="${color.replace(/^#/, '')}"/>`);
   const size = byName.get('fontSize')?.attrs['size'] as number | undefined;
@@ -138,6 +166,12 @@ function runProps(marks: readonly Mark[]): string {
     out.push(
       `<w:vertAlign w:val="${va === 'sub' ? 'subscript' : 'superscript'}"/>`,
     );
+  // Carry-through fidelity: unmodelled rPr children preserved by the importer
+  // (w:rtl, w:kern, w:szCs, …), already escaped/filtered there. Appended after
+  // the modelled props — Word tolerates rPr child order; revisit with a full
+  // CT_RPr order table if a strict consumer ever complains.
+  const carry = byName.get('carryRPr')?.attrs['xml'] as string | undefined;
+  if (carry) out.push(carry);
   return out.length ? `<w:rPr>${out.join('')}</w:rPr>` : '';
 }
 
@@ -329,7 +363,11 @@ function inlineUnit(node: PMNode, ctx: ExportCtx): string {
 function inlineContent(node: PMNode, ctx: ExportCtx): string {
   let out = '';
   node.forEach((child) => {
-    if (!isInlineLeaf(child)) return;
+    if (!isInlineLeaf(child)) {
+      // An inline type the writer has no branch for — dropped from the body.
+      audit.exportUnhandled('node', child.type.name);
+      return;
+    }
     const ids = commentIdsOf(child).filter((id) => ctx.knownComments.has(id));
     for (const id of ids) {
       if (!ctx.openComments.has(id)) {
@@ -399,7 +437,11 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
   if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
   else if (styleId === 'Title' || styleId === 'Subtitle')
     out.push(`<w:pStyle w:val="${styleId}"/>`);
+  // CT_PPr schema order: keepNext, keepLines, pageBreakBefore, widowControl.
+  if (a['keepNext']) out.push('<w:keepNext/>');
+  if (a['keepLines']) out.push('<w:keepLines/>');
   if (a['pageBreakBefore']) out.push('<w:pageBreakBefore/>');
+  if (a['widowControl'] === false) out.push('<w:widowControl w:val="0"/>');
   const list = a['list'] as { numId: string; level: number } | null;
   if (list) {
     const outId = ctx.numIdMap.get(list.numId) ?? list.numId;
@@ -466,6 +508,13 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
   const align = a['align'] as string | null;
   if (align)
     out.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`);
+  // Carry-through fidelity: unmodelled pPr children + the paragraph mark's
+  // w:rPr, preserved verbatim by the importer. The mark rPr goes LAST — in
+  // CT_PPr it sits at the end of the property run (only sectPr, appended by
+  // the caller, may follow).
+  const carry = a['carry'] as { pPr?: string; markRPr?: string } | null;
+  if (carry?.pPr) out.push(carry.pPr);
+  if (carry?.markRPr) out.push(`<w:rPr>${carry.markRPr}</w:rPr>`);
   return out.join('');
 }
 
@@ -473,7 +522,18 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
 function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
   const props = paraProps(node, ctx) + sectPr;
   const pPr = props ? `<w:pPr>${props}</w:pPr>` : '';
-  return `<w:p>${pPr}${inlineContent(node, ctx)}</w:p>`;
+  // Named anchors wrap the paragraph's content: dropping them would break
+  // every "#name" hyperlink pointing here — a saved TOC whose entries no
+  // longer jump anywhere. Ids are local to the part and regenerated.
+  const names = (node.attrs['bookmarks'] as string[] | null) ?? [];
+  let open = '';
+  let close = '';
+  for (const name of names) {
+    const id = ctx.nextId++;
+    open += `<w:bookmarkStart w:id="${id}" w:name="${esc(name)}"/>`;
+    close += `<w:bookmarkEnd w:id="${id}"/>`;
+  }
+  return `<w:p>${pPr}${open}${inlineContent(node, ctx)}${close}</w:p>`;
 }
 
 // ── tables ──────────────────────────────────────────────────────────
@@ -508,7 +568,9 @@ function bordersXml(
       const sz = Math.max(2, Math.round(side.width * 6)); // px → eighths of a point
       const color =
         side.color === '#b0b0b0' ? 'auto' : side.color.replace(/^#/, '');
-      return `<w:${s} w:val="${BORDER_STYLE_OUT[side.style] ?? 'single'}" w:sz="${sz}" w:space="0" w:color="${color}"/>`;
+      // w:space is points; the model keeps px (see parseBorderSide).
+      const space = side.space ? Math.round(side.space * (72 / 96)) : 0;
+      return `<w:${s} w:val="${BORDER_STYLE_OUT[side.style] ?? 'single'}" w:sz="${sz}" w:space="${space}" w:color="${color}"/>`;
     })
     .join('');
   return inner ? `<${tag}>${inner}</${tag}>` : '';
@@ -554,6 +616,9 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
       .join('');
     if (sides) pr.push(`<w:tcMar>${sides}</w:tcMar>`);
   }
+  // Carried tcPr extras (textDirection, noWrap, tcFitText, …).
+  const cellCarry = a['carry'] as { tcPr?: string } | null;
+  if (cellCarry?.tcPr) pr.push(cellCarry.tcPr);
   let content = '';
   cell.forEach((b) => (content += blockXml(b, ctx)));
   if (!content) content = '<w:p/>'; // a cell must contain at least one block
@@ -599,6 +664,9 @@ function rowXml(
     pr.push(
       `<w:trHeight w:val="${pxToTwips(h.value)}" w:hRule="${h.exact ? 'exact' : 'atLeast'}"/>`,
     );
+  // Carried trPr extras (gridBefore/wBefore, cnfStyle, …).
+  const rowCarry = row.attrs['carry'] as { trPr?: string } | null;
+  if (rowCarry?.trPr) pr.push(rowCarry.trPr);
   const trPr = pr.length ? `<w:trPr>${pr.join('')}</w:trPr>` : '';
 
   const nodes: PMNode[] = [];
@@ -645,6 +713,11 @@ function rowXml(
 function tableXml(node: PMNode, ctx: ExportCtx): string {
   const a = node.attrs;
   const pr: string[] = [];
+  // Carried tblPr extras go FIRST: they may hold w:tblStyle, which CT_TblPr
+  // requires at the head. The modelled props that follow (jc/borders/margins)
+  // are tolerated slightly out of strict sequence, same policy as rPr.
+  const carry = a['carry'] as { tblPr?: string } | null;
+  if (carry?.tblPr) pr.push(carry.tblPr);
   if (a['align']) pr.push(`<w:jc w:val="${a['align']}"/>`);
   const borders = a['borders'] as TableBorders | null;
   if (borders) pr.push(bordersXml('w:tblBorders', borders, TABLE_SIDES));
@@ -683,6 +756,7 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
  *  paragraph after a table. */
 function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
   if (node.type.name === 'paragraph') return paragraphXml(node, ctx, sectPr);
+  if (node.type.name !== 'table') audit.exportUnhandled('node', node.type.name);
   let out = node.type.name === 'table' ? tableXml(node, ctx) : '';
   if (sectPr) out += `<w:p><w:pPr>${sectPr}</w:pPr></w:p>`;
   return out;
@@ -1164,6 +1238,9 @@ export async function exportDocx(
   doc: PMNode,
   opts?: { carry?: JSZip },
 ): Promise<Uint8Array> {
+  // XML-audit session for the export side: unhandled model node/mark types
+  // accumulate and log once at the end (no-op unless the flag is on).
+  audit.beginExport(opts?.carry ? 'carry' : 'from-scratch');
   const comments = (doc.attrs['comments'] as CommentNode[] | null) ?? [];
   // Precompute the last inline-leaf index each comment id covers, in document
   // order, so inlineContent can close the range at the right run.
@@ -1296,6 +1373,7 @@ export async function exportDocx(
       zip.file(path, base64, { base64: true });
   });
   perf.bump('export.mediaCount', ctx.media.length);
+  audit.endExport(); // body/parts serialized above; zip generation writes bytes
   return perf.spanAsync('export.generate', () =>
     zip.generateAsync({ type: 'uint8array' }),
   );

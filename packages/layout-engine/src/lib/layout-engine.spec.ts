@@ -1,6 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import type {
   FlowBlock,
+  FlowParagraph,
   FlowTableCell,
   FontSpec,
   LayoutConfig,
@@ -24,7 +25,9 @@ const font = (over: Partial<FontSpec> = {}): FontSpec => ({
   ...over,
 });
 
-const para = (text: string, marker?: string): FlowBlock => ({
+// Typed as FlowParagraph, not FlowBlock: tests spread paragraph-only fields
+// (keepNext, widowControl…) onto it, which the block union wouldn't allow.
+const para = (text: string, marker?: string): FlowParagraph => ({
   type: 'paragraph',
   runs: [{ text, font: font() }],
   marker,
@@ -147,6 +150,128 @@ describe('layoutBlocks', () => {
     expect(line0.segments[1]).toMatchObject({ text: 'aaaa', x: 50 }); // 20 + measure("1. ")
     // wrapped line aligns under the text (x = 50), not back at the margin (20).
     expect(line1.segments[0]).toMatchObject({ text: 'dddd', x: 50 });
+  });
+
+  it('styles the list label per markerStyle (jc / suff / own font+color)', () => {
+    // Hanging indent: text at left=60, marker anchored at 60-30=30.
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+      marker: '9.',
+      markerStyle: {
+        jc: 'right',
+        font: { bold: true, sizePt: 8 },
+        color: '#C00000',
+      },
+      indent: { left: 40, hanging: 30 },
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [markerSeg, textSeg] = pages[0].lines[0].segments;
+    // anchor = 20 + 40 - 30 = 30; jc=right → right edge AT the anchor.
+    expect(markerSeg).toMatchObject({
+      text: '9.',
+      x: 10, // 30 - width(20)
+      color: '#C00000',
+    });
+    expect(markerSeg.font).toMatchObject({ bold: true, sizePt: 8 });
+    // suff defaults to tab: marker end (30) ≤ text position (60) → jump there.
+    expect(textSeg).toMatchObject({ text: 'hi', x: 60 });
+  });
+
+  it('renders small caps as case-split segments (reduced uppercase)', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'Ab cD', font: font(), smallCaps: true, pos: 100 }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    const segs = pages[0].lines[0].segments;
+    // "A" full size · "B" reduced+uppercased · " " neutral · "C" reduced ·
+    // "D" full.
+    expect(segs.map((s) => s.text)).toEqual(['A', 'B', ' ', 'C', 'D']);
+    expect(segs.map((s) => s.font.sizePt)).toEqual([10, 8, 10, 8, 10]);
+    // PM positions still map 1:1 to the ORIGINAL characters.
+    expect(segs.map((s) => s.pos)).toEqual([100, 101, 102, 103, 104]);
+  });
+
+  it('carries dstrike through to the painted segment', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'gone', font: font(), dstrike: true }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    expect(pages[0].lines[0].segments[0].dstrike).toBe(true);
+  });
+
+  it("suff 'nothing' keeps the text tight against the label", () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'hi', font: font() }],
+      marker: '1.',
+      markerStyle: { suff: 'nothing' },
+    };
+    const { pages } = layoutBlocks([block], config());
+    const [markerSeg, textSeg] = pages[0].lines[0].segments;
+    expect(markerSeg.x).toBe(20);
+    expect(textSeg.x).toBe(40); // straight after "1." (20px), no gap
+  });
+
+  // Pagination keeps. Page height 100 → band y ∈ [20, 80], 16px lines: 3 fit.
+  // 15-char words wrap one per line, so word count = line count.
+  const words = (n: number) =>
+    Array.from({ length: n }, () => 'a'.repeat(15)).join(' ');
+  const keepCfg = () => config({ height: 100 });
+
+  it('widow/orphan control never strands a lone line on either side', () => {
+    // 1 filler line + a 4-line paragraph: 2 lines fit after the filler and 2
+    // move — a clean 2/2 split needs no adjustment.
+    const even = layoutBlocks([para(words(1)), para(words(4))], keepCfg());
+    expect(even.pages[0].lines).toHaveLength(3); // filler + 2
+    expect(even.pages[1].lines).toHaveLength(2);
+    // 2 filler lines + a 3-line paragraph: only 1 line would fit — an orphan —
+    // so the whole paragraph moves.
+    const orphan = layoutBlocks([para(words(2)), para(words(3))], keepCfg());
+    expect(orphan.pages[0].lines).toHaveLength(2); // filler only
+    expect(orphan.pages[1].lines).toHaveLength(3);
+    // 1 filler line + a 3-line paragraph: 2 fit but the LAST line would sit
+    // alone up top (widow) → give it company → but that strands an orphan →
+    // the whole paragraph moves.
+    const widow = layoutBlocks([para(words(1)), para(words(3))], keepCfg());
+    expect(widow.pages[0].lines).toHaveLength(1);
+    expect(widow.pages[1].lines).toHaveLength(3);
+  });
+
+  it('w:widowControl off splits wherever the band ends', () => {
+    const { pages } = layoutBlocks(
+      [para(words(1)), { ...para(words(3)), widowControl: false }],
+      keepCfg(),
+    );
+    expect(pages[0].lines).toHaveLength(3); // filler + 2 — lone tail allowed
+    expect(pages[1].lines).toHaveLength(1);
+  });
+
+  it('keepLines moves the whole paragraph instead of splitting', () => {
+    const { pages } = layoutBlocks(
+      [
+        para(words(1)),
+        { ...para(words(3)), keepLines: true, widowControl: false },
+      ],
+      keepCfg(),
+    );
+    expect(pages[0].lines).toHaveLength(1);
+    expect(pages[1].lines).toHaveLength(3);
+  });
+
+  it('keepNext keeps a heading with the opening of what follows', () => {
+    // 2 filler lines + heading + 4-line body: the heading alone still fits,
+    // but the body's orphan-legal opening (2 lines) would not — the heading
+    // moves and opens the next page with the body.
+    const { pages } = layoutBlocks(
+      [para(words(2)), { ...para(words(1)), keepNext: true }, para(words(4))],
+      keepCfg(),
+    );
+    expect(pages[0].lines).toHaveLength(2); // filler only
+    expect(pages[1].lines).toHaveLength(3); // heading + body's first 2 lines
+    expect(pages[2].lines).toHaveLength(2); // body's last 2 lines
   });
 
   it('applies left + firstLine indent to the first line', () => {
