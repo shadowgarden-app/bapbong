@@ -316,6 +316,35 @@ describe('importDocx', () => {
     expect(counter.next('2', 0)).toBe('5.');
   });
 
+  it('links paragraph styles to their numbering level via lvl w:pStyle', async () => {
+    // Numbered heading styles: the style's numPr names only the numId; the
+    // LEVEL comes from whichever lvl claims the style with w:pStyle.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Heading2">
+        <w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/><w:start w:val="1"/><w:pStyle w:val="Heading1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/><w:start w:val="1"/><w:pStyle w:val="Heading2"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>linked heading</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Heading2"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>explicit ilvl wins</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, stylesXml, numberingXml),
+    );
+    // No written ilvl → the lvl>pStyle link picks level 1 (not the default 0).
+    expect(doc.child(0).attrs.list).toEqual({ numId: '1', level: 1 });
+    // A written w:ilvl is direct intent and beats the link.
+    expect(doc.child(1).attrs.list).toEqual({ numId: '1', level: 0 });
+  });
+
   it('parses label styling (w:lvlJc / w:suff / w:isLgl / lvl rPr) into the defs', async () => {
     const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
       <w:abstractNum w:abstractNumId="0">

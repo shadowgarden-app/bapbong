@@ -1021,8 +1021,18 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     ...ctx.styles.resolveStylePPr(pStyleId),
     pPr,
   ];
-  const list = parseList(lastWith(pPrChain, 'w:numPr'));
-  if (list) {
+  const parsedList = parseList(lastWith(pPrChain, 'w:numPr'));
+  let list: ListInfo | null = null;
+  if (parsedList) {
+    const { explicitLevel, ...info } = parsedList;
+    list = info;
+    // Numbered heading styles: a lvl carrying w:pStyle claims paragraphs of
+    // that style for ITS level. Only a written w:ilvl (direct intent) wins
+    // over the link — the style-chain numPr usually has none.
+    if (!explicitLevel && pStyleId !== undefined) {
+      const linked = ctx.numbering.levelForStyle(info.numId, pStyleId);
+      if (linked !== undefined) list.level = linked;
+    }
     const lvlPPr = ctx.numbering.levelPPr(list.numId, list.level);
     if (lvlPPr) pPrChain.splice(pPrChain.length - 1, 0, lvlPPr);
   }
@@ -1380,12 +1390,21 @@ function parseAlign(pPr: OoxmlNode | undefined): Align | null {
 /** Read a paragraph's list membership (w:numPr). The marker string is NOT
  *  resolved here — the layout engine recounts markers from the doc's
  *  numbering defs every pass, so edits renumber live. */
-function parseList(pPr: OoxmlNode | undefined): ListInfo | null {
+function parseList(
+  pPr: OoxmlNode | undefined,
+): (ListInfo & { explicitLevel: boolean }) | null {
   const numPr = child(pPr, 'w:numPr');
   const numId = attrOf(child(numPr, 'w:numId'), 'w:val');
   if (numId === undefined || numId === '0') return null; // 0 cancels numbering
-  const ilvl = Number(attrOf(child(numPr, 'w:ilvl'), 'w:val') ?? '0');
-  return { numId, level: Number.isNaN(ilvl) ? 0 : ilvl };
+  const ilvlAttr = attrOf(child(numPr, 'w:ilvl'), 'w:val');
+  const ilvl = Number(ilvlAttr ?? '0');
+  return {
+    numId,
+    level: Number.isNaN(ilvl) ? 0 : ilvl,
+    // A written w:ilvl is direct intent; its absence leaves room for the
+    // lvl w:pStyle link to pick the level (numbered heading styles).
+    explicitLevel: ilvlAttr !== undefined,
+  };
 }
 
 interface LogicalCell {

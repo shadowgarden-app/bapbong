@@ -22,6 +22,10 @@ export interface NumberingResolver {
   defs: NumberingDefs | null;
   /** The lvl's paragraph properties (indent layer in the pPr cascade). */
   levelPPr(numId: string, level: number): OoxmlNode | undefined;
+  /** The level a paragraph STYLE is linked to (lvl > w:pStyle) inside the
+   *  numId's definition — numbered heading styles pick their level this
+   *  way, with only a numId (no ilvl) in the style's numPr. */
+  levelForStyle(numId: string, styleId: string): number | undefined;
   /** XML-audit hook, call once after every story is parsed: the lvl pPr of
    *  levels NO paragraph referenced are marked as consumed subtrees — like
    *  an unused style, an unreferenced level can't lose this document's data
@@ -87,18 +91,23 @@ export function buildNumbering(
   const numberingEl = child(numberingRoot, 'w:numbering');
 
   const abstract = new Map<string, Map<number, LevelEntry>>();
+  // lvl > w:pStyle links: styleId → ilvl, per abstract definition.
+  const styleLinks = new Map<string, Map<string, number>>();
   for (const abstractNum of children(numberingEl, 'w:abstractNum')) {
     const id = attrOf(abstractNum, 'w:abstractNumId');
     if (id === undefined) continue;
     const levels = new Map<number, LevelEntry>();
+    const links = new Map<string, number>();
     for (const lvl of children(abstractNum, 'w:lvl')) {
-      const ilvl = Number(attrOf(lvl, 'w:ilvl') ?? '0');
-      levels.set(
-        Number.isNaN(ilvl) ? 0 : ilvl,
-        parseLvl(lvl, resolveTheme, resolveFont),
-      );
+      const rawIlvl = Number(attrOf(lvl, 'w:ilvl') ?? '0');
+      const ilvl = Number.isNaN(rawIlvl) ? 0 : rawIlvl;
+      levels.set(ilvl, parseLvl(lvl, resolveTheme, resolveFont));
+      const linkedStyle = attrOf(child(lvl, 'w:pStyle'), 'w:val');
+      if (linkedStyle !== undefined && !links.has(linkedStyle))
+        links.set(linkedStyle, ilvl);
     }
     abstract.set(id, levels);
+    if (links.size > 0) styleLinks.set(id, links);
   }
 
   // w:num maps a numId to its abstract definition, optionally with per-level
@@ -160,9 +169,17 @@ export function buildNumbering(
     return pPr;
   }
 
+  function levelForStyle(numId: string, styleId: string): number | undefined {
+    const absId = numToAbstract.get(numId);
+    return absId === undefined
+      ? undefined
+      : styleLinks.get(absId)?.get(styleId);
+  }
+
   return {
     defs,
     levelPPr,
+    levelForStyle,
     auditMarkUnusedLevels: () => {
       if (!audit.enabled) return;
       for (const levels of abstract.values())
