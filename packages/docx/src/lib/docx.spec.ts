@@ -289,6 +289,33 @@ describe('importDocx', () => {
     expect(doc.child(5).attrs.list).toBeNull();
   });
 
+  it('applies w:lvlOverride / w:startOverride per numId', async () => {
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:start w:val="1"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+      <w:num w:numId="2"><w:abstractNumId w:val="0"/>
+        <w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride>
+      </w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'one')}
+      ${listP('2', 0, 'five')}
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
+    const defs = doc.attrs.numbering as NumberingDefs;
+    // The overridden num restarts at 5 and counts independently of numId 1.
+    expect(defs['2'].levels[0].start).toBe(5);
+    expect(defs['2'].key).not.toBe(defs['1'].key);
+    const counter = createNumberingCounter(defs);
+    expect(counter.next('1', 0)).toBe('1.');
+    expect(counter.next('2', 0)).toBe('5.');
+  });
+
   it('formats bullet and roman markers, with independent counters per numId', async () => {
     const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
       <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl></w:abstractNum>

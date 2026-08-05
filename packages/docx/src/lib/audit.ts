@@ -116,11 +116,17 @@ const IGNORED_TAGS = new Set([
   'a:fmtScheme',
   'a:objectDefaults',
   'a:extraClrSchemeLst',
+  // numbering.xml bookkeeping: internal ids and list-gallery metadata,
+  // meaningless to rendering; the part itself is carried on export.
+  'w:nsid',
+  'w:multiLevelType',
+  'w:tmpl',
+  'w:numIdMacAtCleanup',
 ]);
 
 /** Tag prefixes skipped on purpose (markup-compat wrappers, w14/w15 extras —
  *  the w15 comments-extended part we DO read is visited, so never reported). */
-const IGNORED_TAG_PREFIXES = ['mc:', 'w14:', 'w15:'];
+const IGNORED_TAG_PREFIXES = ['mc:', 'w14:', 'w15:', 'w16cid:', 'w16se:'];
 
 function isIgnoredTag(name: string): boolean {
   if (IGNORED_TAGS.has(name)) return true;
@@ -135,8 +141,12 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     name.startsWith('w14:') ||
     name.startsWith('w15:') ||
     name.startsWith('wp14:') || // anchorId/editId — revision markers
+    name.startsWith('w16cid:') || // durable ids — revision bookkeeping
     name === 'xml:space' ||
     name === 'mc:Ignorable' ||
+    // List-gallery metadata on levels: tplc names the gallery template,
+    // tentative flags levels Word invented but nothing uses yet.
+    (tag === 'w:lvl' && (name === 'w:tplc' || name === 'w:tentative')) ||
     // Rels are resolved by Id; the relationship Type is package plumbing.
     (tag === 'Relationship' && name === 'Type') ||
     // Drawing object ids/names are display metadata; export regenerates them.

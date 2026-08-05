@@ -2138,9 +2138,12 @@ async function importDocxImpl(
   const contentWidth =
     pageGeom.width - pageGeom.margin.left - pageGeom.margin.right;
 
+  // Stateless — markers are recounted by the layout engine, so one resolver
+  // serves every story (and its audit usage-tracking sees them all).
+  const numbering = buildNumbering(numberingRoot);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     styles,
-    numbering: buildNumbering(numberingRoot),
+    numbering,
     rels,
     media,
     resolveTheme,
@@ -2298,8 +2301,10 @@ async function importDocxImpl(
     : false;
 
   // Audit: with every story parsed (body, notes, headers/footers), styles
-  // nothing referenced are swept out of the report — see StyleRegistry.
+  // and numbering levels nothing referenced are swept out of the report —
+  // see StyleRegistry / NumberingResolver.
   styles.auditMarkUnusedStyles();
+  numbering.auditMarkUnusedLevels();
 
   const out: DocxImport = {
     doc,
