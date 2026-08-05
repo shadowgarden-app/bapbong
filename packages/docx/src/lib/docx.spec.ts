@@ -1350,6 +1350,22 @@ describe('importDocx', () => {
     );
   });
 
+  it('falls back to first-row dxa w:tcW when w:tblGrid is missing', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tr>
+          <w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>
+          <w:tc><w:tcPr><w:tcW w:w="6000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const row = doc.child(0).child(0);
+    expect(row.child(0).attrs.colwidth).toEqual([200]); // 3000 twips
+    expect(row.child(1).attrs.colwidth).toEqual([400]); // 6000 twips
+  });
+
   it('resolves w:shd solid patterns and theme fills', async () => {
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
       <a:accent1><a:srgbClr val="4472C4"/></a:accent1>

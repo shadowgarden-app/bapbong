@@ -1472,12 +1472,24 @@ function tableColumnWidths(tbl: OoxmlNode, grid: number[], ctx: Ctx): number[] {
   const cells = firstRow
     ? children(firstRow, 'w:tc').map((tc) => {
         const tcPr = child(tc, 'w:tcPr');
+        const tcW = child(tcPr, 'w:tcW');
         return {
-          pct: pctWidth(child(tcPr, 'w:tcW')),
+          pct: pctWidth(tcW),
+          // dxa width — the fallback grid when w:tblGrid is missing or
+          // degenerate (some producers write no grid at all).
+          dxa:
+            attrOf(tcW, 'w:type') !== 'pct'
+              ? Number(attrOf(tcW, 'w:w') ?? '0') || 0
+              : 0,
           span: Number(attrOf(child(tcPr, 'w:gridSpan'), 'w:val') ?? '1') || 1,
         };
       })
     : [];
+  if (!grid.some((w) => w > 0) && cells.some((c) => c.dxa > 0)) {
+    grid = cells.flatMap((c) =>
+      new Array<number>(c.span).fill(Math.round(c.dxa / c.span)),
+    );
+  }
   const spanSum = cells.reduce((s, c) => s + c.span, 0);
   const cols = grid.length || spanSum;
   if (tablePct === null && !cells.some((c) => c.pct !== null)) {

@@ -104,6 +104,11 @@ const IGNORED_TAGS = new Set([
   'wp:cNvGraphicFramePr',
   // Tracked-change record of an older table grid — the current grid is read.
   'w:tblGridChange',
+  // Per-cell width copies of the grid: w:tblGrid is the width authority
+  // (Word keeps them in sync on save); pct-typed and grid-fallback widths
+  // ARE read from the first row where they matter. Also re-emitted on
+  // export from the model's colwidths, so nothing is lost.
+  'w:tcW',
   // Footnote-body marker glyph: the layout draws its own note numbers.
   'w:footnoteRef',
   // Theme parts beyond colors (and later fonts): effects/object defaults and
