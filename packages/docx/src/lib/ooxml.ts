@@ -221,6 +221,33 @@ export type ThemeColorResolver = (
 /** Resolve a `w:asciiTheme`-style slot token to the theme's typeface. */
 export type ThemeFontResolver = (slot: string) => string | undefined;
 
+/** Effective background of a `w:shd`. A `solid` pattern paints the PATTERN
+ *  color (w:color) at 100%, everything else paints the fill — literal
+ *  `w:fill` hex first, then the theme fill. Pattern percentages (pct25 …)
+ *  are not blended; their fill is the closest paint we do. */
+export function shdFill(
+  shd: OoxmlNode | undefined,
+  resolveTheme?: ThemeColorResolver,
+): string | undefined {
+  if (!shd) return undefined;
+  const val = attrOf(shd, 'w:val');
+  const color = attrOf(shd, 'w:color');
+  const fill = normalizeHex(attrOf(shd, 'w:fill'));
+  const themeFill = attrOf(shd, 'w:themeFill');
+  const themeFillTint = attrOf(shd, 'w:themeFillTint');
+  const themeFillShade = attrOf(shd, 'w:themeFillShade');
+  if (val === 'solid') {
+    const solid = normalizeHex(color);
+    if (solid) return solid;
+  }
+  return (
+    fill ??
+    (themeFill && resolveTheme
+      ? resolveTheme(themeFill, themeFillTint, themeFillShade)
+      : undefined)
+  );
+}
+
 /** Parse a `w:rPr` element into normalized run properties (only present keys). */
 export function parseRunProps(
   rPr: OoxmlNode | undefined,
@@ -239,22 +266,22 @@ export function parseRunProps(
   const s = toggle(child(rPr, 'w:strike'));
   if (s !== undefined) props.strike = s;
 
+  // Color: the literal w:val is Word's own baked rendering of the theme
+  // reference, so it wins (no tint/shade approximation error); the theme
+  // attrs are the fallback when only the reference was written. All four
+  // attrs are read up front — each is part of this resolution.
   const colorEl = child(rPr, 'w:color');
   const colorVal = attrOf(colorEl, 'w:val');
+  const themeColor = attrOf(colorEl, 'w:themeColor');
+  const themeTint = attrOf(colorEl, 'w:themeTint');
+  const themeShade = attrOf(colorEl, 'w:themeShade');
   if (colorVal && colorVal.toLowerCase() !== 'auto') {
     props.color = colorVal.startsWith('#')
       ? colorVal.toUpperCase()
       : `#${colorVal.toUpperCase()}`;
-  } else if (resolveTheme) {
-    const themeColor = attrOf(colorEl, 'w:themeColor');
-    if (themeColor) {
-      const hex = resolveTheme(
-        themeColor,
-        attrOf(colorEl, 'w:themeTint'),
-        attrOf(colorEl, 'w:themeShade'),
-      );
-      if (hex) props.color = hex;
-    }
+  } else if (resolveTheme && themeColor) {
+    const hex = resolveTheme(themeColor, themeTint, themeShade);
+    if (hex) props.color = hex;
   }
 
   const sz = attrOf(child(rPr, 'w:sz'), 'w:val');
@@ -294,12 +321,13 @@ export function parseRunProps(
   if (va === 'superscript') props.vertAlign = 'super';
   else if (va === 'subscript') props.vertAlign = 'sub';
 
-  // Background: w:highlight (named) takes precedence, else w:shd w:fill (hex).
+  // Background: w:highlight (named) takes precedence, else w:shd (solid
+  // pattern color / fill / theme fill).
   const hl = attrOf(child(rPr, 'w:highlight'), 'w:val');
   if (hl && hl !== 'none') {
     props.highlight = HIGHLIGHT_COLORS[hl] ?? normalizeHex(hl);
   } else {
-    const hex = normalizeHex(attrOf(child(rPr, 'w:shd'), 'w:fill'));
+    const hex = shdFill(child(rPr, 'w:shd'), resolveTheme);
     if (hex) props.highlight = hex;
   }
 

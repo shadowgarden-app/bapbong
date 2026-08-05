@@ -1350,6 +1350,33 @@ describe('importDocx', () => {
     );
   });
 
+  it('resolves w:shd solid patterns and theme fills', async () => {
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
+      <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+    </a:clrScheme></a:themeElements></a:theme>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:rPr><w:shd w:val="solid" w:color="FF0000" w:fill="auto"/></w:rPr><w:t>solid</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:shd w:val="clear" w:color="auto" w:themeFill="accent1"/></w:rPr><w:t>themed</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    expect(markMap(doc.child(0).child(0).marks).highlight.color).toBe(
+      '#FF0000',
+    );
+    expect(markMap(doc.child(1).child(0).marks).highlight.color).toBe(
+      '#4472C4',
+    );
+  });
+
   it('resolves theme fonts (w:asciiTheme) via a:fontScheme', async () => {
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
       <a:fontScheme name="Office">

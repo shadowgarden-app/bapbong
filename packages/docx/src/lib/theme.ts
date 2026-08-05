@@ -29,10 +29,20 @@ function schemeColor(el: OoxmlNode): string | undefined {
   const srgbVal = attrOf(srgb, 'val');
   if (srgbVal) return `#${srgbVal.toUpperCase()}`;
   const sys = child(el, 'a:sysClr');
-  const sysVal = attrOf(sys, 'lastClr') ?? attrOf(sys, 'val');
-  if (sysVal) return `#${sysVal.toUpperCase()}`;
+  // lastClr is the resolved system color; val ("window", "windowText") is
+  // the symbolic name we'd otherwise map by hand. Both are read; lastClr wins.
+  const lastClr = attrOf(sys, 'lastClr');
+  const sysName = attrOf(sys, 'val');
+  const sysVal = lastClr ?? (sysName ? SYS_COLORS[sysName] : undefined);
+  if (sysVal) return `#${sysVal.toUpperCase().replace('#', '')}`;
   return undefined;
 }
+
+/** The two system colors OOXML themes actually use. */
+const SYS_COLORS: Record<string, string> = {
+  window: 'FFFFFF',
+  windowText: '000000',
+};
 
 const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
 const hex2 = (n: number) =>

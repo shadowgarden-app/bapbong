@@ -53,6 +53,7 @@ import {
   parseXml,
   RunProps,
   serializeOoxml,
+  shdFill,
 } from './ooxml.js';
 import type {
   BorderSide,
@@ -1524,7 +1525,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
           : 'continue'; // omitted w:val defaults to continue
       const widths = colPx.length ? colPx.slice(col, col + colspan) : [];
       const background =
-        normalizeHex(attrOf(child(tcPr, 'w:shd'), 'w:fill')) ?? null;
+        shdFill(child(tcPr, 'w:shd'), ctx.resolveTheme) ?? null;
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
       const vAlign =
         vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
