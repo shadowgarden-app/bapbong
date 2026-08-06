@@ -1702,39 +1702,68 @@ function splitTableAt(
       const remFloats = (c.view.floats ?? [])
         .filter((f) => f.y + f.height > cut)
         .map((f) => ({ ...f, y: f.y + delta }));
+      // The continuation inherits everything that describes the CELL —
+      // borders, fill — and overrides only what the split changes. Building
+      // it field-by-field silently dropped `borders` and `background`: the
+      // second fragment of a double-ruled header row fell back to the
+      // table's plain grid line, and a shaded cell lost its fill. Only
+      // `vShift` is deliberately absent (centering stays suspended while the
+      // row is split — see unshiftCell). Word draws a border on BOTH sides of
+      // the split, so both fragments must carry the same cell borders.
       const contCell: ResolvedCell = {
-        x: cell.x,
+        ...cell,
         y: 0,
-        width: cell.width,
         height: contHeight,
-        colspan: cell.colspan,
-        rowspan: cell.rowspan,
         lines,
       };
+      delete contCell.vShift;
       if (remTables.length > 0) contCell.tables = remTables;
+      else delete contCell.tables;
       if (remFloats.length > 0) contCell.floats = remFloats;
+      else delete contCell.floats;
       restCells.push(contCell);
     }
   }
 
+  // Both fragments inherit the table's own properties; each then fixes up
+  // what the split actually changed. Three kinds of field, spelled out so a
+  // NEW one can't be forgotten (the property test in the spec enforces it):
+  //   · carried as-is  — borders, and anything describing the table itself
+  //   · re-based       — cantSplitBands, measured from the fragment's top
+  //   · dropped        — headerBottom on `rest`: the continuation has no
+  //     header band unless ghost rows are actually prepended (the caller
+  //     sets it then; cloneHeaderCells can refuse).
+  const shiftBands = (
+    bands: { top: number; bottom: number }[] | undefined,
+    delta: number,
+    limitTop: number,
+    limitBottom: number,
+  ) =>
+    bands
+      ?.map((b) => ({ top: b.top + delta, bottom: b.bottom + delta }))
+      .filter((b) => b.bottom > limitTop && b.top < limitBottom);
+
+  const restDelta = contHeight - splitBottom;
   const top: ResolvedTable = {
-    x: table.x,
+    ...table,
     y: 0,
-    width: table.width,
     height: cut,
     cells: topCells,
   };
+  const topBands = shiftBands(table.cantSplitBands, 0, 0, cut);
+  if (topBands?.length) top.cantSplitBands = topBands;
+  else delete top.cantSplitBands;
+
   const rest: ResolvedTable = {
-    x: table.x,
+    ...table,
     y: 0,
-    width: table.width,
     height: contHeight + (table.height - splitBottom),
     cells: restCells,
   };
-  if (table.borders) {
-    top.borders = table.borders;
-    rest.borders = table.borders;
-  }
+  delete rest.headerBottom;
+  const restBands = shiftBands(table.cantSplitBands, restDelta, 0, rest.height);
+  if (restBands?.length) rest.cantSplitBands = restBands;
+  else delete rest.cantSplitBands;
   return { top, rest };
 }
 
@@ -3112,6 +3141,15 @@ function placeBlocks(
               rest.cells.unshift(...ghosts);
               rest.height += hb;
               rest.headerBottom = hb; // continuations keep repeating it
+              // The repeated header pushes the remaining rows down, so the
+              // cantSplit bands move with them — they are measured from the
+              // fragment's top.
+              if (rest.cantSplitBands) {
+                rest.cantSplitBands = rest.cantSplitBands.map((b) => ({
+                  top: b.top + hb,
+                  bottom: b.bottom + hb,
+                }));
+              }
             }
           }
           placeTable(topFrag);

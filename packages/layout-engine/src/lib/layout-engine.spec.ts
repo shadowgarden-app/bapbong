@@ -921,6 +921,97 @@ describe('layoutBlocks', () => {
     ]);
   });
 
+  it('a split row keeps its cell borders and fill on BOTH fragments', () => {
+    // Word draws a border on both sides of a row that breaks across pages
+    // (a known Word behavior users work around, not a bug to imitate away).
+    // The continuation used to be built field-by-field, so it silently lost
+    // `borders` and `background`: a double-ruled header row came back as the
+    // table's plain grid line, and a shaded cell lost its fill.
+    const dbl = { style: 'double' as const, width: 0.75, color: '#000000' };
+    const rowCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: [100],
+      background: '#EEEEEE',
+      borders: { top: dbl, bottom: dbl, left: dbl, right: dbl },
+      content: Array.from({ length: 4 }, (_, i) => para(`r${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell] }] };
+    const { pages } = layoutBlocks([para('x'), t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    for (const p of pages) {
+      const cell = p.tables?.[0]?.cells[0];
+      expect(cell?.background).toBe('#EEEEEE');
+      expect(cell?.borders?.left).toMatchObject({ style: 'double' });
+      expect(cell?.borders?.top).toMatchObject({ style: 'double' });
+    }
+  });
+
+  it('carries every cell field across a split unless deliberately dropped', () => {
+    // Guards the CLASS of bug above rather than the two fields it hit: the
+    // same table laid out with and without a page break must produce cells
+    // with the same set of keys. Anything new on ResolvedCell that the
+    // splitter forgets shows up here — the drop list is the only exemption,
+    // and it has to be written down.
+    const DELIBERATELY_DROPPED = ['vShift']; // centering pauses mid-split
+    const dbl = { style: 'double' as const, width: 0.75, color: '#000000' };
+    const rowCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: [100],
+      background: '#EEEEEE',
+      vAlign: 'center',
+      borders: { top: dbl, bottom: dbl, left: dbl, right: dbl },
+      content: Array.from({ length: 4 }, (_, i) => para(`r${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell] }] };
+    // Tall page: one piece, every field present. Short page: it splits.
+    const whole = layoutBlocks([para('x'), t], config({ height: 400 })).pages[0]
+      .tables?.[0]?.cells[0];
+    const split = layoutBlocks([para('x'), t], config({ height: 100 })).pages[1]
+      .tables?.[0]?.cells[0];
+    expect(whole && split).toBeTruthy();
+    const w = whole as unknown as Record<string, unknown>;
+    const s = split as unknown as Record<string, unknown>;
+    // Compare fields that actually carry a value: some clone helpers spread
+    // `key: undefined` through, which is not a lost field.
+    const missing = Object.keys(w).filter(
+      (k) =>
+        w[k] !== undefined &&
+        !DELIBERATELY_DROPPED.includes(k) &&
+        s[k] === undefined,
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('re-bases cantSplit bands onto each fragment', () => {
+    // The bands are measured from the table's top, so a fragment that starts
+    // mid-table must renumber them — copying them verbatim would apply
+    // "never break this row" to whatever row now sits at those coordinates.
+    const plain = (n: number): FlowTableCell => ({
+      colspan: 1,
+      rowspan: 1,
+      colwidth: [100],
+      content: Array.from({ length: n }, (_, i) => para(`p${i}`)),
+    });
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        { cells: [plain(3)] }, // 48px, ordinary — gets cut mid-row
+        { cells: [plain(3)], cantSplit: true }, // 48px, must stay whole
+      ],
+    };
+    const { pages } = layoutBlocks([para('x'), t], config({ height: 100 }));
+    // The cantSplit row ends up alone on the last fragment, and its band is
+    // now measured from THAT fragment's top (0..48), not the original 48..96.
+    const last = pages[pages.length - 1].tables?.[0];
+    expect(last?.cantSplitBands).toHaveLength(1);
+    expect(last?.cantSplitBands?.[0].top).toBeCloseTo(0);
+    expect(last?.cantSplitBands?.[0].bottom).toBeCloseTo(48);
+    // Fragments that no longer contain the row carry no band at all.
+    expect(pages[0].tables?.[0]?.cantSplitBands).toBeUndefined();
+  });
+
   it('moves a w:cantSplit row whole when it fits a fresh page', () => {
     // Same geometry, but the row is marked cantSplit → the old behavior:
     // leave the gap, start the intact row on page 2.
