@@ -370,18 +370,50 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[2]).toMatchObject({ y: 36, width: 80 });
   });
 
-  it('scales a tblGrid wider than the column down to fit (no overflow)', () => {
+  it('honors a tblGrid wider than a single-column flow (overflows, like Word)', () => {
     // content box [20,220] = 200px; the table's grid is 200+200 = 400px wide.
+    // Word renders the STORED grid and lets the table run into the right
+    // margin (autofit recomputes on edit, not on open) — shrinking it here
+    // desynced the columns from every margin-anchored object's x position.
     const t = table([
       [cell('a', { colwidth: [200] }), cell('b', { colwidth: [200] })],
     ]);
     const [resolved] = layoutBlocks([t], config()).pages[0].tables ?? [];
-    expect(resolved.width).toBeCloseTo(200); // 400 → scaled to the 200px box
-    // each column halved (200 → 100); grid shifted by the implicit indent.
-    expect(resolved.cells[0].x).toBeCloseTo(12.8);
-    expect(resolved.cells[0].width).toBeCloseTo(100);
-    expect(resolved.cells[1].x).toBeCloseTo(112.8);
-    expect(resolved.cells[1].width).toBeCloseTo(100);
+    expect(resolved.width).toBeCloseTo(400); // grid kept, spills past 220
+    expect(resolved.cells[0].x).toBeCloseTo(12.8); // implicit indent shift
+    expect(resolved.cells[0].width).toBeCloseTo(200);
+    expect(resolved.cells[1].x).toBeCloseTo(212.8);
+    expect(resolved.cells[1].width).toBeCloseTo(200);
+  });
+
+  it('still scales a wide tblGrid down inside a narrow section column', () => {
+    // Two 95px columns (200 − 10 gap) / 2: the 400px grid would spill into
+    // the neighbouring column's text, so THERE the clamp stays.
+    const t = table([
+      [cell('a', { colwidth: [200] }), cell('b', { colwidth: [200] })],
+    ]);
+    const cfg = { ...config(), columns: { count: 2, gap: 10 } };
+    const [resolved] = layoutBlocks([t], cfg).pages[0].tables ?? [];
+    expect(resolved.width).toBeCloseTo(95); // 400 → scaled to the column
+    expect(resolved.cells[0].width).toBeCloseTo(47.5);
+    expect(resolved.cells[1].width).toBeCloseTo(47.5);
+  });
+
+  it('still scales a nested table down to its cell', () => {
+    // Outer cell is 100px wide; the nested grid claims 300px. Spilling would
+    // paint over the neighbouring cell, so nested tables keep the clamp.
+    const nested: FlowBlock = table([[cell('deep', { colwidth: [300] })]]);
+    const outer = table([
+      [
+        { ...cell('host', { colwidth: [100] }), content: [nested] },
+        cell('side', { colwidth: [100] }),
+      ],
+    ]);
+    const [resolved] = layoutBlocks([outer], config()).pages[0].tables ?? [];
+    const inner = resolved.cells[0].tables?.[0];
+    expect(inner).toBeDefined();
+    // 300px grid clamped to the host cell's content width (100 − padding).
+    expect(inner && inner.width).toBeLessThanOrEqual(100);
   });
 
   it('reduces super/subscript font size and flags the segment', () => {

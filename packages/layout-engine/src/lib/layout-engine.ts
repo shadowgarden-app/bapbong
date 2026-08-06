@@ -1276,6 +1276,13 @@ function layoutTable(
   contentLeft: number,
   contentRight: number,
   ctx: Ctx,
+  // Scale an over-wide grid down to `avail`? TRUE inside narrow spaces —
+  // a multi-column section, a cell (nested table), chrome — where spilling
+  // would paint over a neighbour's content. FALSE in the single-column body
+  // flow: Word renders the STORED tblGrid as-is there and lets the table
+  // run into the right margin (autofit only recomputes on edit, not open),
+  // so shrinking desynced our columns from every anchored object's x.
+  clampToWidth = true,
 ): ResolvedTable {
   const avail = contentRight - contentLeft;
   const nrows = table.rows.length;
@@ -1307,10 +1314,11 @@ function layoutTable(
   }
   // A tblGrid wider than the available width (e.g. a full-page table dropped
   // into a narrow column) would otherwise overflow into the next column's
-  // content. Scale every column down proportionally so it fits — Word/Docs
-  // reflow the cell text instead of spilling over.
+  // content. Scale every column down proportionally so it fits — but ONLY
+  // where the caller asked for it (see the parameter): the single-column
+  // body flow honors the grid and overflows the margin, as Word does.
   const natural = colWidths.reduce((s, w) => s + w, 0);
-  if (natural > avail && natural > 0) {
+  if (clampToWidth && natural > avail && natural > 0) {
     const scale = avail / natural;
     for (let i = 0; i < ncols; i++) colWidths[i] *= scale;
   }
@@ -2565,7 +2573,7 @@ export function layoutBlocks(
               borders: block.borders,
             },
           }
-        : { table: layoutTable(block, left, colRight, ctx) };
+        : { table: layoutTable(block, left, colRight, ctx, cols.count > 1) };
     if (i === 0) item.section = { ...cols, newPage: true };
     return item;
   });
@@ -3102,6 +3110,7 @@ export function layout(
         bLeft,
         colRight,
         ctx,
+        bs.columns.count > 1, // clamp only inside a narrow section column
       );
       if (cache && !tableHasList(node)) {
         cache.tables.set(node, {
