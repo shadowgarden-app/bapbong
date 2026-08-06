@@ -1761,6 +1761,25 @@ function buildCtx(config: LayoutConfig): Ctx {
   };
 }
 
+/** Control-flow signal for the page fixed-point: a float registered itself
+ *  over content already placed above it (Word wraps the WHOLE page around a
+ *  float, wherever its anchor sits), so the page must be re-run with that
+ *  float's exclusion known from the start. Thrown from deep inside the
+ *  placement stack; the page loop catches it, restores the page-start
+ *  checkpoint and replays. `drop` retracts seeds whose anchor left the page. */
+class PageRetrySignal {
+  constructor(
+    readonly add: { key: string; rect: Exclusion }[] = [],
+    readonly drop: string[] = [],
+  ) {}
+}
+
+/** Bounded retries per page: margin/page-relative floats converge in one
+ *  replay (their rect is page-constant); the cap only guards the rare
+ *  paragraph-relative feedback loop. The final attempt places with triggers
+ *  disabled, so termination is unconditional. */
+const MAX_PAGE_RETRIES = 3;
+
 /** Stack laid-out blocks onto pages (the paginator). `bandFor` computes the
  *  vertical content bounds for a page geometry (e.g. pushed in by a tall page
  *  header/footer) — a function because sections can override the geometry. */
@@ -1802,6 +1821,50 @@ function placeBlocks(
   let pageFloats: ResolvedFloat[] = [];
   let exclusions: Exclusion[] = []; // floats die at their page's end
   let y = top;
+
+  // ── Page fixed-point state ──────────────────────────────────────────
+  // `idx` is hoisted so page-start checkpoints can record which item was in
+  // flight; the mid-item fields record HOW FAR into it the page boundary
+  // fell (a table's unplaced remainder / a paragraph's next draft line).
+  let idx = 0;
+  let midTableRest: ResolvedTable | null = null;
+  let midParaDraftIdx: number | null = null;
+  let inBandedPara = false; // float-anchoring paragraphs wrap mid-call —
+  // a page starting inside one cannot be replayed (documented limitation).
+  let resumeTable: ResolvedTable | null = null; // handed to the first item
+  let resumeDraftIdx: number | null = null; // of a replayed page
+  const seeds = new Map<string, Exclusion>();
+  // Seeds retracted because they pushed their own anchor off the page —
+  // never re-tried, so the oscillating case settles in one round trip.
+  const droppedSeeds = new Set<string>();
+  const registeredKeys = new Set<string>();
+  let retriesLeft = MAX_PAGE_RETRIES;
+  let pageStartCp!: PageCheckpoint; // assigned before the loop, re-taken per page
+  interface PageCheckpoint {
+    itemIdx: number;
+    midTable: ResolvedTable | null;
+    midDraftIdx: number | null;
+    unreplayable: boolean;
+    firstItem: boolean;
+    curPage: PageConfig;
+    curChromeIndex: number | undefined;
+    pageChromeIndex: number | undefined;
+    pageSectionFirst: boolean;
+    sectionFirstPending: boolean;
+    contentLeft: number;
+    contentRight: number;
+    contentWidth: number;
+    colCount: number;
+    colGap: number;
+    colWidth: number;
+    balancing: boolean;
+    sectionRemaining: number;
+    activePBdr: {
+      borders: ParagraphBorders;
+      startedEarlier: boolean;
+      frag: { x0: number; x1: number; y0: number; y1: number } | null;
+    } | null;
+  }
 
   // w:pBdr tracking: while a bordered paragraph places its lines, a fragment
   // accumulates; a column/page break flushes it as a box (top edge only on
@@ -1983,6 +2046,14 @@ function placeBlocks(
   };
 
   const finalizePage = () => {
+    // Fixed-point guard: a seeded exclusion whose float never re-registered
+    // on the replayed page (the exclusion pushed its own anchor onto the
+    // NEXT page) is a phantom — retract it and replay once more. Skipped on
+    // the final attempt so termination is unconditional.
+    if (seeds.size > 0 && retriesLeft > 0) {
+      const phantom = [...seeds.keys()].filter((k) => !registeredKeys.has(k));
+      if (phantom.length > 0) throw new PageRetrySignal([], phantom);
+    }
     flushPBdrFrag(false); // a bordered paragraph continuing → open-bottom box
     const resolved: ResolvedPage = {
       index: pages.length,
@@ -2021,6 +2092,84 @@ function placeBlocks(
     sectionMaxY = top;
     colDirty = false;
     y = top;
+    // A page closed cleanly: its seeds are spent, and the NEXT page gets a
+    // fresh retry budget and its own checkpoint (all accumulators are empty
+    // here, so the checkpoint is a handful of scalars).
+    seeds.clear();
+    droppedSeeds.clear();
+    registeredKeys.clear();
+    retriesLeft = MAX_PAGE_RETRIES;
+    pageStartCp = takeCheckpoint();
+  };
+
+  const takeCheckpoint = (): PageCheckpoint => ({
+    itemIdx: idx,
+    midTable: midTableRest && cloneTableShifted(midTableRest, 0),
+    midDraftIdx: midParaDraftIdx,
+    unreplayable: inBandedPara,
+    firstItem,
+    curPage,
+    curChromeIndex,
+    pageChromeIndex,
+    pageSectionFirst,
+    sectionFirstPending,
+    contentLeft,
+    contentRight,
+    contentWidth,
+    colCount,
+    colGap,
+    colWidth,
+    balancing,
+    sectionRemaining,
+    activePBdr: activePBdr && {
+      ...activePBdr,
+      frag: activePBdr.frag && { ...activePBdr.frag },
+    },
+  });
+
+  /** Rewind to the page-start checkpoint for a replay: scalars restored,
+   *  page accumulators emptied, the seeded exclusions installed, and the
+   *  mid-item resume handles armed (fresh clones — the checkpoint stays
+   *  valid across multiple retries). */
+  const restoreCheckpoint = (cp: PageCheckpoint) => {
+    firstItem = cp.firstItem;
+    curPage = cp.curPage;
+    curChromeIndex = cp.curChromeIndex;
+    pageChromeIndex = cp.pageChromeIndex;
+    pageSectionFirst = cp.pageSectionFirst;
+    sectionFirstPending = cp.sectionFirstPending;
+    contentLeft = cp.contentLeft;
+    contentRight = cp.contentRight;
+    contentWidth = cp.contentWidth;
+    colCount = cp.colCount;
+    colGap = cp.colGap;
+    colWidth = cp.colWidth;
+    balancing = cp.balancing;
+    sectionRemaining = cp.sectionRemaining;
+    activePBdr = cp.activePBdr && {
+      ...cp.activePBdr,
+      frag: cp.activePBdr.frag && { ...cp.activePBdr.frag },
+    };
+    ({ top, bottom } = bandOf(curPage));
+    lines = [];
+    tables = [];
+    pageFloats = [];
+    paraBorderBoxes = [];
+    pageFnNums = [];
+    pageFnSet.clear();
+    registeredKeys.clear();
+    exclusions = [...seeds.values()].map((r) => ({ ...r }));
+    colIndex = 0;
+    bandTop = top;
+    sectionMaxY = top;
+    colDirty = false;
+    y = top;
+    rebalance();
+    resumeTable = cp.midTable && cloneTableShifted(cp.midTable, 0);
+    resumeDraftIdx = cp.midDraftIdx;
+    midTableRest = null;
+    midParaDraftIdx = null;
+    inBandedPara = false;
   };
 
   /** End the current column: move to the next column, or finalize the page when
@@ -2118,8 +2267,12 @@ function placeBlocks(
    *  (Word's w:widowControl, on by default). Splits force the band break
    *  here; emitLine's own overflow check stays as the footnote-reserve
    *  fallback. */
-  const emitParaDrafts = (drafts: LineDraft[], widowOn: boolean): void => {
-    let i = 0;
+  const emitParaDrafts = (
+    drafts: LineDraft[],
+    widowOn: boolean,
+    startI = 0, // a replayed page resumes mid-paragraph here
+  ): void => {
+    let i = startI;
     while (i < drafts.length) {
       const remaining = drafts.length - i;
       let fit = 0;
@@ -2131,7 +2284,11 @@ function placeBlocks(
         fit++;
       }
       if (fit >= remaining) {
-        for (; i < drafts.length; i++) emitLine(drafts[i]);
+        for (; i < drafts.length; i++) {
+          midParaDraftIdx = i; // emitLine may still break on footnote reserve
+          emitLine(drafts[i]);
+        }
+        midParaDraftIdx = null;
         return;
       }
       if (widowOn && remaining >= 2) {
@@ -2140,8 +2297,16 @@ function placeBlocks(
         if (fit < 0) fit = 0;
       }
       if (fit === 0 && !colDirty) fit = 1; // an empty band must progress
-      for (let k = 0; k < fit; k++, i++) emitLine(drafts[i]);
+      for (let k = 0; k < fit; k++, i++) {
+        // If placing this line (or the chunk break below) closes the page,
+        // a replay resumes at the first UNPLACED draft — emitLine breaks
+        // before it pushes, so the current index is exactly that.
+        midParaDraftIdx = i;
+        emitLine(drafts[i]);
+      }
+      midParaDraftIdx = i;
       breakBand();
+      midParaDraftIdx = null;
     }
   };
 
@@ -2173,23 +2338,61 @@ function placeBlocks(
         effVOffset: f.vOffset ?? 0,
       });
       colDirty = true;
-      if (f.wrap === 'square') {
-        exclusions.push({
-          left: fx - (f.distL ?? 0),
-          right: fx + f.width + (f.distR ?? 0),
-          top: fy - (f.distT ?? 0),
-          bottom: fy + f.height + (f.distB ?? 0),
-        });
-      } else if (f.wrap === 'topAndBottom') {
-        exclusions.push({
-          left: -Infinity,
-          right: Infinity,
-          top: fy - (f.distT ?? 0),
-          bottom: fy + f.height + (f.distB ?? 0),
-        });
-      } // 'none' paints only
+      const rect: Exclusion | null =
+        f.wrap === 'square'
+          ? {
+              left: fx - (f.distL ?? 0),
+              right: fx + f.width + (f.distR ?? 0),
+              top: fy - (f.distT ?? 0),
+              bottom: fy + f.height + (f.distB ?? 0),
+            }
+          : f.wrap === 'topAndBottom'
+            ? {
+                left: -Infinity,
+                right: Infinity,
+                top: fy - (f.distT ?? 0),
+                bottom: fy + f.height + (f.distB ?? 0),
+              }
+            : null; // 'none' paints only
+      if (rect) {
+        const key = `${Math.round(rect.left)}:${Math.round(rect.top)}:${Math.round(rect.right)}:${Math.round(rect.bottom)}`;
+        registeredKeys.add(key);
+        // Word wraps the WHOLE page around a float, wherever its anchor
+        // sits. Content already placed ABOVE this float was laid out
+        // without knowing it — replay the page with the exclusion seeded.
+        // (Not when the page opened mid-wrap of a float paragraph — that
+        // boundary can't be resumed; documented limitation.)
+        if (
+          retriesLeft > 0 &&
+          !seeds.has(key) &&
+          !droppedSeeds.has(key) &&
+          !pageStartCp.unreplayable &&
+          overlapsPlaced(rect)
+        ) {
+          throw new PageRetrySignal([{ key, rect }]);
+        }
+        exclusions.push(rect);
+      }
     }
   };
+
+  /** Whether content already placed on this page intersects `rect` — the
+   *  page-replay trigger. Lines and table fragments both count. */
+  const overlapsPlaced = (rect: Exclusion): boolean =>
+    lines.some(
+      (l) =>
+        l.y < rect.bottom &&
+        l.y + l.height > rect.top &&
+        l.x < rect.right &&
+        l.x + l.width > rect.left,
+    ) ||
+    tables.some(
+      (t) =>
+        t.y < rect.bottom &&
+        t.y + t.height > rect.top &&
+        t.x < rect.right &&
+        t.x + t.width > rect.left,
+    );
 
   /** Widest text band at [yy, yy+h) after carving out the exclusions; null
    *  when nothing usable remains (the caller skips below the blocker). */
@@ -2211,6 +2414,17 @@ function placeBlocks(
 
   /** Wrap + place a paragraph line by line, flowing around active floats. */
   const placeParaBanded = (flow: FlowParagraph) => {
+    // Wrapping is one uninterruptible call: a page boundary inside it has no
+    // resumable midpoint, so checkpoints taken while this flag is up are
+    // marked unreplayable and float triggers on that page stand down.
+    inBandedPara = true;
+    try {
+      placeParaBandedInner(flow);
+    } finally {
+      inBandedPara = false;
+    }
+  };
+  const placeParaBandedInner = (flow: FlowParagraph) => {
     // A paragraph's floats belong on the page its FIRST LINE lands on — but
     // that page-break decision normally happens inside the band callback,
     // AFTER registerFloats has already pushed the floats into the CURRENT
@@ -2275,232 +2489,292 @@ function placeBlocks(
   };
 
   let firstItem = true;
-  for (let idx = 0; idx < items.length; idx++) {
-    const item = items[idx];
-    // Section boundary: switch column flow (and break) before the block.
-    if (item.section) {
-      const nextPage = item.section.page ?? page;
-      const geomChanges = !sameGeom(nextPage, curPage);
-      curChromeIndex = item.section.chromeIndex;
-      if (firstItem) {
-        pageChromeIndex = curChromeIndex;
-        pageSectionFirst = true;
-        if (geomChanges) setGeometry(nextPage);
-        else restartBand(); // page is empty — adopt this section's chrome band
-        applyColumns(item.section);
-      } else if (item.section.newPage || geomChanges) {
-        // Geometry may only change at a page boundary — a continuous break
-        // with a differing page is laid out as next-page (Word's promotion).
-        sectionFirstPending = true;
-        if (pageHasContent()) {
-          finalizePage(); // its tail re-bands for the new section's chrome
-        } else {
-          // The current (empty) page becomes this section's first page.
-          pageChromeIndex = curChromeIndex;
-          pageSectionFirst = true;
-          sectionFirstPending = false;
-          restartBand();
-        }
-        if (geomChanges) setGeometry(nextPage);
-        applyColumns(item.section);
-      } else {
-        // Continuous break: resume below the finishing section's deepest column,
-        // unless that's already at the band floor (then start a fresh page).
-        bump();
-        if (sectionMaxY >= limit()) {
-          sectionFirstPending = true; // the fresh page opens this section
-          finalizePage();
-        } else {
-          bandTop = sectionMaxY;
-          y = bandTop;
-          colIndex = 0;
-          colDirty = false;
-        }
-        applyColumns(item.section);
+  pageStartCp = takeCheckpoint();
+  let startIdx = 0;
+  retry: for (;;) {
+    try {
+      placeRun(startIdx);
+      break retry;
+    } catch (e) {
+      if (!(e instanceof PageRetrySignal)) throw e;
+      retriesLeft--;
+      for (const a of e.add) if (!seeds.has(a.key)) seeds.set(a.key, a.rect);
+      for (const k of e.drop) {
+        seeds.delete(k);
+        droppedSeeds.add(k);
       }
-      // Balance the new section's columns once its content fits a page.
-      balancing = colCount > 1;
-      sectionRemaining = item.section.height ?? 0;
-      rebalance();
-    }
-    firstItem = false;
-
-    if ('para' in item) {
-      if (item.para.pageBreakBefore && pageHasContent()) {
-        finalizePage();
-        rebalance();
-      }
-      // Pagination keeps: break the band early when this paragraph
-      // (keepLines) — or this paragraph plus the head of what must follow
-      // it (keepNext) — cannot finish here but WOULD fit a fresh band.
-      // A chain taller than a whole band gives up, as Word does.
-      if (colDirty && item.para.drafts) {
-        const selfH = (item.para.before ?? 0) + draftsTotal(item.para.drafts);
-        const bandH = colBottom() - bandTop;
-        const avail = colBottom() - y;
-        const needKL = item.para.keepLines && selfH > avail && selfH <= bandH;
-        const needKN =
-          item.para.keepNext &&
-          (() => {
-            const need = selfH + (item.para.after ?? 0) + keepAheadH(idx);
-            return need > avail && need <= bandH;
-          })();
-        if (needKL || needKN) breakBand();
-      }
-      // Space-before: a gap above the paragraph (collapsed away at a band top).
-      if (item.para.before && colDirty) {
-        y += item.para.before;
-        sectionRemaining -= item.para.before;
-      }
-      if (item.para.borders) {
-        activePBdr = {
-          borders: item.para.borders,
-          startedEarlier: false,
-          frag: null,
-        };
-      }
-      const drafts = item.para.drafts;
-      const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
-      const floatsAhead = exclusions.some(
-        (ex) => ex.bottom > y && ex.top < y + draftsHeight,
-      );
-      if (drafts && !floatsAhead) {
-        emitParaDrafts(drafts, item.para.widowControl !== false);
-      } else {
-        placeParaBanded(item.para.getFlow());
-      }
-      if (activePBdr) {
-        flushPBdrFrag(true); // last fragment closes the box's bottom edge
-        activePBdr = null;
-      }
-      if (item.para.after) {
-        y += item.para.after; // space-after gap
-        sectionRemaining -= item.para.after;
-      }
-    } else {
-      // Tables flow across columns/pages: split at row boundaries when
-      // possible, and mid-row when a single row is taller than a whole band.
-      // Header rows (w:tblHeader) repeat at the top of every fragment. Tables
-      // are laid out at column width, then shifted into the current column.
-      let table = item.table; // laid out relative to y = 0, column-0 x
-      // Word never flows a table BESIDE a floating object: text wraps around
-      // one (see bandAt), but a table starts below its wrap zone. Without
-      // this, a logo anchored at the top of a page painted straight over the
-      // first table's opening rows. Skip past whatever the table would run
-      // into, as long as the band still has somewhere to go.
-      for (let guard = 0; guard < 8; guard++) {
-        const bottomOfRun = y + Math.min(table.height, colBottom() - y);
-        const blockers = exclusions.filter(
-          (ex) =>
-            ex.bottom > y &&
-            ex.top < bottomOfRun &&
-            ex.right > colX0() &&
-            ex.left < colX1(),
-        );
-        if (blockers.length === 0) break;
-        const next = Math.min(...blockers.map((ex) => ex.bottom));
-        if (next <= y || next >= colBottom()) break;
-        y = next;
-      }
-      const placeTable = (t: ResolvedTable) => {
-        offsetTable(t, y);
-        shiftTableX(t, xShift());
-        tables.push(t);
-        colDirty = true;
-        commitFns(tableFootnoteNums(t)); // footnotes referenced in the cells
-        y += t.height;
-        sectionRemaining -= t.height;
-        bump();
-      };
-      for (;;) {
-        const avail = colBottom() - y;
-        if (table.height + addedReserve(tableFootnoteNums(table)) <= avail) {
-          placeTable(table);
-          break;
-        }
-        // The header band repeats only while it leaves reasonable band room.
-        const hb =
-          table.headerBottom != null &&
-          table.headerBottom < (limit() - bandTop) / 2
-            ? table.headerBottom
-            : 0;
-        // Prefer the lowest row boundary that still fits (never inside the header).
-        let cut = 0;
-        for (const cell of table.cells) {
-          if (cell.y > hb && cell.y <= avail) cut = Math.max(cut, cell.y);
-        }
-        if (cut === 0) {
-          // No row boundary fits the remaining space, i.e. the first row is
-          // taller than what's left. Word's default lets a row break across
-          // pages, so it starts here and splits mid-row (no blank gap) — only
-          // a row marked w:cantSplit moves whole to a fresh band (and even
-          // then only when it would actually fit one).
-          let firstRowBottom = table.height;
-          for (const cell of table.cells) {
-            if (cell.y > hb && cell.y < firstRowBottom) firstRowBottom = cell.y;
-          }
-          const fitsFullBand = firstRowBottom - hb <= limit() - bandTop;
-          const rowCantSplit = (table.cantSplitBands ?? []).some(
-            (b) => b.top <= hb + 0.5 && b.bottom >= firstRowBottom - 0.5,
-          );
-          if (rowCantSplit && fitsFullBand && colDirty) {
-            breakBand(); // retry with a full fresh column/page
-            continue;
-          }
-          cut = avail; // split the row in the space we have
-        }
-        if (cut <= hb) {
-          // Header band swallows the remaining space — try a fresh band, or
-          // place whole when the geometry is truly degenerate.
-          if (colDirty) {
-            breakBand();
-            continue;
-          }
-          placeTable(table);
-          break;
-        }
-        const { top: topFrag, rest } = splitTableAt(table, cut);
-        if (rest.height >= table.height) {
-          // The cut moved nothing — the leftover strip is too thin to hold
-          // even one line. Retry on a fresh band when this one is already
-          // used (a table landing 8px above the page bottom must not be
-          // dumped there whole, overflowing the page); only a genuinely
-          // band-taller table, with nowhere better to go, is placed as-is.
-          // splitTableAt copies whatever it moves, so `table` is intact.
-          if (colDirty) {
-            breakBand();
-            continue;
-          }
-          placeTable(table);
-          break;
-        }
-        const topHasContent = topFrag.cells.some(
-          (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
-        );
-        if (!topHasContent && colDirty) {
-          // Not even one line fits the leftover space — don't paint an empty
-          // table stub; start on the next column/page instead.
-          breakBand();
-          continue;
-        }
-        if (hb > 0) {
-          const ghosts = cloneHeaderCells(table, hb);
-          if (ghosts) {
-            for (const cell of rest.cells) shiftCell(cell, hb);
-            rest.cells.unshift(...ghosts);
-            rest.height += hb;
-            rest.headerBottom = hb; // continuations keep repeating it
-          }
-        }
-        placeTable(topFrag);
-        breakBand();
-        table = rest;
-      }
+      restoreCheckpoint(pageStartCp);
+      startIdx = pageStartCp.itemIdx;
     }
   }
-
-  if (pageHasContent() || pages.length === 0) finalizePage();
   return { pages };
+
+  function placeRun(from: number): void {
+    for (idx = from; idx < items.length; idx++) {
+      const item = items[idx];
+      // Section boundary: switch column flow (and break) before the block.
+      if (item.section) {
+        const nextPage = item.section.page ?? page;
+        const geomChanges = !sameGeom(nextPage, curPage);
+        curChromeIndex = item.section.chromeIndex;
+        if (firstItem) {
+          pageChromeIndex = curChromeIndex;
+          pageSectionFirst = true;
+          if (geomChanges) setGeometry(nextPage);
+          else restartBand(); // page is empty — adopt this section's chrome band
+          applyColumns(item.section);
+        } else if (item.section.newPage || geomChanges) {
+          // Geometry may only change at a page boundary — a continuous break
+          // with a differing page is laid out as next-page (Word's promotion).
+          sectionFirstPending = true;
+          if (pageHasContent()) {
+            finalizePage(); // its tail re-bands for the new section's chrome
+          } else {
+            // The current (empty) page becomes this section's first page.
+            pageChromeIndex = curChromeIndex;
+            pageSectionFirst = true;
+            sectionFirstPending = false;
+            restartBand();
+          }
+          if (geomChanges) setGeometry(nextPage);
+          applyColumns(item.section);
+        } else {
+          // Continuous break: resume below the finishing section's deepest column,
+          // unless that's already at the band floor (then start a fresh page).
+          bump();
+          if (sectionMaxY >= limit()) {
+            sectionFirstPending = true; // the fresh page opens this section
+            finalizePage();
+          } else {
+            bandTop = sectionMaxY;
+            y = bandTop;
+            colIndex = 0;
+            colDirty = false;
+          }
+          applyColumns(item.section);
+        }
+        // Balance the new section's columns once its content fits a page.
+        balancing = colCount > 1;
+        sectionRemaining = item.section.height ?? 0;
+        rebalance();
+      }
+      firstItem = false;
+
+      if ('para' in item) {
+        // A replayed page opening mid-paragraph: its pre-steps (page break,
+        // keeps, space-before, border box creation) already ran before the
+        // boundary — only the remaining drafts are placed.
+        const resumeAt = resumeDraftIdx;
+        resumeDraftIdx = null;
+        if (resumeAt !== null && item.para.drafts) {
+          emitParaDrafts(
+            item.para.drafts,
+            item.para.widowControl !== false,
+            resumeAt,
+          );
+          if (activePBdr) {
+            flushPBdrFrag(true);
+            activePBdr = null;
+          }
+          if (item.para.after) {
+            y += item.para.after;
+            sectionRemaining -= item.para.after;
+          }
+          continue;
+        }
+        if (item.para.pageBreakBefore && pageHasContent()) {
+          finalizePage();
+          rebalance();
+        }
+        // Pagination keeps: break the band early when this paragraph
+        // (keepLines) — or this paragraph plus the head of what must follow
+        // it (keepNext) — cannot finish here but WOULD fit a fresh band.
+        // A chain taller than a whole band gives up, as Word does.
+        if (colDirty && item.para.drafts) {
+          const selfH = (item.para.before ?? 0) + draftsTotal(item.para.drafts);
+          const bandH = colBottom() - bandTop;
+          const avail = colBottom() - y;
+          const needKL = item.para.keepLines && selfH > avail && selfH <= bandH;
+          const needKN =
+            item.para.keepNext &&
+            (() => {
+              const need = selfH + (item.para.after ?? 0) + keepAheadH(idx);
+              return need > avail && need <= bandH;
+            })();
+          if (needKL || needKN) breakBand();
+        }
+        // Space-before: a gap above the paragraph (collapsed away at a band top).
+        if (item.para.before && colDirty) {
+          y += item.para.before;
+          sectionRemaining -= item.para.before;
+        }
+        if (item.para.borders) {
+          activePBdr = {
+            borders: item.para.borders,
+            startedEarlier: false,
+            frag: null,
+          };
+        }
+        const drafts = item.para.drafts;
+        const draftsHeight = drafts?.reduce((s, d) => s + d.height, 0) ?? 0;
+        const floatsAhead = exclusions.some(
+          (ex) => ex.bottom > y && ex.top < y + draftsHeight,
+        );
+        if (drafts && !floatsAhead) {
+          emitParaDrafts(drafts, item.para.widowControl !== false);
+        } else {
+          placeParaBanded(item.para.getFlow());
+        }
+        if (activePBdr) {
+          flushPBdrFrag(true); // last fragment closes the box's bottom edge
+          activePBdr = null;
+        }
+        if (item.para.after) {
+          y += item.para.after; // space-after gap
+          sectionRemaining -= item.para.after;
+        }
+      } else {
+        // Tables flow across columns/pages: split at row boundaries when
+        // possible, and mid-row when a single row is taller than a whole band.
+        // Header rows (w:tblHeader) repeat at the top of every fragment. Tables
+        // are laid out at column width, then shifted into the current column.
+        // Placement must never mutate its input: placeTable offsets the object
+        // it is given, and the replay pass (floats registered above already-
+        // placed content re-run the page) hands the SAME item in again — a
+        // shared reference would be offset twice. One clone per placement.
+        // A replayed page opening mid-table resumes from the checkpointed
+        // remainder instead of the item's start.
+        let table = resumeTable ?? cloneTableShifted(item.table, 0);
+        resumeTable = null;
+        // Word never flows a table BESIDE a floating object: text wraps around
+        // one (see bandAt), but a table starts below its wrap zone. Without
+        // this, a logo anchored at the top of a page painted straight over the
+        // first table's opening rows. Skip past whatever the table would run
+        // into, as long as the band still has somewhere to go.
+        for (let guard = 0; guard < 8; guard++) {
+          const bottomOfRun = y + Math.min(table.height, colBottom() - y);
+          const blockers = exclusions.filter(
+            (ex) =>
+              ex.bottom > y &&
+              ex.top < bottomOfRun &&
+              ex.right > colX0() &&
+              ex.left < colX1(),
+          );
+          if (blockers.length === 0) break;
+          const next = Math.min(...blockers.map((ex) => ex.bottom));
+          if (next <= y || next >= colBottom()) break;
+          y = next;
+        }
+        const placeTable = (t: ResolvedTable) => {
+          offsetTable(t, y);
+          shiftTableX(t, xShift());
+          tables.push(t);
+          colDirty = true;
+          commitFns(tableFootnoteNums(t)); // footnotes referenced in the cells
+          y += t.height;
+          sectionRemaining -= t.height;
+          bump();
+        };
+        for (;;) {
+          const avail = colBottom() - y;
+          if (table.height + addedReserve(tableFootnoteNums(table)) <= avail) {
+            placeTable(table);
+            break;
+          }
+          // The header band repeats only while it leaves reasonable band room.
+          const hb =
+            table.headerBottom != null &&
+            table.headerBottom < (limit() - bandTop) / 2
+              ? table.headerBottom
+              : 0;
+          // Prefer the lowest row boundary that still fits (never inside the header).
+          let cut = 0;
+          for (const cell of table.cells) {
+            if (cell.y > hb && cell.y <= avail) cut = Math.max(cut, cell.y);
+          }
+          if (cut === 0) {
+            // No row boundary fits the remaining space, i.e. the first row is
+            // taller than what's left. Word's default lets a row break across
+            // pages, so it starts here and splits mid-row (no blank gap) — only
+            // a row marked w:cantSplit moves whole to a fresh band (and even
+            // then only when it would actually fit one).
+            let firstRowBottom = table.height;
+            for (const cell of table.cells) {
+              if (cell.y > hb && cell.y < firstRowBottom)
+                firstRowBottom = cell.y;
+            }
+            const fitsFullBand = firstRowBottom - hb <= limit() - bandTop;
+            const rowCantSplit = (table.cantSplitBands ?? []).some(
+              (b) => b.top <= hb + 0.5 && b.bottom >= firstRowBottom - 0.5,
+            );
+            if (rowCantSplit && fitsFullBand && colDirty) {
+              midTableRest = table; // whole table still pending across the break
+              breakBand(); // retry with a full fresh column/page
+              midTableRest = null;
+              continue;
+            }
+            cut = avail; // split the row in the space we have
+          }
+          if (cut <= hb) {
+            // Header band swallows the remaining space — try a fresh band, or
+            // place whole when the geometry is truly degenerate.
+            if (colDirty) {
+              midTableRest = table;
+              breakBand();
+              midTableRest = null;
+              continue;
+            }
+            placeTable(table);
+            break;
+          }
+          const { top: topFrag, rest } = splitTableAt(table, cut);
+          if (rest.height >= table.height) {
+            // The cut moved nothing — the leftover strip is too thin to hold
+            // even one line. Retry on a fresh band when this one is already
+            // used (a table landing 8px above the page bottom must not be
+            // dumped there whole, overflowing the page); only a genuinely
+            // band-taller table, with nowhere better to go, is placed as-is.
+            // splitTableAt copies whatever it moves, so `table` is intact.
+            if (colDirty) {
+              midTableRest = table;
+              breakBand();
+              midTableRest = null;
+              continue;
+            }
+            placeTable(table);
+            break;
+          }
+          const topHasContent = topFrag.cells.some(
+            (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
+          );
+          if (!topHasContent && colDirty) {
+            // Not even one line fits the leftover space — don't paint an empty
+            // table stub; start on the next column/page instead.
+            midTableRest = table;
+            breakBand();
+            midTableRest = null;
+            continue;
+          }
+          if (hb > 0) {
+            const ghosts = cloneHeaderCells(table, hb);
+            if (ghosts) {
+              for (const cell of rest.cells) shiftCell(cell, hb);
+              rest.cells.unshift(...ghosts);
+              rest.height += hb;
+              rest.headerBottom = hb; // continuations keep repeating it
+            }
+          }
+          placeTable(topFrag);
+          midTableRest = rest; // the break lands the remainder on the new page
+          breakBand();
+          midTableRest = null;
+          table = rest;
+        }
+      }
+    }
+
+    if (pageHasContent() || pages.length === 0) finalizePage();
+  }
 }
 
 /** Lay out already-flattened blocks into paginated pages. Pure (no DOM);

@@ -274,6 +274,79 @@ describe('layoutBlocks', () => {
     expect(pages[2].lines).toHaveLength(2); // body's last 2 lines
   });
 
+  it('wraps lines placed BEFORE a float anchor around it (letterhead)', () => {
+    // The letterhead pattern: a margin-positioned logo is ANCHORED in the
+    // title paragraph, but its box sits at the top of the page, over the
+    // empty paragraphs placed before the anchor. Word wraps the whole page
+    // around a float wherever its anchor sits — the page replays with the
+    // exclusion seeded, so the earlier lines move aside too.
+    const filler = (t: string): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text: t, font: font() }],
+    });
+    const anchor: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'title', font: font() }],
+      floats: [
+        {
+          src: 'logo.png',
+          width: 60,
+          height: 60,
+          wrap: 'square',
+          hAlign: 'left',
+          hRel: 'margin',
+          vOffset: 0,
+          vRel: 'margin', // page-constant: sits at the band top (y=20)
+        },
+      ],
+    };
+    const { pages } = layoutBlocks(
+      [filler('aa'), filler('bb'), anchor],
+      config(),
+    );
+    // Float occupies x 20–80, y 20–80: every line on the page starts right
+    // of it — including the two placed before the anchor.
+    const xs = pages[0].lines.map((l) => Math.round(l.x));
+    expect(xs).toEqual([80, 80, 80]);
+    expect(pages[0].floats?.[0]).toMatchObject({ x: 20, y: 20 });
+  });
+
+  it('a float that would push its own anchor off the page settles, not loops', () => {
+    // Band [20, 80]. Two fillers reach y=52; the anchor's line fits at
+    // 52–68. Its full-width float band (40px at the top) would displace the
+    // fillers DOWN past the band, pushing the anchor to page 2 — where the
+    // float must follow, un-seeding the exclusion. The sticky-drop rule
+    // accepts the original layout instead of oscillating.
+    const filler = (t: string): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text: t, font: font() }],
+    });
+    const anchor: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'anchor', font: font() }],
+      floats: [
+        {
+          src: 'wide.png',
+          width: 200,
+          height: 40,
+          wrap: 'topAndBottom',
+          hAlign: 'left',
+          hRel: 'margin',
+          vOffset: 0,
+          vRel: 'margin',
+        },
+      ],
+    };
+    const { pages } = layoutBlocks(
+      [filler('a'), filler('b'), anchor],
+      config({ height: 100 }),
+    );
+    // Terminates (the test completing is the point) with the pre-trigger
+    // layout: fillers unmoved, anchor still on page 1.
+    expect(pages).toHaveLength(1);
+    expect(pages[0].lines.map((l) => Math.round(l.x))).toEqual([20, 20, 20]);
+  });
+
   it('applies left + firstLine indent to the first line', () => {
     const block: FlowBlock = {
       type: 'paragraph',
