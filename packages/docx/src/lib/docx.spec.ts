@@ -1467,6 +1467,38 @@ describe('importDocx', () => {
     expect(markMap(p.child(0).marks).link.href).toBe('#_Toc1');
   });
 
+  it('applies the default paragraph style to content that names none', async () => {
+    // Word's "Normal" (w:default="1") is where a document keeps its line
+    // spacing and space-after. Skipping it collapses every unstyled
+    // paragraph — empty ones especially, which is what pushes a heading up
+    // the page against a floating logo.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:pPr><w:spacing w:after="200" w:line="276" w:lineRule="auto"/></w:pPr>
+        <w:rPr><w:sz w:val="22"/></w:rPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="Tight">
+        <w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>unstyled</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Tight"/></w:pPr><w:r><w:t>own style</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // Normal's spacing reaches the unstyled paragraph: 200 twips ≈ 13px
+    // after, and w:line 276 is a 1.15 multiple.
+    expect(doc.child(0).attrs.spacing).toMatchObject({
+      after: 13,
+      line: 1.15,
+      lineRule: 'auto',
+    });
+    // A paragraph naming its OWN style does not fall back to Normal — its
+    // basedOn chain decides, exactly as Word resolves it.
+    expect(doc.child(1).attrs.spacing).toMatchObject({ after: 0, line: 1 });
+  });
+
   it('resolves pagination keeps through the style cascade (toggle-aware)', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:style w:type="paragraph" w:styleId="Glue">

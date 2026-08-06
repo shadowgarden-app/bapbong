@@ -34,6 +34,11 @@ export interface StyleRegistry {
   docDefaults: RunProps;
   /** docDefaults → pPrDefault, the lowest layer of the paragraph cascade. */
   docDefaultsPPr: OoxmlNode | undefined;
+  /** The paragraph style Word applies to content that names none —
+   *  `w:style w:type="paragraph" w:default="1"`, almost always "Normal".
+   *  It routinely carries the document's line spacing and space-after, so
+   *  skipping it collapses every unstyled paragraph. */
+  defaultParagraphStyleId: string | undefined;
   /** Effective run properties contributed by a styleId (incl. basedOn chain). */
   resolveStyle(styleId: string | undefined): RunProps;
   /** The styleId's w:pPr nodes, base-most first (basedOn ancestors → style).
@@ -71,9 +76,15 @@ export function buildStyleRegistry(
   );
 
   const defs = new Map<string, StyleDef>();
+  let defaultParagraphStyleId: string | undefined;
   for (const style of children(stylesEl, 'w:style')) {
     const id = attrOf(style, 'w:styleId');
     if (id === undefined) continue;
+    const isDefault =
+      attrOf(style, 'w:default') === '1' ||
+      attrOf(style, 'w:default') === 'true';
+    if (isDefault && attrOf(style, 'w:type') === 'paragraph')
+      defaultParagraphStyleId ??= id;
     defs.set(id, {
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
       rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme, resolveFont),
@@ -81,9 +92,7 @@ export function buildStyleRegistry(
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
       el: style,
-      isDefault:
-        attrOf(style, 'w:default') === '1' ||
-        attrOf(style, 'w:default') === 'true',
+      isDefault,
     });
   }
 
@@ -141,6 +150,7 @@ export function buildStyleRegistry(
   return {
     docDefaults,
     docDefaultsPPr,
+    defaultParagraphStyleId,
     resolveStyle: (styleId) => resolve(styleId, new Set<string>()),
     resolveStylePPr: (styleId) => resolvePPr(styleId, new Set<string>()),
     resolveTableBorders: (styleId) =>

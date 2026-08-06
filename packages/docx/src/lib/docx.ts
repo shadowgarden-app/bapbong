@@ -1104,17 +1104,22 @@ const PARA_CHILD_TAGS = new Set([
 function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const pPr = child(p, 'w:pPr');
   const pStyleId = attrOf(child(pPr, 'w:pStyle'), 'w:val');
+  // Unstyled content still gets Word's DEFAULT paragraph style ("Normal"),
+  // which is where a document keeps its line spacing and space-after. A
+  // paragraph that names its own style does not fall back to Normal — the
+  // style's basedOn chain decides what it inherits, as in Word.
+  const styleId = pStyleId ?? ctx.styles.defaultParagraphStyleId;
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(
     ctx.styles.docDefaults,
-    ctx.styles.resolveStyle(pStyleId),
+    ctx.styles.resolveStyle(styleId),
   );
   // Paragraph-property cascade, base-most first; later layers win:
   // docDefaults pPrDefault → style chain (w:basedOn ancestors → style)
   // → numbering lvl pPr (the per-level list indent) → inline.
   const pPrChain: (OoxmlNode | undefined)[] = [
     ctx.styles.docDefaultsPPr,
-    ...ctx.styles.resolveStylePPr(pStyleId),
+    ...ctx.styles.resolveStylePPr(styleId),
     pPr,
   ];
   const parsedList = parseList(lastWith(pPrChain, 'w:numPr'));
