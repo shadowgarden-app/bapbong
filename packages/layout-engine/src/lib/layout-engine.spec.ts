@@ -2310,6 +2310,84 @@ describe('multi-column layout', () => {
   });
 });
 
+describe('page cache (resume-from-edited-page)', () => {
+  const pSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*' },
+      text: { group: 'inline' },
+    },
+    marks: {},
+  });
+  const para = (t: string) =>
+    pSchema.node('paragraph', null, [pSchema.text(t)]);
+  // Nine one-line paragraphs → three pages of three lines each (band 60px,
+  // 16px lines). The SAME node instances are reused across docs, exactly as
+  // ProseMirror's structural sharing keeps unchanged nodes identical.
+  const nodes = 'abcdefghi'.split('').map((ch) => para(ch.repeat(3)));
+  const mkDoc = (override?: { at: number; text: string }) =>
+    pSchema.node(
+      'doc',
+      null,
+      nodes.map((n, i) =>
+        override && i === override.at ? para(override.text) : n,
+      ),
+    );
+  const cfg = () => config({ height: 100 });
+
+  it('reuses every unchanged page of an untouched document by identity', () => {
+    const cache = createLayoutCache();
+    const doc = mkDoc();
+    const r1 = layout(doc, cfg(), cache);
+    expect(r1.pages).toHaveLength(3);
+    const r2 = layout(doc, cfg(), cache);
+    expect(r2.pages).toHaveLength(3);
+    // Pages before the boundary page come straight from the cache — same
+    // objects. The final page is re-placed (boundary insurance) but equal.
+    expect(r2.pages[0]).toBe(r1.pages[0]);
+    expect(r2.pages[1]).toBe(r1.pages[1]);
+    expect(r2.pages[2].lines.map((l) => l.y)).toEqual(
+      r1.pages[2].lines.map((l) => l.y),
+    );
+  });
+
+  it('an edit on the LAST page keeps the prefix and re-places only the tail', () => {
+    const cache = createLayoutCache();
+    const r1 = layout(mkDoc(), cfg(), cache);
+    const r2 = layout(mkDoc({ at: 8, text: 'zzz' }), cfg(), cache);
+    expect(r2.pages[0]).toBe(r1.pages[0]); // prefix page: cached object
+    // The edited page is genuinely re-placed with the new text.
+    const last = r2.pages[2].lines.map((l) => l.segments[0]?.text);
+    expect(last).toContain('zzz');
+  });
+
+  it('an edit MID-document re-attaches the unchanged tail by identity', () => {
+    const cache = createLayoutCache();
+    const r1 = layout(mkDoc(), cfg(), cache);
+    // Same-length edit on page 2: page 3's items and carry are unchanged,
+    // so the tail splices back — the very object from the previous pass.
+    const r2 = layout(mkDoc({ at: 4, text: 'yyy' }), cfg(), cache);
+    expect(r2.pages).toHaveLength(3);
+    expect(r2.pages[1].lines.map((l) => l.segments[0]?.text)).toContain('yyy');
+    expect(r2.pages[2]).toBe(r1.pages[2]);
+  });
+
+  it('a size-changing edit splices the tail with shifted PM positions', () => {
+    const cache = createLayoutCache();
+    const r1 = layout(mkDoc(), cfg(), cache);
+    // 'eee' → 'eeeee': same line count, document positions after it +2.
+    const r2 = layout(mkDoc({ at: 4, text: 'eeeee' }), cfg(), cache);
+    expect(r2.pages).toHaveLength(3);
+    const oldLine = r1.pages[2].lines[0];
+    const newLine = r2.pages[2].lines[0];
+    expect(newLine.from).toBe((oldLine.from ?? 0) + 2);
+    expect(newLine.segments[0]?.pos).toBe((oldLine.segments[0]?.pos ?? 0) + 2);
+    // Geometry is untouched — only positions moved.
+    expect(newLine.x).toBe(oldLine.x);
+    expect(newLine.y).toBe(oldLine.y);
+  });
+});
+
 describe('incremental table re-layout', () => {
   const tSchema = new Schema({
     nodes: {

@@ -616,6 +616,11 @@ function wrapParagraph(
   ctx: Ctx,
   bandFn: BandFn,
   emit: (d: LineDraft) => void,
+  // Resume a paragraph split by a page boundary at this PM position (a line
+  // start): earlier tokens are skipped and the first emitted line is a
+  // CONTINUATION — no marker, no first-line indent. This is what makes a
+  // page that opens mid-way through a float-anchoring paragraph replayable.
+  resumeFrom?: number,
 ): void {
   const { base, measure, metrics, tabWidth } = ctx;
   const indent = block.indent;
@@ -626,7 +631,11 @@ function wrapParagraph(
     indent?.hanging != null ? -indent.hanging : (indent?.firstLine ?? 0);
   const align: Align = block.align ?? 'left';
 
-  const tokens = block.runs.flatMap((inline) => tokenizeInline(inline, ctx));
+  let tokens = block.runs.flatMap((inline) => tokenizeInline(inline, ctx));
+  if (resumeFrom !== undefined) {
+    // Line boundaries are token boundaries, so the cut is exact.
+    tokens = tokens.filter((t) => t.pos !== undefined && t.pos >= resumeFrom);
+  }
 
   // Baseline metrics for the default font seed every line (so empty lines have
   // a sensible height too).
@@ -687,7 +696,7 @@ function wrapParagraph(
 
   let lineTokens: Token[] = [];
   let lineWidth = 0; // running width of the current line's tokens
-  let firstLine = true;
+  let firstLine = resumeFrom === undefined; // a resumed line is a continuation
   let prevTo: number | undefined; // caret slot after the previous line's content
   let maxFontPx = sizePx(base); // tallest text (fallback line-height mode)
   let maxImagePx = 0; // tallest inline image on the line
@@ -1525,6 +1534,11 @@ type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
    *  (filled by assignSectionHeights) is the section's total content height,
    *  used to balance the columns on the section's final page. */
   section?: SectionMarker;
+  /** The document node this item came from + its PM offset — the identity the
+   *  page cache matches on (PM structural sharing keeps unchanged nodes
+   *  reference-equal across transactions). */
+  node?: PMNode;
+  nodeOffset?: number;
 };
 
 /** Estimated laid-out height of a block item (drafts + spacing, or table). */
@@ -1761,6 +1775,98 @@ function buildCtx(config: LayoutConfig): Ctx {
   };
 }
 
+/** Everything that crosses a page boundary, captured at each page's start
+ *  (the page accumulators are empty there, so this is a handful of scalars
+ *  plus the mid-item resume handles). Serves both the fixed-point replay
+ *  (Phase 2) and the cross-pass page cache (Phase 3): a page is a pure
+ *  function of (its items, this carry), which is what makes reusing it safe. */
+interface PageCheckpoint {
+  itemIdx: number;
+  midTable: ResolvedTable | null;
+  midDraftIdx: number | null;
+  midBandedFrom: number | null;
+  unreplayable: boolean;
+  firstItem: boolean;
+  curPage: PageConfig;
+  curChromeIndex: number | undefined;
+  pageChromeIndex: number | undefined;
+  pageSectionFirst: boolean;
+  sectionFirstPending: boolean;
+  contentLeft: number;
+  contentRight: number;
+  contentWidth: number;
+  colCount: number;
+  colGap: number;
+  colWidth: number;
+  balancing: boolean;
+  sectionRemaining: number;
+  activePBdr: {
+    borders: ParagraphBorders;
+    startedEarlier: boolean;
+    frag: { x0: number; x1: number; y0: number; y1: number } | null;
+  } | null;
+}
+
+/** One placed page as recorded for cross-pass reuse: which document nodes fed
+ *  it, the carry it started from, and the finished page. `endsMidItem` marks
+ *  a page whose last item continues on the next one (a split table or
+ *  paragraph), so consecutive entries overlap on that node. */
+interface PageRunEntry {
+  itemNodes: PMNode[];
+  endsMidItem: boolean;
+  cp: PageCheckpoint;
+  /** PM offset of itemNodes[0] when recorded — the tail-splice shift base. */
+  startOffset: number;
+  page: ResolvedPage;
+}
+interface PageRun {
+  entries: PageRunEntry[];
+}
+
+/** Control-flow signal for the tail splice: placement reached a clean page
+ *  boundary whose carry and remaining items match the previous run — every
+ *  page from `entryIdx` on can be reused (shifted by the PM-position delta)
+ *  instead of re-placed. */
+class TailSpliceSignal {
+  constructor(readonly entryIdx: number) {}
+}
+
+/** A recorded page re-used at a different document position: geometry is
+ *  identical by construction (same items, same carry) — only the PM
+ *  positions and the page index shift. */
+function shiftResolvedPage(
+  p: ResolvedPage,
+  delta: number,
+  index: number,
+): ResolvedPage {
+  const out: ResolvedPage = {
+    ...p,
+    index,
+    lines: p.lines.map((l) => cloneLineShifted(l, delta)),
+  };
+  if (p.tables) out.tables = p.tables.map((t) => cloneTableShifted(t, delta));
+  if (p.floats)
+    out.floats = p.floats.map((f) =>
+      f.pos != null ? { ...f, pos: f.pos + delta } : { ...f },
+    );
+  return out;
+}
+
+/** A recorded checkpoint re-based for the spliced tail, so the NEXT pass can
+ *  resume from it: item index and PM positions move by the edit's deltas. */
+function rebaseCp(
+  cp: PageCheckpoint,
+  delta: number,
+  idxDelta: number,
+): PageCheckpoint {
+  return {
+    ...cp,
+    itemIdx: cp.itemIdx + idxDelta,
+    midTable: cp.midTable && cloneTableShifted(cp.midTable, delta),
+    midBandedFrom: cp.midBandedFrom != null ? cp.midBandedFrom + delta : null,
+  };
+}
+
 /** Control-flow signal for the page fixed-point: a float registered itself
  *  over content already placed above it (Word wraps the WHOLE page around a
  *  float, wherever its anchor sits), so the page must be re-run with that
@@ -1793,6 +1899,10 @@ function placeBlocks(
     chromeIndex?: number,
   ) => { top: number; bottom: number },
   footnotes?: Map<number, FootnoteBody>,
+  // Cross-pass page cache (Phase 3): `store` persists in the host's
+  // LayoutCache; `key` fingerprints every input a page depends on besides
+  // its items and carry (geometry, chrome bands, tab grid, footnotes).
+  pageCache?: { store: Map<string, PageRun>; key: string },
 ): ResolvedLayout {
   const { page } = config;
   // Which section's chrome the CURRENT page shows: the section in effect where
@@ -1829,10 +1939,15 @@ function placeBlocks(
   let idx = 0;
   let midTableRest: ResolvedTable | null = null;
   let midParaDraftIdx: number | null = null;
-  let inBandedPara = false; // float-anchoring paragraphs wrap mid-call —
-  // a page starting inside one cannot be replayed (documented limitation).
+  let inBandedPara = false; // inside a float paragraph's wrap call
+  // Mid-wrap resume position of a float-anchoring paragraph: the PM start of
+  // the line being placed. UNRESUMABLE (-1) when the flow carries no
+  // positions (flat API) — such a page keeps the old can't-replay behavior.
+  const UNRESUMABLE = -1;
+  let midBandedFrom: number | null = null;
   let resumeTable: ResolvedTable | null = null; // handed to the first item
   let resumeDraftIdx: number | null = null; // of a replayed page
+  let resumeBandedFrom: number | null = null;
   const seeds = new Map<string, Exclusion>();
   // Seeds retracted because they pushed their own anchor off the page —
   // never re-tried, so the oscillating case settles in one round trip.
@@ -1840,32 +1955,93 @@ function placeBlocks(
   const registeredKeys = new Set<string>();
   let retriesLeft = MAX_PAGE_RETRIES;
   let pageStartCp!: PageCheckpoint; // assigned before the loop, re-taken per page
-  interface PageCheckpoint {
-    itemIdx: number;
-    midTable: ResolvedTable | null;
-    midDraftIdx: number | null;
-    unreplayable: boolean;
-    firstItem: boolean;
-    curPage: PageConfig;
-    curChromeIndex: number | undefined;
-    pageChromeIndex: number | undefined;
-    pageSectionFirst: boolean;
-    sectionFirstPending: boolean;
-    contentLeft: number;
-    contentRight: number;
-    contentWidth: number;
-    colCount: number;
-    colGap: number;
-    colWidth: number;
-    balancing: boolean;
-    sectionRemaining: number;
-    activePBdr: {
-      borders: ParagraphBorders;
-      startedEarlier: boolean;
-      frag: { x0: number; x1: number; y0: number; y1: number } | null;
-    } | null;
-  }
 
+  // ── Page-cache recording (Phase 3) ──────────────────────────────────
+  const prior = pageCache?.store.get(pageCache.key);
+  // Clean-boundary entries of the previous run, indexed by their first node —
+  // the tail-resync lookup.
+  const priorFirstNode = new Map<PMNode, number>();
+  prior?.entries.forEach((e, i) => {
+    const n = e.itemNodes[0];
+    const cp = e.cp;
+    if (
+      n &&
+      !priorFirstNode.has(n) &&
+      cp.midTable === null &&
+      cp.midDraftIdx === null &&
+      cp.midBandedFrom === null &&
+      cp.activePBdr === null &&
+      !cp.unreplayable
+    ) {
+      priorFirstNode.set(n, i);
+    }
+  });
+  const record: PageRunEntry[] = [];
+  let pageNodes: PMNode[] = [];
+  let pageFirstOffset: number | null = null;
+  let currentPageCp!: PageCheckpoint; // the checkpoint that OPENED this page
+  /** The in-flight item continues past this page boundary. */
+  const midAny = () =>
+    midTableRest !== null || midParaDraftIdx !== null || inBandedPara;
+  /** Re-seed the recording state for a page that starts at checkpoint `cp`. */
+  const seedRecording = (cp: PageCheckpoint) => {
+    currentPageCp = cp;
+    const mid =
+      cp.midTable !== null ||
+      cp.midDraftIdx !== null ||
+      cp.midBandedFrom !== null ||
+      cp.unreplayable;
+    const it = mid ? items[cp.itemIdx] : undefined;
+    pageNodes = it?.node ? [it.node] : [];
+    pageFirstOffset = it?.node ? (it.nodeOffset ?? null) : null;
+  };
+  /** Two clean page-start carries describe the same resume point. */
+  const carryEq = (a: PageCheckpoint, b: PageCheckpoint): boolean =>
+    a.midTable === null &&
+    b.midTable === null &&
+    a.midDraftIdx === null &&
+    b.midDraftIdx === null &&
+    a.midBandedFrom === null &&
+    b.midBandedFrom === null &&
+    a.activePBdr === null &&
+    b.activePBdr === null &&
+    !a.unreplayable &&
+    !b.unreplayable &&
+    a.firstItem === b.firstItem &&
+    a.curChromeIndex === b.curChromeIndex &&
+    a.pageChromeIndex === b.pageChromeIndex &&
+    a.pageSectionFirst === b.pageSectionFirst &&
+    a.sectionFirstPending === b.sectionFirstPending &&
+    a.contentLeft === b.contentLeft &&
+    a.contentRight === b.contentRight &&
+    a.contentWidth === b.contentWidth &&
+    a.colCount === b.colCount &&
+    a.colGap === b.colGap &&
+    a.colWidth === b.colWidth &&
+    a.balancing === b.balancing &&
+    a.sectionRemaining === b.sectionRemaining &&
+    sameGeom(a.curPage, b.curPage);
+  /** The remaining items match the recorded run from `entryIdx` on. */
+  const tailMatches = (entryIdx: number): boolean => {
+    if (!prior) return false;
+    let c = idx;
+    let prevEndsMid = false;
+    for (let k = entryIdx; k < prior.entries.length; k++) {
+      const e = prior.entries[k];
+      for (let j = 0; j < e.itemNodes.length; j++) {
+        if (j === 0 && prevEndsMid) {
+          // Consecutive entries overlap on a split item: its node was
+          // already matched as the previous entry's last — just verify.
+          if (items[c - 1]?.node !== e.itemNodes[0]) return false;
+          continue;
+        }
+        if (items[c]?.node !== e.itemNodes[j]) return false;
+        c++;
+      }
+      prevEndsMid = e.endsMidItem;
+    }
+    return c === items.length;
+  };
   // w:pBdr tracking: while a bordered paragraph places its lines, a fragment
   // accumulates; a column/page break flushes it as a box (top edge only on
   // the first fragment, bottom only on the last).
@@ -2072,6 +2248,19 @@ function placeBlocks(
       resolved.chromeIndex = pageChromeIndex;
       resolved.sectionFirst = pageSectionFirst;
     }
+    // Page-cache recording: which nodes fed this page, the carry it opened
+    // with, and whether its last LISTED item continues on the next page —
+    // an in-flight item that placed nothing here isn't an overlap.
+    if (pageCache) {
+      const inflight = midAny() ? items[idx]?.node : undefined;
+      record.push({
+        itemNodes: pageNodes,
+        endsMidItem: !!inflight && pageNodes[pageNodes.length - 1] === inflight,
+        cp: currentPageCp,
+        startOffset: pageFirstOffset ?? 0,
+        page: resolved,
+      });
+    }
     // The next page starts under the CURRENT section's chrome — recompute the
     // band so a section with taller/shorter chrome gets its own bounds even
     // when the geometry didn't change.
@@ -2100,13 +2289,32 @@ function placeBlocks(
     registeredKeys.clear();
     retriesLeft = MAX_PAGE_RETRIES;
     pageStartCp = takeCheckpoint();
+    if (pageCache) {
+      seedRecording(pageStartCp);
+      // Tail resync: this fresh page opens at a CLEAN boundary whose carry
+      // and remaining items match a page of the previous run — every page
+      // from there on is reusable (shifted by the position delta) instead
+      // of re-placed. The splice signal unwinds to the page loop.
+      if (prior && !midAny() && idx < items.length) {
+        const n = items[idx]?.node;
+        const k = n ? priorFirstNode.get(n) : undefined;
+        if (k !== undefined) {
+          const e = prior.entries[k];
+          if (carryEq(pageStartCp, e.cp) && tailMatches(k)) {
+            throw new TailSpliceSignal(k);
+          }
+        }
+      }
+    }
   };
 
   const takeCheckpoint = (): PageCheckpoint => ({
     itemIdx: idx,
     midTable: midTableRest && cloneTableShifted(midTableRest, 0),
     midDraftIdx: midParaDraftIdx,
-    unreplayable: inBandedPara,
+    midBandedFrom:
+      inBandedPara && midBandedFrom !== UNRESUMABLE ? midBandedFrom : null,
+    unreplayable: inBandedPara && midBandedFrom === UNRESUMABLE,
     firstItem,
     curPage,
     curChromeIndex,
@@ -2167,9 +2375,12 @@ function placeBlocks(
     rebalance();
     resumeTable = cp.midTable && cloneTableShifted(cp.midTable, 0);
     resumeDraftIdx = cp.midDraftIdx;
+    resumeBandedFrom = cp.midBandedFrom;
     midTableRest = null;
     midParaDraftIdx = null;
+    midBandedFrom = null;
     inBandedPara = false;
+    if (pageCache) seedRecording(cp);
   };
 
   /** End the current column: move to the next column, or finalize the page when
@@ -2191,6 +2402,16 @@ function placeBlocks(
    *  references. Breaks to the next column/page when the line + its (and the
    *  page's already-committed) footnotes no longer fit, or it would cross the
    *  balance target. */
+  /** Record that the in-flight item put content on the CURRENT page — the
+   *  page cache matches pages by exactly these node lists. Called after any
+   *  internal band break has resolved, so it names the right page. */
+  const noteNodePlaced = () => {
+    const it = items[idx];
+    if (!it?.node) return;
+    if (pageNodes[pageNodes.length - 1] !== it.node) pageNodes.push(it.node);
+    pageFirstOffset ??= it.nodeOffset ?? null;
+  };
+
   const emitLine = (draft: LineDraft) => {
     let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     const floor = () =>
@@ -2199,6 +2420,7 @@ function placeBlocks(
       breakBand(); // next column, or next page; footnotes ride the page
       add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     }
+    noteNodePlaced();
     lines.push(draftToLine(draft, y, xShift()));
     if (activePBdr) {
       if (!activePBdr.frag) {
@@ -2285,7 +2507,10 @@ function placeBlocks(
       }
       if (fit >= remaining) {
         for (; i < drafts.length; i++) {
-          midParaDraftIdx = i; // emitLine may still break on footnote reserve
+          // emitLine may still break on footnote reserve. i === 0 means
+          // NOTHING of this paragraph placed yet — that boundary is "before
+          // the item" (resume re-runs its pre-steps), not mid-item.
+          midParaDraftIdx = i === 0 ? null : i;
           emitLine(drafts[i]);
         }
         midParaDraftIdx = null;
@@ -2300,11 +2525,12 @@ function placeBlocks(
       for (let k = 0; k < fit; k++, i++) {
         // If placing this line (or the chunk break below) closes the page,
         // a replay resumes at the first UNPLACED draft — emitLine breaks
-        // before it pushes, so the current index is exactly that.
-        midParaDraftIdx = i;
+        // before it pushes, so the current index is exactly that. Index 0
+        // stays null: that boundary is "before the item", not mid-item.
+        midParaDraftIdx = i === 0 ? null : i;
         emitLine(drafts[i]);
       }
-      midParaDraftIdx = i;
+      midParaDraftIdx = i === 0 ? null : i;
       breakBand();
       midParaDraftIdx = null;
     }
@@ -2422,6 +2648,7 @@ function placeBlocks(
       placeParaBandedInner(flow);
     } finally {
       inBandedPara = false;
+      midBandedFrom = null;
     }
   };
   const placeParaBandedInner = (flow: FlowParagraph) => {
@@ -2455,47 +2682,138 @@ function placeBlocks(
       }
     }
     registerFloats(flow, y);
-    wrapParagraph(
-      flow,
-      ctx,
-      (estH, minWidth) => {
-        for (;;) {
-          if (y + estH > colBottom() && colDirty) {
-            breakBand(); // next column/page: exclusions are gone
-            continue;
-          }
-          const b = bandAt(y, estH);
-          const blockers = exclusions.filter(
-            (ex) => ex.top < y + estH && ex.bottom > y,
-          );
-          // A band that passed the MIN_BAND floor can still be too narrow for
-          // an unbreakable item (an inline image). While a float is what
-          // narrowed it, keep walking down past the floats — same move as a
-          // null band. With no blockers left the band is the full column;
-          // return it even if the item is wider (it overflows, as before).
-          if (
-            b &&
-            (minWidth === undefined ||
-              b.right - b.left >= minWidth ||
-              blockers.length === 0)
-          )
-            return b;
-          if (blockers.length === 0) return { left: colX0(), right: colX1() };
-          y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
-        }
-      },
-      (draft) => emitLine(draft),
-    );
+    wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine);
+  };
+
+  const bandedBandFn: BandFn = (estH, minWidth) => {
+    for (;;) {
+      if (y + estH > colBottom() && colDirty) {
+        breakBand(); // next column/page: exclusions are gone
+        continue;
+      }
+      const b = bandAt(y, estH);
+      const blockers = exclusions.filter(
+        (ex) => ex.top < y + estH && ex.bottom > y,
+      );
+      // A band that passed the MIN_BAND floor can still be too narrow for
+      // an unbreakable item (an inline image). While a float is what
+      // narrowed it, keep walking down past the floats — same move as a
+      // null band. With no blockers left the band is the full column;
+      // return it even if the item is wider (it overflows, as before).
+      if (
+        b &&
+        (minWidth === undefined ||
+          b.right - b.left >= minWidth ||
+          blockers.length === 0)
+      )
+        return b;
+      if (blockers.length === 0) return { left: colX0(), right: colX1() };
+      y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
+    }
+  };
+
+  /** Emit one wrapped line of a float-anchoring paragraph, keeping the
+   *  mid-wrap resume position current: if placing THIS line closes the page,
+   *  a replayed page re-wraps the paragraph from this line's start. Lines
+   *  without a PM position (flat-API flows) can't be resumed — the sentinel
+   *  marks the checkpoint unreplayable, the pre-existing degraded mode. */
+  const emitBandedLine = (draft: LineDraft): void => {
+    midBandedFrom = draft.from ?? UNRESUMABLE;
+    emitLine(draft);
+  };
+
+  /** Re-enter a float paragraph split by the replayed page's start: its
+   *  floats stayed on the earlier page (they belong where the first line
+   *  landed), so only the remaining lines re-wrap — against this page's
+   *  exclusions, seeds included. */
+  const resumeParaBanded = (flow: FlowParagraph, fromPos: number) => {
+    inBandedPara = true;
+    try {
+      wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, fromPos);
+    } finally {
+      inBandedPara = false;
+      midBandedFrom = null;
+    }
   };
 
   let firstItem = true;
   pageStartCp = takeCheckpoint();
+  if (pageCache) seedRecording(pageStartCp);
   let startIdx = 0;
+
+  // ── Prefix reuse (Phase 3) ──────────────────────────────────────────
+  // Pages whose item nodes are reference-identical to the previous run are
+  // the same pages — copy them and resume placement at the first difference.
+  // The boundary page itself is re-placed (k − 1): its break decisions may
+  // have peeked past the boundary (keepNext look-ahead).
+  if (prior && prior.entries.length > 1) {
+    let cursor = 0;
+    let k = 0;
+    for (; k < prior.entries.length; k++) {
+      const e = prior.entries[k];
+      if (e.itemNodes.length === 0) break;
+      let c = cursor;
+      let ok = true;
+      for (let j = 0; j < e.itemNodes.length; j++, c++) {
+        if (items[c]?.node !== e.itemNodes[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) break;
+      cursor = e.endsMidItem ? c - 1 : c;
+    }
+    k = Math.max(0, k - 1);
+    const cp = prior.entries[k]?.cp;
+    if (k > 0 && cp && !cp.unreplayable) {
+      for (let i = 0; i < k; i++) {
+        pages.push(prior.entries[i].page);
+        record.push(prior.entries[i]);
+        perf.bump('page.reuse');
+      }
+      restoreCheckpoint(cp);
+      pageStartCp = cp;
+      startIdx = cp.itemIdx;
+    }
+  }
+
   retry: for (;;) {
     try {
       placeRun(startIdx);
       break retry;
     } catch (e) {
+      if (e instanceof TailSpliceSignal) {
+        // Splice the previous run's tail in, shifted by the PM delta the
+        // edit introduced. Entries are re-based so the NEXT pass can reuse
+        // them again without re-placing.
+        const entries = (prior as PageRun).entries;
+        const first = entries[e.entryIdx];
+        const delta = (items[idx].nodeOffset ?? 0) - first.startOffset;
+        const idxDelta = idx - first.cp.itemIdx;
+        for (let i = e.entryIdx; i < entries.length; i++) {
+          const pe = entries[i];
+          const newIndex = pages.length;
+          const asIs =
+            delta === 0 && idxDelta === 0 && pe.page.index === newIndex;
+          const pg = asIs
+            ? pe.page
+            : shiftResolvedPage(pe.page, delta, newIndex);
+          pages.push(pg);
+          record.push(
+            asIs
+              ? pe
+              : {
+                  itemNodes: pe.itemNodes,
+                  endsMidItem: pe.endsMidItem,
+                  cp: rebaseCp(pe.cp, delta, idxDelta),
+                  startOffset: pe.startOffset + delta,
+                  page: pg,
+                },
+          );
+          perf.bump('page.splice');
+        }
+        break retry;
+      }
       if (!(e instanceof PageRetrySignal)) throw e;
       retriesLeft--;
       for (const a of e.add) if (!seeds.has(a.key)) seeds.set(a.key, a.rect);
@@ -2505,6 +2823,15 @@ function placeBlocks(
       }
       restoreCheckpoint(pageStartCp);
       startIdx = pageStartCp.itemIdx;
+    }
+  }
+  if (pageCache) {
+    pageCache.store.delete(pageCache.key); // re-insert as most recent
+    pageCache.store.set(pageCache.key, { entries: record });
+    while (pageCache.store.size > 2) {
+      const oldest = pageCache.store.keys().next().value;
+      if (oldest === undefined) break;
+      pageCache.store.delete(oldest);
     }
   }
   return { pages };
@@ -2561,6 +2888,23 @@ function placeBlocks(
       firstItem = false;
 
       if ('para' in item) {
+        // A replayed page opening mid-way through a FLOAT paragraph's wrap:
+        // its floats live on the earlier page; re-wrap only the remaining
+        // lines against this page's exclusions (seeds included).
+        const resumeBanded = resumeBandedFrom;
+        resumeBandedFrom = null;
+        if (resumeBanded !== null) {
+          resumeParaBanded(item.para.getFlow(), resumeBanded);
+          if (activePBdr) {
+            flushPBdrFrag(true);
+            activePBdr = null;
+          }
+          if (item.para.after) {
+            y += item.para.after;
+            sectionRemaining -= item.para.after;
+          }
+          continue;
+        }
         // A replayed page opening mid-paragraph: its pre-steps (page break,
         // keeps, space-before, border box creation) already ran before the
         // boundary — only the remaining drafts are placed.
@@ -2645,6 +2989,11 @@ function placeBlocks(
         // A replayed page opening mid-table resumes from the checkpointed
         // remainder instead of the item's start.
         let table = resumeTable ?? cloneTableShifted(item.table, 0);
+        // Whether `table` is already a split remainder: only then does a page
+        // boundary need the mid-table resume handle — an untouched table
+        // resumes identically from the item's start (and that keeps the
+        // boundary CLEAN for the page cache's tail resync).
+        let tableIsRemainder = resumeTable !== null;
         resumeTable = null;
         // Word never flows a table BESIDE a floating object: text wraps around
         // one (see bandAt), but a table starts below its wrap zone. Without
@@ -2668,6 +3017,7 @@ function placeBlocks(
         const placeTable = (t: ResolvedTable) => {
           offsetTable(t, y);
           shiftTableX(t, xShift());
+          noteNodePlaced();
           tables.push(t);
           colDirty = true;
           commitFns(tableFootnoteNums(t)); // footnotes referenced in the cells
@@ -2708,7 +3058,7 @@ function placeBlocks(
               (b) => b.top <= hb + 0.5 && b.bottom >= firstRowBottom - 0.5,
             );
             if (rowCantSplit && fitsFullBand && colDirty) {
-              midTableRest = table; // whole table still pending across the break
+              midTableRest = tableIsRemainder ? table : null;
               breakBand(); // retry with a full fresh column/page
               midTableRest = null;
               continue;
@@ -2719,7 +3069,7 @@ function placeBlocks(
             // Header band swallows the remaining space — try a fresh band, or
             // place whole when the geometry is truly degenerate.
             if (colDirty) {
-              midTableRest = table;
+              midTableRest = tableIsRemainder ? table : null;
               breakBand();
               midTableRest = null;
               continue;
@@ -2736,7 +3086,7 @@ function placeBlocks(
             // band-taller table, with nowhere better to go, is placed as-is.
             // splitTableAt copies whatever it moves, so `table` is intact.
             if (colDirty) {
-              midTableRest = table;
+              midTableRest = tableIsRemainder ? table : null;
               breakBand();
               midTableRest = null;
               continue;
@@ -2750,7 +3100,7 @@ function placeBlocks(
           if (!topHasContent && colDirty) {
             // Not even one line fits the leftover space — don't paint an empty
             // table stub; start on the next column/page instead.
-            midTableRest = table;
+            midTableRest = tableIsRemainder ? table : null;
             breakBand();
             midTableRest = null;
             continue;
@@ -2769,6 +3119,7 @@ function placeBlocks(
           breakBand();
           midTableRest = null;
           table = rest;
+          tableIsRemainder = true;
         }
       }
     }
@@ -2987,6 +3338,11 @@ function tableHasList(node: PMNode): boolean {
 export class LayoutCache {
   readonly paragraphs = new WeakMap<PMNode, ParagraphCacheEntry>();
   readonly tables = new WeakMap<PMNode, TableCacheEntry>();
+  /** Placed pages of previous passes, keyed by a layout fingerprint (page
+   *  geometry, chrome band heights, tab grid, footnote heights). Unchanged
+   *  prefix pages are reused outright; an unchanged tail re-attaches at the
+   *  first clean boundary after an edit, shifted by the PM-position delta. */
+  readonly pageRuns = new Map<string, PageRun>();
 }
 
 export function createLayoutCache(): LayoutCache {
@@ -3314,6 +3670,8 @@ export function layout(
         if (bs.page) item.section.page = bs.page;
         item.section.chromeIndex = bs.chromeIndex;
       }
+      item.node = node;
+      item.nodeOffset = offset;
       return item;
     };
     if (node.type.name === 'paragraph') {
@@ -3458,8 +3816,39 @@ export function layout(
       b = Math.min(b, p.height - footerDist(p) - maxBandHeight(footers));
     return { top: t, bottom: b };
   };
+  // Page-cache fingerprint (Phase 3): every input a page depends on besides
+  // its items and carry. A mismatch (page setup, chrome height, tab grid,
+  // footnote heights) invalidates naturally by keying a different run.
+  const pageKey =
+    cache &&
+    JSON.stringify({
+      g: [
+        page.width,
+        page.height,
+        page.margin.top,
+        page.margin.right,
+        page.margin.bottom,
+        page.margin.left,
+        page.headerDistance ?? -1,
+        page.footerDistance ?? -1,
+        page.gutter ?? 0,
+      ],
+      tw: config.tabWidth ?? -1,
+      hb: [maxBandHeight(headers), maxBandHeight(footers)],
+      sb: setBandH.map((s) => [s.header, s.footer]),
+      fn: fnMap
+        ? [...fnMap.entries()].map(([n, b]) => [n, Math.round(b.height * 10)])
+        : 0,
+    });
   const resolved = perf.span('placeBlocks', () =>
-    placeBlocks(items, config, ctx, bandFor, fnMap),
+    placeBlocks(
+      items,
+      config,
+      ctx,
+      bandFor,
+      fnMap,
+      cache && pageKey ? { store: cache.pageRuns, key: pageKey } : undefined,
+    ),
   );
 
   // Chrome with page-number fields: re-lay every variant now that the page
