@@ -756,6 +756,33 @@ describe('layoutBlocks', () => {
     ).toEqual(['l3']);
   });
 
+  it('moves a table off a sliver of band instead of overflowing the page', () => {
+    // Band [20, 80] = 60px. Three filler lines leave a 12px strip — too thin
+    // to hold even one row line, so the cut moves nothing. The table must go
+    // to the next page: dumping it here painted it straight off the bottom
+    // of the sheet (a customer form lost most of a work-history table).
+    const filler: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a b c', font: font() }],
+    };
+    const rowCell: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+      content: Array.from({ length: 2 }, (_, i) => para(`r${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowCell] }] };
+    const { pages } = layoutBlocks(
+      [filler, filler, filler, t],
+      config({ height: 100 }),
+    );
+    expect(pages).toHaveLength(2);
+    expect(pages[0].tables ?? []).toHaveLength(0); // nothing crammed in
+    const placed = pages[1].tables?.[0];
+    expect(placed?.y).toBe(20); // opens the fresh page
+    expect(placed && placed.y + placed.height).toBeLessThanOrEqual(80);
+  });
+
   it('moves a w:cantSplit row whole when it fits a fresh page', () => {
     // Same geometry, but the row is marked cantSplit → the old behavior:
     // leave the gap, start the intact row on page 2.

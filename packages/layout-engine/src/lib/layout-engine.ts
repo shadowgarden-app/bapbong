@@ -2431,8 +2431,16 @@ function placeBlocks(
         }
         const { top: topFrag, rest } = splitTableAt(table, cut);
         if (rest.height >= table.height) {
-          // No progress (e.g. one line taller than the band) — place whole.
+          // The cut moved nothing — the leftover strip is too thin to hold
+          // even one line. Retry on a fresh band when this one is already
+          // used (a table landing 8px above the page bottom must not be
+          // dumped there whole, overflowing the page); only a genuinely
+          // band-taller table, with nowhere better to go, is placed as-is.
           // splitTableAt copies whatever it moves, so `table` is intact.
+          if (colDirty) {
+            breakBand();
+            continue;
+          }
           placeTable(table);
           break;
         }
