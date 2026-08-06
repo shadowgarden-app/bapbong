@@ -2353,6 +2353,25 @@ function placeBlocks(
       // Header rows (w:tblHeader) repeat at the top of every fragment. Tables
       // are laid out at column width, then shifted into the current column.
       let table = item.table; // laid out relative to y = 0, column-0 x
+      // Word never flows a table BESIDE a floating object: text wraps around
+      // one (see bandAt), but a table starts below its wrap zone. Without
+      // this, a logo anchored at the top of a page painted straight over the
+      // first table's opening rows. Skip past whatever the table would run
+      // into, as long as the band still has somewhere to go.
+      for (let guard = 0; guard < 8; guard++) {
+        const bottomOfRun = y + Math.min(table.height, colBottom() - y);
+        const blockers = exclusions.filter(
+          (ex) =>
+            ex.bottom > y &&
+            ex.top < bottomOfRun &&
+            ex.right > colX0() &&
+            ex.left < colX1(),
+        );
+        if (blockers.length === 0) break;
+        const next = Math.min(...blockers.map((ex) => ex.bottom));
+        if (next <= y || next >= colBottom()) break;
+        y = next;
+      }
       const placeTable = (t: ResolvedTable) => {
         offsetTable(t, y);
         shiftTableX(t, xShift());

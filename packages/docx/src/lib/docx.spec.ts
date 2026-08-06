@@ -1511,6 +1511,30 @@ describe('importDocx', () => {
     expect(markMap(p.child(2).marks).smallCaps).toBeUndefined();
   });
 
+  it('translates ordinary text set in a symbol font (Wingdings checkbox)', async () => {
+    // A ticked checkbox in a real HR form is the letter "x" in Wingdings —
+    // not a w:sym. Without translation it renders as a literal "x" wherever
+    // the font is missing.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:rFonts w:ascii="Wingdings" w:hAnsi="Wingdings"/></w:rPr><w:t>x</w:t></w:r>
+        <w:r><w:t xml:space="preserve"> Nữ</w:t></w:r>
+        <w:r><w:rPr><w:rFonts w:ascii="Wingdings" w:hAnsi="Wingdings"/></w:rPr><w:t>A</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    // Translated → font-independent, so the font mark goes away and the run
+    // merges with the plain text beside it.
+    expect(p.child(0).text).toBe('☒ Nữ');
+    expect(markMap(p.child(0).marks).fontFamily).toBeUndefined();
+    // An untranslatable char keeps the font so its glyph still resolves.
+    const last = p.child(p.childCount - 1);
+    expect(last.text).toBe('A');
+    expect(markMap(last.marks).fontFamily.family).toBe('Wingdings');
+  });
+
   it('maps known w:sym codes to Unicode, tags unknown ones with the symbol font', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r>

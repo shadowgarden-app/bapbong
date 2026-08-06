@@ -266,40 +266,94 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   return marks;
 }
 
-/** Common Wingdings/Symbol PUA chars (w:sym w:char) → Unicode equivalents
- *  that render in ANY text font. */
-const SYMBOL_MAP: Record<string, string> = {
-  F0B7: '•',
-  F06C: '●',
-  F06E: '■',
-  F06F: '□',
-  F075: '◆',
-  F0A7: '▪',
-  F0A8: '▫',
-  F0FC: '✔',
-  F0FB: '✗',
-  F0E0: '→',
-  F04A: '☺',
-  F04B: '😐',
-  F04C: '☹',
-  F04D: '💣',
-  F04E: '☠',
-  F051: '✈',
+/** Wingdings code point → the Unicode character Word draws for it. Keyed by
+ *  the LOW byte, because the same glyph reaches us two ways: as `w:sym
+ *  w:char="F06F"` (PUA-offset) and as an ordinary run of text whose rFonts
+ *  says Wingdings — a form's ticked checkbox is often just the letter "x"
+ *  in that font. Both go through symbolChar. */
+const WINGDINGS: Record<number, string> = {
+  0x4a: '☺',
+  0x4b: '😐',
+  0x4c: '☹',
+  0x4d: '💣',
+  0x4e: '☠',
+  0x51: '✈',
+  0x6c: '●',
+  0x6e: '■',
+  // The checkbox family: Word draws these at text size, so the Unicode
+  // BALLOT BOX forms match it far better than the tiny ▫/□ geometric ones.
+  0x6f: '☐',
+  0x70: '☐',
+  0x71: '☐',
+  0x72: '☐',
+  0x73: '☐',
+  0x75: '◆',
+  0x78: '☒', // "x" — a ticked box, the usual mark in Vietnamese HR forms
+  0xa7: '▪',
+  0xa8: '☐',
+  0xb7: '•',
+  0xe0: '→',
+  0xfb: '✗',
+  0xfc: '✔',
+  0xfd: '☒',
+  0xfe: '☑',
 };
-/** A w:sym char: mapped codes become font-independent Unicode; unknown codes
- *  keep their PUA code point and remember the symbol font — the caller tags
- *  them with a fontFamily mark so the glyph renders where the font exists
+
+/** Symbol font: only the few glyphs documents actually lean on (its letters
+ *  are Greek, which we leave to the font). */
+const SYMBOL_FONT: Record<number, string> = {
+  0xb7: '•',
+  0xd7: '×',
+  0xb0: '°',
+  0xa0: '€',
+};
+
+/** Fonts whose bytes are pictures, not letters. */
+function symbolTable(font: string | undefined): Record<number, string> | null {
+  if (!font) return null;
+  const f = font.toLowerCase();
+  if (f.startsWith('wingdings')) return WINGDINGS;
+  if (f === 'symbol') return SYMBOL_FONT;
+  return null;
+}
+
+/** One character of a symbol font → the Unicode Word shows. Mapped chars come
+ *  back font-independent (no `font`), so they render anywhere; unmapped ones
+ *  keep their code point AND the font name, and the caller tags them with a
+ *  fontFamily mark so the glyph still appears where the font is installed
  *  (and survives a save either way). */
 function symbolChar(
   code: string | undefined,
   font: string | undefined,
 ): { text: string; font?: string } {
   if (!code) return { text: '' };
-  const upper = code.toUpperCase();
-  if (SYMBOL_MAP[upper]) return { text: SYMBOL_MAP[upper] };
   const n = parseInt(code, 16);
   if (Number.isNaN(n)) return { text: '' };
+  // w:sym codes sit in the PUA (F0xx); a plain run's character is the byte.
+  const mapped = symbolTable(font)?.[n & 0xff];
+  if (mapped) return { text: mapped };
   return { text: String.fromCodePoint(n), ...(font && { font }) };
+}
+
+/** A run of ordinary text set in a symbol font, translated to Unicode. Null
+ *  when the font isn't one (the overwhelmingly common case — one cheap map
+ *  lookup) or when nothing in the text maps, so the run passes through
+ *  untouched and keeps its font. */
+function symbolFontText(text: string, font: string | undefined): string | null {
+  const table = symbolTable(font);
+  if (!table) return null;
+  let changed = false;
+  let out = '';
+  for (const ch of text) {
+    const mapped = table[ch.codePointAt(0) as number];
+    if (mapped) {
+      out += mapped;
+      changed = true;
+    } else {
+      out += ch;
+    }
+  }
+  return changed ? out : null;
 }
 
 /** Whether a run carries an explicit page break (w:br w:type="page"). */
@@ -372,14 +426,34 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   if (image) return [image];
 
   const out: PMNode[] = [];
+  // A run set in a symbol font spells its pictures with ordinary letters —
+  // a ticked checkbox is the letter "x" in Wingdings. Translate those to
+  // Unicode and drop the font mark, so the glyph survives on machines
+  // without the font (and stays legible in the a11y mirror and on export).
+  const runFont = marks.find((m) => m.type.name === 'fontFamily')?.attrs[
+    'family'
+  ] as string | undefined;
+  // Only when something ACTUALLY translates: a symbol-font run we can't read
+  // must keep its font, or its glyph is lost for everyone who has it.
+  const asSymbols =
+    symbolTable(runFont) &&
+    run.children.some(
+      (c) => c.name === 'w:t' && symbolFontText(c.text, runFont) !== null,
+    )
+      ? runFont
+      : undefined;
+  const textMarks = asSymbols
+    ? marks.filter((m) => m.type.name !== 'fontFamily')
+    : marks;
   let buf = '';
   const flush = () => {
-    if (buf.length > 0) out.push(ctx.schema.text(buf, marks));
+    if (buf.length > 0) out.push(ctx.schema.text(buf, textMarks));
     buf = '';
   };
   for (const node of run.children) {
     if (RUN_CHILD_TAGS.has(node.name)) audit.mark(node);
-    if (node.name === 'w:t') buf += node.text;
+    if (node.name === 'w:t')
+      buf += (asSymbols && symbolFontText(node.text, asSymbols)) || node.text;
     else if (node.name === 'w:tab') buf += '\t';
     else if (node.name === 'w:sym') {
       const sym = symbolChar(attrOf(node, 'w:char'), attrOf(node, 'w:font'));
