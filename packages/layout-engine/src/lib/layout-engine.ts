@@ -1455,6 +1455,7 @@ function layoutTable(
       rowspan: c.rowspan,
       lines,
     };
+    if (vOffset > 0) cell.vShift = vOffset;
     if (c.background) cell.background = c.background;
     if (c.borders) cell.borders = c.borders;
     if (c.tables.length > 0) cell.tables = c.tables;
@@ -1583,6 +1584,22 @@ function cloneCell(cell: ResolvedCell): ResolvedCell {
   return copy;
 }
 
+/** A copy of the cell with its vertical-alignment slack removed — content
+ *  stacked from the cell's top. Word's rule while the cell's row is split:
+ *  centering resumes only when the row is whole. Without this, a centered
+ *  one-liner sits BELOW the cut, so the first fragment painted an empty box
+ *  while its text rode to the next page. */
+function unshiftCell(cell: ResolvedCell): ResolvedCell {
+  const s = cell.vShift ?? 0;
+  if (s <= 0) return cell;
+  const copy = cloneCell(cell);
+  delete copy.vShift;
+  for (const l of copy.lines) l.y -= s;
+  copy.tables?.forEach((t) => offsetTable(t, -s));
+  copy.floats?.forEach((f) => (f.y -= s));
+  return copy;
+}
+
 /**
  * Split a resolved table (in its own y = 0 space) at `cut` px.
  *
@@ -1598,7 +1615,8 @@ function splitTableAt(
   cut: number,
 ): { top: ResolvedTable; rest: ResolvedTable } {
   interface Cont {
-    cell: ResolvedCell;
+    /** The cell with centering slack removed — what BOTH fragments read. */
+    view: ResolvedCell;
     remLines: LayoutLine[];
     remTables: ResolvedTable[];
     firstY: number;
@@ -1610,8 +1628,9 @@ function splitTableAt(
   for (const cell of table.cells) {
     if (cell.y >= cut || cell.y + cell.height <= cut) continue;
     splitBottom = Math.max(splitBottom, cell.y + cell.height);
-    const remLines = cell.lines.filter((l) => l.y + l.height > cut);
-    const remTables = (cell.tables ?? []).filter((t) => t.y + t.height > cut);
+    const view = unshiftCell(cell);
+    const remLines = view.lines.filter((l) => l.y + l.height > cut);
+    const remTables = (view.tables ?? []).filter((t) => t.y + t.height > cut);
     const firstY = Math.min(
       remLines.length ? Math.min(...remLines.map((l) => l.y)) : Infinity,
       remTables.length ? Math.min(...remTables.map((t) => t.y)) : Infinity,
@@ -1627,7 +1646,7 @@ function splitTableAt(
           : first,
       ) - first;
     contHeight = Math.max(contHeight, extent);
-    straddlers.set(cell, { cell, remLines, remTables, firstY: first });
+    straddlers.set(cell, { view, remLines, remTables, firstY: first });
   }
 
   const topCells: ResolvedCell[] = [];
@@ -1641,8 +1660,10 @@ function splitTableAt(
       restCells.push(shiftCell(cloneCell(cell), contHeight - splitBottom));
     } else {
       const c = straddlers.get(cell) as Cont;
-      const topLines = cell.lines.filter((l) => l.y + l.height <= cut);
-      const topTables = (cell.tables ?? []).filter(
+      // Both fragments read the UN-CENTERED view (see unshiftCell) so the
+      // first lines land on the first fragment, as Word splits.
+      const topLines = c.view.lines.filter((l) => l.y + l.height <= cut);
+      const topTables = (c.view.tables ?? []).filter(
         (t) => t.y + t.height <= cut,
       );
       const topCell: ResolvedCell = {
@@ -1650,9 +1671,10 @@ function splitTableAt(
         height: cut - cell.y,
         lines: topLines,
       };
+      delete topCell.vShift; // its content is top-stacked now
       if (topTables.length > 0) topCell.tables = topTables;
       else delete topCell.tables;
-      const topFloats = (cell.floats ?? []).filter(
+      const topFloats = (c.view.floats ?? []).filter(
         (f) => f.y + f.height <= cut,
       );
       if (topFloats.length > 0) topCell.floats = topFloats;
@@ -1663,7 +1685,7 @@ function splitTableAt(
       const lines = c.remLines.map((l) => ({ ...l, y: l.y + delta }));
       const remTables = c.remTables.map(cloneTable);
       remTables.forEach((t) => offsetTable(t, delta));
-      const remFloats = (cell.floats ?? [])
+      const remFloats = (c.view.floats ?? [])
         .filter((f) => f.y + f.height > cut)
         .map((f) => ({ ...f, y: f.y + delta }));
       const contCell: ResolvedCell = {

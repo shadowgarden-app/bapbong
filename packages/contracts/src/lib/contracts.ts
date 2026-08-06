@@ -481,6 +481,11 @@ export interface ResolvedCell {
   colspan: number;
   rowspan: number;
   lines: LayoutLine[];
+  /** Vertical-alignment slack added above the content (w:vAlign center/
+   *  bottom), in px. The row splitter removes it — Word suspends vertical
+   *  centering while a row breaks across pages, re-stacking content from the
+   *  cell's top. Purely informational for the painter. */
+  vShift?: number;
   /** Cell fill color, painted behind the content. */
   background?: string;
   /** Per-cell border overrides; each side overrides the table's edge. */

@@ -815,6 +815,39 @@ describe('layoutBlocks', () => {
     expect(placed && placed.y + placed.height).toBeLessThanOrEqual(80);
   });
 
+  it('suspends vertical centering when a row splits (no empty first fragment)', () => {
+    // Band [20, 80]. Two filler lines leave 28px; the row is 64px tall (cell
+    // B has 4 lines) so it splits at 28. Cell A's single vAlign=center line
+    // sits at y 24–40 — BELOW the cut — so the old split shipped it to page
+    // 2 and painted an empty 28px box on page 1 (the customer form's
+    // 'Tên công ty' header row showed 3 blank cells). Word suspends the
+    // centering while the row is split: every cell's first line stays.
+    const filler = para(words(2));
+    const rowA: FlowTableCell = {
+      ...cell('hub', { colwidth: [100] }),
+      vAlign: 'center',
+    };
+    const rowB: FlowTableCell = {
+      colspan: 1,
+      rowspan: 1,
+      colwidth: [100],
+      content: Array.from({ length: 4 }, (_, i) => para(`b${i + 1}`)),
+    };
+    const t: FlowBlock = { type: 'table', rows: [{ cells: [rowA, rowB] }] };
+    const { pages } = layoutBlocks([filler, t], config({ height: 100 }));
+    expect(pages).toHaveLength(2);
+    const [cellA0, cellB0] = pages[0].tables?.[0]?.cells ?? [];
+    expect(cellA0.lines.map((l) => l.segments[0]?.text)).toEqual(['hub']);
+    expect(cellB0.lines.map((l) => l.segments[0]?.text)).toEqual(['b1']);
+    const [cellA1, cellB1] = pages[1].tables?.[0]?.cells ?? [];
+    expect(cellA1.lines).toHaveLength(0); // its one line already landed
+    expect(cellB1.lines.map((l) => l.segments[0]?.text)).toEqual([
+      'b2',
+      'b3',
+      'b4',
+    ]);
+  });
+
   it('moves a w:cantSplit row whole when it fits a fresh page', () => {
     // Same geometry, but the row is marked cantSplit → the old behavior:
     // leave the gap, start the intact row on page 2.
