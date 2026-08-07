@@ -19,7 +19,9 @@ describe('defaultToolbarGroups', () => {
   });
 
   it('omits an empty group (no alignments registered)', () => {
-    const commands = new Collection<Command>([cmd('bold'), cmd('underline')], { idProperty: 'name' });
+    const commands = new Collection<Command>([cmd('bold'), cmd('underline')], {
+      idProperty: 'name',
+    });
     expect(defaultToolbarGroups(commands)).toEqual([['bold', 'underline']]);
   });
 });

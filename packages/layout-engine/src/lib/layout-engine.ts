@@ -138,6 +138,13 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
     if (!Number.isNaN(tw) && tw !== 0)
       font.letterSpacing = (tw / 20) * (96 / 72);
   }
+  const scaled = findMark(marks, 'charScale');
+  if (scaled) {
+    // Percent → factor. 100 is Word's default; the mark still exists at that
+    // value (it may override a style), it just has nothing to apply.
+    const pct = Number(scaled.attrs['percent']);
+    if (!Number.isNaN(pct) && pct > 0 && pct !== 100) font.scaleX = pct / 100;
+  }
   const raised = findMark(marks, 'position');
   if (raised) {
     // Half-points → px. Word does NOT grow the line box for a raised run, so

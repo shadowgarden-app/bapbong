@@ -1,4 +1,9 @@
-import type { Collection, Command, Dispatch, EditorChange } from '@shadow-garden/bapbong-contracts';
+import type {
+  Collection,
+  Command,
+  Dispatch,
+  EditorChange,
+} from '@shadow-garden/bapbong-contracts';
 
 /** The editor `run` state type, derived from the {@link Command} contract so
  *  this package needs no direct ProseMirror dependency. */

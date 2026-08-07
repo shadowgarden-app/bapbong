@@ -64,7 +64,10 @@ export function toggleMarkCommand(
  * the next typed text carries the value. The value-bearing analogue of
  * {@link toggleMarkCommand} (which only flips a mark on/off).
  */
-export function setMarkAttr(markName: string, attrs: Record<string, unknown> | null): Command {
+export function setMarkAttr(
+  markName: string,
+  attrs: Record<string, unknown> | null,
+): Command {
   return {
     name: `set-${markName}`,
     run(state, dispatch) {
@@ -93,7 +96,11 @@ export function setMarkAttr(markName: string, attrs: Record<string, unknown> | n
  * mark when empty, the shared value if uniform across a range, else null (mixed
  * or unset). Used to show the current font size / colour in a toolbar control.
  */
-export function activeMarkValue(state: EditorState, markName: string, attrKey: string): unknown {
+export function activeMarkValue(
+  state: EditorState,
+  markName: string,
+  attrKey: string,
+): unknown {
   const type = state.schema.marks[markName];
   if (!type) return null;
   const { from, to, empty, $from } = state.selection;

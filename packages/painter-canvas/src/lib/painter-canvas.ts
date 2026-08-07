@@ -512,7 +512,7 @@ export class CanvasPainter {
       }
     }
     for (const seg of line.segments) {
-      applyGlyphSpec(ctx, seg.font);
+      const scaleX = applyGlyphSpec(ctx, seg.font);
       // Hyperlinks without an explicit color get Word's hyperlink look
       // (blue + underline) — otherwise a fresh link paints like plain text
       // and inserting one reads as "nothing happened".
@@ -531,7 +531,19 @@ export class CanvasPainter {
           : seg.vertAlign === 'sub'
             ? baselineY + em * 0.2
             : baselineY) - (seg.raise ?? 0);
-      ctx.fillText(text, seg.x, segY);
+      if (scaleX === 1) {
+        ctx.fillText(text, seg.x, segY);
+      } else {
+        // Horizontal glyph scaling (w:w). Only the GLYPHS are squeezed, so
+        // the transform wraps nothing but the fillText — seg.width already
+        // has the scale baked in by the measurer, and the decorations below
+        // are drawn from it in unscaled space. Putting them inside here
+        // would apply the scale a second time.
+        ctx.save();
+        ctx.scale(scaleX, 1);
+        ctx.fillText(text, seg.x / scaleX, segY);
+        ctx.restore();
+      }
       // Text decorations use the width measured at layout time — the painter
       // never measures.
       const underline = seg.underline || (!!seg.link && !seg.color);

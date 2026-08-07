@@ -122,7 +122,9 @@ export function createFontRegistryMeasurer(
     // measurer already diverges from canvas by more than that (no kerning, no
     // shaping) — it exists to be DETERMINISTIC across environments, not to
     // match canvas pixel for pixel.
-    return total + (font.letterSpacing ?? 0) * glyphCount(text);
+    return (
+      total * (font.scaleX ?? 1) + (font.letterSpacing ?? 0) * glyphCount(text)
+    );
   };
 }
 

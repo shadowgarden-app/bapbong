@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Source for the glyph-scale fixture (scripts/make-glyph-scale-fixture.sh).
+
+  Flat ODF, not .docx, on purpose: this is the INPUT LibreOffice converts, so
+  the w:spacing / w:w markup in the output is LibreOffice's own rather than
+  something bapbong wrote. Flat XML keeps the source reviewable in a diff.
+
+  WHAT IT IS FOR
+    Character tracking (w:spacing) and horizontal glyph scaling (w:w) can be
+    combined, and the combination has exactly one open question: does the
+    scale apply to the tracking as well as to the glyphs?
+
+      bapbong assumes NOT — width = glyphs × scale + n × tracking
+
+    ECMA-376 backs that reading: w:w scales "the current character size",
+    while w:spacing is "character pitch added after each character" given in
+    twips. An absolute unit would be a strange way to write something meant to
+    be scaled. But the whole point of this pipeline is not to settle a
+    rendering question by consulting our own assumption, so the four lines
+    below isolate it:
+
+      plain      — baseline for the same text with no adjustment at all
+      tracked    — tracking only
+      scaled     — scaling only
+      both       — the case in question; 17 runs in khbd.docx carry both
+
+    Every line is the same text, so the four measured widths are directly
+    comparable: width(both) should equal width(scaled) + n × tracking, and
+    NOT width(tracked) × scale.
+-->
+<office:document
+  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+  xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+  office:version="1.3"
+  office:mimetype="application/vnd.oasis.opendocument.text">
+
+  <office:automatic-styles>
+    <!-- 1.3pt of tracking: the value khbd.docx uses most (26 twips). -->
+    <style:style style:name="Tracked" style:family="text">
+      <style:text-properties fo:letter-spacing="1.3pt"/>
+    </style:style>
+    <!-- 80%: the scale khbd.docx uses most. -->
+    <style:style style:name="Scaled" style:family="text">
+      <style:text-properties style:text-scale="80%"/>
+    </style:style>
+    <style:style style:name="Both" style:family="text">
+      <style:text-properties fo:letter-spacing="1.3pt" style:text-scale="80%"/>
+    </style:style>
+  </office:automatic-styles>
+
+  <office:body>
+    <office:text>
+      <text:p>plain: Khoa hoc tu nhien</text:p>
+      <text:p>tracked: <text:span text:style-name="Tracked">Khoa hoc tu nhien</text:span></text:p>
+      <text:p>scaled: <text:span text:style-name="Scaled">Khoa hoc tu nhien</text:span></text:p>
+      <text:p>both: <text:span text:style-name="Both">Khoa hoc tu nhien</text:span></text:p>
+    </office:text>
+  </office:body>
+</office:document>

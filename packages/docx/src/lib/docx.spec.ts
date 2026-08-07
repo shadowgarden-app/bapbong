@@ -1319,6 +1319,32 @@ describe('importDocx', () => {
     expect(track(2)).toBeUndefined();
   });
 
+  it('imports w:w as a character scale, bare or percent-suffixed', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:w w:val="80"/></w:rPr><w:t>bare</w:t></w:r>
+        <w:r><w:rPr><w:w w:val="70%"/></w:rPr><w:t>suffixed</w:t></w:r>
+        <w:r><w:rPr><w:w w:val="100"/></w:rPr><w:t>normal</w:t></w:r>
+        <w:r><w:rPr><w:w w:val="80"/><w:spacing w:val="26"/></w:rPr><w:t>both</w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const para = doc.child(0);
+    const marks = (i: number) =>
+      Object.fromEntries(
+        para.child(i).marks.map((m) => [m.type.name, m.attrs]),
+      );
+    expect(marks(0)['charScale']).toEqual({ percent: 80 });
+    expect(marks(1)['charScale']).toEqual({ percent: 70 });
+    // 100 is Word's default but still an explicit override of a style.
+    expect(marks(2)['charScale']).toEqual({ percent: 100 });
+    // The two are independent and 17 runs in khbd carry both.
+    expect(marks(3)['charScale']).toEqual({ percent: 80 });
+    expect(marks(3)['letterSpacing']).toEqual({ twips: 26 });
+    expect(marks(4)['charScale']).toBeUndefined();
+  });
+
   it('imports w:position as a baseline shift independent of vertAlign', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

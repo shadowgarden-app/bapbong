@@ -48,7 +48,12 @@ interface Hit {
   context: string;
 }
 
-const MARK_BY_FLAG = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike' } as const;
+const MARK_BY_FLAG = {
+  bold: 'strong',
+  italic: 'em',
+  underline: 'underline',
+  strike: 'strike',
+} as const;
 
 export class PmDocSession implements DocumentSession {
   readonly capabilities: SessionCapabilities;
@@ -61,7 +66,11 @@ export class PmDocSession implements DocumentSession {
 
   async snapshot(): Promise<DocSnapshot> {
     const blocks: DocBlock[] = this.textblocks().map(({ node }, index) => {
-      const block: DocBlock = { index, type: blockType(node), text: node.textContent };
+      const block: DocBlock = {
+        index,
+        type: blockType(node),
+        text: node.textContent,
+      };
       const images = blockImages(node).map(({ node: img }, i) => ({
         index: i,
         alt: String(img.attrs['alt'] ?? ''),
@@ -73,11 +82,19 @@ export class PmDocSession implements DocumentSession {
       if (images.length > 0) block.images = images;
       return block;
     });
-    return { docVersion: this.host.getVersion(), blocks, meta: this.host.meta() };
+    return {
+      docVersion: this.host.getVersion(),
+      blocks,
+      meta: this.host.meta(),
+    };
   }
 
   async find(query: string): Promise<FindMatch[]> {
-    return this.hits(query).map((h, i) => ({ blockIndex: h.blockIndex, occurrence: i + 1, context: h.context }));
+    return this.hits(query).map((h, i) => ({
+      blockIndex: h.blockIndex,
+      occurrence: i + 1,
+      context: h.context,
+    }));
   }
 
   async getSelection(): Promise<{ text: string; blockIndex: number } | null> {
@@ -93,20 +110,39 @@ export class PmDocSession implements DocumentSession {
 
   // ── mutations ────────────────────────────────────────────────────────
 
-  async replaceText(oldText: string, newText: string, opts: MutationOptions = {}): Promise<MutationResult> {
+  async replaceText(
+    oldText: string,
+    newText: string,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
     const hit = this.uniqueHit(oldText, opts.occurrence);
-    this.host.apply(this.host.getState().tr.insertText(newText, hit.from, hit.to));
-    return { docVersion: this.host.getVersion(), range: { from: hit.from, to: hit.from + newText.length } };
+    this.host.apply(
+      this.host.getState().tr.insertText(newText, hit.from, hit.to),
+    );
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: hit.from, to: hit.from + newText.length },
+    };
   }
 
-  async insertContent(content: string, anchor: InsertAnchor, opts: MutationOptions = {}): Promise<MutationResult> {
+  async insertContent(
+    content: string,
+    anchor: InsertAnchor,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
     const state = this.host.getState();
     const { schema } = state;
     const paragraphs = content
       .split('\n')
-      .map((line) => schema.node('paragraph', null, line.length > 0 ? [schema.text(line)] : []));
+      .map((line) =>
+        schema.node(
+          'paragraph',
+          null,
+          line.length > 0 ? [schema.text(line)] : [],
+        ),
+      );
 
     let insertAt: number;
     if (anchor.position === 'document_end') {
@@ -114,14 +150,24 @@ export class PmDocSession implements DocumentSession {
     } else {
       const hit = this.uniqueHit(anchor.text, anchor.occurrence);
       const block = this.textblocks()[hit.blockIndex];
-      insertAt = anchor.position === 'before' ? block.pos : block.pos + block.node.nodeSize;
+      insertAt =
+        anchor.position === 'before'
+          ? block.pos
+          : block.pos + block.node.nodeSize;
     }
     const inserted = paragraphs.reduce((size, node) => size + node.nodeSize, 0);
     this.host.apply(state.tr.insert(insertAt, paragraphs));
-    return { docVersion: this.host.getVersion(), range: { from: insertAt, to: insertAt + inserted } };
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: insertAt, to: insertAt + inserted },
+    };
   }
 
-  async applyFormatting(target: string, format: Formatting, opts: MutationOptions = {}): Promise<MutationResult> {
+  async applyFormatting(
+    target: string,
+    format: Formatting,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
     const hit = this.uniqueHit(target, opts.occurrence);
     const state = this.host.getState();
@@ -132,18 +178,26 @@ export class PmDocSession implements DocumentSession {
       if (want === undefined) continue;
       const mark = schema.marks[markName];
       if (!mark) continue;
-      tr = want ? tr.addMark(hit.from, hit.to, mark.create()) : tr.removeMark(hit.from, hit.to, mark);
+      tr = want
+        ? tr.addMark(hit.from, hit.to, mark.create())
+        : tr.removeMark(hit.from, hit.to, mark);
     }
     if (format.align) {
       const block = this.textblocks()[hit.blockIndex];
-      tr = tr.setNodeMarkup(block.pos, undefined, { ...block.node.attrs, align: format.align });
+      tr = tr.setNodeMarkup(block.pos, undefined, {
+        ...block.node.attrs,
+        align: format.align,
+      });
     }
     if (tr.steps.length === 0) {
       // Formatting that named no supported change — a no-op success.
       return { docVersion: this.host.getVersion() };
     }
     this.host.apply(tr);
-    return { docVersion: this.host.getVersion(), range: { from: hit.from, to: hit.to } };
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: hit.from, to: hit.to },
+    };
   }
 
   async updateImage(
@@ -161,9 +215,14 @@ export class PmDocSession implements DocumentSession {
           `Block indexes change with every edit; call get_document again.`,
       );
     }
-    const images = blockImages(block.node).map((img) => ({ ...img, pos: block.pos + 1 + img.offset }));
+    const images = blockImages(block.node).map((img) => ({
+      ...img,
+      pos: block.pos + 1 + img.offset,
+    }));
     if (images.length === 0) {
-      throw new AnchorError(`Block ${blockIndex} has no images. get_document lists each block's images.`);
+      throw new AnchorError(
+        `Block ${blockIndex} has no images. get_document lists each block's images.`,
+      );
     }
     const img = images[imageIndex];
     if (!img) {
@@ -172,14 +231,31 @@ export class PmDocSession implements DocumentSession {
       );
     }
     let tr = this.host.getState().tr;
-    if (changes.width !== undefined) tr = tr.setNodeAttribute(img.pos, 'width', Math.max(1, Math.round(changes.width)));
-    if (changes.height !== undefined) tr = tr.setNodeAttribute(img.pos, 'height', Math.max(1, Math.round(changes.height)));
+    if (changes.width !== undefined)
+      tr = tr.setNodeAttribute(
+        img.pos,
+        'width',
+        Math.max(1, Math.round(changes.width)),
+      );
+    if (changes.height !== undefined)
+      tr = tr.setNodeAttribute(
+        img.pos,
+        'height',
+        Math.max(1, Math.round(changes.height)),
+      );
     if (changes.rotation !== undefined) {
-      tr = tr.setNodeAttribute(img.pos, 'rotation', ((changes.rotation % 360) + 360) % 360);
+      tr = tr.setNodeAttribute(
+        img.pos,
+        'rotation',
+        ((changes.rotation % 360) + 360) % 360,
+      );
     }
     if (tr.steps.length === 0) return { docVersion: this.host.getVersion() };
     this.host.apply(tr);
-    return { docVersion: this.host.getVersion(), range: { from: img.pos, to: img.pos + 1 } };
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: img.pos, to: img.pos + 1 },
+    };
   }
 
   async save(): Promise<void> {
@@ -221,11 +297,19 @@ export class PmDocSession implements DocumentSession {
       // Concatenate the block's text children, breaking the searchable string
       // at non-text inlines so a match can't pretend to span an atom. Each
       // segment records where it starts in the joined string AND in the doc.
-      const segments: { joinedStart: number; length: number; startPos: number }[] = [];
+      const segments: {
+        joinedStart: number;
+        length: number;
+        startPos: number;
+      }[] = [];
       let joined = '';
       node.forEach((child, offset) => {
         if (child.isText && child.text) {
-          segments.push({ joinedStart: joined.length, length: child.text.length, startPos: pos + 1 + offset });
+          segments.push({
+            joinedStart: joined.length,
+            length: child.text.length,
+            startPos: pos + 1 + offset,
+          });
           joined += child.text;
         } else {
           joined += '￿'; // unmatchable atom sentinel
@@ -236,7 +320,9 @@ export class PmDocSession implements DocumentSession {
         // A match may span adjacent text segments (mark changes split runs);
         // adjacency in `joined` implies adjacency in the doc, so mapping the
         // START offset to a position is enough.
-        const seg = segments.find((s) => at >= s.joinedStart && at < s.joinedStart + s.length);
+        const seg = segments.find(
+          (s) => at >= s.joinedStart && at < s.joinedStart + s.length,
+        );
         if (seg) {
           const from = seg.startPos + (at - seg.joinedStart);
           out.push({
@@ -263,7 +349,9 @@ export class PmDocSession implements DocumentSession {
     if (occurrence !== undefined) {
       const hit = all[occurrence - 1];
       if (!hit) {
-        throw new AnchorError(`occurrence ${occurrence} is out of range — the text matches ${all.length} time(s).`);
+        throw new AnchorError(
+          `occurrence ${occurrence} is out of range — the text matches ${all.length} time(s).`,
+        );
       }
       return hit;
     }

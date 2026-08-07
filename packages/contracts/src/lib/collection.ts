@@ -1,5 +1,7 @@
 /** Property names of T whose value can serve as a key (string | number | symbol). */
-type IdKeysOf<T> = { [K in keyof T]: T[K] extends PropertyKey ? K : never }[keyof T];
+type IdKeysOf<T> = {
+  [K in keyof T]: T[K] extends PropertyKey ? K : never;
+}[keyof T];
 
 /** Default key property: `id` when T has one, otherwise any valid id property. */
 type DefaultIdKey<T> = 'id' extends IdKeysOf<T> ? 'id' : IdKeysOf<T>;
@@ -17,9 +19,10 @@ type DefaultIdKey<T> = 'id' extends IdKeysOf<T> ? 'id' : IdKeysOf<T>;
  * Note: if T has no `id` property you must pass `{ idProperty }` — otherwise
  * items would key by an absent property at runtime.
  */
-export class Collection<T extends object, IdKey extends IdKeysOf<T> = DefaultIdKey<T>>
-  implements Iterable<T>
-{
+export class Collection<
+  T extends object,
+  IdKey extends IdKeysOf<T> = DefaultIdKey<T>,
+> implements Iterable<T> {
   private readonly items = new Map<T[IdKey], T>();
   private readonly idProperty: IdKey;
   private readonly defaulted: boolean;
@@ -48,7 +51,9 @@ export class Collection<T extends object, IdKey extends IdKeysOf<T> = DefaultIdK
     if ((key as unknown) === undefined || (key as unknown) === null) {
       throw new Error(
         `Collection: item has no "${String(this.idProperty)}" key` +
-          (this.defaulted ? ' — pass { idProperty } to key by another property.' : '.'),
+          (this.defaulted
+            ? ' — pass { idProperty } to key by another property.'
+            : '.'),
       );
     }
     this.items.set(key, value);

@@ -494,6 +494,30 @@ export const schema = new Schema({
         0,
       ],
     },
+    // w:w — horizontal glyph scale as a PERCENT (100 = normal). Squeezes the
+    // glyphs and their advances; independent of letterSpacing, which rides on
+    // top at its absolute value.
+    charScale: {
+      attrs: { percent: {} },
+      parseDOM: [
+        {
+          style: 'transform',
+          getAttrs: (value) => {
+            const m = /^scaleX\(([\d.]+)\)$/.exec(String(value).trim());
+            return m ? { percent: Math.round(Number(m[1]) * 100) } : false;
+          },
+        },
+      ],
+      toDOM: (mark) => [
+        'span',
+        {
+          style:
+            `display: inline-block; transform: scaleX(` +
+            `${(mark.attrs['percent'] as number) / 100})`,
+        },
+        0,
+      ],
+    },
     // w:position — baseline shift in half-points, positive up. Unlike
     // super/subscript this does NOT resize the glyphs; Word treats the two
     // as independent and documents combine them.

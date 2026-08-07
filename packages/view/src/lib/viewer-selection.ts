@@ -119,13 +119,19 @@ export class ViewerSelection {
   // ── Helpers ─────────────────────────────────────────────────────────
 
   private range(): { from: number; to: number } | null {
-    if (this.anchor == null || this.head == null || this.anchor === this.head) return null;
-    return { from: Math.min(this.anchor, this.head), to: Math.max(this.anchor, this.head) };
+    if (this.anchor == null || this.head == null || this.anchor === this.head)
+      return null;
+    return {
+      from: Math.min(this.anchor, this.head),
+      to: Math.max(this.anchor, this.head),
+    };
   }
 
   private paint(): void {
     const r = this.range();
-    this.core.paintOverlay({ selection: r ? this.core.selectionRects(r.from, r.to) : [] });
+    this.core.paintOverlay({
+      selection: r ? this.core.selectionRects(r.from, r.to) : [],
+    });
   }
 
   private selectedText(): string | null {
@@ -138,7 +144,10 @@ export class ViewerSelection {
 
 /** The word range (doc positions) around `pos`, or null. Scans the text of the
  *  containing block; treats runs of non-space as words. */
-function wordRangeAt(doc: ProseMirrorNode, pos: number): { from: number; to: number } | null {
+function wordRangeAt(
+  doc: ProseMirrorNode,
+  pos: number,
+): { from: number; to: number } | null {
   const $pos = doc.resolve(pos);
   const text = $pos.parent.textContent;
   if (!text) return null;

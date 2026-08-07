@@ -84,6 +84,9 @@ export interface GlyphAdjust {
   /** w:spacing — extra advance added after every character, px. Absolute:
    *  it does not shrink with the font (superscript keeps the same tracking). */
   letterSpacing?: number;
+  /** w:w — horizontal glyph scale, 1 = normal. Scales the glyphs and their
+   *  advances only; the tracking above rides on top at its absolute value. */
+  scaleX?: number;
 }
 
 /** A resolved font used for both measuring and painting. */

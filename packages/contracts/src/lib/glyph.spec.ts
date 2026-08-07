@@ -47,6 +47,31 @@ describe('applyGlyphSpec', () => {
   });
 });
 
+describe('applyGlyphSpec + horizontal scale', () => {
+  it('pre-divides tracking so measurer and painter both land on it', () => {
+    // The two callers apply the scale differently — the measurer multiplies
+    // the width it measured, the painter puts it on the transform — and this
+    // pre-division is what makes both come out at `glyphs × scale + tracking`.
+    const ctx = fakeCtx();
+    const scale = applyGlyphSpec(ctx, font({ scaleX: 0.8, letterSpacing: 2 }));
+    expect(scale).toBe(0.8);
+    expect(ctx.letterSpacing).toBe('2.5px'); // 2 / 0.8
+
+    // What the measurer computes: (glyphs + n × 2.5) × 0.8.
+    const glyphs = 100;
+    const n = 4;
+    const measured = (glyphs + n * 2.5) * 0.8;
+    // Word squeezes the glyphs and leaves the tracking alone.
+    expect(measured).toBeCloseTo(glyphs * 0.8 + n * 2, 10);
+  });
+
+  it('returns 1 and leaves tracking alone when unscaled', () => {
+    const ctx = fakeCtx();
+    expect(applyGlyphSpec(ctx, font({ letterSpacing: 2 }))).toBe(1);
+    expect(ctx.letterSpacing).toBe('2px');
+  });
+});
+
 describe('sameGlyphRun', () => {
   it('separates runs that differ only in tracking', () => {
     // The cluster merge in the layout engine measures consecutive same-run
@@ -56,6 +81,13 @@ describe('sameGlyphRun', () => {
     expect(
       sameGlyphRun(font({ letterSpacing: 2 }), font({ letterSpacing: 2 })),
     ).toBe(true);
+  });
+
+  it('separates runs that differ only in horizontal scale', () => {
+    expect(sameGlyphRun(font({ scaleX: 0.8 }), font())).toBe(false);
+    expect(sameGlyphRun(font({ scaleX: 0.8 }), font({ scaleX: 0.8 }))).toBe(
+      true,
+    );
   });
 
   it('still separates the face fields', () => {

@@ -39,8 +39,26 @@ export interface CellPropertiesOptions {
   onApply: (result: CellPropsResult) => void;
 }
 
-const FILL_PRESETS = ['#FCEBEB', '#FAEEDA', '#EAF3DE', '#E6F1FB', '#EEEDFE', '#FBEAF0', '#E1F5EE', '#F1EFE8', '#D3D1C7'];
-const PEN_COLORS = ['#000000', '#5F5E5A', '#B0B0B0', '#E24B4A', '#185FA5', '#1D9E75', '#BA7517'];
+const FILL_PRESETS = [
+  '#FCEBEB',
+  '#FAEEDA',
+  '#EAF3DE',
+  '#E6F1FB',
+  '#EEEDFE',
+  '#FBEAF0',
+  '#E1F5EE',
+  '#F1EFE8',
+  '#D3D1C7',
+];
+const PEN_COLORS = [
+  '#000000',
+  '#5F5E5A',
+  '#B0B0B0',
+  '#E24B4A',
+  '#185FA5',
+  '#1D9E75',
+  '#BA7517',
+];
 const PT_WIDTHS = [0.5, 0.75, 1, 1.5, 2.25, 3];
 const STYLES: ReadonlyArray<{ key: BorderStyle; label: string }> = [
   { key: 'solid', label: 'Solid' },
@@ -48,22 +66,50 @@ const STYLES: ReadonlyArray<{ key: BorderStyle; label: string }> = [
   { key: 'dotted', label: 'Dotted' },
   { key: 'double', label: 'Double' },
 ];
-const VALIGNS: ReadonlyArray<{ key: CellPropsResult['vAlign']; label: string }> = [
+const VALIGNS: ReadonlyArray<{
+  key: CellPropsResult['vAlign'];
+  label: string;
+}> = [
   { key: 'top', label: 'Top' },
   { key: 'center', label: 'Middle' },
   { key: 'bottom', label: 'Bottom' },
 ];
-const PRESETS: ReadonlyArray<{ key: BorderPreset; label: string; sides: number[]; inside: boolean }> = [
-  { key: 'all', label: 'All borders', sides: [1, 1, 1, 1, 1, 1], inside: false },
+const PRESETS: ReadonlyArray<{
+  key: BorderPreset;
+  label: string;
+  sides: number[];
+  inside: boolean;
+}> = [
+  {
+    key: 'all',
+    label: 'All borders',
+    sides: [1, 1, 1, 1, 1, 1],
+    inside: false,
+  },
   { key: 'none', label: 'No border', sides: [0, 0, 0, 0, 0, 0], inside: false },
-  { key: 'outside', label: 'Outside', sides: [1, 1, 1, 1, 0, 0], inside: false },
+  {
+    key: 'outside',
+    label: 'Outside',
+    sides: [1, 1, 1, 1, 0, 0],
+    inside: false,
+  },
   { key: 'inside', label: 'Inside', sides: [0, 0, 0, 0, 1, 1], inside: true },
   { key: 'top', label: 'Top', sides: [1, 0, 0, 0, 0, 0], inside: false },
   { key: 'bottom', label: 'Bottom', sides: [0, 0, 1, 0, 0, 0], inside: false },
   { key: 'left', label: 'Left', sides: [0, 0, 0, 1, 0, 0], inside: false },
   { key: 'right', label: 'Right', sides: [0, 1, 0, 0, 0, 0], inside: false },
-  { key: 'insideH', label: 'Inside horizontal', sides: [0, 0, 0, 0, 1, 0], inside: true },
-  { key: 'insideV', label: 'Inside vertical', sides: [0, 0, 0, 0, 0, 1], inside: true },
+  {
+    key: 'insideH',
+    label: 'Inside horizontal',
+    sides: [0, 0, 0, 0, 1, 0],
+    inside: true,
+  },
+  {
+    key: 'insideV',
+    label: 'Inside vertical',
+    sides: [0, 0, 0, 0, 0, 1],
+    inside: true,
+  },
 ];
 
 const STYLE = `
@@ -97,7 +143,13 @@ const STYLE = `
 
 const ACTIVE = '#378ADD';
 const INACTIVE = '#c9c7be';
-const presetLine = (x1: number, y1: number, x2: number, y2: number, on: number) =>
+const presetLine = (
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  on: number,
+) =>
   `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${on ? ACTIVE : INACTIVE}" stroke-width="${on ? 1.6 : 1}" ${on ? '' : 'stroke-dasharray="1.5 1.5"'} stroke-linecap="round"/>`;
 const presetIcon = (s: number[]) =>
   `<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">` +
@@ -124,7 +176,11 @@ const section = (label: string): HTMLDivElement => {
  * action-based — pick the pen, click a preset, and on Apply the host paints
  * that preset across the selected block. Untouched borders are left as-is.
  */
-export function openCellProperties({ initial, singleCell, onApply }: CellPropertiesOptions): void {
+export function openCellProperties({
+  initial,
+  singleCell,
+  onApply,
+}: CellPropertiesOptions): void {
   injectStyle('bb-ui-cellprops-styles', STYLE);
   let background = initial.background;
   let vAlign = initial.vAlign;
@@ -213,7 +269,10 @@ export function openCellProperties({ initial, singleCell, onApply }: CellPropert
     if (pt === penWidthPt) o.selected = true;
     widthSel.appendChild(o);
   }
-  widthSel.addEventListener('change', () => (penWidthPt = Number(widthSel.value)));
+  widthSel.addEventListener(
+    'change',
+    () => (penWidthPt = Number(widthSel.value)),
+  );
   const styleSel = document.createElement('select');
   styleSel.className = 'bb-cp-select';
   for (const { key, label } of STYLES) {
@@ -222,7 +281,10 @@ export function openCellProperties({ initial, singleCell, onApply }: CellPropert
     o.textContent = label;
     styleSel.appendChild(o);
   }
-  styleSel.addEventListener('change', () => (penStyle = styleSel.value as BorderStyle));
+  styleSel.addEventListener(
+    'change',
+    () => (penStyle = styleSel.value as BorderStyle),
+  );
   penRow.append(widthSel, styleSel);
 
   const colors = document.createElement('div');
@@ -278,7 +340,8 @@ export function openCellProperties({ initial, singleCell, onApply }: CellPropert
   root.append(fill, valign, borders, footer);
 
   function syncFill(): void {
-    for (const { el, color } of swatchEls) el.classList.toggle('on', color === background);
+    for (const { el, color } of swatchEls)
+      el.classList.toggle('on', color === background);
     hexPreview.style.background = background ?? 'transparent';
     if (document.activeElement !== hex) hex.value = background ?? '';
   }
@@ -286,10 +349,12 @@ export function openCellProperties({ initial, singleCell, onApply }: CellPropert
     for (const [key, b] of vaBtns) b.classList.toggle('on', vAlign === key);
   }
   function syncColors(): void {
-    for (const { el, color } of colorEls) el.classList.toggle('on', color === penColor);
+    for (const { el, color } of colorEls)
+      el.classList.toggle('on', color === penColor);
   }
   function syncPresets(): void {
-    for (const { el, key } of presetEls) el.classList.toggle('on', preset === key);
+    for (const { el, key } of presetEls)
+      el.classList.toggle('on', preset === key);
   }
   syncFill();
   syncVAlign();
@@ -303,7 +368,12 @@ export function openCellProperties({ initial, singleCell, onApply }: CellPropert
   apply.addEventListener('click', () => {
     const result: CellPropsResult = { background, vAlign };
     if (preset) {
-      result.border = { preset, width: (penWidthPt * 96) / 72, style: penStyle, color: penColor };
+      result.border = {
+        preset,
+        width: (penWidthPt * 96) / 72,
+        style: penStyle,
+        color: penColor,
+      };
     }
     onApply(result);
     dialog.close();

@@ -191,6 +191,8 @@ export interface RunProps {
   /** w:spacing (rPr) — tracking in TWIPS, positive = expanded. Same rule:
    *  document unit in, converted once by the layout. */
   letterSpacing?: number;
+  /** w:w — horizontal glyph scale as a PERCENT (100 = normal). */
+  charScale?: number;
 }
 
 /** Word's 16 named highlight colors → hex. */
@@ -347,6 +349,13 @@ export function parseRunProps(
   if (track !== undefined) {
     const tw = Number(track);
     if (!Number.isNaN(tw)) props.letterSpacing = tw;
+  }
+
+  // w:w is a percentage; the schema allows a bare number or a "%" suffix.
+  const scale = attrOf(child(rPr, 'w:w'), 'w:val');
+  if (scale !== undefined) {
+    const pct = Number(scale.endsWith('%') ? scale.slice(0, -1) : scale);
+    if (!Number.isNaN(pct) && pct > 0) props.charScale = pct;
   }
 
   // Background: w:highlight (named) takes precedence, else w:shd (solid

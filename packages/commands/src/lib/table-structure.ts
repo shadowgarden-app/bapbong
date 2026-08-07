@@ -34,7 +34,10 @@ function tableContext(state: EditorState): TableContext | null {
 }
 
 /** A fresh empty cell carrying the given column width (px) / colspan. */
-function emptyCell(state: EditorState, attrs: { colwidth?: number[] | null; colspan?: number }): ProseMirrorNode {
+function emptyCell(
+  state: EditorState,
+  attrs: { colwidth?: number[] | null; colspan?: number },
+): ProseMirrorNode {
   const cell = state.schema.nodes['table_cell'];
   const paragraph = state.schema.nodes['paragraph'];
   return cell.create(attrs, paragraph.create());
@@ -50,7 +53,12 @@ export function insertRow(below: boolean): Command {
       if (dispatch) {
         const cells: ProseMirrorNode[] = [];
         cx.row.forEach((cell) =>
-          cells.push(emptyCell(state, { colwidth: cell.attrs['colwidth'] as number[] | null, colspan: cell.attrs['colspan'] as number })),
+          cells.push(
+            emptyCell(state, {
+              colwidth: cell.attrs['colwidth'] as number[] | null,
+              colspan: cell.attrs['colspan'] as number,
+            }),
+          ),
         );
         const newRow = state.schema.nodes['table_row'].create(null, cells);
         const at = below ? cx.rowPos + cx.row.nodeSize : cx.rowPos;
@@ -72,8 +80,11 @@ export function insertColumn(right: boolean): Command {
       if (!cx) return false;
       if (dispatch) {
         const targetIndex = right ? cx.cellIndex + 1 : cx.cellIndex;
-        const curCell = cx.row.maybeChild(Math.min(cx.cellIndex, cx.row.childCount - 1));
-        const colwidth = (curCell?.attrs['colwidth'] as number[] | null) ?? null;
+        const curCell = cx.row.maybeChild(
+          Math.min(cx.cellIndex, cx.row.childCount - 1),
+        );
+        const colwidth =
+          (curCell?.attrs['colwidth'] as number[] | null) ?? null;
 
         // Doc position where the target cell starts in each row (or the row's
         // content end when the row is shorter), in the original document.
@@ -131,7 +142,11 @@ export function deleteColumn(): Command {
       if (!cx) return false;
       if (dispatch) {
         if (cx.row.childCount <= 1) {
-          dispatch(state.tr.delete(cx.tablePos, cx.tablePos + cx.table.nodeSize).scrollIntoView());
+          dispatch(
+            state.tr
+              .delete(cx.tablePos, cx.tablePos + cx.table.nodeSize)
+              .scrollIntoView(),
+          );
           return true;
         }
         // The doc range of the target cell in each row (original positions).
@@ -174,14 +189,21 @@ export interface MergeCell {
  * expects for an imported merged cell. Best-effort if the block already
  * contains spanning cells.
  */
-export function mergeCells(cells: MergeCell[], rows: number, cols: number): Command {
+export function mergeCells(
+  cells: MergeCell[],
+  rows: number,
+  cols: number,
+): Command {
   return {
     name: 'merge-cells',
     run(state, dispatch) {
       if (cells.length < 2) return false;
       const located = cells
         .map((c) => ({ c, node: state.doc.nodeAt(c.pos) }))
-        .filter((x): x is { c: MergeCell; node: ProseMirrorNode } => x.node?.type.name === 'table_cell');
+        .filter(
+          (x): x is { c: MergeCell; node: ProseMirrorNode } =>
+            x.node?.type.name === 'table_cell',
+        );
       if (located.length < 2) return false;
       const tl = located.find((x) => x.c.row === 0 && x.c.col === 0);
       if (!tl) return false;
@@ -189,7 +211,9 @@ export function mergeCells(cells: MergeCell[], rows: number, cols: number): Comm
         const cellType = state.schema.nodes['table_cell'];
         // Merged width = the top-row cells' widths concatenated (best-effort).
         let colwidth: number[] | null = [];
-        for (const x of located.filter((x) => x.c.row === 0).sort((a, b) => a.c.col - b.c.col)) {
+        for (const x of located
+          .filter((x) => x.c.row === 0)
+          .sort((a, b) => a.c.col - b.c.col)) {
           const cw = x.node.attrs['colwidth'] as number[] | null;
           if (!cw) {
             colwidth = null;
@@ -203,16 +227,27 @@ export function mergeCells(cells: MergeCell[], rows: number, cols: number): Comm
         for (const x of located) {
           if (x === tl) continue;
           x.node.forEach((child) => {
-            if (!child.isTextblock || child.textContent.trim().length > 0) content.push(child);
+            if (!child.isTextblock || child.textContent.trim().length > 0)
+              content.push(child);
           });
         }
-        const merged = cellType.create({ ...tl.node.attrs, colspan: cols, rowspan: rows, colwidth }, content);
+        const merged = cellType.create(
+          { ...tl.node.attrs, colspan: cols, rowspan: rows, colwidth },
+          content,
+        );
         // Apply back-to-front so the original positions stay valid.
         const ops = located
-          .map((x) => ({ from: x.c.pos, to: x.c.pos + x.node.nodeSize, node: x === tl ? merged : null }))
+          .map((x) => ({
+            from: x.c.pos,
+            to: x.c.pos + x.node.nodeSize,
+            node: x === tl ? merged : null,
+          }))
           .sort((a, b) => b.from - a.from);
         let tr = state.tr;
-        for (const op of ops) tr = op.node ? tr.replaceWith(op.from, op.to, op.node) : tr.delete(op.from, op.to);
+        for (const op of ops)
+          tr = op.node
+            ? tr.replaceWith(op.from, op.to, op.node)
+            : tr.delete(op.from, op.to);
         dispatch(tr.scrollIntoView());
       }
       return true;
@@ -227,7 +262,12 @@ export function deleteTable(): Command {
     run(state, dispatch) {
       const cx = tableContext(state);
       if (!cx) return false;
-      if (dispatch) dispatch(state.tr.delete(cx.tablePos, cx.tablePos + cx.table.nodeSize).scrollIntoView());
+      if (dispatch)
+        dispatch(
+          state.tr
+            .delete(cx.tablePos, cx.tablePos + cx.table.nodeSize)
+            .scrollIntoView(),
+        );
       return true;
     },
     isEnabled: (state) => tableContext(state) != null,

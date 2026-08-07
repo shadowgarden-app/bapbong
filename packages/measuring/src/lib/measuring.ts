@@ -28,9 +28,11 @@ export function createCanvasMeasurer(): MeasureText {
   if (!ctx) throw new Error('bapbong-measuring: 2D canvas context unavailable');
   return (text, font) => {
     // Configure and measure through the same helper the painter uses, so the
-    // browser does the tracking arithmetic once for both of us.
-    applyGlyphSpec(ctx, font);
-    return ctx.measureText(text).width;
+    // browser does the tracking arithmetic once for both of us. measureText
+    // ignores the transform, so the horizontal scale is applied here — the
+    // painter puts the very same number on its transform instead.
+    const scale = applyGlyphSpec(ctx, font);
+    return ctx.measureText(text).width * scale;
   };
 }
 
@@ -40,7 +42,7 @@ export function createCanvasMeasurer(): MeasureText {
  */
 export function createApproxMeasurer(factor = 0.5): MeasureText {
   return (text, font) =>
-    text.length * font.sizePt * factor +
+    text.length * font.sizePt * factor * (font.scaleX ?? 1) +
     (font.letterSpacing ?? 0) * glyphCount(text);
 }
 

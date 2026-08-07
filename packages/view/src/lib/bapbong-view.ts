@@ -51,12 +51,15 @@ export class BapbongView {
       a11yLabel: opts.a11yLabel,
     });
     this.offFonts = this.core.onFontsReloaded(() => this.emit());
-    this.selection = opts.selectable === false ? null : new ViewerSelection(this.core);
+    this.selection =
+      opts.selectable === false ? null : new ViewerSelection(this.core);
   }
 
   /** Import a `.docx` and render the first frame. Resolves with the imported
    *  page-chrome keys (header/footer w:types present). */
-  async loadDocx(bytes: ArrayBuffer): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
+  async loadDocx(
+    bytes: ArrayBuffer,
+  ): Promise<{ headerKeys: string[]; footerKeys: string[] }> {
     this.selection?.clear();
     const { headerKeys, footerKeys } = await this.core.loadDocx(bytes);
     this.emit();

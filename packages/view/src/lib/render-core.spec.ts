@@ -13,15 +13,22 @@ describe('bapbong-view exports', () => {
 
 describe('collectFontFamilies', () => {
   it('always includes the engine default (Arial)', () => {
-    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('hi')])]);
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text('hi')]),
+    ]);
     expect(collectFontFamilies(doc)).toContain('Arial');
   });
 
   it('gathers distinct fontFamily marks across documents', () => {
     const para = (text: string, family: string) =>
-      schema.node('paragraph', null, [schema.text(text, [schema.marks['fontFamily'].create({ family })])]);
+      schema.node('paragraph', null, [
+        schema.text(text, [schema.marks['fontFamily'].create({ family })]),
+      ]);
     const a = schema.node('doc', null, [para('x', 'Calibri')]);
-    const b = schema.node('doc', null, [para('y', 'Times New Roman'), para('z', 'Calibri')]);
+    const b = schema.node('doc', null, [
+      para('y', 'Times New Roman'),
+      para('z', 'Calibri'),
+    ]);
     const fams = collectFontFamilies(a, b, undefined);
     expect(fams).toContain('Calibri');
     expect(fams).toContain('Times New Roman');
