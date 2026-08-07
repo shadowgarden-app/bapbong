@@ -1,6 +1,7 @@
 import type { CharacterFormatting } from '@shadow-garden/bapbong-contracts';
 import { Dialog } from './dialog.js';
-import { injectStyle, swatchRow } from './internal.js';
+import { colorButton } from './color-picker.js';
+import { injectStyle } from './internal.js';
 
 /**
  * Format ▸ Font — the home for character formatting, in two tabs the way Word
@@ -43,29 +44,6 @@ const SCALE_PRESETS = [200, 150, 100, 90, 80, 66, 50, 33];
  *  while it agrees with what gets drawn. */
 const SUPERSUB_SCALE = 0.66;
 
-const TEXT_COLORS = [
-  '#000000',
-  '#5F5E5A',
-  '#B0B0B0',
-  '#C0392B',
-  '#BA7517',
-  '#1D9E75',
-  '#185FA5',
-  '#7F77DD',
-];
-
-/** Word's own highlighter set, which is what a .docx round-trips exactly
- *  (w:highlight is a named enum; anything else has to travel as w:shd). */
-const HIGHLIGHTS = [
-  '#FFFF00',
-  '#00FF00',
-  '#00FFFF',
-  '#FF00FF',
-  '#0000FF',
-  '#FF0000',
-  '#C0C0C0',
-];
-
 const STYLE = `
 .bb-fd{display:flex;flex-direction:column;gap:15px;min-width:396px;max-width:430px;color:var(--bb-ui-fg,#2c2c2a)}
 .bb-fd *{box-sizing:border-box}
@@ -94,12 +72,6 @@ const STYLE = `
 .bb-fd-segbtn:last-child{border-right:0}
 .bb-fd-segbtn[aria-pressed="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c)}
 .bb-fd-segbtn[aria-pressed="mixed"]{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--bb-ui-active-bg,#e6f1fb) 4px 8px)}
-.bb-fd-swatches{display:flex;flex-wrap:wrap;gap:6px}
-.bb-fd-swatch{width:26px;height:26px;border-radius:6px;border:0.5px solid var(--bb-ui-border,#d8d6cf);padding:0;cursor:pointer}
-.bb-fd-swatch.on{box-shadow:0 0 0 2px var(--bb-ui-active-fg,#0c447c)}
-.bb-fd-swatch-none{display:flex;align-items:center;justify-content:center;background:var(--bb-ui-bg,#fff);font-size:15px;color:inherit;opacity:.55}
-/* The OS picker is a chip like the rest: strip the native chrome so it does
-   not read as a different KIND of control from the presets beside it. */
 .bb-fd-swatch-custom{background:conic-gradient(#c0392b,#ba7517,#1d9e75,#185fa5,#7f77dd,#c0392b)}
 .bb-fd-swatch-custom::-webkit-color-swatch-wrapper{padding:0}
 .bb-fd-swatch-custom::-webkit-color-swatch{border:0;border-radius:5px;opacity:0}
@@ -251,37 +223,41 @@ export function openFontDialog({
   const italicBtn = mkSeg('I', initial.italic, 'font-style:italic');
   const underBtn = mkSeg('U', initial.underline, 'text-decoration:underline');
 
-  // Colours get swatches and the platform picker, not a dropdown of names:
-  // a colour is chosen by looking at it.
+  // Both colours use the shared picker — the same panel the toolbar and the
+  // cell dialog open, so a colour is chosen the same way everywhere.
   let color: string | null = initial.color ?? null;
   let highlight: string | null = initial.highlight ?? null;
-  const colorRow = swatchRow({
-    prefix: 'bb-fd',
-    presets: TEXT_COLORS,
+  const colorBtn = colorButton({
+    title: 'Text color',
+    label: 'Text color',
     clearLabel: 'Automatic',
-    get: () => color,
-    set: (c) => {
+    value: () => color,
+    onPick: (c) => {
       color = c;
       paint();
     },
   });
-  const hlRow = swatchRow({
-    prefix: 'bb-fd',
-    presets: HIGHLIGHTS,
+  const hlBtn = colorButton({
+    title: 'Highlight',
+    label: 'Highlight',
     clearLabel: 'No highlight',
-    get: () => highlight,
-    set: (c) => {
+    value: () => highlight,
+    onPick: (c) => {
       highlight = c;
       paint();
     },
   });
 
+  const styleRow = el('div', 'bb-fd-grid');
+  styleRow.style.gridTemplateColumns = 'auto 1fr 1fr';
+  styleRow.style.alignItems = 'end';
   const styleCell = el('div');
   styleCell.append(el('div', 'bb-fd-lbl', 'Style'), seg);
   const colorCell = el('div');
-  colorCell.append(el('div', 'bb-fd-lbl', 'Text color'), colorRow.el);
+  colorCell.append(el('div', 'bb-fd-lbl', 'Colour'), colorBtn.el);
   const hlCell = el('div');
-  hlCell.append(el('div', 'bb-fd-lbl', 'Highlight'), hlRow.el);
+  hlCell.append(el('div', 'bb-fd-lbl', 'Highlight'), hlBtn.el);
+  styleRow.append(styleCell, colorCell, hlCell);
 
   const effWrap = el('div');
   effWrap.append(el('div', 'bb-fd-sec', 'Effects'));
@@ -316,7 +292,7 @@ export function openFontDialog({
     wrapOf(smallCapsCb),
   );
   effWrap.append(effGrid);
-  fontPane.append(topGrid, styleCell, colorCell, hlCell, effWrap);
+  fontPane.append(topGrid, styleRow, effWrap);
 
   // ── Advanced tab ────────────────────────────────────────────────
   const advWrap = el('div');

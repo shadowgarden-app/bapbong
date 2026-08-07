@@ -1,4 +1,4 @@
-import { injectStyle } from './internal.js';
+import { injectStyle, placeFloating } from './internal.js';
 
 /**
  * Floating link panel, anchored at the caret / selection (Google Docs-style).
@@ -112,26 +112,6 @@ function closeCurrent(): void {
   }
 }
 
-/** Place `el` below the anchor (flip above when the viewport runs out),
- *  clamped horizontally — connected positioning like the context menu. */
-function place(el: HTMLElement, anchor: LinkPanelAnchor): void {
-  const r = el.getBoundingClientRect();
-  const pad = 6;
-  const gap = 6;
-  const x = Math.max(
-    pad,
-    Math.min(anchor.x, window.innerWidth - r.width - pad),
-  );
-  const below = anchor.y + anchor.height + gap;
-  const above = anchor.y - gap - r.height;
-  const y =
-    below + r.height <= window.innerHeight - pad || above < pad
-      ? Math.min(below, window.innerHeight - r.height - pad)
-      : above;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
-}
-
 export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
   injectStyle('bb-ui-linkpanel-styles', STYLE);
   // Keep-alive: the same keyed panel (still open, or in its deferred-close
@@ -240,7 +220,7 @@ export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
       );
     }
     el.appendChild(row);
-    place(el, opts.anchor);
+    placeFloating(el, opts.anchor);
   };
 
   const renderForm = (
@@ -290,7 +270,7 @@ export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
     row.appendChild(apply);
     form.appendChild(row);
     el.appendChild(form);
-    place(el, opts.anchor);
+    placeFloating(el, opts.anchor);
     u.input.focus();
     u.input.select();
   };

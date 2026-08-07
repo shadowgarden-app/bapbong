@@ -37,80 +37,32 @@ export function injectStyle(id: string, css: string): void {
   document.head.appendChild(el);
 }
 
-/** A row of colour swatches plus the OS colour picker.
- *
- *  A dropdown of named colours is the wrong control for a colour: it hides the
- *  choices behind a click and can only ever offer the handful someone thought
- *  to name. A row shows every preset at once, and the trailing
- *  `input[type=color]` hands off to the platform picker for anything else —
- *  the real thing rather than a hex field imitating one.
- *
- *  Styling is the caller's `prefix`, so a widget keeps its own class names.
- *  Returns a `sync` to call whenever the value changes outside the row. */
-export interface SwatchRow {
-  el: HTMLElement;
-  sync(): void;
+/** A rectangle to hang a floating panel from — a caret box, a button, or any
+ *  point with a height. Viewport coordinates. */
+export interface FloatAnchor {
+  x: number;
+  y: number;
+  height: number;
 }
 
-export function swatchRow(opts: {
-  prefix: string;
-  presets: readonly string[];
-  /** Label + title for the "no colour" chip; omit to drop that chip. */
-  clearLabel?: string;
-  get(): string | null;
-  set(color: string | null): void;
-}): SwatchRow {
-  const { prefix, presets, clearLabel, get, set } = opts;
-  const el = document.createElement('div');
-  el.className = `${prefix}-swatches`;
-  const chips: Array<{ node: HTMLElement; color: string | null }> = [];
-
-  const add = (node: HTMLElement, color: string | null) => {
-    node.addEventListener('click', () => {
-      set(color);
-      sync();
-    });
-    el.append(node);
-    chips.push({ node, color });
-  };
-
-  if (clearLabel !== undefined) {
-    const none = document.createElement('button');
-    none.type = 'button';
-    none.className = `${prefix}-swatch ${prefix}-swatch-none`;
-    none.title = clearLabel;
-    none.textContent = '⦸';
-    add(none, null);
-  }
-  for (const color of presets) {
-    const sw = document.createElement('button');
-    sw.type = 'button';
-    sw.className = `${prefix}-swatch`;
-    sw.style.background = color;
-    sw.title = color;
-    add(sw, color);
-  }
-
-  // The platform picker, for everything the presets do not cover.
-  const custom = document.createElement('input');
-  custom.type = 'color';
-  custom.className = `${prefix}-swatch ${prefix}-swatch-custom`;
-  custom.title = 'Custom colour…';
-  custom.addEventListener('input', () => {
-    set(custom.value.toUpperCase());
-    sync();
-  });
-  el.append(custom);
-
-  function sync(): void {
-    const value = get();
-    for (const { node, color } of chips)
-      node.classList.toggle('on', color === value);
-    // Keep the picker showing the live colour, but never steal a value it is
-    // mid-edit — that would fight the user dragging inside the OS panel.
-    if (document.activeElement !== custom && value) custom.value = value;
-    custom.classList.toggle('on', !!value && !presets.some((p) => p === value));
-  }
-  sync();
-  return { el, sync };
+/** Place `el` below `anchor`, flipping above when the viewport runs out and
+ *  clamping horizontally. Shared by the link panel and the colour picker: both
+ *  are body-level fixed panels, which is also how they escape the toolbar's
+ *  `overflow: hidden` without any container-relative arithmetic. */
+export function placeFloating(el: HTMLElement, anchor: FloatAnchor): void {
+  const r = el.getBoundingClientRect();
+  const pad = 6;
+  const gap = 6;
+  const x = Math.max(
+    pad,
+    Math.min(anchor.x, window.innerWidth - r.width - pad),
+  );
+  const below = anchor.y + anchor.height + gap;
+  const above = anchor.y - gap - r.height;
+  const y =
+    below + r.height <= window.innerHeight - pad || above < pad
+      ? Math.min(below, window.innerHeight - r.height - pad)
+      : above;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
 }

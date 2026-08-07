@@ -1,4 +1,5 @@
 import type { BorderStyle } from '@shadow-garden/bapbong-contracts';
+import { colorButton } from './color-picker.js';
 import { Dialog } from './dialog.js';
 import { injectStyle } from './internal.js';
 
@@ -39,26 +40,6 @@ export interface CellPropertiesOptions {
   onApply: (result: CellPropsResult) => void;
 }
 
-const FILL_PRESETS = [
-  '#FCEBEB',
-  '#FAEEDA',
-  '#EAF3DE',
-  '#E6F1FB',
-  '#EEEDFE',
-  '#FBEAF0',
-  '#E1F5EE',
-  '#F1EFE8',
-  '#D3D1C7',
-];
-const PEN_COLORS = [
-  '#000000',
-  '#5F5E5A',
-  '#B0B0B0',
-  '#E24B4A',
-  '#185FA5',
-  '#1D9E75',
-  '#BA7517',
-];
 const PT_WIDTHS = [0.5, 0.75, 1, 1.5, 2.25, 3];
 const STYLES: ReadonlyArray<{ key: BorderStyle; label: string }> = [
   { key: 'solid', label: 'Solid' },
@@ -116,13 +97,6 @@ const STYLE = `
 .bb-cp{display:flex;flex-direction:column;gap:16px;min-width:320px;color:var(--bb-ui-fg,#2c2c2a)}
 .bb-cp *{box-sizing:border-box}
 .bb-cp-label{font-size:12px;opacity:.7;margin-bottom:8px}
-.bb-cp-swatches{display:flex;flex-wrap:wrap;gap:7px}
-.bb-cp-swatch{width:26px;height:26px;border-radius:6px;border:0.5px solid var(--bb-ui-border,#d8d6cf);padding:0;cursor:pointer}
-.bb-cp-swatch.on{box-shadow:0 0 0 2px var(--bb-ui-active-fg,#0c447c)}
-.bb-cp-none{display:flex;align-items:center;justify-content:center;background:var(--bb-ui-bg,#fff);font-size:15px;color:#b4b2a9}
-.bb-cp-hexrow{display:flex;align-items:center;gap:8px;margin-top:10px}
-.bb-cp-hexpreview{width:26px;height:26px;border-radius:6px;border:0.5px solid var(--bb-ui-border,#d8d6cf);flex:none}
-.bb-cp-hex{height:30px;width:120px;font-size:13px;padding:0 8px;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit}
 .bb-cp-seg{display:inline-flex;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;overflow:hidden}
 .bb-cp-segbtn{height:32px;padding:0 16px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-cp-segbtn:last-child{border-right:0}
@@ -133,9 +107,6 @@ const STYLE = `
 .bb-cp-preset:disabled{opacity:.35;cursor:default}
 .bb-cp-penrow{display:flex;gap:10px;margin-bottom:10px}
 .bb-cp-select{flex:1;height:32px;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;padding:0 8px}
-.bb-cp-colors{display:flex;gap:7px}
-.bb-cp-color{width:24px;height:24px;border-radius:6px;border:0.5px solid var(--bb-ui-border,#d8d6cf);padding:0;cursor:pointer}
-.bb-cp-color.on{box-shadow:0 0 0 2px var(--bb-ui-active-fg,#0c447c)}
 .bb-cp-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}
 .bb-cp-btn{height:32px;padding:0 16px;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-cp-primary{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#b5d4f4);color:var(--bb-ui-active-fg,#0c447c)}
@@ -194,48 +165,16 @@ export function openCellProperties({
 
   // ── Fill ──
   const fill = section('Fill');
-  const swatches = document.createElement('div');
-  swatches.className = 'bb-cp-swatches';
-  const swatchEls: Array<{ el: HTMLElement; color: string | null }> = [];
-  const addSwatch = (el: HTMLElement, color: string | null) => {
-    el.addEventListener('click', () => {
-      background = color;
-      syncFill();
-    });
-    swatches.appendChild(el);
-    swatchEls.push({ el, color });
-  };
-  const none = document.createElement('button');
-  none.type = 'button';
-  none.className = 'bb-cp-swatch bb-cp-none';
-  none.title = 'No fill';
-  none.textContent = '⦸';
-  addSwatch(none, null);
-  for (const color of FILL_PRESETS) {
-    const sw = document.createElement('button');
-    sw.type = 'button';
-    sw.className = 'bb-cp-swatch';
-    sw.style.background = color;
-    sw.title = color;
-    addSwatch(sw, color);
-  }
-  const hexRow = document.createElement('div');
-  hexRow.className = 'bb-cp-hexrow';
-  const hexPreview = document.createElement('span');
-  hexPreview.className = 'bb-cp-hexpreview';
-  const hex = document.createElement('input');
-  hex.type = 'text';
-  hex.className = 'bb-cp-hex';
-  hex.placeholder = '#RRGGBB';
-  hex.addEventListener('input', () => {
-    const v = hex.value.trim();
-    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
-      background = v;
-      syncFill();
-    }
+  const fillBtn = colorButton({
+    title: 'Cell fill',
+    label: 'Fill',
+    clearLabel: 'No fill',
+    value: () => background,
+    onPick: (c) => {
+      background = c;
+    },
   });
-  hexRow.append(hexPreview, hex);
-  fill.append(swatches, hexRow);
+  fill.append(fillBtn.el);
 
   // ── Vertical alignment ──
   const valign = section('Vertical alignment');
@@ -285,24 +224,15 @@ export function openCellProperties({
     'change',
     () => (penStyle = styleSel.value as BorderStyle),
   );
-  penRow.append(widthSel, styleSel);
-
-  const colors = document.createElement('div');
-  colors.className = 'bb-cp-colors';
-  const colorEls: Array<{ el: HTMLElement; color: string }> = [];
-  for (const color of PEN_COLORS) {
-    const c = document.createElement('button');
-    c.type = 'button';
-    c.className = 'bb-cp-color';
-    c.style.background = color;
-    c.title = color;
-    c.addEventListener('click', () => {
-      penColor = color;
-      syncColors();
-    });
-    colors.appendChild(c);
-    colorEls.push({ el: c, color });
-  }
+  const penBtn = colorButton({
+    title: 'Border colour',
+    label: 'Colour',
+    value: () => penColor,
+    onPick: (c) => {
+      if (c) penColor = c;
+    },
+  });
+  penRow.append(widthSel, styleSel, penBtn.el);
 
   const grid = document.createElement('div');
   grid.className = 'bb-cp-presets';
@@ -322,7 +252,7 @@ export function openCellProperties({
     grid.appendChild(btn);
     presetEls.push({ el: btn, key: p.key });
   }
-  borders.append(grid, penRow, colors);
+  borders.append(grid, penRow);
 
   // ── Footer ──
   const footer = document.createElement('div');
@@ -339,26 +269,14 @@ export function openCellProperties({
 
   root.append(fill, valign, borders, footer);
 
-  function syncFill(): void {
-    for (const { el, color } of swatchEls)
-      el.classList.toggle('on', color === background);
-    hexPreview.style.background = background ?? 'transparent';
-    if (document.activeElement !== hex) hex.value = background ?? '';
-  }
   function syncVAlign(): void {
     for (const [key, b] of vaBtns) b.classList.toggle('on', vAlign === key);
-  }
-  function syncColors(): void {
-    for (const { el, color } of colorEls)
-      el.classList.toggle('on', color === penColor);
   }
   function syncPresets(): void {
     for (const { el, key } of presetEls)
       el.classList.toggle('on', preset === key);
   }
-  syncFill();
   syncVAlign();
-  syncColors();
   syncPresets();
 
   const dialog = new Dialog({ title: 'Cell properties', modal: true });
