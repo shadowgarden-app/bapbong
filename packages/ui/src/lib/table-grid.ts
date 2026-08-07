@@ -11,7 +11,7 @@ export interface TableGridOptions {
 const STYLE = `
 .bb-grid{display:flex;flex-direction:column;gap:6px;user-select:none}
 .bb-grid-cells{display:grid;gap:2px}
-.bb-grid-cell{width:15px;height:15px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:2px;background:var(--bb-ui-bg,#fff);cursor:pointer;padding:0}
+.bb-grid-cell{width:15px;height:15px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:2px;background:var(--bb-ui-bg,#fff);cursor:pointer;padding:0}
 .bb-grid-cell.on{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#7fb2ec)}
 .bb-grid-label{font-size:12px;text-align:center;opacity:.7}
 `;

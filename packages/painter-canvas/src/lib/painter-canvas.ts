@@ -1,7 +1,7 @@
+import { applyGlyphSpec } from '@shadow-garden/bapbong-contracts';
 import type {
   BorderSide,
   CaretRect,
-  FontSpec,
   LayoutLine,
   PagePoint,
   PaintDecoration,
@@ -80,12 +80,6 @@ const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   selectionColor: 'rgba(59, 130, 246, 0.30)',
   decorations: [],
 };
-
-/** CSS font shorthand. Duplicated from bapbong-measuring: the painter may only
- *  depend on contracts (module boundary), and this must stay in sync with how
- *  text was measured. */
-const fontCss = (f: FontSpec) =>
-  `${f.italic ? 'italic ' : ''}${f.bold ? '700' : '400'} ${f.sizePt}pt ${f.family}`;
 
 const defaultDpr = () =>
   typeof globalThis.devicePixelRatio === 'number'
@@ -518,7 +512,7 @@ export class CanvasPainter {
       }
     }
     for (const seg of line.segments) {
-      ctx.font = fontCss(seg.font);
+      const scaleX = applyGlyphSpec(ctx, seg.font);
       // Hyperlinks without an explicit color get Word's hyperlink look
       // (blue + underline) — otherwise a fresh link paints like plain text
       // and inserting one reads as "nothing happened".
@@ -528,35 +522,52 @@ export class CanvasPainter {
         seg.field && pageInfo
           ? String(seg.field === 'pageNumber' ? pageInfo.page : pageInfo.pages)
           : seg.text;
-      // Super/subscript shift the (already-reduced) glyphs off the baseline.
+      // Super/subscript shift the (already-reduced) glyphs off the baseline;
+      // w:position adds its own shift on top, at full size.
       const em = seg.font.sizePt * (96 / 72);
       const segY =
-        seg.vertAlign === 'super'
+        (seg.vertAlign === 'super'
           ? baselineY - em * 0.5
           : seg.vertAlign === 'sub'
             ? baselineY + em * 0.2
-            : baselineY;
-      ctx.fillText(text, seg.x, segY);
+            : baselineY) - (seg.raise ?? 0);
+      if (scaleX === 1) {
+        ctx.fillText(text, seg.x, segY);
+      } else {
+        // Horizontal glyph scaling (w:w). Only the GLYPHS are squeezed, so
+        // the transform wraps nothing but the fillText — seg.width already
+        // has the scale baked in by the measurer, and the decorations below
+        // are drawn from it in unscaled space. Putting them inside here
+        // would apply the scale a second time.
+        ctx.save();
+        ctx.scale(scaleX, 1);
+        ctx.fillText(text, seg.x / scaleX, segY);
+        ctx.restore();
+      }
       // Text decorations use the width measured at layout time — the painter
       // never measures.
       const underline = seg.underline || (!!seg.link && !seg.color);
       if ((underline || seg.strike || seg.dstrike) && seg.width) {
         const em = seg.font.sizePt * (96 / 72);
         const thickness = Math.max(1, em * 0.05);
+        // Decorations ride with a raised run — a rule left at the original
+        // baseline would detach from the glyphs it belongs to. (Super/sub
+        // deliberately keep drawing theirs at the base line, as before.)
+        const decoY = baselineY - (seg.raise ?? 0);
         if (underline)
           ctx.fillRect(
             seg.x,
-            baselineY + Math.max(1, em * 0.1),
+            decoY + Math.max(1, em * 0.1),
             seg.width,
             thickness,
           );
         if (seg.strike)
-          ctx.fillRect(seg.x, baselineY - em * 0.27, seg.width, thickness);
+          ctx.fillRect(seg.x, decoY - em * 0.27, seg.width, thickness);
         if (seg.dstrike) {
           // Double strikethrough: two thin lines straddling the single-strike
           // position.
-          ctx.fillRect(seg.x, baselineY - em * 0.34, seg.width, thickness);
-          ctx.fillRect(seg.x, baselineY - em * 0.2, seg.width, thickness);
+          ctx.fillRect(seg.x, decoY - em * 0.34, seg.width, thickness);
+          ctx.fillRect(seg.x, decoY - em * 0.2, seg.width, thickness);
         }
       }
     }

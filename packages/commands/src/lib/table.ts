@@ -39,7 +39,8 @@ export function setCellAttrs(pos: number, attrs: Partial<CellAttrs>): Command {
       if (!cell || cell.type.name !== 'table_cell') return false;
       if (dispatch) {
         const tr = state.tr;
-        for (const [key, value] of Object.entries(attrs)) tr.setNodeAttribute(pos, key, value);
+        for (const [key, value] of Object.entries(attrs))
+          tr.setNodeAttribute(pos, key, value);
         dispatch(tr);
       }
       return true;
@@ -49,16 +50,22 @@ export function setCellAttrs(pos: number, attrs: Partial<CellAttrs>): Command {
 
 /** Set the same attrs on several cells (by doc position) in one transaction —
  *  the cell-properties dialog applied across a selected block. */
-export function setCellsAttrs(positions: number[], attrs: Partial<CellAttrs>): Command {
+export function setCellsAttrs(
+  positions: number[],
+  attrs: Partial<CellAttrs>,
+): Command {
   return {
     name: 'cells-attrs',
     run(state, dispatch) {
-      const cells = positions.filter((pos) => state.doc.nodeAt(pos)?.type.name === 'table_cell');
+      const cells = positions.filter(
+        (pos) => state.doc.nodeAt(pos)?.type.name === 'table_cell',
+      );
       if (cells.length === 0) return false;
       if (dispatch) {
         const tr = state.tr;
         for (const pos of cells) {
-          for (const [key, value] of Object.entries(attrs)) tr.setNodeAttribute(pos, key, value);
+          for (const [key, value] of Object.entries(attrs))
+            tr.setNodeAttribute(pos, key, value);
         }
         dispatch(tr);
       }
@@ -73,7 +80,9 @@ export function setCellBackground(color: string | null): Command {
     name: 'cell-background',
     run: (state, dispatch) => {
       const cell = cellAt(state);
-      return cell ? setCellAttrs(cell.pos, { background: color }).run(state, dispatch) : false;
+      return cell
+        ? setCellAttrs(cell.pos, { background: color }).run(state, dispatch)
+        : false;
     },
     isEnabled: (state) => cellAt(state) != null,
   };
@@ -88,6 +97,7 @@ export function setCellBackground(color: string | null): Command {
 export function setColumnWidth(cellPos: number, width: number): Command {
   return {
     name: 'column-width',
-    run: (state, dispatch) => setCellAttrs(cellPos, { colwidth: [width] }).run(state, dispatch),
+    run: (state, dispatch) =>
+      setCellAttrs(cellPos, { colwidth: [width] }).run(state, dispatch),
   };
 }

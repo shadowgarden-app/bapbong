@@ -27,7 +27,10 @@ export * from '@shadow-garden/bapbong-contracts';
 export * from '@shadow-garden/bapbong-model';
 export * from '@shadow-garden/bapbong-docx';
 export * from '@shadow-garden/bapbong-commands';
-export { layout, createLayoutCache } from '@shadow-garden/bapbong-layout-engine';
+export {
+  layout,
+  createLayoutCache,
+} from '@shadow-garden/bapbong-layout-engine';
 export {
   FontRegistry,
   createFontRegistryMeasurer,
@@ -37,9 +40,23 @@ export {
   fontToCss,
   type FontVariant,
 } from '@shadow-garden/bapbong-measuring';
+// How a FontSpec becomes glyphs on a context. Prefer this over `fontToCss`:
+// the shorthand cannot carry tracking, so a context built from it alone draws
+// text narrower than the engine measured it.
+export {
+  applyGlyphSpec,
+  glyphCount,
+  glyphKey,
+  sameGlyphRun,
+  type GlyphContext,
+} from '@shadow-garden/bapbong-contracts';
 
 // A handful of names are declared (structurally-identically) in more than one
 // layer. Re-export the canonical contract versions explicitly so they stay
 // accessible from the façade — an explicit re-export wins over the otherwise
 // ambiguous `export *`, which would silently drop these names.
-export type { Align, PageConfig, CommentData } from '@shadow-garden/bapbong-contracts';
+export type {
+  Align,
+  PageConfig,
+  CommentData,
+} from '@shadow-garden/bapbong-contracts';

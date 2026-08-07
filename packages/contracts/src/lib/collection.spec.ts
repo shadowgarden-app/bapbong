@@ -21,7 +21,9 @@ describe('Collection', () => {
 
   it('keys by a custom idProperty via options (e.g. `name`)', () => {
     const a = { name: 'a', v: 1 };
-    const c = new Collection<Plugin>([a, { name: 'b', v: 2 }], { idProperty: 'name' });
+    const c = new Collection<Plugin>([a, { name: 'b', v: 2 }], {
+      idProperty: 'name',
+    });
     expect(c.get('a')).toBe(a); // by key
     expect(c.get(a)).toBe(a); // by item
     expect(c.has('b')).toBe(true);
@@ -32,14 +34,21 @@ describe('Collection', () => {
 
   it('throws when an item lacks the key property (default id, item has none)', () => {
     // Plugin has no `id`; with no { idProperty } it defaults to "id" → throws.
-    expect(() => new Collection<Plugin>([{ name: 'x', v: 1 }])).toThrow(/no "id" key/);
+    expect(() => new Collection<Plugin>([{ name: 'x', v: 1 }])).toThrow(
+      /no "id" key/,
+    );
     // Passing the right idProperty is fine.
-    expect(() => new Collection<Plugin>([{ name: 'x', v: 1 }], { idProperty: 'name' })).not.toThrow();
+    expect(
+      () =>
+        new Collection<Plugin>([{ name: 'x', v: 1 }], { idProperty: 'name' }),
+    ).not.toThrow();
   });
 
   it('add replaces by key and keeps insertion order; iterates values', () => {
     const c = new Collection<Plugin>([], { idProperty: 'name' });
-    c.add({ name: 'x', v: 1 }).add({ name: 'y', v: 2 }).add({ name: 'x', v: 9 }); // replaces x
+    c.add({ name: 'x', v: 1 })
+      .add({ name: 'y', v: 2 })
+      .add({ name: 'x', v: 9 }); // replaces x
     expect([...c].map((p) => `${p.name}:${p.v}`)).toEqual(['x:9', 'y:2']);
     expect(c.entries()).toEqual([
       ['x', { name: 'x', v: 9 }],

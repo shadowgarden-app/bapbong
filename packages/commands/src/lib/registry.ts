@@ -33,6 +33,9 @@ export function defaultCommands(): Collection<Command> {
       toggleMarkCommand('strike'),
       toggleMarkCommand('superscript', 'vertAlign', { value: 'super' }),
       toggleMarkCommand('subscript', 'vertAlign', { value: 'sub' }),
+      // Marks the importer has always produced but nothing could switch on.
+      toggleMarkCommand('small-caps', 'smallCaps'),
+      toggleMarkCommand('double-strike', 'dstrike'),
       clearMarks(),
       setAlign('left'),
       setAlign('center'),

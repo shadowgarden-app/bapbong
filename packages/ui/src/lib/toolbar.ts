@@ -1,3 +1,4 @@
+import { colorButton } from './color-picker.js';
 import type { Collection, Command } from '@shadow-garden/bapbong-contracts';
 import {
   type EditorHandle,
@@ -34,17 +35,18 @@ export interface ToolbarSelect {
   width?: number;
 }
 
-/** A colour-picker control: a button (a glyph over a colour bar) that opens a
- *  swatch palette. The host owns the command; the lib renders the popover. */
+/** A colour control: a glyph over a bar of the current colour, opening the
+ *  shared picker. The host owns the command; the palette belongs to the picker,
+ *  not to the caller — every shell offering its own list is how the two shells
+ *  ended up with different colours in the same menu. */
 export interface ToolbarColor {
   kind: 'color';
   title: string;
   /** Glyph above the colour bar (e.g. 'A' for text colour, '🖉' for highlight). */
   glyph: string;
-  /** Swatch colours offered (hex). */
-  swatches: string[];
-  /** Offer a "None / automatic" entry that clears the colour. */
-  allowNone?: boolean;
+  /** Wording for the "no colour" row ("Automatic", "No highlight"); omit to
+   *  drop that row entirely. */
+  clearLabel?: string;
   /** Current colour from state (shown in the bar), or null. */
   value: (state: EditorStateOf) => string | null;
   /** Called with the picked colour (null = cleared). */
@@ -170,7 +172,7 @@ const DEFAULT_ITEMS: Record<string, ToolbarItem> = {
 
 const STYLE = `
 .bb-toolbar-wrap{position:relative}
-.bb-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;overflow:hidden;padding:6px 8px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-bg,#fff);border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
+.bb-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;overflow:hidden;padding:6px 8px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
 .bb-toolbar *{box-sizing:border-box}
 .bb-toolbar-group{display:flex;gap:2px;flex:none}
 .bb-toolbar-group+.bb-toolbar-group{padding-left:10px;border-left:1px solid var(--bb-ui-border,#e3e3e0)}
@@ -181,16 +183,8 @@ const STYLE = `
 .bb-toolbar-btn:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-toolbar-btn.is-active{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-border,#b5d4f4)}
 .bb-toolbar-btn:disabled{opacity:.38;cursor:default}
-.bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer}
+.bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer}
 .bb-toolbar-select:hover{background:var(--bb-ui-hover,#f1efe8)}
-.bb-toolbar-color{position:relative}
-.bb-toolbar-color .bb-color-glyph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;line-height:1;font-size:13px}
-.bb-toolbar-color .bb-color-bar{width:16px;height:3px;border-radius:1px;background:currentColor}
-.bb-color-pop{position:absolute;z-index:1200;display:grid;grid-template-columns:repeat(8,16px);gap:4px;padding:8px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16)}
-.bb-color-pop[hidden]{display:none}
-.bb-color-swatch{width:16px;height:16px;padding:0;border:1px solid rgba(0,0,0,.18);border-radius:3px;cursor:pointer}
-.bb-color-none{grid-column:1/-1;font:inherit;font-size:12px;padding:3px 0;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:5px;background:var(--bb-ui-bg,#fff);cursor:pointer}
-.bb-color-none:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
 .bb-toolbar-split{display:flex;align-items:center;gap:0}
 .bb-toolbar-split .bb-toolbar-btn{min-width:26px;padding:0 5px}
@@ -198,7 +192,7 @@ const STYLE = `
 .bb-split-arrow svg{display:block}
 .bb-split-pop{position:absolute;z-index:1200;display:grid;grid-template-columns:repeat(3,auto);gap:8px;padding:10px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16)}
 .bb-split-pop[hidden]{display:none}
-.bb-split-card{display:flex;flex-direction:column;gap:6px;width:76px;padding:9px 8px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit}
+.bb-split-card{display:flex;flex-direction:column;gap:6px;width:76px;padding:9px 8px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:6px;background:transparent;cursor:pointer;font-family:inherit}
 .bb-split-card:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-split-card.is-selected{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#b5d4f4)}
 .bb-split-row{display:flex;align-items:center;gap:4px}
@@ -245,7 +239,7 @@ export function mountToolbar(
 
   const buttons: Array<{ name: string; el: HTMLButtonElement }> = [];
   const selects: Array<{ spec: ToolbarSelect; el: HTMLSelectElement }> = [];
-  const colors: Array<{ spec: ToolbarColor; bar: HTMLElement }> = [];
+  const colors: Array<{ sync(): void }> = [];
   const splits: Array<{ spec: ToolbarSplit; cards: HTMLButtonElement[] }> = [];
   let latest: EditorStateOf | null = null;
 
@@ -280,86 +274,23 @@ export function mountToolbar(
         continue;
       }
       if (typeof entry !== 'string' && entry.kind === 'color') {
-        const colorWrap = document.createElement('div');
-        colorWrap.className = 'bb-toolbar-color';
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'bb-toolbar-btn';
-        btn.title = entry.title;
-        btn.setAttribute('aria-label', entry.title);
-        const glyph = document.createElement('span');
-        glyph.className = 'bb-color-glyph';
-        glyph.innerHTML = entry.glyph; // text (e.g. 'A') or inline SVG (host-trusted)
-        const bar = document.createElement('span');
-        bar.className = 'bb-color-bar';
-        glyph.appendChild(bar);
-        btn.appendChild(glyph);
-        const pop = document.createElement('div');
-        pop.className = 'bb-color-pop';
-        pop.hidden = true;
-        const pick = (color: string | null) => {
-          entry.onSelect(color);
-          pop.hidden = true;
-          editor.focus();
-        };
-        for (const c of entry.swatches) {
-          const sw = document.createElement('button');
-          sw.type = 'button';
-          sw.className = 'bb-color-swatch';
-          sw.style.background = c;
-          sw.title = c;
-          sw.addEventListener('mousedown', (e) => e.preventDefault());
-          sw.addEventListener('click', () => pick(c));
-          pop.appendChild(sw);
-        }
-        if (entry.allowNone) {
-          const none = document.createElement('button');
-          none.type = 'button';
-          none.className = 'bb-color-none';
-          none.textContent = 'None';
-          none.addEventListener('mousedown', (e) => e.preventDefault());
-          none.addEventListener('click', () => pick(null));
-          pop.appendChild(none);
-        }
-        btn.addEventListener('mousedown', (e) => e.preventDefault());
-        btn.addEventListener('click', () => {
-          const open = pop.hidden;
-          wrap
-            .querySelectorAll('.bb-color-pop,.bb-split-pop')
-            .forEach((p) => ((p as HTMLElement).hidden = true));
-          pop.hidden = !open;
-          if (!pop.hidden) {
-            // Position under the button, relative to the outer wrap — the pop
-            // lives OUTSIDE the overflow-hidden .bb-toolbar row (which would
-            // clip it entirely; the "⋮" popover escapes the same way), and the
-            // button itself may sit in the row or in the folded popover.
-            const wrapRect = wrap.getBoundingClientRect();
-            const btnRect = btn.getBoundingClientRect();
-            pop.style.top = `${btnRect.bottom - wrapRect.top + 4}px`;
-            const left = Math.max(
-              0,
-              Math.min(
-                btnRect.left - wrapRect.left,
-                wrap.clientWidth - pop.offsetWidth - 4,
-              ),
-            );
-            pop.style.left = `${left}px`;
-            const onDoc = (ev: Event) => {
-              if (
-                !colorWrap.contains(ev.target as Node) &&
-                !pop.contains(ev.target as Node)
-              ) {
-                pop.hidden = true;
-                document.removeEventListener('pointerdown', onDoc, true);
-              }
-            };
-            document.addEventListener('pointerdown', onDoc, true);
-          }
+        // The picker is a body-level fixed panel, so unlike the popover this
+        // replaces it needs no wrap-relative arithmetic to escape the row's
+        // `overflow: hidden`.
+        const ctl = colorButton({
+          title: entry.title,
+          glyph: entry.glyph,
+          clearLabel: entry.clearLabel,
+          // `latest`, not `editor.state`: the toolbar mounts before any
+          // document exists, and reading state then throws.
+          value: () => (latest ? entry.value(latest) : null),
+          onPick: (color) => {
+            entry.onSelect(color);
+            editor.focus();
+          },
         });
-        colorWrap.appendChild(btn);
-        wrap.appendChild(pop);
-        groupEl.appendChild(colorWrap);
-        colors.push({ spec: entry, bar });
+        groupEl.appendChild(ctl.el);
+        colors.push(ctl);
         continue;
       }
       if (typeof entry !== 'string' && entry.kind === 'split') {
@@ -428,7 +359,7 @@ export function mountToolbar(
         arrow.addEventListener('click', () => {
           const open = pop.hidden;
           wrap
-            .querySelectorAll('.bb-split-pop,.bb-color-pop')
+            .querySelectorAll('.bb-split-pop')
             .forEach((p) => ((p as HTMLElement).hidden = true));
           pop.hidden = !open;
           if (!pop.hidden) {
@@ -527,7 +458,7 @@ export function mountToolbar(
     // Refolding moves the anchor buttons — an open color/split pop would float
     // detached from its button, so close them all.
     wrap
-      .querySelectorAll('.bb-color-pop,.bb-split-pop')
+      .querySelectorAll('.bb-split-pop')
       .forEach((p) => ((p as HTMLElement).hidden = true));
     if (fits()) return;
     moreBtn.style.display = '';
@@ -561,9 +492,7 @@ export function mountToolbar(
       el.disabled = cmd.isEnabled ? !cmd.isEnabled(state) : false;
     }
     for (const { spec, el } of selects) el.value = spec.value(state);
-    // Empty → CSS `currentColor` (the button's text colour) shows in the bar.
-    for (const { spec, bar } of colors)
-      bar.style.background = spec.value(state) ?? '';
+    for (const c of colors) c.sync();
     for (const { spec, cards } of splits) {
       const selected = spec.value(state);
       for (const card of cards)

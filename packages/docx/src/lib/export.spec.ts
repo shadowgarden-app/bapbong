@@ -267,6 +267,61 @@ describe('exportDocx (round-trip)', () => {
     ).toBe('super');
   });
 
+  it('round-trips w:position (baseline shift)', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'down', marks: ['position'], attrs: { halfPoints: -2 } },
+        { text: 'up', marks: ['position'], attrs: { halfPoints: 6 } },
+        { text: 'flat' },
+      ],
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const runs = [...range(back.child(0))];
+    const raise = (t: string) =>
+      runs
+        .find((n) => n.text === t)
+        ?.marks.find((m) => m.type.name === 'position')?.attrs['halfPoints'];
+    expect(raise('down')).toBe(-2);
+    expect(raise('up')).toBe(6);
+    expect(raise('flat')).toBeUndefined();
+  });
+
+  it('round-trips rPr w:spacing (tracking)', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'wide', marks: ['letterSpacing'], attrs: { twips: 26 } },
+        { text: 'tight', marks: ['letterSpacing'], attrs: { twips: -8 } },
+        { text: 'plain' },
+      ],
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const runs = [...range(back.child(0))];
+    const track = (t: string) =>
+      runs
+        .find((n) => n.text === t)
+        ?.marks.find((m) => m.type.name === 'letterSpacing')?.attrs['twips'];
+    expect(track('wide')).toBe(26);
+    expect(track('tight')).toBe(-8);
+    expect(track('plain')).toBeUndefined();
+  });
+
+  it('round-trips w:w, including alongside tracking', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'narrow', marks: ['charScale'], attrs: { percent: 80 } },
+        { text: 'plain' },
+      ],
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const runs = [...range(back.child(0))];
+    const pct = (t: string) =>
+      runs
+        .find((n) => n.text === t)
+        ?.marks.find((m) => m.type.name === 'charScale')?.attrs['percent'];
+    expect(pct('narrow')).toBe(80);
+    expect(pct('plain')).toBeUndefined();
+  });
+
   it('round-trips a hard break within a paragraph', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

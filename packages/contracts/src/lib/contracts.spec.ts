@@ -2,7 +2,12 @@ import type { FontSpec, PageConfig, ResolvedLayout } from './contracts.js';
 
 describe('contracts', () => {
   it('shapes compose as expected', () => {
-    const font: FontSpec = { family: 'Arial', sizePt: 11, bold: false, italic: false };
+    const font: FontSpec = {
+      family: 'Arial',
+      sizePt: 11,
+      bold: false,
+      italic: false,
+    };
     const page: PageConfig = {
       width: 816,
       height: 1056,

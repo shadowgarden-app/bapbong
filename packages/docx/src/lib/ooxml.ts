@@ -185,6 +185,14 @@ export interface RunProps {
   fontFamily?: string;
   highlight?: string; // background "#RRGGBB" (w:highlight / w:shd w:fill)
   vertAlign?: 'super' | 'sub'; // w:vertAlign
+  /** w:position — baseline shift in HALF-POINTS, positive up. Kept in the
+   *  document's own unit; the layout converts once, at the point of use. */
+  position?: number;
+  /** w:spacing (rPr) — tracking in TWIPS, positive = expanded. Same rule:
+   *  document unit in, converted once by the layout. */
+  letterSpacing?: number;
+  /** w:w — horizontal glyph scale as a PERCENT (100 = normal). */
+  charScale?: number;
 }
 
 /** Word's 16 named highlight colors → hex. */
@@ -326,6 +334,29 @@ export function parseRunProps(
   const va = attrOf(child(rPr, 'w:vertAlign'), 'w:val');
   if (va === 'superscript') props.vertAlign = 'super';
   else if (va === 'subscript') props.vertAlign = 'sub';
+
+  // w:position is independent of vertAlign: it moves the baseline without
+  // resizing the glyphs, and a run may carry both.
+  const pos = attrOf(child(rPr, 'w:position'), 'w:val');
+  if (pos !== undefined) {
+    const hp = Number(pos);
+    if (!Number.isNaN(hp)) props.position = hp;
+  }
+
+  // w:spacing inside rPr is CHARACTER tracking — nothing to do with the
+  // paragraph-level w:spacing (before/after/line) parsed from pPr.
+  const track = attrOf(child(rPr, 'w:spacing'), 'w:val');
+  if (track !== undefined) {
+    const tw = Number(track);
+    if (!Number.isNaN(tw)) props.letterSpacing = tw;
+  }
+
+  // w:w is a percentage; the schema allows a bare number or a "%" suffix.
+  const scale = attrOf(child(rPr, 'w:w'), 'w:val');
+  if (scale !== undefined) {
+    const pct = Number(scale.endsWith('%') ? scale.slice(0, -1) : scale);
+    if (!Number.isNaN(pct) && pct > 0) props.charScale = pct;
+  }
 
   // Background: w:highlight (named) takes precedence, else w:shd (solid
   // pattern color / fill / theme fill).

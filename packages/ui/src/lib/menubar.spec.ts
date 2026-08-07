@@ -27,9 +27,14 @@ describe('defaultMenus', () => {
   });
 
   it('omits the separator when only one kind of command exists', () => {
-    const commands = new Collection<Command>([cmd('bold'), cmd('underline')], { idProperty: 'name' });
+    const commands = new Collection<Command>([cmd('bold'), cmd('underline')], {
+      idProperty: 'name',
+    });
     expect(defaultMenus(commands)).toEqual([
-      { label: 'Format', entries: [{ command: 'bold' }, { command: 'underline' }] },
+      {
+        label: 'Format',
+        entries: [{ command: 'bold' }, { command: 'underline' }],
+      },
     ]);
   });
 });

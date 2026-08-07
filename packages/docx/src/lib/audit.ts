@@ -28,8 +28,10 @@ import type { OoxmlNode } from './ooxml.js';
  *     comment bodies reduced to plain text).
  *   - An attribute counts as covered when the code ASKED for it (`attrOf`),
  *     even if absent in this file — checking is coverage.
- *   - Entries are split into UNKNOWN (real gaps) and ignored-by-design (the
- *     IGNORED_* lists below: revision noise, style-gallery metadata, …).
+ *   - Entries are split three ways: UNKNOWN (real gaps), inert (unread, but
+ *     at a value the spec defines as a no-op — see INERT_* below), and
+ *     ignored-by-design (the IGNORED_* lists: revision noise, style-gallery
+ *     metadata, …).
  *
  * Known limitation: a read attribute whose VALUE the code didn't recognize
  * (e.g. `w:jc w:val="thaiDistribute"`) is not caught — the attr was read.
@@ -50,10 +52,19 @@ export interface AuditEntry {
   count: number;
 }
 
+/** An entry mid-collection, before bucketing: same as AuditEntry plus the
+ *  value-derived verdict only the tree walk can compute. */
+interface Counted extends AuditEntry {
+  inert: boolean;
+}
+
 export interface AuditReport {
   mode: 'import' | 'export';
   label: string;
   unknown: AuditEntry[];
+  /** Unread, but carrying a value the spec defines as having no effect — so
+   *  reading it would change nothing on the page. See INERT_ATTRS. */
+  inert: AuditEntry[];
   ignored: AuditEntry[];
 }
 
@@ -159,11 +170,16 @@ const IGNORED_TAGS = new Set([
   'w:tcW',
   // Footnote-body marker glyph: the layout draws its own note numbers.
   'w:footnoteRef',
-  // Theme parts beyond colors (and later fonts): effects/object defaults and
-  // extra scheme variants style Office's galleries, not document content.
-  'a:fmtScheme',
+  // Theme parts beyond colors, fonts and the format scheme: object defaults
+  // and extra scheme variants style Office's galleries, not document content.
+  // a:fmtScheme is NOT here any more — a shape's a:fillRef resolves through
+  // it, so the entries we cannot paint (gradient fills, the theme's line
+  // widths) are real gaps and should stay countable.
   'a:objectDefaults',
   'a:extraClrSchemeLst',
+  // Theme effect gallery: we paint no shadows or glows at all, the same
+  // decision already recorded for a:effectRef and a:effectLst.
+  'a:effectStyleLst',
   // numbering.xml bookkeeping: internal ids and list-gallery metadata,
   // meaningless to rendering; the part itself is carried on export.
   'w:nsid',
@@ -204,6 +220,9 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'w:lvl' && (name === 'w:tplc' || name === 'w:tentative')) ||
     // Rels are resolved by Id; the relationship Type is package plumbing.
     (tag === 'Relationship' && name === 'Type') ||
+    // Whether a style came from Word's built-in gallery or the user made it:
+    // drives the Styles pane and built-in name mapping, never rendering.
+    (tag === 'w:style' && name === 'w:customStyle') ||
     // Word's visited-link tracking flag — UI state, not content.
     (tag === 'w:hyperlink' && name === 'w:history') ||
     // A bookmark's numeric id pairs start/end within the part; the NAME is
@@ -240,6 +259,91 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     // CJK disambiguation hint — the explicit rFonts attrs are all read.
     (tag === 'w:rFonts' && name === 'w:hint')
   );
+}
+
+/**
+ * "Unread" and "would change the page" are not the same question, and the gap
+ * between them is almost entirely one thing: values that do nothing. Word
+ * writes a full set of schema defaults on every textbox, an empty a:srcRect on
+ * every picture, a "no outline" a:ln on every photo — none of which the
+ * document asked for. Counting those as gaps buries the real ones.
+ *
+ * An entry lands in the `inert` bucket when it is unread AND, per ECMA-376,
+ * a no-op in exactly this state. Two shapes:
+ *   - an attribute sitting at its schema default (`wps:bodyPr @anchor="t"`);
+ *   - an element the spec defines as inert here (`a:ln` holding only
+ *     `a:noFill`, an empty `a:effectLst`, `prst="textNoShape"`).
+ *
+ * What does NOT qualify — the distinction this whole bucket rests on — is
+ * "the value happens to equal our hardcoded fallback". Those render the same
+ * only by coincidence and are real gaps: `w:tblCellMar`'s 108 twips matching
+ * CELL_PAD_X's 7.2px is the standing example, and it stays UNKNOWN.
+ *
+ * Demoting by VALUE rather than by NAME is what keeps this from going blind:
+ * any other value on the same key falls straight back to UNKNOWN, so the day
+ * a file writes `anchor="ctr"` the audit says so.
+ */
+const FALSE_VALUES = new Set(['0', 'false', 'off']);
+const isFalse = (v: string) => FALSE_VALUES.has(v);
+const isNum = (n: number) => (v: string) => Number(v) === n;
+
+/** `tag @attr` → predicate on the raw value: true = this value is a no-op. */
+const INERT_ATTRS: Record<string, (v: string) => boolean> = {
+  // CT_TextBodyProperties. Word stamps the whole default set onto every
+  // textbox it writes. NOT listed: @compatLnSpc, whose default is false — a
+  // written "1" really does change line spacing inside the shape.
+  'wps:bodyPr @rot': isNum(0),
+  'wps:bodyPr @spcFirstLastPara': isFalse,
+  'wps:bodyPr @vertOverflow': (v) => v === 'overflow',
+  'wps:bodyPr @horzOverflow': (v) => v === 'overflow',
+  'wps:bodyPr @vert': (v) => v === 'horz',
+  'wps:bodyPr @wrap': (v) => v === 'square',
+  'wps:bodyPr @numCol': isNum(1),
+  'wps:bodyPr @spcCol': isNum(0),
+  'wps:bodyPr @rtlCol': isFalse,
+  'wps:bodyPr @fromWordArt': isFalse,
+  'wps:bodyPr @anchor': (v) => v === 't',
+  'wps:bodyPr @anchorCtr': isFalse,
+  'wps:bodyPr @forceAA': isFalse,
+};
+
+/** Elements that are no-ops in a particular shape. The predicate reads
+ *  `node.attrs`/`node.children` directly — the sweep must not mark anything. */
+const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
+  // CT_RelativeRect: all four insets default to 0, so an empty srcRect (what
+  // Word writes on every uncropped picture) crops nothing.
+  'a:srcRect': (n) => n.children.length === 0 && attrCount(n) === 0,
+  // No effect children = no shadow, glow or reflection.
+  'a:effectLst': (n) => n.children.length === 0,
+  // The spec's explicit "this shape has no outline" state.
+  'a:ln': (n) =>
+    n.children.length > 0 && n.children.every((c) => c.name === 'a:noFill'),
+  // The preset that applies no warp at all — Word writes it on every textbox.
+  'a:prstTxWarp': (n) => n.attrs['prst'] === 'textNoShape',
+  // ST_TextEffect defaults to "none": the animated text effects Word has not
+  // rendered since 2007, written out as "no effect".
+  'w:effect': (n) => n.attrs['w:val'] === 'none',
+  // CT_TblWidth @w:w defaults to 0 = the table sits at the margin.
+  'w:tblInd': (n) => Number(n.attrs['w:w'] ?? '0') === 0,
+  // ST_DocGrid @w:type defaults to "default", which snaps nothing — and that
+  // makes the linePitch/charSpace it carries moot. Only lines/linesAndChars
+  // actually grid the page, and those stay UNKNOWN.
+  'w:docGrid': (n) => {
+    const t = n.attrs['w:type'];
+    return t === undefined || t === 'default';
+  },
+};
+
+function attrCount(n: OoxmlNode): number {
+  return Object.keys(n.attrs).filter((a) => !a.startsWith('xmlns')).length;
+}
+
+function isInertAttr(tag: string, name: string, value: string): boolean {
+  return INERT_ATTRS[`${tag} @${name}`]?.(value) ?? false;
+}
+
+function isInertTag(node: OoxmlNode): boolean {
+  return INERT_TAGS[node.name]?.(node) ?? false;
 }
 
 function computeEnabled(): boolean {
@@ -287,40 +391,48 @@ function emitLine(line: string): void {
   }
 }
 
-function classify(
-  counts: Map<string, { part: string; key: string; count: number }>,
-): { unknown: AuditEntry[]; ignored: AuditEntry[] } {
+function classify(counts: Map<string, Counted>): {
+  unknown: AuditEntry[];
+  inert: AuditEntry[];
+  ignored: AuditEntry[];
+} {
   const unknown: AuditEntry[] = [];
   // UNKNOWN entries keep their part (the location matters for fixing them);
-  // ignored-by-design ones aggregate across parts — pure noise volume
-  // otherwise (the same rsid attr once per header/footer part).
+  // inert and ignored-by-design ones aggregate across parts — pure noise
+  // volume otherwise (the same rsid attr once per header/footer part).
+  const inertByKey = new Map<string, AuditEntry>();
   const ignoredByKey = new Map<string, AuditEntry>();
+  const aggregate = (into: Map<string, AuditEntry>, e: Counted) => {
+    const agg = into.get(e.key);
+    if (agg) agg.count += e.count;
+    else into.set(e.key, { part: '*', key: e.key, count: e.count });
+  };
   for (const e of counts.values()) {
     const tag = e.key.split(' @')[0];
     const attr = e.key.includes(' @') ? e.key.split(' @')[1] : null;
-    const isIgnored = attr ? isIgnoredAttr(tag, attr) : isIgnoredTag(tag);
-    if (!isIgnored) {
-      unknown.push(e);
+    if (attr ? isIgnoredAttr(tag, attr) : isIgnoredTag(tag)) {
+      aggregate(ignoredByKey, e);
+    } else if (e.inert) {
+      aggregate(inertByKey, e);
     } else {
-      const agg = ignoredByKey.get(e.key);
-      if (agg) agg.count += e.count;
-      else ignoredByKey.set(e.key, { part: '*', key: e.key, count: e.count });
+      unknown.push({ part: e.part, key: e.key, count: e.count });
     }
   }
-  const ignored = [...ignoredByKey.values()];
   const byCount = (a: AuditEntry, b: AuditEntry) =>
     b.count - a.count || a.key.localeCompare(b.key);
   unknown.sort(byCount);
-  ignored.sort(byCount);
-  return { unknown, ignored };
+  const inert = [...inertByKey.values()].sort(byCount);
+  const ignored = [...ignoredByKey.values()].sort(byCount);
+  return { unknown, inert, ignored };
 }
 
 function emitReport(report: AuditReport): void {
   lastReport = report;
-  const { mode, label, unknown, ignored } = report;
+  const { mode, label, unknown, inert, ignored } = report;
   const header =
     `[xml-audit] ${mode} "${label}" — ` +
-    `${unknown.length} UNKNOWN, ${ignored.length} ignored-by-design`;
+    `${unknown.length} UNKNOWN, ${inert.length} inert, ` +
+    `${ignored.length} ignored-by-design`;
   const c = console as unknown as {
     groupCollapsed?: (l: string) => void;
     groupEnd?: () => void;
@@ -331,27 +443,32 @@ function emitReport(report: AuditReport): void {
   if (sink && grouped) sink(header);
   const pad = Math.max(
     0,
-    ...[...unknown, ...ignored].map((e) => e.part.length),
+    ...[...unknown, ...inert, ...ignored].map((e) => e.part.length),
   );
   for (const e of unknown)
     emitLine(`  UNKNOWN ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
+  for (const e of inert)
+    emitLine(`  inert   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
   for (const e of ignored)
     emitLine(`  ignored ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
   if (grouped) c.groupEnd?.();
 }
 
 /** Walk a registered part, collecting untouched tags/attrs (see module doc
- *  for the boundary rule). */
+ *  for the boundary rule). Inert-ness is decided HERE, the only place that
+ *  still sees the node and its value — and it belongs to the bucket identity,
+ *  not to the key: two `wp:wrapSquare` elements with different `wrapText`
+ *  values must not collapse into one verdict. */
 function collectPart(
   part: string,
   root: OoxmlNode,
-  counts: Map<string, { part: string; key: string; count: number }>,
+  counts: Map<string, Counted>,
 ): void {
-  const bump = (key: string) => {
-    const id = `${part} ${key}`;
+  const bump = (key: string, inert: boolean) => {
+    const id = `${part} ${key} ${inert}`;
     const e = counts.get(id);
     if (e) e.count++;
-    else counts.set(id, { part, key, count: 1 });
+    else counts.set(id, { part, key, count: 1, inert });
   };
   const walk = (node: OoxmlNode, parentVisited: boolean) => {
     for (const c of node.children) {
@@ -362,10 +479,11 @@ function collectPart(
         for (const a of Object.keys(c.attrs)) {
           // xmlns declarations aren't content — not worth an "ignored" line.
           if (a.startsWith('xmlns')) continue;
-          if (!asked?.has(a)) bump(`${c.name} @${a}`);
+          if (!asked?.has(a))
+            bump(`${c.name} @${a}`, isInertAttr(c.name, a, c.attrs[a]));
         }
       } else if (parentVisited) {
-        bump(c.name);
+        bump(c.name, isInertTag(c));
       }
       walk(c, v);
     }
@@ -378,6 +496,14 @@ export const audit = {
    *  toggled live from the console; imports resolve it once in begin). */
   get enabled(): boolean {
     return computeEnabled();
+  },
+
+  /** Whether an import is currently COLLECTING — a plain boolean read, unlike
+   *  `enabled` which re-resolves the flag through globalThis/localStorage.
+   *  Guard extra bookkeeping that only the audit needs with this, so the hot
+   *  path pays nothing when the flag is off. */
+  get collecting(): boolean {
+    return importActive;
   },
 
   /** Force the flag on/off from code (equivalent to setting the global). */
@@ -451,10 +577,7 @@ export const audit = {
     importDepth = Math.max(0, importDepth - 1);
     if (importDepth > 0 || !importActive) return;
     importActive = false;
-    const counts = new Map<
-      string,
-      { part: string; key: string; count: number }
-    >();
+    const counts = new Map<string, Counted>();
     for (const p of parts) collectPart(p.name, p.root, counts);
     emitReport({ mode: 'import', label: importLabel, ...classify(counts) });
     parts = [];
@@ -482,6 +605,12 @@ export const audit = {
     const unknown: AuditEntry[] = [...exportCounts.entries()]
       .map(([key, count]) => ({ part: 'model', key, count }))
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
-    emitReport({ mode: 'export', label: exportLabel, unknown, ignored: [] });
+    emitReport({
+      mode: 'export',
+      label: exportLabel,
+      unknown,
+      inert: [],
+      ignored: [],
+    });
   },
 };

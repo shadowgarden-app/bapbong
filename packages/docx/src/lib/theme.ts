@@ -125,3 +125,255 @@ export function buildThemeResolver(
       : applyTintShade(base, tint, shade);
   };
 }
+
+// ── DrawingML colour ────────────────────────────────────────────────
+// ST_ColorChoice is a CLOSED union of six elements, each able to carry a
+// stack of transforms. Reading only two of the six (and none of the
+// transforms) is how a shape ends up rendered in its base accent colour when
+// Word shows "Accent 1, Lighter 40%" — that pair is written as schemeClr +
+// lumMod + lumOff, and dropping the children keeps the val and loses the
+// adjustment silently. Because the union is closed, covering it once closes
+// it for good.
+
+/** The subset of a:prstClr Word actually emits (shape defaults and the
+ *  standard-colour row). Unlisted names resolve to undefined and fall through
+ *  to whatever default the caller has. */
+const PRESET_COLORS: Record<string, string> = {
+  black: '000000',
+  white: 'FFFFFF',
+  red: 'FF0000',
+  green: '008000',
+  blue: '0000FF',
+  yellow: 'FFFF00',
+  cyan: '00FFFF',
+  aqua: '00FFFF',
+  magenta: 'FF00FF',
+  fuchsia: 'FF00FF',
+  gray: '808080',
+  grey: '808080',
+  darkGray: 'A9A9A9',
+  lightGray: 'D3D3D3',
+  silver: 'C0C0C0',
+  maroon: '800000',
+  olive: '808000',
+  navy: '000080',
+  purple: '800080',
+  teal: '008080',
+  lime: '00FF00',
+  orange: 'FFA500',
+  brown: 'A52A2A',
+  pink: 'FFC0CB',
+  gold: 'FFD700',
+  indigo: '4B0082',
+  violet: 'EE82EE',
+};
+
+const CHOICE_TAGS = [
+  'a:srgbClr',
+  'a:schemeClr',
+  'a:sysClr',
+  'a:prstClr',
+  'a:scrgbClr',
+  'a:hslClr',
+];
+
+/** OOXML percentages are thousandths of a percent: 40000 = 40%. */
+function pct(el: OoxmlNode | undefined, attr: string): number | undefined {
+  const v = attrOf(el, attr);
+  if (v === undefined) return undefined;
+  const n = Number(v.endsWith('%') ? v.slice(0, -1) : v) / 100000;
+  return Number.isNaN(n) ? undefined : n;
+}
+
+/** Colour carried through a transform chain as floats in 0..1. Quantising to
+ *  bytes between transforms is what put "Accent 1, Lighter 40%" two units off
+ *  Word's swatch — lumMod and lumOff are written as a PAIR, so the
+ *  intermediate value must never be rounded. */
+type Rgb = [number, number, number];
+
+const hexToRgb = (hex: string): Rgb => [
+  parseInt(hex.slice(1, 3), 16) / 255,
+  parseInt(hex.slice(3, 5), 16) / 255,
+  parseInt(hex.slice(5, 7), 16) / 255,
+];
+
+const rgbToHex = ([r, g, b]: Rgb): string =>
+  `#${hex2(r * 255)}${hex2(g * 255)}${hex2(b * 255)}`;
+
+function rgbToHsl([r, g, b]: Rgb): [number, number, number] {
+  const max = Math.max(r, g, b),
+    min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h =
+    max === r
+      ? ((g - b) / d + (g < b ? 6 : 0)) / 6
+      : max === g
+        ? ((b - r) / d + 2) / 6
+        : ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+function hslToRgb(h: number, s: number, l: number): Rgb {
+  const sat = Math.max(0, Math.min(1, s));
+  const lum = Math.max(0, Math.min(1, l));
+  if (sat === 0) return [lum, lum, lum];
+  const q = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat;
+  const p = 2 * lum - q;
+  const comp = (t: number) => {
+    let x = t;
+    if (x < 0) x += 1;
+    if (x > 1) x -= 1;
+    if (x < 1 / 6) return p + (q - p) * 6 * x;
+    if (x < 1 / 2) return q;
+    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+    return p;
+  };
+  return [comp(h + 1 / 3), comp(h), comp(h - 1 / 3)];
+}
+
+/** Apply one colour transform. Luminance/saturation modifiers go through HSL
+ *  — that is the pair Word writes for every "Lighter N%" swatch, and HSL
+ *  reproduces its result exactly. a:alpha is deliberately absent: the colour
+ *  model is opaque "#RRGGBB", so faking transparency against an unknown
+ *  backdrop would be worse than leaving it visibly unhandled. */
+function applyTransform(c: Rgb, el: OoxmlNode): Rgb {
+  const f = pct(el, 'val');
+  if (f === undefined) return c;
+  const hsl = () => rgbToHsl(c);
+  switch (el.name) {
+    case 'a:lumMod': {
+      const [h, s, l] = hsl();
+      return hslToRgb(h, s, l * f);
+    }
+    case 'a:lumOff': {
+      const [h, s, l] = hsl();
+      return hslToRgb(h, s, l + f);
+    }
+    case 'a:satMod': {
+      const [h, s, l] = hsl();
+      return hslToRgb(h, s * f, l);
+    }
+    case 'a:shade':
+      return [c[0] * f, c[1] * f, c[2] * f];
+    case 'a:tint':
+      return [c[0] * f + (1 - f), c[1] * f + (1 - f), c[2] * f + (1 - f)];
+    default:
+      return c;
+  }
+}
+
+/** Resolve the ST_ColorChoice child of `parent` (an a:solidFill, a:lnRef,
+ *  a:gs …) to "#RRGGBB", applying its transforms in document order.
+ *
+ *  `phClr` substitutes for `a:schemeClr val="phClr"`, the placeholder a theme's
+ *  fmtScheme uses to mean "whichever colour the shape's style reference
+ *  supplied". Without it every themed shape fill resolves to nothing. */
+export function drawingColor(
+  parent: OoxmlNode | undefined,
+  resolveTheme: ThemeResolver,
+  phClr?: string,
+): string | undefined {
+  if (!parent) return undefined;
+  let el: OoxmlNode | undefined;
+  for (const tag of CHOICE_TAGS) {
+    el = child(parent, tag);
+    if (el) break;
+  }
+  if (!el) return undefined;
+
+  let base: string | undefined;
+  switch (el.name) {
+    case 'a:srgbClr': {
+      const v = attrOf(el, 'val');
+      base = v ? `#${v.toUpperCase()}` : undefined;
+      break;
+    }
+    case 'a:schemeClr': {
+      const v = attrOf(el, 'val');
+      base = v === 'phClr' ? phClr : v ? resolveTheme(v) : undefined;
+      break;
+    }
+    case 'a:sysClr': {
+      // lastClr is Word's own resolution of the system colour; val is the
+      // symbolic name we'd otherwise map by hand.
+      const last = attrOf(el, 'lastClr');
+      const name = attrOf(el, 'val');
+      const v = last ?? (name ? SYS_COLORS[name] : undefined);
+      base = v ? `#${v.toUpperCase().replace('#', '')}` : undefined;
+      break;
+    }
+    case 'a:prstClr': {
+      const v = attrOf(el, 'val');
+      const hex = v ? PRESET_COLORS[v] : undefined;
+      base = hex ? `#${hex}` : undefined;
+      break;
+    }
+    case 'a:scrgbClr': {
+      const r = pct(el, 'r'),
+        g = pct(el, 'g'),
+        b = pct(el, 'b');
+      base =
+        r !== undefined && g !== undefined && b !== undefined
+          ? `#${hex2(r * 255)}${hex2(g * 255)}${hex2(b * 255)}`
+          : undefined;
+      break;
+    }
+    case 'a:hslClr': {
+      const hueRaw = attrOf(el, 'hue');
+      const h = hueRaw === undefined ? undefined : Number(hueRaw) / 21600000;
+      const sat = pct(el, 'sat'),
+        lum = pct(el, 'lum');
+      base =
+        h !== undefined && sat !== undefined && lum !== undefined
+          ? rgbToHex(hslToRgb(h, sat, lum))
+          : undefined;
+      break;
+    }
+  }
+  if (!base) return undefined;
+
+  // Transforms compose in document order, so "lumMod 60% then lumOff 40%"
+  // is not the same as the reverse.
+  let out = hexToRgb(base);
+  for (const t of el.children) {
+    audit.mark(t);
+    out = applyTransform(out, t);
+  }
+  return rgbToHex(out);
+}
+
+/** Resolve an `a:fillRef` — a shape saying "fill me the way the theme's
+ *  format scheme entry N does, using this colour as the placeholder". */
+export type ThemeFillResolver = (
+  fillRef: OoxmlNode | undefined,
+) => string | undefined;
+
+export function buildThemeFillResolver(
+  themeRoot: OoxmlNode | undefined,
+  resolveTheme: ThemeResolver,
+): ThemeFillResolver {
+  const list = findDescendant(themeRoot, 'a:fillStyleLst');
+  const bgList = findDescendant(themeRoot, 'a:bgFillStyleLst');
+
+  return (fillRef) => {
+    if (!fillRef) return undefined;
+    const idx = Number(attrOf(fillRef, 'idx') ?? '0');
+    if (!Number.isFinite(idx) || idx === 0) return undefined; // idx 0 = no fill
+    // The ref carries the placeholder colour the scheme entry fills in.
+    const phClr = drawingColor(fillRef, resolveTheme);
+    const entry =
+      idx >= 1000
+        ? bgList?.children[idx - 1000]
+        : (list?.children[idx - 1] ?? undefined);
+    if (!entry) return phClr;
+    if (entry.name === 'a:solidFill')
+      return drawingColor(entry, resolveTheme, phClr) ?? phClr;
+    // Gradient and pattern entries: we paint flat, so take the first stop —
+    // closer than the bare placeholder, which ignores the scheme's tinting.
+    const firstStop = child(child(entry, 'a:gsLst'), 'a:gs');
+    return drawingColor(firstStop, resolveTheme, phClr) ?? phClr;
+  };
+}

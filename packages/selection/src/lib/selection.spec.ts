@@ -5,13 +5,24 @@ import type {
   ResolvedLayout,
   ResolvedPage,
 } from '@shadow-garden/bapbong-contracts';
-import { caretRect, hitTest, imageAtPoint, selectionRects, verticalCaret } from './selection.js';
+import {
+  caretRect,
+  hitTest,
+  imageAtPoint,
+  selectionRects,
+  verticalCaret,
+} from './selection.js';
 
 const F: FontSpec = { family: 'Arial', sizePt: 10, bold: false, italic: false };
 /** 10px per character. */
 const measure: MeasureText = (text) => text.length * 10;
 
-const seg = (x: number, text: string, pos: number) => ({ x, text, font: F, pos });
+const seg = (x: number, text: string, pos: number) => ({
+  x,
+  text,
+  font: F,
+  pos,
+});
 
 const line = (
   y: number,
@@ -31,7 +42,11 @@ const line = (
   ...over,
 });
 
-const page = (lines: LayoutLine[], index = 0, over: Partial<ResolvedPage> = {}): ResolvedPage => ({
+const page = (
+  lines: LayoutLine[],
+  index = 0,
+  over: Partial<ResolvedPage> = {},
+): ResolvedPage => ({
   index,
   width: 240,
   height: 100,
@@ -86,8 +101,24 @@ describe('hitTest', () => {
               width: 180,
               height: 16,
               cells: [
-                { x: 20, y: 20, width: 80, height: 16, colspan: 1, rowspan: 1, lines: [left] },
-                { x: 120, y: 20, width: 80, height: 16, colspan: 1, rowspan: 1, lines: [right] },
+                {
+                  x: 20,
+                  y: 20,
+                  width: 80,
+                  height: 16,
+                  colspan: 1,
+                  rowspan: 1,
+                  lines: [left],
+                },
+                {
+                  x: 120,
+                  y: 20,
+                  width: 80,
+                  height: 16,
+                  colspan: 1,
+                  rowspan: 1,
+                  lines: [right],
+                },
               ],
             },
           ],
@@ -101,17 +132,32 @@ describe('hitTest', () => {
 
 describe('caretRect', () => {
   it('positions the caret inside a segment', () => {
-    expect(caretRect(twoLines, 3, measure)).toEqual({ pageIndex: 0, x: 40, y: 20, height: 16 });
+    expect(caretRect(twoLines, 3, measure)).toEqual({
+      pageIndex: 0,
+      x: 40,
+      y: 20,
+      height: 16,
+    });
   });
 
   it('clamps a swallowed wrap-space position to the line end', () => {
     // pos 6 is the space dropped at the wrap → caret at end of "hello".
-    expect(caretRect(twoLines, 6, measure)).toEqual({ pageIndex: 0, x: 70, y: 20, height: 16 });
+    expect(caretRect(twoLines, 6, measure)).toEqual({
+      pageIndex: 0,
+      x: 70,
+      y: 20,
+      height: 16,
+    });
   });
 
   it('places the caret on an empty line', () => {
     const layout: ResolvedLayout = { pages: [page([line(20, [], 5, 5)])] };
-    expect(caretRect(layout, 5, measure)).toEqual({ pageIndex: 0, x: 20, y: 20, height: 16 });
+    expect(caretRect(layout, 5, measure)).toEqual({
+      pageIndex: 0,
+      x: 20,
+      y: 20,
+      height: 16,
+    });
   });
 });
 
@@ -181,12 +227,24 @@ describe('imageAtPoint', () => {
           ],
           tables: [
             {
-              x: 20, y: 80, width: 100, height: 20,
-              cells: [{
-                x: 20, y: 80, width: 100, height: 20, colspan: 1, rowspan: 1,
-                lines: [],
-                floats: [{ x: 30, y: 85, width: 20, height: 10, src: 'cf', pos: 15 }],
-              }],
+              x: 20,
+              y: 80,
+              width: 100,
+              height: 20,
+              cells: [
+                {
+                  x: 20,
+                  y: 80,
+                  width: 100,
+                  height: 20,
+                  colspan: 1,
+                  rowspan: 1,
+                  lines: [],
+                  floats: [
+                    { x: 30, y: 85, width: 20, height: 10, src: 'cf', pos: 15 },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -195,7 +253,11 @@ describe('imageAtPoint', () => {
   };
   it('hits an inline image via its baseline-anchored box', () => {
     const hit = imageAtPoint(layout, { pageIndex: 0, x: 70, y: 25 });
-    expect(hit).toMatchObject({ pos: 5, kind: 'inline', rect: { x: 60, y: 22, width: 40, height: 10 } });
+    expect(hit).toMatchObject({
+      pos: 5,
+      kind: 'inline',
+      rect: { x: 60, y: 22, width: 40, height: 10 },
+    });
     // Just above the image box (line top band) → no hit.
     expect(imageAtPoint(layout, { pageIndex: 0, x: 70, y: 21 })).toBeNull();
   });
@@ -206,16 +268,30 @@ describe('imageAtPoint', () => {
     // Point only inside the pos-less decoration float → skipped → null.
     expect(imageAtPoint(layout, { pageIndex: 0, x: 175, y: 60 })).toBeNull();
     const cf = imageAtPoint(layout, { pageIndex: 0, x: 35, y: 90 });
-    expect(cf).toMatchObject({ pos: 15, kind: 'float', rect: { x: 30, y: 85 } });
+    expect(cf).toMatchObject({
+      pos: 15,
+      kind: 'float',
+      rect: { x: 30, y: 85 },
+    });
   });
 
   it('prefers the float over an underlying inline image', () => {
     const both: ResolvedLayout = {
-      pages: [page(
-        [line(20, [seg(20, 'x', 1)], 1, 3, { images: [{ x: 20, src: 'a', width: 40, height: 10, pos: 2 }] })],
-        0,
-        { floats: [{ x: 20, y: 20, width: 40, height: 12, src: 'f', pos: 30 }] },
-      )],
+      pages: [
+        page(
+          [
+            line(20, [seg(20, 'x', 1)], 1, 3, {
+              images: [{ x: 20, src: 'a', width: 40, height: 10, pos: 2 }],
+            }),
+          ],
+          0,
+          {
+            floats: [
+              { x: 20, y: 20, width: 40, height: 12, src: 'f', pos: 30 },
+            ],
+          },
+        ),
+      ],
     };
     expect(imageAtPoint(both, { pageIndex: 0, x: 30, y: 26 })?.pos).toBe(30);
   });

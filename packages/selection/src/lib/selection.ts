@@ -34,7 +34,9 @@ function allLines(page: ResolvedPage): LayoutLine[] {
     }
   };
   page.tables?.forEach(visit);
-  return lines.filter((l) => l.from != null).sort((a, b) => a.y - b.y || a.x - b.x);
+  return lines
+    .filter((l) => l.from != null)
+    .sort((a, b) => a.y - b.y || a.x - b.x);
 }
 
 /** Positioned items of a line, sorted by x. Marker segments (no pos) are skipped. */
@@ -44,7 +46,12 @@ function lineItems(line: LayoutLine, measure: MeasureText): Item[] {
     if (seg.pos == null) continue;
     if (seg.field) {
       // Page-number fields are atoms: one PM position, midpoint rule.
-      items.push({ x: seg.x, width: seg.width ?? measure(seg.text, seg.font), pos: seg.pos, size: 1 });
+      items.push({
+        x: seg.x,
+        width: seg.width ?? measure(seg.text, seg.font),
+        pos: seg.pos,
+        size: 1,
+      });
       continue;
     }
     items.push({
@@ -64,7 +71,11 @@ function lineItems(line: LayoutLine, measure: MeasureText): Item[] {
 }
 
 /** Caret x for `pos` on `line` (clamped to the line's content edges). */
-function caretXOnLine(line: LayoutLine, pos: number, measure: MeasureText): number {
+function caretXOnLine(
+  line: LayoutLine,
+  pos: number,
+  measure: MeasureText,
+): number {
   const items = lineItems(line, measure);
   if (items.length === 0) return line.x;
   const first = items[0];
@@ -131,7 +142,11 @@ function lineForPos(lines: LayoutLine[], pos: number): LayoutLine | null {
 }
 
 /** Page-local point → PM position (nearest caret slot), or null on an empty page. */
-export function hitTest(layout: ResolvedLayout, point: PagePoint, measure: MeasureText): number | null {
+export function hitTest(
+  layout: ResolvedLayout,
+  point: PagePoint,
+  measure: MeasureText,
+): number | null {
   const page = layout.pages[point.pageIndex];
   if (!page) return null;
   const lines = allLines(page);
@@ -143,7 +158,11 @@ export function hitTest(layout: ResolvedLayout, point: PagePoint, measure: Measu
   let target: LayoutLine;
   if (hits.length > 0) {
     const xDist = (l: LayoutLine) =>
-      point.x < l.x ? l.x - point.x : point.x > l.x + l.width ? point.x - (l.x + l.width) : 0;
+      point.x < l.x
+        ? l.x - point.x
+        : point.x > l.x + l.width
+          ? point.x - (l.x + l.width)
+          : 0;
     target = hits.reduce((a, b) => (xDist(b) < xDist(a) ? b : a));
   } else {
     const yDist = (l: LayoutLine) =>
@@ -154,7 +173,11 @@ export function hitTest(layout: ResolvedLayout, point: PagePoint, measure: Measu
 }
 
 /** PM position → caret rectangle in page-local coordinates, or null. */
-export function caretRect(layout: ResolvedLayout, pos: number, measure: MeasureText): CaretRect | null {
+export function caretRect(
+  layout: ResolvedLayout,
+  pos: number,
+  measure: MeasureText,
+): CaretRect | null {
   for (const page of layout.pages) {
     const lines = allLines(page);
     if (lines.length === 0) continue;
@@ -190,7 +213,13 @@ export function selectionRects(
       if (lineFrom === lineTo) {
         // Empty line: show a stub when the selection passes over it.
         if (from <= lineFrom && to > lineTo) {
-          rects.push({ pageIndex: page.index, x: line.x, y: line.y, width: EMPTY_LINE_RECT_WIDTH, height: line.height });
+          rects.push({
+            pageIndex: page.index,
+            x: line.x,
+            y: line.y,
+            width: EMPTY_LINE_RECT_WIDTH,
+            height: line.height,
+          });
         }
         continue;
       }
@@ -199,7 +228,13 @@ export function selectionRects(
       if (e <= s) continue;
       const x1 = caretXOnLine(line, s, measure);
       const x2 = caretXOnLine(line, e, measure);
-      rects.push({ pageIndex: page.index, x: x1, y: line.y, width: Math.max(x2 - x1, 2), height: line.height });
+      rects.push({
+        pageIndex: page.index,
+        x: x1,
+        y: line.y,
+        width: Math.max(x2 - x1, 2),
+        height: line.height,
+      });
     }
   }
   return rects;
@@ -229,14 +264,21 @@ export function verticalCaret(
   }
   if (!current || pageIdx < 0) return null;
 
-  const pick = (cands: LayoutLine[], extremeTop: boolean): LayoutLine | null => {
+  const pick = (
+    cands: LayoutLine[],
+    extremeTop: boolean,
+  ): LayoutLine | null => {
     if (cands.length === 0) return null;
     const edgeY = extremeTop
       ? Math.min(...cands.map((l) => l.y))
       : Math.max(...cands.map((l) => l.y));
     const band = cands.filter((l) => Math.abs(l.y - edgeY) < 0.5);
     const xDist = (l: LayoutLine) =>
-      goalX < l.x ? l.x - goalX : goalX > l.x + l.width ? goalX - (l.x + l.width) : 0;
+      goalX < l.x
+        ? l.x - goalX
+        : goalX > l.x + l.width
+          ? goalX - (l.x + l.width)
+          : 0;
     return band.reduce((a, b) => (xDist(b) < xDist(a) ? b : a));
   };
 
@@ -270,12 +312,21 @@ export interface ImageHit {
 /** The topmost document image at a page-local point, or null. Floats win over
  *  inline images (they paint over the text); among floats, the later one wins
  *  (painted last = on top). Chrome/textbox art carries no pos and is skipped. */
-export function imageAtPoint(layout: ResolvedLayout, point: PagePoint): ImageHit | null {
+export function imageAtPoint(
+  layout: ResolvedLayout,
+  point: PagePoint,
+): ImageHit | null {
   const page = layout.pages[point.pageIndex];
   if (!page) return null;
   // A rotated image paints rotated around its box center; hit-test in its
   // local space by inverse-rotating the point.
-  const inside = (x: number, y: number, w: number, h: number, rotation?: number) => {
+  const inside = (
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    rotation?: number,
+  ) => {
     let px = point.x;
     let py = point.y;
     if (rotation) {
@@ -300,7 +351,8 @@ export function imageAtPoint(layout: ResolvedLayout, point: PagePoint): ImageHit
   page.tables?.forEach(visitCells);
   for (let i = floats.length - 1; i >= 0; i--) {
     const f = floats[i];
-    if (f.pos == null || !inside(f.x, f.y, f.width, f.height, f.rotation)) continue;
+    if (f.pos == null || !inside(f.x, f.y, f.width, f.height, f.rotation))
+      continue;
     return {
       pos: f.pos,
       pageIndex: point.pageIndex,

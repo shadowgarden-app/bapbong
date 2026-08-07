@@ -1150,6 +1150,69 @@ describe('importDocx', () => {
     expect(doc.child(1).attrs.cellPadding).toBeNull(); // no override → defaults
   });
 
+  it('a table naming no w:tblStyle still inherits the default table style', async () => {
+    // Word applies w:default="1" per style TYPE, not just to paragraphs. Stock
+    // documents park the 108-twip cell margins and any table borders on
+    // "TableNormal" and then never name it, so ignoring the default table
+    // style dropped both.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal">
+        <w:tblPr>
+          <w:tblCellMar>
+            <w:left w:w="300" w:type="dxa"/><w:right w:w="150" w:type="dxa"/>
+          </w:tblCellMar>
+          <w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/></w:tblBorders>
+        </w:tblPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="Fancy">
+        <w:tblPr><w:tblCellMar><w:left w:w="600" w:type="dxa"/></w:tblCellMar></w:tblPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Fancy"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>y</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.cellPadding).toEqual({ left: 20, right: 10 });
+    expect(doc.child(0).attrs.borders).toMatchObject({
+      top: { style: 'solid' },
+    });
+    // A table that DOES name a style resolves through that one, not the
+    // default — the default only fills in for tables naming nothing.
+    expect(doc.child(1).attrs.cellPadding).toEqual({ left: 40 });
+  });
+
+  it('the default style of one type never leaks into another', async () => {
+    // Style ids are unique document-wide, so an untyped lookup mostly works;
+    // what must not happen is the PARAGRAPH default being picked for a table
+    // (or vice versa) just because it is the first w:default="1" in the part.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:pPr><w:spacing w:after="240"/></w:pPr>
+      </w:style>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal">
+        <w:tblPr><w:tblCellMar><w:left w:w="300" w:type="dxa"/></w:tblCellMar></w:tblPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>body</w:t></w:r></w:p>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.spacing).toMatchObject({ after: 16 }); // 240tw
+    expect(doc.child(1).attrs.cellPadding).toEqual({ left: 20 });
+  });
+
   it('marks w:tblHeader rows as header rows', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>
@@ -1229,6 +1292,147 @@ describe('importDocx', () => {
     expect(img.type.name).toBe('image');
     expect(img.attrs.src).toBe(`data:image/png;base64,${PNG_1x1}`);
     expect(img.attrs.width).toBe(100);
+  });
+
+  it('imports rPr w:spacing as tracking, without disturbing pPr w:spacing', async () => {
+    // The two elements share a tag name and nothing else: one is character
+    // tracking on a run, the other is before/after/line on a paragraph.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:pPr><w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>
+        <w:r><w:rPr><w:spacing w:val="26"/></w:rPr><w:t>tracked</w:t></w:r>
+        <w:r><w:rPr><w:spacing w:val="0"/></w:rPr><w:t>reset</w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const para = doc.child(0);
+    // Paragraph spacing survived untouched.
+    expect(para.attrs.spacing).toMatchObject({ before: 16, after: 8 });
+    const track = (i: number) =>
+      para.child(i).marks.find((m) => m.type.name === 'letterSpacing')?.attrs[
+        'twips'
+      ];
+    expect(track(0)).toBe(26);
+    // 0 is an explicit "back to normal" override of a style, not an absence.
+    expect(track(1)).toBe(0);
+    expect(track(2)).toBeUndefined();
+  });
+
+  it('imports w:w as a character scale, bare or percent-suffixed', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:w w:val="80"/></w:rPr><w:t>bare</w:t></w:r>
+        <w:r><w:rPr><w:w w:val="70%"/></w:rPr><w:t>suffixed</w:t></w:r>
+        <w:r><w:rPr><w:w w:val="100"/></w:rPr><w:t>normal</w:t></w:r>
+        <w:r><w:rPr><w:w w:val="80"/><w:spacing w:val="26"/></w:rPr><w:t>both</w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const para = doc.child(0);
+    const marks = (i: number) =>
+      Object.fromEntries(
+        para.child(i).marks.map((m) => [m.type.name, m.attrs]),
+      );
+    expect(marks(0)['charScale']).toEqual({ percent: 80 });
+    expect(marks(1)['charScale']).toEqual({ percent: 70 });
+    // 100 is Word's default but still an explicit override of a style.
+    expect(marks(2)['charScale']).toEqual({ percent: 100 });
+    // The two are independent and 17 runs in khbd carry both.
+    expect(marks(3)['charScale']).toEqual({ percent: 80 });
+    expect(marks(3)['letterSpacing']).toEqual({ twips: 26 });
+    expect(marks(4)['charScale']).toBeUndefined();
+  });
+
+  it('imports w:position as a baseline shift independent of vertAlign', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:position w:val="-2"/></w:rPr><w:t>lowered</w:t></w:r>
+        <w:r><w:rPr><w:position w:val="6"/><w:vertAlign w:val="superscript"/></w:rPr><w:t>both</w:t></w:r>
+        <w:r><w:rPr><w:position w:val="0"/></w:rPr><w:t>reset</w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const marksOf = (i: number) =>
+      Object.fromEntries(
+        doc
+          .child(0)
+          .child(i)
+          .marks.map((m) => [m.type.name, m.attrs]),
+      );
+    expect(marksOf(0)['position']).toEqual({ halfPoints: -2 });
+    // A run can carry both: w:position moves the baseline, w:vertAlign also
+    // shrinks the glyphs.
+    expect(marksOf(1)['position']).toEqual({ halfPoints: 6 });
+    expect(marksOf(1)['vertAlign']).toEqual({ value: 'super' });
+    // 0 is an explicit "back to the baseline" override, not an absent value.
+    expect(marksOf(2)['position']).toEqual({ halfPoints: 0 });
+    expect(marksOf(3)['position']).toBeUndefined();
+  });
+
+  it('resolves the full DrawingML colour union and its transforms', async () => {
+    const WPS_NS =
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+    // accent1 at 60% luminance with +40% offset is how Word writes
+    // "Accent 1, Lighter 40%" — reading only @val loses the adjustment and
+    // paints the shape in the base accent.
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:clrScheme name="Office"><a:accent1><a:srgbClr val="4472C4"/></a:accent1></a:clrScheme>
+      <a:fmtScheme><a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:fillStyleLst></a:fmtScheme>
+    </a:themeElements></a:theme>`;
+    const shape = (spPr: string, style: string) =>
+      `<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/>
+        <a:graphic><a:graphicData><wps:wsp xmlns:wps="${WPS_NS}">
+          <wps:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${spPr}</wps:spPr>
+          ${style}
+        </wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    const documentXml =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}"><w:body><w:p>` +
+      shape(
+        `<a:solidFill><a:schemeClr val="accent1"><a:lumMod val="60000"/><a:lumOff val="40000"/></a:schemeClr></a:solidFill>`,
+        '',
+      ) +
+      shape(
+        `<a:solidFill><a:sysClr val="window" lastClr="FFFFFF"/></a:solidFill>`,
+        '',
+      ) +
+      shape(`<a:solidFill><a:prstClr val="red"/></a:solidFill>`, '') +
+      // No direct fill at all: the shape style's fillRef points at the theme
+      // format scheme, with its own colour standing in for phClr.
+      shape(
+        '',
+        `<wps:style><a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef></wps:style>`,
+      ) +
+      // An explicit a:noFill must beat the style reference.
+      shape(
+        '<a:noFill/>',
+        `<wps:style><a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef></wps:style>`,
+      ) +
+      `</w:p></w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    const fills = doc
+      .child(0)
+      .children.map((n) => (n.attrs.shape as { fill?: string }).fill);
+    // Word's own swatch for "Accent 1, Lighter 40%" on 4472C4.
+    expect(fills[0]).toBe('#8FAADC');
+    expect(fills[1]).toBe('#FFFFFF');
+    expect(fills[2]).toBe('#FF0000');
+    expect(fills[3]).toBe('#4472C4'); // phClr substituted into the scheme
+    expect(fills[4]).toBeUndefined();
   });
 
   it('imports wps shapes (rect/line) as shape-carrying image nodes', async () => {

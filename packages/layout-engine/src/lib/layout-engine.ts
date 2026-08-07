@@ -1,5 +1,5 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
-import { perf } from '@shadow-garden/bapbong-contracts';
+import { glyphKey, perf, sameGlyphRun } from '@shadow-garden/bapbong-contracts';
 import {
   createNumberingCounter,
   type NumberingCounter,
@@ -130,6 +130,28 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const va = findMark(marks, 'vertAlign');
   // The font is reduced in tokenizeInline (one place, both entry paths).
   if (va) run.vertAlign = va.attrs['value'] === 'sub' ? 'sub' : 'super';
+  const tracked = findMark(marks, 'letterSpacing');
+  if (tracked) {
+    // Twips (1/20 pt) → px. Absolute: it is NOT reduced along with the font
+    // for superscript or small caps, matching Word.
+    const tw = Number(tracked.attrs['twips']);
+    if (!Number.isNaN(tw) && tw !== 0)
+      font.letterSpacing = (tw / 20) * (96 / 72);
+  }
+  const scaled = findMark(marks, 'charScale');
+  if (scaled) {
+    // Percent → factor. 100 is Word's default; the mark still exists at that
+    // value (it may override a style), it just has nothing to apply.
+    const pct = Number(scaled.attrs['percent']);
+    if (!Number.isNaN(pct) && pct > 0 && pct !== 100) font.scaleX = pct / 100;
+  }
+  const raised = findMark(marks, 'position');
+  if (raised) {
+    // Half-points → px. Word does NOT grow the line box for a raised run, so
+    // neither do we: the shift is purely a paint-time offset.
+    const hp = Number(raised.attrs['halfPoints']);
+    if (!Number.isNaN(hp) && hp !== 0) run.raise = (hp / 2) * (96 / 72);
+  }
   const fn = findMark(marks, 'footnote');
   if (fn) run.footnoteRef = Number(fn.attrs['num']) || undefined;
   const cm = findMark(marks, 'comment');
@@ -429,6 +451,7 @@ interface Token {
   dstrike?: boolean;
   background?: string;
   vertAlign?: 'super' | 'sub';
+  raise?: number;
   footnoteRef?: number;
   commentIds?: number[];
   width: number;
@@ -548,6 +571,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         dstrike: inline.dstrike,
         background: inline.background,
         vertAlign: inline.vertAlign,
+        raise: inline.raise,
         footnoteRef: inline.footnoteRef,
         commentIds: inline.commentIds,
         width: isTab ? 0 : ctx.measure(part, font),
@@ -845,6 +869,7 @@ function wrapParagraph(
           strike: t.strike,
           background: t.background,
           vertAlign: t.vertAlign,
+          raise: t.raise,
           width: t.width,
           pos: t.pos,
         };
@@ -947,11 +972,6 @@ function wrapParagraph(
   let clusterText = '';
   let clusterWidth = 0;
   let clusterFont: FontSpec | null = null;
-  const sameFont = (a: FontSpec, b: FontSpec) =>
-    a.family === b.family &&
-    a.sizePt === b.sizePt &&
-    a.bold === b.bold &&
-    a.italic === b.italic;
   const resetCluster = () => {
     clusterText = '';
     clusterWidth = 0;
@@ -984,7 +1004,7 @@ function wrapParagraph(
     if (
       clusterable(token) &&
       clusterFont &&
-      sameFont(clusterFont, token.font)
+      sameGlyphRun(clusterFont, token.font)
     ) {
       token.width = Math.max(
         0,
@@ -1061,7 +1081,7 @@ function wrapParagraph(
       tokens.splice(ti + 1, 0, rest);
     }
     if (clusterable(token)) {
-      if (clusterFont && !sameFont(clusterFont, token.font)) resetCluster();
+      if (clusterFont && !sameGlyphRun(clusterFont, token.font)) resetCluster();
       clusterText += token.text;
       clusterWidth += token.width;
       clusterFont = token.font;
@@ -3872,6 +3892,10 @@ export function layout(
         page.gutter ?? 0,
       ],
       tw: config.tabWidth ?? -1,
+      // LayoutConfig.defaultFont is a Partial<FontSpec>, so a host can set a
+      // document-wide glyph adjustment. Node identity covers everything that
+      // rides a mark; this covers the one input that does not.
+      gf: glyphKey({ ...DEFAULT_FONT, ...config.defaultFont }),
       hb: [maxBandHeight(headers), maxBandHeight(footers)],
       sb: setBandH.map((s) => [s.header, s.footer]),
       fn: fnMap

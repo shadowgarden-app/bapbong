@@ -68,14 +68,62 @@ export interface CommentNode {
   resolved?: boolean;
 }
 
-/** A resolved font used for both measuring and painting. */
-export interface FontSpec {
+/**
+ * Everything the Font dialog reads and writes, shared so the command layer and
+ * the widget cannot drift apart on what a field means.
+ *
+ * Two absent-ish values, deliberately distinct:
+ *   `undefined` — leave it alone. The selection was mixed and the user never
+ *                 touched the control, so writing anything would flatten
+ *                 formatting they never looked at.
+ *   `null`      — clear it (Automatic colour, no highlight, no font override).
+ *
+ * The three spacing values carry no absent case at all: their controls always
+ * hold a definite number, and the default (100% / 0pt / 0pt) IS the clear.
+ */
+export interface CharacterFormatting {
+  family?: string | null;
+  sizePt?: number | null;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  doubleStrike?: boolean;
+  smallCaps?: boolean;
+  vertAlign?: 'super' | 'sub' | null;
+  color?: string | null;
+  highlight?: string | null;
+  /** w:w, percent. 100 = normal. */
+  scalePercent: number;
+  /** w:spacing, twips. 0 = normal. */
+  letterSpacingTwips: number;
+  /** w:position, half-points. 0 = on the baseline. */
+  positionHalfPoints: number;
+}
+
+/** The face itself — everything the CSS font shorthand can say. */
+export interface FontFace {
   family: string;
   /** Size in points (CSS `pt`). */
   sizePt: number;
   bold: boolean;
   italic: boolean;
 }
+
+/** Per-run glyph adjustments. These change how WIDE text runs, never how TALL:
+ *  no adjustment here can move a baseline, which is why {@link MeasureMetrics}
+ *  takes only a {@link FontFace} and cannot see them. */
+export interface GlyphAdjust {
+  /** w:spacing — extra advance added after every character, px. Absolute:
+   *  it does not shrink with the font (superscript keeps the same tracking). */
+  letterSpacing?: number;
+  /** w:w — horizontal glyph scale, 1 = normal. Scales the glyphs and their
+   *  advances only; the tracking above rides on top at its absolute value. */
+  scaleX?: number;
+}
+
+/** A resolved font used for both measuring and painting. */
+export interface FontSpec extends FontFace, GlyphAdjust {}
 
 /** Measures the width (CSS px) of `text` rendered with `font`. */
 export type MeasureText = (text: string, font: FontSpec) => number;
@@ -88,8 +136,10 @@ export interface FontMetrics {
   descent: number;
 }
 
-/** Provides vertical metrics for a font. Injected so the engine stays pure. */
-export type MeasureMetrics = (font: FontSpec) => FontMetrics;
+/** Provides vertical metrics for a face. Injected so the engine stays pure.
+ *  Takes {@link FontFace}, not {@link FontSpec}: an implementation physically
+ *  cannot read a glyph adjustment, so it cannot let one move a baseline. */
+export type MeasureMetrics = (font: FontFace) => FontMetrics;
 
 // ── Flow input (document flattened, ready for layout) ──────────────
 
@@ -109,6 +159,9 @@ export interface InlineRun {
   background?: string;
   /** Superscript / subscript (font already reduced; painter shifts baseline). */
   vertAlign?: 'super' | 'sub';
+  /** w:position — baseline shift in px, positive UP, at full glyph size.
+   *  Independent of vertAlign; a run can carry both. */
+  raise?: number;
   /** Footnote reference number (w:footnoteReference): the run's text is the
    *  superscript mark; the body is laid out at the bottom of its page. */
   footnoteRef?: number;
@@ -421,6 +474,8 @@ export interface LayoutSegment {
   /** Superscript / subscript: the painter shifts the baseline (font is
    *  already the reduced size). */
   vertAlign?: 'super' | 'sub';
+  /** w:position — extra baseline shift in px, positive UP, glyphs unresized. */
+  raise?: number;
   /** Measured width (px) — lets the painter draw text decorations without
    *  re-measuring at paint time. */
   width?: number;

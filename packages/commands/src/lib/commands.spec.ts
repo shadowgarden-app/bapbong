@@ -2,6 +2,8 @@ import { Schema, type Node as PMNode } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Command, PageConfig } from '@shadow-garden/bapbong-contracts';
 import {
+  activeCharacterFormatting,
+  applyCharacterFormatting,
   toggleMarkCommand,
   isMarkActive,
   setFontSize,
@@ -116,6 +118,12 @@ const schema = new Schema({
     textColor: { attrs: { color: {} }, toDOM: () => ['span', 0] },
     highlight: { attrs: { color: {} }, toDOM: () => ['span', 0] },
     link: { attrs: { href: {} }, inclusive: false, toDOM: () => ['a', 0] },
+    // Advanced character formatting — the Font dialog's reason to exist.
+    dstrike: { toDOM: () => ['s', 0] },
+    smallCaps: { toDOM: () => ['span', 0] },
+    letterSpacing: { attrs: { twips: {} }, toDOM: () => ['span', 0] },
+    charScale: { attrs: { percent: {} }, toDOM: () => ['span', 0] },
+    position: { attrs: { halfPoints: {} }, toDOM: () => ['span', 0] },
   },
 });
 
@@ -287,6 +295,90 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(sup.isActive?.(after)).toBe(true);
     expect(sub.isActive?.(after)).toBe(false); // same mark type → mutually exclusive
     expect(isMarkActive(after, 'vertAlign', { value: 'super' })).toBe(true);
+  });
+
+  it('applyCharacterFormatting writes the whole dialog in one transaction', () => {
+    const before = paraState();
+    let trCount = 0;
+    const cmd = applyCharacterFormatting({
+      bold: true,
+      smallCaps: true,
+      scalePercent: 80,
+      letterSpacingTwips: 26,
+      positionHalfPoints: -2,
+    });
+    let after = before;
+    cmd.run(before, (tr) => {
+      trCount++;
+      after = before.apply(tr);
+    });
+    // One visit to the dialog is ONE undo step, not thirteen.
+    expect(trCount).toBe(1);
+    const read = activeCharacterFormatting(after);
+    expect(read.bold).toBe(true);
+    expect(read.smallCaps).toBe(true);
+    expect(read.scalePercent).toBe(80);
+    expect(read.letterSpacingTwips).toBe(26);
+    expect(read.positionHalfPoints).toBe(-2);
+  });
+
+  it('applyCharacterFormatting leaves undefined fields untouched', () => {
+    // The reason this matters: open the dialog on a selection whose bold is
+    // mixed, change only the tracking, press OK. Anything less than this and
+    // the bold the user never looked at gets flattened.
+    const bolded = apply(paraState(), toggleMarkCommand('bold', 'strong'));
+    expect(activeCharacterFormatting(bolded).bold).toBe(true);
+    const after = apply(
+      bolded,
+      applyCharacterFormatting({
+        scalePercent: 100,
+        letterSpacingTwips: 26,
+        positionHalfPoints: 0,
+      }),
+    );
+    expect(activeCharacterFormatting(after).bold).toBe(true);
+    expect(activeCharacterFormatting(after).letterSpacingTwips).toBe(26);
+  });
+
+  it('a value back at its default clears the mark rather than writing it', () => {
+    // A "scale 100%" mark left behind would export a run Word never wrote.
+    const tracked = apply(
+      paraState(),
+      applyCharacterFormatting({
+        scalePercent: 80,
+        letterSpacingTwips: 26,
+        positionHalfPoints: 0,
+      }),
+    );
+    expect(tracked.doc.rangeHasMark(1, 6, schema.marks['charScale'])).toBe(
+      true,
+    );
+    const reset = apply(
+      tracked,
+      applyCharacterFormatting({
+        scalePercent: 100,
+        letterSpacingTwips: 0,
+        positionHalfPoints: 0,
+      }),
+    );
+    expect(reset.doc.rangeHasMark(1, 6, schema.marks['charScale'])).toBe(false);
+    expect(reset.doc.rangeHasMark(1, 6, schema.marks['letterSpacing'])).toBe(
+      false,
+    );
+  });
+
+  it('activeCharacterFormatting reports a mixed toggle as undefined', () => {
+    const doc = n(
+      'doc',
+      null,
+      n('paragraph', null, [
+        schema.text('bold', [schema.marks['strong'].create()]),
+        schema.text('plain'),
+      ]),
+    );
+    const st = EditorState.create({ schema, doc });
+    const all = st.apply(st.tr.setSelection(TextSelection.create(doc, 1, 10)));
+    expect(activeCharacterFormatting(all).bold).toBeUndefined();
   });
 
   it('pageBreakCommand toggles pageBreakBefore on the paragraph', () => {

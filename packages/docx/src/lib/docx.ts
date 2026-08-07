@@ -67,8 +67,11 @@ import { buildStyleRegistry, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
+  buildThemeFillResolver,
   buildThemeFontResolver,
   buildThemeResolver,
+  drawingColor,
+  ThemeFillResolver,
   ThemeFontResolver,
   ThemeResolver,
 } from './theme.js';
@@ -196,6 +199,8 @@ interface Ctx {
   media: Map<string, string>; // zip path → data URL
   resolveTheme: ThemeResolver;
   resolveFont: ThemeFontResolver;
+  /** Shape fill from an `a:fillRef` (theme format scheme + placeholder). */
+  resolveThemeFill: ThemeFillResolver;
   notes: NotesRegistry;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
@@ -263,6 +268,16 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
     marks.push(ctx.schema.marks['highlight'].create({ color: p.highlight }));
   if (p.vertAlign)
     marks.push(ctx.schema.marks['vertAlign'].create({ value: p.vertAlign }));
+  // 0 is a real value (an explicit "back to the baseline" override), so test
+  // for presence, not truthiness.
+  if (p.position !== undefined && ctx.schema.marks['position'])
+    marks.push(ctx.schema.marks['position'].create({ halfPoints: p.position }));
+  if (p.letterSpacing !== undefined && ctx.schema.marks['letterSpacing'])
+    marks.push(
+      ctx.schema.marks['letterSpacing'].create({ twips: p.letterSpacing }),
+    );
+  if (p.charScale !== undefined && ctx.schema.marks['charScale'])
+    marks.push(ctx.schema.marks['charScale'].create({ percent: p.charScale }));
   return marks;
 }
 
@@ -706,17 +721,13 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   });
 }
 
-/** Color of a node's <a:solidFill>: srgbClr directly, schemeClr via theme. */
+/** Color of a node's <a:solidFill>, through the full DrawingML colour union
+ *  and its transform stack (see theme.ts `drawingColor`). */
 function solidFillColor(
   node: OoxmlNode | undefined,
   ctx: Ctx,
 ): string | undefined {
-  const fill = child(node, 'a:solidFill');
-  if (!fill) return undefined;
-  const srgb = attrOf(child(fill, 'a:srgbClr'), 'val');
-  if (srgb) return `#${srgb}`;
-  const scheme = attrOf(child(fill, 'a:schemeClr'), 'val');
-  return scheme ? ctx.resolveTheme(scheme) : undefined;
+  return drawingColor(child(node, 'a:solidFill'), ctx.resolveTheme);
 }
 
 /** A drawn wps shape (rect / straight connector) in a run's drawing — the
@@ -746,20 +757,25 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (!kind) return null;
 
   const shape: Record<string, unknown> = { kind };
+  const style = child(wsp, 'wps:style');
   const ln = child(spPr, 'a:ln');
   if (!child(ln, 'a:noFill')) {
     const w = attrOf(ln, 'w'); // outline width in EMU
     shape['strokeWidth'] = w ? Math.max(1, Math.round(Number(w) / 9525)) : 1;
     // Direct outline color, else the style's line reference (how Word themes
     // shape outlines), else black.
-    const lnRef = findDescendant(child(wsp, 'wps:style'), 'a:lnRef');
-    const refScheme = attrOf(child(lnRef, 'a:schemeClr'), 'val');
     shape['stroke'] =
       solidFillColor(ln, ctx) ??
-      (refScheme ? ctx.resolveTheme(refScheme) : undefined) ??
+      drawingColor(findDescendant(style, 'a:lnRef'), ctx.resolveTheme) ??
       '#000000';
   }
-  const fill = solidFillColor(spPr, ctx);
+  // Fill: an explicit a:noFill wins, then a direct a:solidFill, then the
+  // shape style's a:fillRef resolved through the theme's format scheme —
+  // which is how Word fills every shape inserted from the shape gallery.
+  const fill = child(spPr, 'a:noFill')
+    ? undefined
+    : (solidFillColor(spPr, ctx) ??
+      ctx.resolveThemeFill(child(style, 'a:fillRef')));
   if (fill) shape['fill'] = fill;
   if (attrOf(child(spPr, 'a:xfrm'), 'flipV') === '1') shape['flipV'] = true;
 
@@ -826,6 +842,11 @@ const CONSUMED_RPR = new Set([
   'w:sz',
   'w:rFonts',
   'w:vertAlign',
+  'w:position',
+  // Character tracking. The pPr set below has its own 'w:spacing' entry — the
+  // two elements share a name and nothing else.
+  'w:spacing',
+  'w:w',
   'w:highlight',
   'w:shd',
   // w:rStyle: resolved into the cascade. NOT carried on purpose — re-emitting
@@ -922,7 +943,11 @@ function runMarks(
   href: string | null,
 ) {
   const rPr = child(run, 'w:rPr');
-  const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
+  // No w:rStyle still means the default character style ("Default Paragraph
+  // Font"), which is empty in a stock document but need not be.
+  const rStyleId =
+    attrOf(child(rPr, 'w:rStyle'), 'w:val') ??
+    ctx.styles.defaultStyleIdFor('character');
   const effective = [
     paraBase,
     ctx.styles.resolveStyle(rStyleId),
@@ -1009,7 +1034,14 @@ function headingLevel(
 ): number | undefined {
   if (pStyleId) {
     const m = /^heading\s*([1-9])$/i.exec(pStyleId);
-    if (m) return Math.min(6, Number(m[1]));
+    if (m) {
+      // The style name settled it, so the chain's w:outlineLvl is never
+      // consulted — but Word bakes the matching level into every built-in
+      // HeadingN style, so it agrees and was handled, not missed.
+      if (audit.collecting)
+        markOverridden(pPrChain, pPrChain.length, 'w:outlineLvl');
+      return Math.min(6, Number(m[1]));
+    }
   }
   const ol = lastWith(pPrChain, 'w:outlineLvl');
   if (ol) {
@@ -1108,7 +1140,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // which is where a document keeps its line spacing and space-after. A
   // paragraph that names its own style does not fall back to Normal — the
   // style's basedOn chain decides what it inherits, as in Word.
-  const styleId = pStyleId ?? ctx.styles.defaultParagraphStyleId;
+  const styleId = pStyleId ?? ctx.styles.defaultStyleIdFor('paragraph');
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(
     ctx.styles.docDefaults,
@@ -1423,22 +1455,51 @@ function resolveTabs(
   return stops.length > 0 ? stops.sort((a, b) => a.pos - b.pos) : null;
 }
 
+/** Mark every `childName` in the layers BELOW `winner` as handled.
+ *
+ *  A cascade resolves by walking back from the most-derived layer and taking
+ *  the first hit, so the layers under it are never touched — and to the audit
+ *  an untouched node is indistinguishable from an unsupported one. But being
+ *  overridden is the correct outcome, not a gap: eight Heading3 paragraphs
+ *  carrying an inline `w:tabs` made the style's own `w:tabs` look unread,
+ *  when the renderer had honoured the cascade exactly right.
+ *
+ *  Pass `chain.length` for `winner` when something OUTSIDE the chain settled
+ *  the property (a style name deciding a heading level). */
+function markOverridden(
+  chain: (OoxmlNode | undefined)[],
+  winner: number,
+  childName: string,
+): void {
+  for (let i = winner - 1; i >= 0; i--) {
+    const el = child(chain[i], childName);
+    if (el) audit.markSubtree(el);
+  }
+}
+
 /** The last (most-derived) pPr layer that carries `childName`, if any. */
 function lastWith(
   chain: (OoxmlNode | undefined)[],
   childName: string,
 ): OoxmlNode | undefined {
   for (let i = chain.length - 1; i >= 0; i--) {
-    if (child(chain[i], childName)) return chain[i];
+    if (child(chain[i], childName)) {
+      if (audit.collecting) markOverridden(chain, i, childName);
+      return chain[i];
+    }
   }
   return undefined;
 }
 
-/** Resolve alignment through the cascade: the last layer with a w:jc wins. */
+/** Resolve alignment through the cascade: the last layer with a w:jc wins.
+ *  A layer whose w:val we don't map (thaiDistribute…) falls through to the
+ *  one below, so the winner is not simply the last layer holding a w:jc. */
 function resolveAlign(chain: (OoxmlNode | undefined)[]): Align | null {
   for (let i = chain.length - 1; i >= 0; i--) {
     const align = parseAlign(chain[i]);
-    if (align) return align;
+    if (!align) continue;
+    if (audit.collecting) markOverridden(chain, i, 'w:jc');
+    return align;
   }
   return null;
 }
@@ -2358,6 +2419,7 @@ async function importDocxImpl(
     : undefined;
   const resolveTheme = buildThemeResolver(themeRoot);
   const resolveFont = buildThemeFontResolver(themeRoot);
+  const resolveThemeFill = buildThemeFillResolver(themeRoot, resolveTheme);
   const styles = buildStyleRegistry(
     stylesXml ? parsePart('word/styles.xml', stylesXml) : undefined,
     resolveTheme,
@@ -2390,6 +2452,7 @@ async function importDocxImpl(
     media,
     resolveTheme,
     resolveFont,
+    resolveThemeFill,
     notes,
     comments,
     schema: opts?.schema ?? schema,

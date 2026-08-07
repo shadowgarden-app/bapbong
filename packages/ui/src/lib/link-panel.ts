@@ -1,4 +1,4 @@
-import { injectStyle } from './internal.js';
+import { injectStyle, placeFloating } from './internal.js';
 
 /**
  * Floating link panel, anchored at the caret / selection (Google Docs-style).
@@ -62,7 +62,7 @@ const STYLE = `
 .bb-linkpanel *{box-sizing:border-box}
 .bb-linkpanel-row{display:flex;align-items:center;gap:8px}
 .bb-linkpanel-form{display:flex;flex-direction:column;gap:8px}
-.bb-linkpanel-field{display:flex;align-items:center;gap:7px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:7px;padding:0 9px;background:var(--bb-ui-bg,#fff)}
+.bb-linkpanel-field{display:flex;align-items:center;gap:7px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:7px;padding:0 9px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff))}
 .bb-linkpanel-field:focus-within{border-color:var(--bb-ui-accent,#d85a30)}
 .bb-linkpanel-field svg{flex:none;opacity:.55}
 .bb-linkpanel-input{flex:1;min-width:0;height:30px;border:0;background:transparent;color:inherit;font:inherit;font-size:13px;outline:none}
@@ -110,26 +110,6 @@ function closeCurrent(): void {
     currentHandle = null;
     dispose();
   }
-}
-
-/** Place `el` below the anchor (flip above when the viewport runs out),
- *  clamped horizontally — connected positioning like the context menu. */
-function place(el: HTMLElement, anchor: LinkPanelAnchor): void {
-  const r = el.getBoundingClientRect();
-  const pad = 6;
-  const gap = 6;
-  const x = Math.max(
-    pad,
-    Math.min(anchor.x, window.innerWidth - r.width - pad),
-  );
-  const below = anchor.y + anchor.height + gap;
-  const above = anchor.y - gap - r.height;
-  const y =
-    below + r.height <= window.innerHeight - pad || above < pad
-      ? Math.min(below, window.innerHeight - r.height - pad)
-      : above;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
 }
 
 export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
@@ -240,7 +220,7 @@ export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
       );
     }
     el.appendChild(row);
-    place(el, opts.anchor);
+    placeFloating(el, opts.anchor);
   };
 
   const renderForm = (
@@ -290,7 +270,7 @@ export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
     row.appendChild(apply);
     form.appendChild(row);
     el.appendChild(form);
-    place(el, opts.anchor);
+    placeFloating(el, opts.anchor);
     u.input.focus();
     u.input.select();
   };

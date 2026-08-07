@@ -11,16 +11,49 @@ import type { FontSpec } from '@shadow-garden/bapbong-contracts';
  *  every assertion is exact and platform-independent (the point of measuring
  *  from font files). Ranges let us fake subset files (latin vs vietnamese). */
 function makeFont(
-  opts: { from?: number; to?: number; advance?: number; em?: number; ascender?: number; descender?: number } = {},
+  opts: {
+    from?: number;
+    to?: number;
+    advance?: number;
+    em?: number;
+    ascender?: number;
+    descender?: number;
+  } = {},
 ) {
-  const { from = 65, to = 90, advance = 500, em = 1000, ascender = 800, descender = -200 } = opts;
-  const glyphs = [new opentype.Glyph({ name: '.notdef', unicode: 0, advanceWidth: advance, path: new opentype.Path() })];
+  const {
+    from = 65,
+    to = 90,
+    advance = 500,
+    em = 1000,
+    ascender = 800,
+    descender = -200,
+  } = opts;
+  const glyphs = [
+    new opentype.Glyph({
+      name: '.notdef',
+      unicode: 0,
+      advanceWidth: advance,
+      path: new opentype.Path(),
+    }),
+  ];
   for (let c = from; c <= to; c++) {
     glyphs.push(
-      new opentype.Glyph({ name: `u${c}`, unicode: c, advanceWidth: advance, path: new opentype.Path() }),
+      new opentype.Glyph({
+        name: `u${c}`,
+        unicode: c,
+        advanceWidth: advance,
+        path: new opentype.Path(),
+      }),
     );
   }
-  return new opentype.Font({ familyName: 'Test', styleName: 'Regular', unitsPerEm: em, ascender, descender, glyphs });
+  return new opentype.Font({
+    familyName: 'Test',
+    styleName: 'Regular',
+    unitsPerEm: em,
+    ascender,
+    descender,
+    glyphs,
+  });
 }
 
 const spec = (over: Partial<FontSpec> = {}): FontSpec => ({
@@ -64,7 +97,11 @@ describe('font-registry measurer', () => {
     const reg = new FontRegistry();
     // Parse via bytes: opentype's cmap lookup only works on a parsed font, which
     // is also the production path (registerBytes).
-    reg.registerBytes('Test', {}, makeFont({ advance: 500, em: 1000 }).toArrayBuffer());
+    reg.registerBytes(
+      'Test',
+      {},
+      makeFont({ advance: 500, em: 1000 }).toArrayBuffer(),
+    );
     const measure = createFontRegistryMeasurer(reg, createApproxMeasurer(0.5));
     // 12pt → 16px; each glyph 500/1000·16 = 8px; "AB" = 16px.
     expect(measure('AB', spec())).toBeCloseTo(16);
@@ -74,8 +111,16 @@ describe('font-registry measurer', () => {
 
   it('routes each char to the subset file that has its glyph', () => {
     const reg = new FontRegistry();
-    reg.registerBytes('Test', {}, makeFont({ from: 65, to: 77, advance: 500 }).toArrayBuffer()); // A–M @ 500
-    reg.registerBytes('Test', {}, makeFont({ from: 78, to: 90, advance: 300 }).toArrayBuffer()); // N–Z @ 300
+    reg.registerBytes(
+      'Test',
+      {},
+      makeFont({ from: 65, to: 77, advance: 500 }).toArrayBuffer(),
+    ); // A–M @ 500
+    reg.registerBytes(
+      'Test',
+      {},
+      makeFont({ from: 78, to: 90, advance: 300 }).toArrayBuffer(),
+    ); // N–Z @ 300
     const measure = createFontRegistryMeasurer(reg, createApproxMeasurer(0.5));
     // "A" (500/1000·16=8) + "N" (300/1000·16=4.8) = 12.8.
     expect(measure('AN', spec())).toBeCloseTo(12.8);
@@ -94,7 +139,11 @@ describe('font-registry measurer', () => {
 describe('font-registry metrics', () => {
   it('reads ascent/descent from a registered face (deterministic)', () => {
     const reg = new FontRegistry();
-    reg.register('Test', {}, makeFont({ em: 1000, ascender: 800, descender: -200 }));
+    reg.register(
+      'Test',
+      {},
+      makeFont({ em: 1000, ascender: 800, descender: -200 }),
+    );
     const metrics = createFontRegistryMetrics(reg, createApproxMetrics());
     // 12pt → 16px; ascent 800/1000·16 = 12.8, descent 200/1000·16 = 3.2.
     const { ascent, descent } = metrics(spec());
