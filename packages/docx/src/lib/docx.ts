@@ -922,7 +922,11 @@ function runMarks(
   href: string | null,
 ) {
   const rPr = child(run, 'w:rPr');
-  const rStyleId = attrOf(child(rPr, 'w:rStyle'), 'w:val');
+  // No w:rStyle still means the default character style ("Default Paragraph
+  // Font"), which is empty in a stock document but need not be.
+  const rStyleId =
+    attrOf(child(rPr, 'w:rStyle'), 'w:val') ??
+    ctx.styles.defaultStyleIdFor('character');
   const effective = [
     paraBase,
     ctx.styles.resolveStyle(rStyleId),
@@ -1108,7 +1112,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // which is where a document keeps its line spacing and space-after. A
   // paragraph that names its own style does not fall back to Normal — the
   // style's basedOn chain decides what it inherits, as in Word.
-  const styleId = pStyleId ?? ctx.styles.defaultParagraphStyleId;
+  const styleId = pStyleId ?? ctx.styles.defaultStyleIdFor('paragraph');
   // Base for every run: docDefaults → paragraph style's run properties.
   const paraBase = mergeRunProps(
     ctx.styles.docDefaults,

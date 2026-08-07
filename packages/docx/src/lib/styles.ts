@@ -11,6 +11,11 @@ import {
   ThemeFontResolver,
 } from './ooxml.js';
 
+/** The four kinds a `w:style` can declare. Word applies the `w:default="1"`
+ *  style OF A KIND to content of that kind naming no style — which is why the
+ *  kind has to be read at all, not just glanced at for the paragraph case. */
+export type StyleType = 'paragraph' | 'character' | 'table' | 'numbering';
+
 interface StyleDef {
   basedOn?: string;
   rPr: RunProps;
@@ -22,6 +27,8 @@ interface StyleDef {
   tblCellMar?: OoxmlNode;
   /** The w:style element itself — for the audit's unused-style sweep. */
   el: OoxmlNode;
+  /** w:style/@w:type. Optional in the schema; absent reads as "paragraph". */
+  type: string;
   /** w:default="1": Word applies this style to unstyled content, so it is
    *  implicitly in use even when nothing names it. */
   isDefault: boolean;
@@ -34,19 +41,28 @@ export interface StyleRegistry {
   docDefaults: RunProps;
   /** docDefaults → pPrDefault, the lowest layer of the paragraph cascade. */
   docDefaultsPPr: OoxmlNode | undefined;
-  /** The paragraph style Word applies to content that names none —
-   *  `w:style w:type="paragraph" w:default="1"`, almost always "Normal".
-   *  It routinely carries the document's line spacing and space-after, so
-   *  skipping it collapses every unstyled paragraph. */
-  defaultParagraphStyleId: string | undefined;
+  /** The style Word applies to content of `type` that names none — the
+   *  `w:default="1"` one, "Normal" / "Default Paragraph Font" / "Table
+   *  Normal" / "No List" in a stock document. These are not inert defaults:
+   *  Normal routinely carries the document's line spacing and space-after
+   *  (skipping it collapsed every unstyled paragraph until 49862f1), and
+   *  Table Normal carries the 108-twip cell margins.
+   *
+   *  Type-specific resolvers below fall back to this on their own; the
+   *  polymorphic `resolveStyle` cannot, since it serves both paragraph and
+   *  character lookups — its callers pass the right default in. */
+  defaultStyleIdFor(type: StyleType): string | undefined;
   /** Effective run properties contributed by a styleId (incl. basedOn chain). */
   resolveStyle(styleId: string | undefined): RunProps;
   /** The styleId's w:pPr nodes, base-most first (basedOn ancestors → style).
    *  Callers append the inline pPr and resolve "later wins" per property. */
   resolveStylePPr(styleId: string | undefined): OoxmlNode[];
-  /** The most-derived w:tblBorders a table style (chain) contributes, if any. */
+  /** The most-derived w:tblBorders a table style (chain) contributes, if any.
+   *  A table naming no `w:tblStyle` resolves through the default table style,
+   *  exactly as Word does. */
   resolveTableBorders(styleId: string | undefined): OoxmlNode | undefined;
-  /** The most-derived w:tblCellMar a table style (chain) contributes, if any. */
+  /** The most-derived w:tblCellMar a table style (chain) contributes, if any.
+   *  Same default-style fallback as resolveTableBorders. */
   resolveTableCellMar(styleId: string | undefined): OoxmlNode | undefined;
   /** XML-audit hook, call once after every story is parsed: styles NOTHING
    *  referenced (directly, via basedOn, or as a w:default) are marked as
@@ -76,16 +92,19 @@ export function buildStyleRegistry(
   );
 
   const defs = new Map<string, StyleDef>();
-  let defaultParagraphStyleId: string | undefined;
+  const defaultIds = new Map<string, string>();
   for (const style of children(stylesEl, 'w:style')) {
     const id = attrOf(style, 'w:styleId');
     if (id === undefined) continue;
     const isDefault =
       attrOf(style, 'w:default') === '1' ||
       attrOf(style, 'w:default') === 'true';
-    if (isDefault && attrOf(style, 'w:type') === 'paragraph')
-      defaultParagraphStyleId ??= id;
+    // Read unconditionally: asking only inside the isDefault branch left the
+    // kind of every ordinary style unread (63 of them in one lesson plan).
+    const type = attrOf(style, 'w:type') ?? 'paragraph';
+    if (isDefault && !defaultIds.has(type)) defaultIds.set(type, id);
     defs.set(id, {
+      type,
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
       rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme, resolveFont),
       pPr: child(style, 'w:pPr'),
@@ -147,16 +166,22 @@ export function buildStyleRegistry(
     return def.tblCellMar ?? resolveTblCellMar(def.basedOn, seen);
   }
 
+  const defaultStyleIdFor = (type: StyleType) => defaultIds.get(type);
+  // A table with no w:tblStyle still inherits the default table style, the
+  // same way an unstyled paragraph inherits Normal.
+  const tableStyle = (styleId: string | undefined) =>
+    styleId ?? defaultStyleIdFor('table');
+
   return {
     docDefaults,
     docDefaultsPPr,
-    defaultParagraphStyleId,
+    defaultStyleIdFor,
     resolveStyle: (styleId) => resolve(styleId, new Set<string>()),
     resolveStylePPr: (styleId) => resolvePPr(styleId, new Set<string>()),
     resolveTableBorders: (styleId) =>
-      resolveTblBorders(styleId, new Set<string>()),
+      resolveTblBorders(tableStyle(styleId), new Set<string>()),
     resolveTableCellMar: (styleId) =>
-      resolveTblCellMar(styleId, new Set<string>()),
+      resolveTblCellMar(tableStyle(styleId), new Set<string>()),
     auditMarkUnusedStyles: () => {
       if (!audit.enabled) return;
       for (const [id, def] of defs) {

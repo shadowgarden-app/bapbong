@@ -215,6 +215,9 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'w:lvl' && (name === 'w:tplc' || name === 'w:tentative')) ||
     // Rels are resolved by Id; the relationship Type is package plumbing.
     (tag === 'Relationship' && name === 'Type') ||
+    // Whether a style came from Word's built-in gallery or the user made it:
+    // drives the Styles pane and built-in name mapping, never rendering.
+    (tag === 'w:style' && name === 'w:customStyle') ||
     // Word's visited-link tracking flag — UI state, not content.
     (tag === 'w:hyperlink' && name === 'w:history') ||
     // A bookmark's numeric id pairs start/end within the part; the NAME is

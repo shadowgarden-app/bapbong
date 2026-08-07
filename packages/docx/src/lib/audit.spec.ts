@@ -259,12 +259,10 @@ describe('xml audit (export + round-trip baseline)', () => {
       // Read in general, but headingLevel() short-circuits on the "Heading2"
       // style id before asking for outlineLvl — unread in THIS document.
       'w:outlineLvl',
-      // NOTE the pgMar chrome distances/gutter no longer appear (read into
-      // PageConfig), and w:style @w:default is read for the unused-style
-      // sweep. The FUNCTIONAL gap (default styles are not applied to
-      // unstyled content) still exists — the audit just can't see an attr
-      // that is read for classification; tracked in the support plan.
-      'w:style @w:type',
+      // NOTE w:style @w:type has left this list: the registry now reads the
+      // kind of every style, not only the w:default="1" ones, so it can pick
+      // the right default per type. The pgMar chrome distances/gutter went
+      // earlier (read into PageConfig).
     ]);
   });
 });

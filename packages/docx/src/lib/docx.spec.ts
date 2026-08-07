@@ -1150,6 +1150,69 @@ describe('importDocx', () => {
     expect(doc.child(1).attrs.cellPadding).toBeNull(); // no override → defaults
   });
 
+  it('a table naming no w:tblStyle still inherits the default table style', async () => {
+    // Word applies w:default="1" per style TYPE, not just to paragraphs. Stock
+    // documents park the 108-twip cell margins and any table borders on
+    // "TableNormal" and then never name it, so ignoring the default table
+    // style dropped both.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal">
+        <w:tblPr>
+          <w:tblCellMar>
+            <w:left w:w="300" w:type="dxa"/><w:right w:w="150" w:type="dxa"/>
+          </w:tblCellMar>
+          <w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/></w:tblBorders>
+        </w:tblPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="Fancy">
+        <w:tblPr><w:tblCellMar><w:left w:w="600" w:type="dxa"/></w:tblCellMar></w:tblPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Fancy"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>y</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.cellPadding).toEqual({ left: 20, right: 10 });
+    expect(doc.child(0).attrs.borders).toMatchObject({
+      top: { style: 'solid' },
+    });
+    // A table that DOES name a style resolves through that one, not the
+    // default — the default only fills in for tables naming nothing.
+    expect(doc.child(1).attrs.cellPadding).toEqual({ left: 40 });
+  });
+
+  it('the default style of one type never leaks into another', async () => {
+    // Style ids are unique document-wide, so an untyped lookup mostly works;
+    // what must not happen is the PARAGRAPH default being picked for a table
+    // (or vice versa) just because it is the first w:default="1" in the part.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:pPr><w:spacing w:after="240"/></w:pPr>
+      </w:style>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal">
+        <w:tblPr><w:tblCellMar><w:left w:w="300" w:type="dxa"/></w:tblCellMar></w:tblPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>body</w:t></w:r></w:p>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.spacing).toMatchObject({ after: 16 }); // 240tw
+    expect(doc.child(1).attrs.cellPadding).toEqual({ left: 20 });
+  });
+
   it('marks w:tblHeader rows as header rows', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>
