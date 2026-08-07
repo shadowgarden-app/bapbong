@@ -1013,7 +1013,14 @@ function headingLevel(
 ): number | undefined {
   if (pStyleId) {
     const m = /^heading\s*([1-9])$/i.exec(pStyleId);
-    if (m) return Math.min(6, Number(m[1]));
+    if (m) {
+      // The style name settled it, so the chain's w:outlineLvl is never
+      // consulted — but Word bakes the matching level into every built-in
+      // HeadingN style, so it agrees and was handled, not missed.
+      if (audit.collecting)
+        markOverridden(pPrChain, pPrChain.length, 'w:outlineLvl');
+      return Math.min(6, Number(m[1]));
+    }
   }
   const ol = lastWith(pPrChain, 'w:outlineLvl');
   if (ol) {
@@ -1427,22 +1434,51 @@ function resolveTabs(
   return stops.length > 0 ? stops.sort((a, b) => a.pos - b.pos) : null;
 }
 
+/** Mark every `childName` in the layers BELOW `winner` as handled.
+ *
+ *  A cascade resolves by walking back from the most-derived layer and taking
+ *  the first hit, so the layers under it are never touched — and to the audit
+ *  an untouched node is indistinguishable from an unsupported one. But being
+ *  overridden is the correct outcome, not a gap: eight Heading3 paragraphs
+ *  carrying an inline `w:tabs` made the style's own `w:tabs` look unread,
+ *  when the renderer had honoured the cascade exactly right.
+ *
+ *  Pass `chain.length` for `winner` when something OUTSIDE the chain settled
+ *  the property (a style name deciding a heading level). */
+function markOverridden(
+  chain: (OoxmlNode | undefined)[],
+  winner: number,
+  childName: string,
+): void {
+  for (let i = winner - 1; i >= 0; i--) {
+    const el = child(chain[i], childName);
+    if (el) audit.markSubtree(el);
+  }
+}
+
 /** The last (most-derived) pPr layer that carries `childName`, if any. */
 function lastWith(
   chain: (OoxmlNode | undefined)[],
   childName: string,
 ): OoxmlNode | undefined {
   for (let i = chain.length - 1; i >= 0; i--) {
-    if (child(chain[i], childName)) return chain[i];
+    if (child(chain[i], childName)) {
+      if (audit.collecting) markOverridden(chain, i, childName);
+      return chain[i];
+    }
   }
   return undefined;
 }
 
-/** Resolve alignment through the cascade: the last layer with a w:jc wins. */
+/** Resolve alignment through the cascade: the last layer with a w:jc wins.
+ *  A layer whose w:val we don't map (thaiDistribute…) falls through to the
+ *  one below, so the winner is not simply the last layer holding a w:jc. */
 function resolveAlign(chain: (OoxmlNode | undefined)[]): Align | null {
   for (let i = chain.length - 1; i >= 0; i--) {
     const align = parseAlign(chain[i]);
-    if (align) return align;
+    if (!align) continue;
+    if (audit.collecting) markOverridden(chain, i, 'w:jc');
+    return align;
   }
   return null;
 }

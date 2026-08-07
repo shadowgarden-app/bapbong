@@ -490,6 +490,14 @@ export const audit = {
     return computeEnabled();
   },
 
+  /** Whether an import is currently COLLECTING — a plain boolean read, unlike
+   *  `enabled` which re-resolves the flag through globalThis/localStorage.
+   *  Guard extra bookkeeping that only the audit needs with this, so the hot
+   *  path pays nothing when the flag is off. */
+  get collecting(): boolean {
+    return importActive;
+  },
+
   /** Force the flag on/off from code (equivalent to setting the global). */
   setEnabled(on: boolean): void {
     (globalThis as { __BAPBONG_XML_AUDIT__?: boolean }).__BAPBONG_XML_AUDIT__ =

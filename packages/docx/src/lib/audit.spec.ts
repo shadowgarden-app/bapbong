@@ -196,6 +196,34 @@ describe('xml audit (import)', () => {
     expect(keys(audit.lastReport?.inert ?? [])).not.toContain('w:left');
   });
 
+  it('a cascade layer that was overridden is handled, not missing', async () => {
+    audit.setEnabled(true);
+    // Heading3 carries w:tabs and w:outlineLvl; the paragraph overrides the
+    // tabs inline and its style NAME settles the heading level. Both style
+    // properties were resolved correctly, so neither is a gap — before this,
+    // the cascade's early return left them looking unread.
+    const stylesXml =
+      `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">` +
+      `<w:style w:type="paragraph" w:styleId="Heading3"><w:pPr>` +
+      `<w:tabs><w:tab w:val="left" w:pos="-48"/></w:tabs>` +
+      `<w:jc w:val="left"/><w:outlineLvl w:val="2"/>` +
+      `</w:pPr></w:style></w:styles>`;
+    const documentXml =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p><w:pPr>` +
+      `<w:pStyle w:val="Heading3"/>` +
+      `<w:tabs><w:tab w:val="center" w:pos="2160"/></w:tabs>` +
+      `<w:jc w:val="center"/>` +
+      `</w:pPr><w:r><w:t>x</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await importDocx(await makeDocx(documentXml, stylesXml));
+    log.mockRestore();
+
+    const unknown = keys(audit.lastReport?.unknown ?? []);
+    expect(unknown).not.toContain('w:tabs');
+    expect(unknown).not.toContain('w:jc');
+    expect(unknown).not.toContain('w:outlineLvl');
+  });
+
   it('separator footnotes and comment bodies count as consumed subtrees', async () => {
     audit.setEnabled(true);
     const zip = new JSZip();
@@ -251,18 +279,14 @@ describe('xml audit (export + round-trip baseline)', () => {
     await importDocx(bytes);
     log.mockRestore();
 
-    // BASELINE of known round-trip losses (see the bb3.docx survey). Shrink
-    // this list as gaps get fixed; a new entry appearing here means the
-    // exporter started writing something the importer doesn't read back.
+    // BASELINE of known round-trip losses (see the bb3.docx survey). It is
+    // EMPTY: everything our exporter writes, our importer reads back. Any
+    // entry appearing here is a regression — either the exporter started
+    // writing something new, or the importer stopped reading something.
+    // (w:style @w:type left when the registry began reading every style's
+    // kind; w:outlineLvl when the cascade started marking the layers a more
+    // derived one overrides; the pgMar chrome went earlier, into PageConfig.)
     const unknown = keys(audit.lastReport?.unknown ?? []).sort();
-    expect(unknown).toEqual([
-      // Read in general, but headingLevel() short-circuits on the "Heading2"
-      // style id before asking for outlineLvl — unread in THIS document.
-      'w:outlineLvl',
-      // NOTE w:style @w:type has left this list: the registry now reads the
-      // kind of every style, not only the w:default="1" ones, so it can pick
-      // the right default per type. The pgMar chrome distances/gutter went
-      // earlier (read into PageConfig).
-    ]);
+    expect(unknown).toEqual([]);
   });
 });
