@@ -159,7 +159,12 @@ export class EditorPlayground implements OnDestroy {
    *  so it also survives into a plain `globalThis.__BAPBONG_XML_AUDIT__`. */
   protected readonly xmlAudit = signal(audit.enabled);
   protected readonly auditUnknown = signal<AuditEntry[]>([]);
+  /** Unread but provably harmless (value = the spec's no-op). Kept out of the
+   *  UNKNOWN count and folded away by default — visible on demand so the
+   *  demotion stays auditable rather than becoming a silent ignore-list. */
+  protected readonly auditInert = signal<AuditEntry[]>([]);
   protected readonly auditIgnored = signal<AuditEntry[]>([]);
+  protected readonly showAuditInert = signal(false);
   protected readonly showAuditIgnored = signal(false);
   protected readonly pageCount = signal(0);
 
@@ -260,6 +265,7 @@ export class EditorPlayground implements OnDestroy {
   private readAuditReport(): void {
     const report = audit.enabled ? audit.lastReport : null;
     this.auditUnknown.set(report?.unknown ?? []);
+    this.auditInert.set(report?.inert ?? []);
     this.auditIgnored.set(report?.ignored ?? []);
   }
 
@@ -276,6 +282,7 @@ export class EditorPlayground implements OnDestroy {
     this.xmlAudit.set(on);
     if (!on) {
       this.auditUnknown.set([]);
+      this.auditInert.set([]);
       this.auditIgnored.set([]);
     }
   }
