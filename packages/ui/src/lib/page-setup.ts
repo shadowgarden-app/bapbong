@@ -68,7 +68,7 @@ const STYLE = `
 .bb-pd-fields{display:grid;gap:10px 18px}
 .bb-pd-field{display:flex;align-items:center;gap:8px}
 .bb-pd-label{flex:0 0 74px;font-size:13px}
-.bb-pd-input{flex:1 1 auto;min-width:0;width:100%;height:30px;padding:0 8px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px}
+.bb-pd-input{flex:1 1 auto;min-width:0;width:100%;height:30px;padding:0 8px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px}
 .bb-pd-input:focus{outline:2px solid var(--bb-ui-active-border,#7fb2ec);outline-offset:-1px}
 .bb-pd-actions{display:flex;justify-content:flex-end;gap:8px}
 `;

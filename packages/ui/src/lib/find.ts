@@ -64,9 +64,9 @@ const STYLE = `
 .bb-find{display:flex;flex-direction:column;gap:8px;min-width:300px}
 .bb-find *{box-sizing:border-box}
 .bb-find-row{display:flex;gap:6px;align-items:center}
-.bb-find-input{flex:1 1 auto;height:30px;padding:0 9px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;font:inherit;font-size:13px;background:var(--bb-ui-bg,#fff);color:inherit}
+.bb-find-input{flex:1 1 auto;height:30px;padding:0 9px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;font:inherit;font-size:13px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit}
 .bb-find-count{min-width:44px;text-align:center;font-size:12px;opacity:.65;font-variant-numeric:tabular-nums}
-.bb-find-btn{height:30px;min-width:30px;padding:0 10px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.bb-find-btn{height:30px;min-width:30px;padding:0 10px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-find-btn:hover:not(:disabled){background:var(--bb-ui-hover,#f1efe8)}
 .bb-find-btn:disabled{opacity:.4;cursor:default}
 `;

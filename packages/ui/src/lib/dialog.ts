@@ -26,9 +26,9 @@ const STYLE = `
 .bb-dialog-close:hover{opacity:1;background:var(--bb-ui-hover,#f1efe8)}
 .bb-dialog-body{padding:12px}
 .bb-prompt{display:flex;flex-direction:column;gap:10px;min-width:280px}
-.bb-prompt-input{height:30px;padding:0 9px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;font:inherit;font-size:13px}
+.bb-prompt-input{height:30px;padding:0 9px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;font:inherit;font-size:13px}
 .bb-prompt-actions{display:flex;justify-content:flex-end;gap:8px}
-.bb-prompt-btn{height:30px;padding:0 14px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.bb-prompt-btn{height:30px;padding:0 14px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-prompt-btn[data-primary]{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#b5d4f4);color:var(--bb-ui-active-fg,#0c447c)}
 .bb-prompt-btn:hover{filter:brightness(.97)}
 `;

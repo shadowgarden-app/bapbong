@@ -143,14 +143,14 @@ const STYLE = `
 .bb-cpk-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .bb-cpk-none{width:100%;display:flex;align-items:center;gap:8px;height:28px;padding:0 7px;margin-bottom:10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;text-align:left;cursor:pointer}
 .bb-cpk-none:hover,.bb-cpk-none:focus-visible{background:var(--bb-ui-hover,#f1efe8);outline:none}
-.bb-cpk-none-chip{width:18px;height:18px;border-radius:50%;border:1px solid var(--bb-ui-border,#d8d6cf);display:flex;align-items:center;justify-content:center;font-size:12px;opacity:.6;flex:none}
+.bb-cpk-none-chip{width:18px;height:18px;border-radius:50%;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));display:flex;align-items:center;justify-content:center;font-size:12px;opacity:.6;flex:none}
 .bb-cpk-plus{width:20px;height:20px;padding:0;border-radius:50%;border:1px dashed var(--bb-ui-border,#d8d6cf);background:transparent;color:inherit;font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:.75;position:relative;overflow:hidden}
 .bb-cpk-plus input{position:absolute;inset:0;opacity:0;cursor:pointer;border:0;padding:0}
-.bb-cpk-hex{height:26px;width:96px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:12px;padding:0 7px;font-family:var(--bb-ui-mono,ui-monospace,monospace)}
+.bb-cpk-hex{height:26px;width:96px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:12px;padding:0 7px;font-family:var(--bb-ui-mono,ui-monospace,monospace)}
 
-.bb-cpk-btn{min-width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;padding:0 7px;cursor:pointer}
+.bb-cpk-btn{min-width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px;padding:0 7px;cursor:pointer}
 .bb-cpk-btn-chip{width:14px;height:14px;border-radius:50%;border:1px solid rgba(128,128,128,.4);flex:none}
-.bb-cpk-btn-chip.none{background:var(--bb-ui-bg,#fff);display:flex;align-items:center;justify-content:center;font-size:10px;opacity:.6}
+.bb-cpk-btn-chip.none{background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));display:flex;align-items:center;justify-content:center;font-size:10px;opacity:.6}
 .bb-cpk-btn-caret{opacity:.5;font-size:10px}
 /* Toolbar shape: a glyph with the colour as a bar beneath it. */
 .bb-cpk-btn.glyphed{flex-direction:column;gap:1px;min-width:30px;padding:0 6px;border-color:transparent;background:transparent}

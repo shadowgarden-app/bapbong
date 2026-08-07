@@ -51,7 +51,7 @@ const STYLE = `
    active tab's background to equal the pane's, and this dialog floats on
    frosted glass whose colour the widget cannot know. Same shape cell-properties
    already uses, so the two dialogs read as one product. */
-.bb-fd-tabs{display:inline-flex;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;overflow:hidden;align-self:flex-start}
+.bb-fd-tabs{display:inline-flex;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;overflow:hidden;align-self:flex-start}
 .bb-fd-tab{height:30px;padding:0 18px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;opacity:.65;font:inherit;font-size:13px;cursor:pointer}
 .bb-fd-tab:last-child{border-right:0}
 .bb-fd-tab[aria-selected="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);opacity:1}
@@ -62,12 +62,12 @@ const STYLE = `
 .bb-fd-lbl{font-size:12px;opacity:.7;margin-bottom:5px}
 .bb-fd-sec{font-size:12px;opacity:.7;margin-bottom:9px}
 .bb-fd-grid{display:grid;gap:10px}
-.bb-fd-ctl{width:100%;height:32px;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;padding:0 8px}
+.bb-fd-ctl{width:100%;height:32px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px;padding:0 8px}
 .bb-fd-row{display:grid;grid-template-columns:96px 1fr 88px;gap:10px;align-items:center;margin-bottom:10px}
 .bb-fd-row label{font-size:13px}
 .bb-fd-state{font-size:12px;color:var(--bb-ui-active-fg,#0c447c)}
 .bb-fd-state.off{color:inherit;opacity:.5}
-.bb-fd-seg{display:inline-flex;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;overflow:hidden;height:32px}
+.bb-fd-seg{display:inline-flex;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;overflow:hidden;height:32px}
 .bb-fd-segbtn{width:40px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-fd-segbtn:last-child{border-right:0}
 .bb-fd-segbtn[aria-pressed="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c)}
@@ -77,7 +77,7 @@ const STYLE = `
 .bb-fd-swatch-custom::-webkit-color-swatch{border:0;border-radius:5px;opacity:0}
 .bb-fd-eff{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}
 .bb-fd-cb{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
-.bb-fd-prev{border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:8px;background:var(--bb-ui-bg,#fff);padding:13px 14px;overflow:hidden}
+.bb-fd-prev{border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:8px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));padding:13px 14px;overflow:hidden}
 .bb-fd-prev-cap{font-size:11px;opacity:.55;margin-bottom:9px;text-align:center}
 /* The surrounding sentence stays at a fixed size and weight — it is the ruler
    the sample is read against, so it must not move when the sample does. */
@@ -86,7 +86,7 @@ const STYLE = `
 .bb-fd-dim{opacity:.4}
 .bb-fd-note{font-size:11px;opacity:.55;margin-top:5px}
 .bb-fd-foot{display:flex;justify-content:flex-end;gap:8px}
-.bb-fd-btn{height:31px;padding:0 17px;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.bb-fd-btn{height:31px;padding:0 17px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-fd-btn.primary{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#7fb2ec);color:var(--bb-ui-active-fg,#0c447c)}
 `;
 

@@ -62,7 +62,7 @@ const STYLE = `
 .bb-linkpanel *{box-sizing:border-box}
 .bb-linkpanel-row{display:flex;align-items:center;gap:8px}
 .bb-linkpanel-form{display:flex;flex-direction:column;gap:8px}
-.bb-linkpanel-field{display:flex;align-items:center;gap:7px;border:1px solid var(--bb-ui-border,#e3e3e0);border-radius:7px;padding:0 9px;background:var(--bb-ui-bg,#fff)}
+.bb-linkpanel-field{display:flex;align-items:center;gap:7px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:7px;padding:0 9px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff))}
 .bb-linkpanel-field:focus-within{border-color:var(--bb-ui-accent,#d85a30)}
 .bb-linkpanel-field svg{flex:none;opacity:.55}
 .bb-linkpanel-input{flex:1;min-width:0;height:30px;border:0;background:transparent;color:inherit;font:inherit;font-size:13px;outline:none}

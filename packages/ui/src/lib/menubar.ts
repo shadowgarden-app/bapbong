@@ -83,7 +83,7 @@ const DEFAULT_LABELS: Record<string, string> = {
 };
 
 const STYLE = `
-.bb-menubar{display:flex;gap:2px;align-items:center;padding:2px 6px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-bg,#fff);border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
+.bb-menubar{display:flex;gap:2px;align-items:center;padding:2px 6px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
 .bb-menubar *{box-sizing:border-box}
 .bb-menubar-menu{position:relative}
 .bb-menubar-title{height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
