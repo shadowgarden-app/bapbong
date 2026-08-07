@@ -170,11 +170,16 @@ const IGNORED_TAGS = new Set([
   'w:tcW',
   // Footnote-body marker glyph: the layout draws its own note numbers.
   'w:footnoteRef',
-  // Theme parts beyond colors (and later fonts): effects/object defaults and
-  // extra scheme variants style Office's galleries, not document content.
-  'a:fmtScheme',
+  // Theme parts beyond colors, fonts and the format scheme: object defaults
+  // and extra scheme variants style Office's galleries, not document content.
+  // a:fmtScheme is NOT here any more — a shape's a:fillRef resolves through
+  // it, so the entries we cannot paint (gradient fills, the theme's line
+  // widths) are real gaps and should stay countable.
   'a:objectDefaults',
   'a:extraClrSchemeLst',
+  // Theme effect gallery: we paint no shadows or glows at all, the same
+  // decision already recorded for a:effectRef and a:effectLst.
+  'a:effectStyleLst',
   // numbering.xml bookkeeping: internal ids and list-gallery metadata,
   // meaningless to rendering; the part itself is carried on export.
   'w:nsid',

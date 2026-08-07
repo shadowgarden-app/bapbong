@@ -1294,6 +1294,69 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100);
   });
 
+  it('resolves the full DrawingML colour union and its transforms', async () => {
+    const WPS_NS =
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
+    // accent1 at 60% luminance with +40% offset is how Word writes
+    // "Accent 1, Lighter 40%" — reading only @val loses the adjustment and
+    // paints the shape in the base accent.
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:clrScheme name="Office"><a:accent1><a:srgbClr val="4472C4"/></a:accent1></a:clrScheme>
+      <a:fmtScheme><a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:fillStyleLst></a:fmtScheme>
+    </a:themeElements></a:theme>`;
+    const shape = (spPr: string, style: string) =>
+      `<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/>
+        <a:graphic><a:graphicData><wps:wsp xmlns:wps="${WPS_NS}">
+          <wps:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${spPr}</wps:spPr>
+          ${style}
+        </wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    const documentXml =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}"><w:body><w:p>` +
+      shape(
+        `<a:solidFill><a:schemeClr val="accent1"><a:lumMod val="60000"/><a:lumOff val="40000"/></a:schemeClr></a:solidFill>`,
+        '',
+      ) +
+      shape(
+        `<a:solidFill><a:sysClr val="window" lastClr="FFFFFF"/></a:solidFill>`,
+        '',
+      ) +
+      shape(`<a:solidFill><a:prstClr val="red"/></a:solidFill>`, '') +
+      // No direct fill at all: the shape style's fillRef points at the theme
+      // format scheme, with its own colour standing in for phClr.
+      shape(
+        '',
+        `<wps:style><a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef></wps:style>`,
+      ) +
+      // An explicit a:noFill must beat the style reference.
+      shape(
+        '<a:noFill/>',
+        `<wps:style><a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef></wps:style>`,
+      ) +
+      `</w:p></w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    const fills = doc
+      .child(0)
+      .children.map((n) => (n.attrs.shape as { fill?: string }).fill);
+    // Word's own swatch for "Accent 1, Lighter 40%" on 4472C4.
+    expect(fills[0]).toBe('#8FAADC');
+    expect(fills[1]).toBe('#FFFFFF');
+    expect(fills[2]).toBe('#FF0000');
+    expect(fills[3]).toBe('#4472C4'); // phClr substituted into the scheme
+    expect(fills[4]).toBeUndefined();
+  });
+
   it('imports wps shapes (rect/line) as shape-carrying image nodes', async () => {
     const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
     const WPS_NS =

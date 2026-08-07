@@ -67,8 +67,11 @@ import { buildStyleRegistry, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
+  buildThemeFillResolver,
   buildThemeFontResolver,
   buildThemeResolver,
+  drawingColor,
+  ThemeFillResolver,
   ThemeFontResolver,
   ThemeResolver,
 } from './theme.js';
@@ -196,6 +199,8 @@ interface Ctx {
   media: Map<string, string>; // zip path → data URL
   resolveTheme: ThemeResolver;
   resolveFont: ThemeFontResolver;
+  /** Shape fill from an `a:fillRef` (theme format scheme + placeholder). */
+  resolveThemeFill: ThemeFillResolver;
   notes: NotesRegistry;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
@@ -706,17 +711,13 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   });
 }
 
-/** Color of a node's <a:solidFill>: srgbClr directly, schemeClr via theme. */
+/** Color of a node's <a:solidFill>, through the full DrawingML colour union
+ *  and its transform stack (see theme.ts `drawingColor`). */
 function solidFillColor(
   node: OoxmlNode | undefined,
   ctx: Ctx,
 ): string | undefined {
-  const fill = child(node, 'a:solidFill');
-  if (!fill) return undefined;
-  const srgb = attrOf(child(fill, 'a:srgbClr'), 'val');
-  if (srgb) return `#${srgb}`;
-  const scheme = attrOf(child(fill, 'a:schemeClr'), 'val');
-  return scheme ? ctx.resolveTheme(scheme) : undefined;
+  return drawingColor(child(node, 'a:solidFill'), ctx.resolveTheme);
 }
 
 /** A drawn wps shape (rect / straight connector) in a run's drawing — the
@@ -746,20 +747,25 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (!kind) return null;
 
   const shape: Record<string, unknown> = { kind };
+  const style = child(wsp, 'wps:style');
   const ln = child(spPr, 'a:ln');
   if (!child(ln, 'a:noFill')) {
     const w = attrOf(ln, 'w'); // outline width in EMU
     shape['strokeWidth'] = w ? Math.max(1, Math.round(Number(w) / 9525)) : 1;
     // Direct outline color, else the style's line reference (how Word themes
     // shape outlines), else black.
-    const lnRef = findDescendant(child(wsp, 'wps:style'), 'a:lnRef');
-    const refScheme = attrOf(child(lnRef, 'a:schemeClr'), 'val');
     shape['stroke'] =
       solidFillColor(ln, ctx) ??
-      (refScheme ? ctx.resolveTheme(refScheme) : undefined) ??
+      drawingColor(findDescendant(style, 'a:lnRef'), ctx.resolveTheme) ??
       '#000000';
   }
-  const fill = solidFillColor(spPr, ctx);
+  // Fill: an explicit a:noFill wins, then a direct a:solidFill, then the
+  // shape style's a:fillRef resolved through the theme's format scheme —
+  // which is how Word fills every shape inserted from the shape gallery.
+  const fill = child(spPr, 'a:noFill')
+    ? undefined
+    : (solidFillColor(spPr, ctx) ??
+      ctx.resolveThemeFill(child(style, 'a:fillRef')));
   if (fill) shape['fill'] = fill;
   if (attrOf(child(spPr, 'a:xfrm'), 'flipV') === '1') shape['flipV'] = true;
 
@@ -2398,6 +2404,7 @@ async function importDocxImpl(
     : undefined;
   const resolveTheme = buildThemeResolver(themeRoot);
   const resolveFont = buildThemeFontResolver(themeRoot);
+  const resolveThemeFill = buildThemeFillResolver(themeRoot, resolveTheme);
   const styles = buildStyleRegistry(
     stylesXml ? parsePart('word/styles.xml', stylesXml) : undefined,
     resolveTheme,
@@ -2430,6 +2437,7 @@ async function importDocxImpl(
     media,
     resolveTheme,
     resolveFont,
+    resolveThemeFill,
     notes,
     comments,
     schema: opts?.schema ?? schema,
