@@ -67,13 +67,13 @@ const HIGHLIGHTS = [
 ];
 
 const STYLE = `
-.bb-fd{display:flex;flex-direction:column;min-width:396px;max-width:430px;color:var(--bb-ui-fg,#2c2c2a)}
+.bb-fd{display:flex;flex-direction:column;gap:15px;min-width:396px;max-width:430px;color:var(--bb-ui-fg,#2c2c2a)}
 .bb-fd *{box-sizing:border-box}
 /* A segmented control, not a "tab joined to its pane": that pattern needs the
    active tab's background to equal the pane's, and this dialog floats on
    frosted glass whose colour the widget cannot know. Same shape cell-properties
    already uses, so the two dialogs read as one product. */
-.bb-fd-tabs{display:inline-flex;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;overflow:hidden;margin-bottom:15px;align-self:flex-start}
+.bb-fd-tabs{display:inline-flex;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;overflow:hidden;align-self:flex-start}
 .bb-fd-tab{height:30px;padding:0 18px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;opacity:.65;font:inherit;font-size:13px;cursor:pointer}
 .bb-fd-tab:last-child{border-right:0}
 .bb-fd-tab[aria-selected="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);opacity:1}
@@ -113,7 +113,7 @@ const STYLE = `
 .bb-fd-prev-txt{display:inline-block}
 .bb-fd-dim{opacity:.4}
 .bb-fd-note{font-size:11px;opacity:.55;margin-top:5px}
-.bb-fd-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.bb-fd-foot{display:flex;justify-content:flex-end;gap:8px}
 .bb-fd-btn{height:31px;padding:0 17px;border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:6px;background:var(--bb-ui-bg,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .bb-fd-btn.primary{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-border,#7fb2ec);color:var(--bb-ui-active-fg,#0c447c)}
 `;
@@ -480,6 +480,9 @@ export function openFontDialog({
 
   root.append(tabs, fontPane, advPane, prev, foot);
   dialog.body.append(root);
+  // Dialog appends its element to the body on construction and this helper
+  // builds a fresh one per open, so without this every visit leaves one behind.
+  dialog.onClose(() => dialog.destroy());
   showTab(false);
   paint();
   dialog.open();
