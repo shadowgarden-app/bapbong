@@ -528,14 +528,15 @@ export class CanvasPainter {
         seg.field && pageInfo
           ? String(seg.field === 'pageNumber' ? pageInfo.page : pageInfo.pages)
           : seg.text;
-      // Super/subscript shift the (already-reduced) glyphs off the baseline.
+      // Super/subscript shift the (already-reduced) glyphs off the baseline;
+      // w:position adds its own shift on top, at full size.
       const em = seg.font.sizePt * (96 / 72);
       const segY =
-        seg.vertAlign === 'super'
+        (seg.vertAlign === 'super'
           ? baselineY - em * 0.5
           : seg.vertAlign === 'sub'
             ? baselineY + em * 0.2
-            : baselineY;
+            : baselineY) - (seg.raise ?? 0);
       ctx.fillText(text, seg.x, segY);
       // Text decorations use the width measured at layout time — the painter
       // never measures.
@@ -543,20 +544,24 @@ export class CanvasPainter {
       if ((underline || seg.strike || seg.dstrike) && seg.width) {
         const em = seg.font.sizePt * (96 / 72);
         const thickness = Math.max(1, em * 0.05);
+        // Decorations ride with a raised run — a rule left at the original
+        // baseline would detach from the glyphs it belongs to. (Super/sub
+        // deliberately keep drawing theirs at the base line, as before.)
+        const decoY = baselineY - (seg.raise ?? 0);
         if (underline)
           ctx.fillRect(
             seg.x,
-            baselineY + Math.max(1, em * 0.1),
+            decoY + Math.max(1, em * 0.1),
             seg.width,
             thickness,
           );
         if (seg.strike)
-          ctx.fillRect(seg.x, baselineY - em * 0.27, seg.width, thickness);
+          ctx.fillRect(seg.x, decoY - em * 0.27, seg.width, thickness);
         if (seg.dstrike) {
           // Double strikethrough: two thin lines straddling the single-strike
           // position.
-          ctx.fillRect(seg.x, baselineY - em * 0.34, seg.width, thickness);
-          ctx.fillRect(seg.x, baselineY - em * 0.2, seg.width, thickness);
+          ctx.fillRect(seg.x, decoY - em * 0.34, seg.width, thickness);
+          ctx.fillRect(seg.x, decoY - em * 0.2, seg.width, thickness);
         }
       }
     }

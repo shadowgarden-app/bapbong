@@ -475,6 +475,30 @@ export const schema = new Schema({
       ],
       toDOM: (mark) => [mark.attrs['value'] === 'sub' ? 'sub' : 'sup', 0],
     },
+    // w:position — baseline shift in half-points, positive up. Unlike
+    // super/subscript this does NOT resize the glyphs; Word treats the two
+    // as independent and documents combine them.
+    position: {
+      attrs: { halfPoints: {} },
+      parseDOM: [
+        {
+          style: 'vertical-align',
+          getAttrs: (value) => {
+            const m = /^(-?[\d.]+)pt$/.exec(String(value));
+            return m ? { halfPoints: Number(m[1]) * 2 } : false;
+          },
+        },
+      ],
+      toDOM: (mark) => [
+        'span',
+        {
+          style: `vertical-align: ${
+            (mark.attrs['halfPoints'] as number) / 2
+          }pt`,
+        },
+        0,
+      ],
+    },
     // w:highlight / w:shd w:fill — run background color ("#RRGGBB")
     highlight: {
       attrs: { color: {} },

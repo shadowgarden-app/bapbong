@@ -130,6 +130,13 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const va = findMark(marks, 'vertAlign');
   // The font is reduced in tokenizeInline (one place, both entry paths).
   if (va) run.vertAlign = va.attrs['value'] === 'sub' ? 'sub' : 'super';
+  const raised = findMark(marks, 'position');
+  if (raised) {
+    // Half-points → px. Word does NOT grow the line box for a raised run, so
+    // neither do we: the shift is purely a paint-time offset.
+    const hp = Number(raised.attrs['halfPoints']);
+    if (!Number.isNaN(hp) && hp !== 0) run.raise = (hp / 2) * (96 / 72);
+  }
   const fn = findMark(marks, 'footnote');
   if (fn) run.footnoteRef = Number(fn.attrs['num']) || undefined;
   const cm = findMark(marks, 'comment');
@@ -429,6 +436,7 @@ interface Token {
   dstrike?: boolean;
   background?: string;
   vertAlign?: 'super' | 'sub';
+  raise?: number;
   footnoteRef?: number;
   commentIds?: number[];
   width: number;
@@ -548,6 +556,7 @@ function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
         dstrike: inline.dstrike,
         background: inline.background,
         vertAlign: inline.vertAlign,
+        raise: inline.raise,
         footnoteRef: inline.footnoteRef,
         commentIds: inline.commentIds,
         width: isTab ? 0 : ctx.measure(part, font),
@@ -845,6 +854,7 @@ function wrapParagraph(
           strike: t.strike,
           background: t.background,
           vertAlign: t.vertAlign,
+          raise: t.raise,
           width: t.width,
           pos: t.pos,
         };

@@ -320,6 +320,9 @@ const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
     n.children.length > 0 && n.children.every((c) => c.name === 'a:noFill'),
   // The preset that applies no warp at all — Word writes it on every textbox.
   'a:prstTxWarp': (n) => n.attrs['prst'] === 'textNoShape',
+  // ST_TextEffect defaults to "none": the animated text effects Word has not
+  // rendered since 2007, written out as "no effect".
+  'w:effect': (n) => n.attrs['w:val'] === 'none',
   // CT_TblWidth @w:w defaults to 0 = the table sits at the margin.
   'w:tblInd': (n) => Number(n.attrs['w:w'] ?? '0') === 0,
   // ST_DocGrid @w:type defaults to "default", which snaps nothing — and that

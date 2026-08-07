@@ -1294,6 +1294,33 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100);
   });
 
+  it('imports w:position as a baseline shift independent of vertAlign', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:rPr><w:position w:val="-2"/></w:rPr><w:t>lowered</w:t></w:r>
+        <w:r><w:rPr><w:position w:val="6"/><w:vertAlign w:val="superscript"/></w:rPr><w:t>both</w:t></w:r>
+        <w:r><w:rPr><w:position w:val="0"/></w:rPr><w:t>reset</w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const marksOf = (i: number) =>
+      Object.fromEntries(
+        doc
+          .child(0)
+          .child(i)
+          .marks.map((m) => [m.type.name, m.attrs]),
+      );
+    expect(marksOf(0)['position']).toEqual({ halfPoints: -2 });
+    // A run can carry both: w:position moves the baseline, w:vertAlign also
+    // shrinks the glyphs.
+    expect(marksOf(1)['position']).toEqual({ halfPoints: 6 });
+    expect(marksOf(1)['vertAlign']).toEqual({ value: 'super' });
+    // 0 is an explicit "back to the baseline" override, not an absent value.
+    expect(marksOf(2)['position']).toEqual({ halfPoints: 0 });
+    expect(marksOf(3)['position']).toBeUndefined();
+  });
+
   it('resolves the full DrawingML colour union and its transforms', async () => {
     const WPS_NS =
       'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';

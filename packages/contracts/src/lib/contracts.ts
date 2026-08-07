@@ -109,6 +109,9 @@ export interface InlineRun {
   background?: string;
   /** Superscript / subscript (font already reduced; painter shifts baseline). */
   vertAlign?: 'super' | 'sub';
+  /** w:position — baseline shift in px, positive UP, at full glyph size.
+   *  Independent of vertAlign; a run can carry both. */
+  raise?: number;
   /** Footnote reference number (w:footnoteReference): the run's text is the
    *  superscript mark; the body is laid out at the bottom of its page. */
   footnoteRef?: number;
@@ -421,6 +424,8 @@ export interface LayoutSegment {
   /** Superscript / subscript: the painter shifts the baseline (font is
    *  already the reduced size). */
   vertAlign?: 'super' | 'sub';
+  /** w:position — extra baseline shift in px, positive UP, glyphs unresized. */
+  raise?: number;
   /** Measured width (px) — lets the painter draw text decorations without
    *  re-measuring at paint time. */
   width?: number;

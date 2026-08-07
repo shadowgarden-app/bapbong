@@ -268,6 +268,10 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
     marks.push(ctx.schema.marks['highlight'].create({ color: p.highlight }));
   if (p.vertAlign)
     marks.push(ctx.schema.marks['vertAlign'].create({ value: p.vertAlign }));
+  // 0 is a real value (an explicit "back to the baseline" override), so test
+  // for presence, not truthiness.
+  if (p.position !== undefined && ctx.schema.marks['position'])
+    marks.push(ctx.schema.marks['position'].create({ halfPoints: p.position }));
   return marks;
 }
 
@@ -832,6 +836,7 @@ const CONSUMED_RPR = new Set([
   'w:sz',
   'w:rFonts',
   'w:vertAlign',
+  'w:position',
   'w:highlight',
   'w:shd',
   // w:rStyle: resolved into the cascade. NOT carried on purpose — re-emitting

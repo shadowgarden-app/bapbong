@@ -185,6 +185,9 @@ export interface RunProps {
   fontFamily?: string;
   highlight?: string; // background "#RRGGBB" (w:highlight / w:shd w:fill)
   vertAlign?: 'super' | 'sub'; // w:vertAlign
+  /** w:position — baseline shift in HALF-POINTS, positive up. Kept in the
+   *  document's own unit; the layout converts once, at the point of use. */
+  position?: number;
 }
 
 /** Word's 16 named highlight colors → hex. */
@@ -326,6 +329,14 @@ export function parseRunProps(
   const va = attrOf(child(rPr, 'w:vertAlign'), 'w:val');
   if (va === 'superscript') props.vertAlign = 'super';
   else if (va === 'subscript') props.vertAlign = 'sub';
+
+  // w:position is independent of vertAlign: it moves the baseline without
+  // resizing the glyphs, and a run may carry both.
+  const pos = attrOf(child(rPr, 'w:position'), 'w:val');
+  if (pos !== undefined) {
+    const hp = Number(pos);
+    if (!Number.isNaN(hp)) props.position = hp;
+  }
 
   // Background: w:highlight (named) takes precedence, else w:shd (solid
   // pattern color / fill / theme fill).

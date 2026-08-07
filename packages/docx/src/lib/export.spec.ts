@@ -267,6 +267,25 @@ describe('exportDocx (round-trip)', () => {
     ).toBe('super');
   });
 
+  it('round-trips w:position (baseline shift)', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'down', marks: ['position'], attrs: { halfPoints: -2 } },
+        { text: 'up', marks: ['position'], attrs: { halfPoints: 6 } },
+        { text: 'flat' },
+      ],
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const runs = [...range(back.child(0))];
+    const raise = (t: string) =>
+      runs
+        .find((n) => n.text === t)
+        ?.marks.find((m) => m.type.name === 'position')?.attrs['halfPoints'];
+    expect(raise('down')).toBe(-2);
+    expect(raise('up')).toBe(6);
+    expect(raise('flat')).toBeUndefined();
+  });
+
   it('round-trips a hard break within a paragraph', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [
