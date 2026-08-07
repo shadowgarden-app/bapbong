@@ -1,7 +1,10 @@
 import { toggleMark } from 'prosemirror-commands';
 import type { EditorState } from 'prosemirror-state';
 import type { Mark } from 'prosemirror-model';
-import type { Command } from '@shadow-garden/bapbong-contracts';
+import type {
+  CharacterFormatting,
+  Command,
+} from '@shadow-garden/bapbong-contracts';
 
 const matches = (mark: Mark, attrs?: Record<string, unknown>): boolean =>
   !attrs || Object.entries(attrs).every(([k, v]) => mark.attrs[k] === v);
@@ -122,6 +125,155 @@ export function activeMarkValue(
     }
   });
   return seen ? value : null;
+}
+
+// ── Advanced character formatting ───────────────────────────────────
+// Continuous, value-bearing properties. Each keeps the DOCUMENT's own unit,
+// the way the marks do: twips for tracking, percent for the glyph scale,
+// half-points for the baseline shift. Converting here would put a second
+// conversion beside the layout's, and the two would drift.
+
+/** Set character tracking (w:spacing) in TWIPS; null clears it. */
+export function setLetterSpacing(twips: number | null): Command {
+  return setMarkAttr('letterSpacing', twips == null ? null : { twips });
+}
+
+/** Tracking in twips over the selection, or null when unset or mixed. */
+export function activeLetterSpacing(state: EditorState): number | null {
+  const v = activeMarkValue(state, 'letterSpacing', 'twips');
+  return typeof v === 'number' ? v : null;
+}
+
+/** Set horizontal glyph scale (w:w) as a PERCENT; null clears it. */
+export function setCharScale(percent: number | null): Command {
+  return setMarkAttr('charScale', percent == null ? null : { percent });
+}
+
+/** Glyph scale percent over the selection, or null when unset or mixed. */
+export function activeCharScale(state: EditorState): number | null {
+  const v = activeMarkValue(state, 'charScale', 'percent');
+  return typeof v === 'number' ? v : null;
+}
+
+/** Set the baseline shift (w:position) in HALF-POINTS; null clears it. */
+export function setPosition(halfPoints: number | null): Command {
+  return setMarkAttr('position', halfPoints == null ? null : { halfPoints });
+}
+
+/** Baseline shift in half-points over the selection, or null when unset. */
+export function activePosition(state: EditorState): number | null {
+  const v = activeMarkValue(state, 'position', 'halfPoints');
+  return typeof v === 'number' ? v : null;
+}
+
+// ── The Font dialog's read/apply pair ───────────────────────────────
+
+/** A boolean mark over the selection: true/false when uniform, undefined when
+ *  mixed — which the dialog shows as an indeterminate box and leaves alone. */
+function activeToggle(
+  state: EditorState,
+  markName: string,
+): boolean | undefined {
+  const type = state.schema.marks[markName];
+  if (!type) return undefined;
+  const { from, to, empty, $from } = state.selection;
+  if (empty) return !!type.isInSet(state.storedMarks ?? $from.marks());
+  let value: boolean | undefined;
+  let mixed = false;
+  state.doc.nodesBetween(from, to, (node) => {
+    if (!node.isText || mixed) return;
+    const on = !!type.isInSet(node.marks);
+    if (value === undefined) value = on;
+    else if (value !== on) mixed = true;
+  });
+  return mixed ? undefined : (value ?? false);
+}
+
+/** Read every property the Font dialog shows, for the current selection. */
+export function activeCharacterFormatting(
+  state: EditorState,
+): CharacterFormatting {
+  const va = activeMarkValue(state, 'vertAlign', 'value');
+  return {
+    family: activeFontFamily(state),
+    sizePt: activeFontSize(state),
+    bold: activeToggle(state, 'strong'),
+    italic: activeToggle(state, 'em'),
+    underline: activeToggle(state, 'underline'),
+    strike: activeToggle(state, 'strike'),
+    doubleStrike: activeToggle(state, 'dstrike'),
+    smallCaps: activeToggle(state, 'smallCaps'),
+    vertAlign: va === 'super' || va === 'sub' ? va : null,
+    color: activeTextColor(state),
+    highlight: activeHighlight(state),
+    scalePercent: activeCharScale(state) ?? 100,
+    letterSpacingTwips: activeLetterSpacing(state) ?? 0,
+    positionHalfPoints: activePosition(state) ?? 0,
+  };
+}
+
+/**
+ * Apply the whole dialog in ONE transaction, so the user's visit is a single
+ * undo step rather than thirteen. `undefined` fields are skipped — that is how
+ * a mixed selection keeps the formatting the user never looked at.
+ */
+export function applyCharacterFormatting(v: CharacterFormatting): Command {
+  return {
+    name: 'apply-character-formatting',
+    run(state, dispatch) {
+      if (!dispatch) return true;
+      const { from, to, empty } = state.selection;
+      const tr = state.tr;
+      const put = (markName: string, attrs: Record<string, unknown> | null) => {
+        const type = state.schema.marks[markName];
+        if (!type) return;
+        if (empty) {
+          tr.removeStoredMark(type);
+          if (attrs) tr.addStoredMark(type.create(attrs));
+        } else {
+          tr.removeMark(from, to, type);
+          if (attrs) tr.addMark(from, to, type.create(attrs));
+        }
+      };
+      const toggle = (markName: string, on: boolean | undefined) => {
+        if (on !== undefined) put(markName, on ? {} : null);
+      };
+      if (v.family !== undefined)
+        put('fontFamily', v.family ? { family: v.family } : null);
+      if (v.sizePt !== undefined)
+        put('fontSize', v.sizePt ? { size: v.sizePt } : null);
+      if (v.color !== undefined)
+        put('textColor', v.color ? { color: v.color } : null);
+      if (v.highlight !== undefined)
+        put('highlight', v.highlight ? { color: v.highlight } : null);
+      toggle('strong', v.bold);
+      toggle('em', v.italic);
+      toggle('underline', v.underline);
+      toggle('strike', v.strike);
+      toggle('dstrike', v.doubleStrike);
+      toggle('smallCaps', v.smallCaps);
+      if (v.vertAlign !== undefined)
+        put('vertAlign', v.vertAlign ? { value: v.vertAlign } : null);
+      // The three below always carry a definite number; the default IS the
+      // clear, so a run never keeps a "scale 100%" mark Word would not write.
+      put(
+        'charScale',
+        v.scalePercent === 100 ? null : { percent: v.scalePercent },
+      );
+      put(
+        'letterSpacing',
+        v.letterSpacingTwips === 0 ? null : { twips: v.letterSpacingTwips },
+      );
+      put(
+        'position',
+        v.positionHalfPoints === 0
+          ? null
+          : { halfPoints: v.positionHalfPoints },
+      );
+      dispatch(tr.scrollIntoView());
+      return true;
+    },
+  };
 }
 
 /** Set the font size (points) over the selection; null clears it. */

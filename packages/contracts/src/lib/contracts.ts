@@ -68,6 +68,39 @@ export interface CommentNode {
   resolved?: boolean;
 }
 
+/**
+ * Everything the Font dialog reads and writes, shared so the command layer and
+ * the widget cannot drift apart on what a field means.
+ *
+ * Two absent-ish values, deliberately distinct:
+ *   `undefined` — leave it alone. The selection was mixed and the user never
+ *                 touched the control, so writing anything would flatten
+ *                 formatting they never looked at.
+ *   `null`      — clear it (Automatic colour, no highlight, no font override).
+ *
+ * The three spacing values carry no absent case at all: their controls always
+ * hold a definite number, and the default (100% / 0pt / 0pt) IS the clear.
+ */
+export interface CharacterFormatting {
+  family?: string | null;
+  sizePt?: number | null;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  doubleStrike?: boolean;
+  smallCaps?: boolean;
+  vertAlign?: 'super' | 'sub' | null;
+  color?: string | null;
+  highlight?: string | null;
+  /** w:w, percent. 100 = normal. */
+  scalePercent: number;
+  /** w:spacing, twips. 0 = normal. */
+  letterSpacingTwips: number;
+  /** w:position, half-points. 0 = on the baseline. */
+  positionHalfPoints: number;
+}
+
 /** The face itself — everything the CSS font shorthand can say. */
 export interface FontFace {
   family: string;

@@ -8,3 +8,4 @@ export * from './lib/link-panel.js';
 export * from './lib/cell-properties.js';
 export * from './lib/table-grid.js';
 export * from './lib/page-setup.js';
+export * from './lib/font-dialog.js';

@@ -63,6 +63,8 @@ const DEFAULT_LABELS: Record<string, string> = {
   strike: 'Strikethrough',
   superscript: 'Superscript',
   subscript: 'Subscript',
+  'small-caps': 'Small caps',
+  'double-strike': 'Double strikethrough',
   'align-left': 'Align left',
   'align-center': 'Center',
   'align-right': 'Align right',

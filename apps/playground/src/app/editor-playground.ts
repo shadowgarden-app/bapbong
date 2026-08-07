@@ -32,6 +32,8 @@ import {
   listPresets,
   mergeCells,
   removeSectionBreak,
+  activeCharacterFormatting,
+  applyCharacterFormatting,
   setFontFamily,
   setFontSize,
   setHighlight,
@@ -58,6 +60,7 @@ import {
   mountMenubar,
   mountToolbar,
   openCellProperties,
+  openFontDialog,
   promptDialog,
   showContextMenu,
   showLinkPanel,
@@ -141,6 +144,19 @@ function borderSidesFor(
  * render/edit loop, and this component just wires file load → editor + the
  * inspection panels (rendered preview, document JSON).
  */
+/** Offered in the toolbar pickers and in Format ▸ Font, so the two cannot
+ *  drift apart on what is available. */
+const FONT_FAMILIES = [
+  'Arial',
+  'Times New Roman',
+  'Georgia',
+  'Calibri',
+  'Courier New',
+  'Verdana',
+  'Tahoma',
+] as const;
+const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48] as const;
+
 @Component({
   selector: 'app-editor-playground',
   templateUrl: './editor-playground.html',
@@ -358,19 +374,8 @@ export class EditorPlayground implements OnDestroy {
               title: 'Font',
               width: 132,
               options: [
-                { label: 'Phông chữ', value: '' },
-                ...[
-                  'Arial',
-                  'Times New Roman',
-                  'Georgia',
-                  'Calibri',
-                  'Courier New',
-                  'Verdana',
-                  'Tahoma',
-                ].map((f) => ({
-                  label: f,
-                  value: f,
-                })),
+                { label: 'Font', value: '' },
+                ...FONT_FAMILIES.map((f) => ({ label: f, value: f })),
               ],
               value: (s) => activeFontFamily(s) ?? '',
               onSelect: (v) => this.exec(setFontFamily(v || null)),
@@ -380,10 +385,11 @@ export class EditorPlayground implements OnDestroy {
               title: 'Font size',
               width: 66,
               options: [
-                { label: 'Cỡ chữ', value: '' },
-                ...[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map(
-                  (n) => ({ label: String(n), value: String(n) }),
-                ),
+                { label: 'Size', value: '' },
+                ...FONT_SIZES.map((n) => ({
+                  label: String(n),
+                  value: String(n),
+                })),
               ],
               value: (s) => {
                 const sz = activeFontSize(s);
@@ -780,6 +786,7 @@ export class EditorPlayground implements OnDestroy {
               { command: 'clear-format', label: 'Clear formatting' },
             ],
           },
+          { label: 'Font…', run: () => this.openFontDialog() },
           {
             label: 'Align',
             submenu: [
@@ -956,6 +963,19 @@ export class EditorPlayground implements OnDestroy {
   }
 
   /** Run a parameterized command against the live editor. */
+  /** Format ▸ Font — the only way in for smallCaps, double strikethrough,
+   *  baseline shift, tracking and glyph scale. */
+  private openFontDialog(): void {
+    const ed = this.editor;
+    if (!ed) return;
+    openFontDialog({
+      initial: activeCharacterFormatting(ed.state),
+      families: FONT_FAMILIES,
+      sizes: FONT_SIZES,
+      onApply: (values) => this.exec(applyCharacterFormatting(values)),
+    });
+  }
+
   private exec(cmd: Command): void {
     if (!this.editor) return;
     cmd.run(this.editor.state, (tr) => this.editor?.dispatch(tr));
