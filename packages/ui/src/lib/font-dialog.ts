@@ -179,22 +179,22 @@ export function openFontDialog({
     : initial.family
       ? [initial.family, ...families]
       : families;
-  // '(unchanged)', not '(mixed)': a null here means "no explicit mark OR a
-  // mixed selection", and the two are indistinguishable at this layer. What
-  // IS certain is what OK will do with it — leave the property alone — so the
-  // label promises that instead of guessing which case it is.
+  // The empty option carries the field's own name, the way the toolbar's
+  // pickers do. It stands for "no explicit value OR a mixed selection" — the
+  // two are indistinguishable at this layer — and leaving it alone leaves the
+  // property alone. Naming it after the field rather than describing that
+  // state keeps the dialog and the toolbar saying the same word for it.
   const familySel = select(
-    [['', '(unchanged)'], ...famList.map((f) => [f, f] as const)],
+    [['', 'Font'], ...famList.map((f) => [f, f] as const)],
     initial.family ?? '',
   );
   const sizeSel = select(
-    [['', '(unchanged)'], ...sizes.map((n) => [String(n), String(n)] as const)],
+    [['', 'Size'], ...sizes.map((n) => [String(n), String(n)] as const)],
     initial.sizePt == null ? '' : String(initial.sizePt),
   );
 
   const topGrid = el('div', 'bb-fd-grid');
-  // Wide enough for the '(unchanged)' option, which is longer than any size.
-  topGrid.style.gridTemplateColumns = '1fr 118px';
+  topGrid.style.gridTemplateColumns = '1fr 100px';
   const famCell = el('div');
   famCell.append(el('div', 'bb-fd-lbl', 'Font'), familySel);
   const sizeCell = el('div');
