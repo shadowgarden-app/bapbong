@@ -272,6 +272,10 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   // for presence, not truthiness.
   if (p.position !== undefined && ctx.schema.marks['position'])
     marks.push(ctx.schema.marks['position'].create({ halfPoints: p.position }));
+  if (p.letterSpacing !== undefined && ctx.schema.marks['letterSpacing'])
+    marks.push(
+      ctx.schema.marks['letterSpacing'].create({ twips: p.letterSpacing }),
+    );
   return marks;
 }
 
@@ -837,6 +841,9 @@ const CONSUMED_RPR = new Set([
   'w:rFonts',
   'w:vertAlign',
   'w:position',
+  // Character tracking. The pPr set below has its own 'w:spacing' entry — the
+  // two elements share a name and nothing else.
+  'w:spacing',
   'w:highlight',
   'w:shd',
   // w:rStyle: resolved into the cascade. NOT carried on purpose — re-emitting

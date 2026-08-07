@@ -1,7 +1,7 @@
+import { applyGlyphSpec } from '@shadow-garden/bapbong-contracts';
 import type {
   BorderSide,
   CaretRect,
-  FontSpec,
   LayoutLine,
   PagePoint,
   PaintDecoration,
@@ -80,12 +80,6 @@ const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   selectionColor: 'rgba(59, 130, 246, 0.30)',
   decorations: [],
 };
-
-/** CSS font shorthand. Duplicated from bapbong-measuring: the painter may only
- *  depend on contracts (module boundary), and this must stay in sync with how
- *  text was measured. */
-const fontCss = (f: FontSpec) =>
-  `${f.italic ? 'italic ' : ''}${f.bold ? '700' : '400'} ${f.sizePt}pt ${f.family}`;
 
 const defaultDpr = () =>
   typeof globalThis.devicePixelRatio === 'number'
@@ -518,7 +512,7 @@ export class CanvasPainter {
       }
     }
     for (const seg of line.segments) {
-      ctx.font = fontCss(seg.font);
+      applyGlyphSpec(ctx, seg.font);
       // Hyperlinks without an explicit color get Word's hyperlink look
       // (blue + underline) — otherwise a fresh link paints like plain text
       // and inserting one reads as "nothing happened".

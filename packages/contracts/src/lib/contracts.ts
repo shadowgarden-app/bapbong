@@ -68,14 +68,26 @@ export interface CommentNode {
   resolved?: boolean;
 }
 
-/** A resolved font used for both measuring and painting. */
-export interface FontSpec {
+/** The face itself — everything the CSS font shorthand can say. */
+export interface FontFace {
   family: string;
   /** Size in points (CSS `pt`). */
   sizePt: number;
   bold: boolean;
   italic: boolean;
 }
+
+/** Per-run glyph adjustments. These change how WIDE text runs, never how TALL:
+ *  no adjustment here can move a baseline, which is why {@link MeasureMetrics}
+ *  takes only a {@link FontFace} and cannot see them. */
+export interface GlyphAdjust {
+  /** w:spacing — extra advance added after every character, px. Absolute:
+   *  it does not shrink with the font (superscript keeps the same tracking). */
+  letterSpacing?: number;
+}
+
+/** A resolved font used for both measuring and painting. */
+export interface FontSpec extends FontFace, GlyphAdjust {}
 
 /** Measures the width (CSS px) of `text` rendered with `font`. */
 export type MeasureText = (text: string, font: FontSpec) => number;
@@ -88,8 +100,10 @@ export interface FontMetrics {
   descent: number;
 }
 
-/** Provides vertical metrics for a font. Injected so the engine stays pure. */
-export type MeasureMetrics = (font: FontSpec) => FontMetrics;
+/** Provides vertical metrics for a face. Injected so the engine stays pure.
+ *  Takes {@link FontFace}, not {@link FontSpec}: an implementation physically
+ *  cannot read a glyph adjustment, so it cannot let one move a baseline. */
+export type MeasureMetrics = (font: FontFace) => FontMetrics;
 
 // ── Flow input (document flattened, ready for layout) ──────────────
 

@@ -286,6 +286,25 @@ describe('exportDocx (round-trip)', () => {
     expect(raise('flat')).toBeUndefined();
   });
 
+  it('round-trips rPr w:spacing (tracking)', async () => {
+    const doc = makeDoc([
+      [
+        { text: 'wide', marks: ['letterSpacing'], attrs: { twips: 26 } },
+        { text: 'tight', marks: ['letterSpacing'], attrs: { twips: -8 } },
+        { text: 'plain' },
+      ],
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const runs = [...range(back.child(0))];
+    const track = (t: string) =>
+      runs
+        .find((n) => n.text === t)
+        ?.marks.find((m) => m.type.name === 'letterSpacing')?.attrs['twips'];
+    expect(track('wide')).toBe(26);
+    expect(track('tight')).toBe(-8);
+    expect(track('plain')).toBeUndefined();
+  });
+
   it('round-trips a hard break within a paragraph', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

@@ -188,6 +188,9 @@ export interface RunProps {
   /** w:position — baseline shift in HALF-POINTS, positive up. Kept in the
    *  document's own unit; the layout converts once, at the point of use. */
   position?: number;
+  /** w:spacing (rPr) — tracking in TWIPS, positive = expanded. Same rule:
+   *  document unit in, converted once by the layout. */
+  letterSpacing?: number;
 }
 
 /** Word's 16 named highlight colors → hex. */
@@ -336,6 +339,14 @@ export function parseRunProps(
   if (pos !== undefined) {
     const hp = Number(pos);
     if (!Number.isNaN(hp)) props.position = hp;
+  }
+
+  // w:spacing inside rPr is CHARACTER tracking — nothing to do with the
+  // paragraph-level w:spacing (before/after/line) parsed from pPr.
+  const track = attrOf(child(rPr, 'w:spacing'), 'w:val');
+  if (track !== undefined) {
+    const tw = Number(track);
+    if (!Number.isNaN(tw)) props.letterSpacing = tw;
   }
 
   // Background: w:highlight (named) takes precedence, else w:shd (solid

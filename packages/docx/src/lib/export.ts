@@ -132,6 +132,7 @@ const KNOWN_MARKS = new Set([
   'highlight',
   'vertAlign',
   'position',
+  'letterSpacing',
   'link',
   'comment',
   'footnote',
@@ -171,6 +172,12 @@ function runProps(marks: readonly Mark[]): string {
     | number
     | undefined;
   if (raise != null) out.push(`<w:position w:val="${Math.round(raise)}"/>`);
+  // Character tracking. paraProps writes its own w:spacing (before/after/line)
+  // into w:pPr — same tag name, different element, different function.
+  const track = byName.get('letterSpacing')?.attrs['twips'] as
+    | number
+    | undefined;
+  if (track != null) out.push(`<w:spacing w:val="${Math.round(track)}"/>`);
   // Carry-through fidelity: unmodelled rPr children preserved by the importer
   // (w:rtl, w:kern, w:szCs, …), already escaped/filtered there. Appended after
   // the modelled props — Word tolerates rPr child order; revisit with a full

@@ -1,5 +1,10 @@
 import * as opentype from 'opentype.js';
-import type { FontSpec, MeasureMetrics, MeasureText } from '@shadow-garden/bapbong-contracts';
+import {
+  glyphCount,
+  type FontSpec,
+  type MeasureMetrics,
+  type MeasureText,
+} from '@shadow-garden/bapbong-contracts';
 
 const PT_TO_PX = 96 / 72;
 
@@ -42,7 +47,11 @@ export class FontRegistry {
   }
 
   /** Parse font-file bytes (TTF/OTF/WOFF) and register the resulting face. */
-  registerBytes(family: string, variant: FontVariant, bytes: ArrayBuffer): void {
+  registerBytes(
+    family: string,
+    variant: FontVariant,
+    bytes: ArrayBuffer,
+  ): void {
     this.register(family, variant, opentype.parse(bytes));
   }
 
@@ -95,7 +104,10 @@ export class FontRegistry {
  * defer to `fallback` (e.g. a canvas measurer). Kerning is not applied, matching
  * Word's default line-breaking (kerning-for-fonts is off by default).
  */
-export function createFontRegistryMeasurer(registry: FontRegistry, fallback: MeasureText): MeasureText {
+export function createFontRegistryMeasurer(
+  registry: FontRegistry,
+  fallback: MeasureText,
+): MeasureText {
   return (text, font) => {
     if (!registry.has(font)) return fallback(text, font);
     const px = font.sizePt * PT_TO_PX;
@@ -103,9 +115,14 @@ export function createFontRegistryMeasurer(registry: FontRegistry, fallback: Mea
     for (const ch of text) {
       const file = registry.fileForCodePoint(font, ch.codePointAt(0) ?? 0);
       if (!file) continue;
-      total += ((file.charToGlyph(ch).advanceWidth ?? 0) / file.unitsPerEm) * px;
+      total +=
+        ((file.charToGlyph(ch).advanceWidth ?? 0) / file.unitsPerEm) * px;
     }
-    return total;
+    // Tracking is charged arithmetically here, not by the browser. This
+    // measurer already diverges from canvas by more than that (no kerning, no
+    // shaping) — it exists to be DETERMINISTIC across environments, not to
+    // match canvas pixel for pixel.
+    return total + (font.letterSpacing ?? 0) * glyphCount(text);
   };
 }
 
@@ -113,11 +130,17 @@ export function createFontRegistryMeasurer(registry: FontRegistry, fallback: Mea
  * A {@link MeasureMetrics} reading a registered face's hhea ascent/descent
  * (scaled to px), deferring to `fallback` for unknown families.
  */
-export function createFontRegistryMetrics(registry: FontRegistry, fallback: MeasureMetrics): MeasureMetrics {
+export function createFontRegistryMetrics(
+  registry: FontRegistry,
+  fallback: MeasureMetrics,
+): MeasureMetrics {
   return (font) => {
     const face = registry.primary(font);
     if (!face) return fallback(font);
     const scale = (font.sizePt * PT_TO_PX) / face.unitsPerEm;
-    return { ascent: face.ascender * scale, descent: Math.abs(face.descender) * scale };
+    return {
+      ascent: face.ascender * scale,
+      descent: Math.abs(face.descender) * scale,
+    };
   };
 }

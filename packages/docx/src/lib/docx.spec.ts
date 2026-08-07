@@ -1294,6 +1294,31 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100);
   });
 
+  it('imports rPr w:spacing as tracking, without disturbing pPr w:spacing', async () => {
+    // The two elements share a tag name and nothing else: one is character
+    // tracking on a run, the other is before/after/line on a paragraph.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:pPr><w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>
+        <w:r><w:rPr><w:spacing w:val="26"/></w:rPr><w:t>tracked</w:t></w:r>
+        <w:r><w:rPr><w:spacing w:val="0"/></w:rPr><w:t>reset</w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const para = doc.child(0);
+    // Paragraph spacing survived untouched.
+    expect(para.attrs.spacing).toMatchObject({ before: 16, after: 8 });
+    const track = (i: number) =>
+      para.child(i).marks.find((m) => m.type.name === 'letterSpacing')?.attrs[
+        'twips'
+      ];
+    expect(track(0)).toBe(26);
+    // 0 is an explicit "back to normal" override of a style, not an absence.
+    expect(track(1)).toBe(0);
+    expect(track(2)).toBeUndefined();
+  });
+
   it('imports w:position as a baseline shift independent of vertAlign', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

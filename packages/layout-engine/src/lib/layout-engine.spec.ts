@@ -489,6 +489,30 @@ describe('layoutBlocks', () => {
     expect(inner && inner.width).toBeLessThanOrEqual(100);
   });
 
+  it('does not cluster adjacent runs that differ only in tracking', () => {
+    // Consecutive same-run tokens are measured CUMULATIVELY so kerning across
+    // a run boundary is right. Two runs with different tracking are not the
+    // same run: clustering them would measure the joined text with one side's
+    // tracking. This measurer charges 1px per character so the cumulative
+    // path and the per-run path give visibly different totals.
+    const tracking: MeasureText = (text, f) =>
+      text.length * 10 + (f.letterSpacing ?? 0) * text.length;
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        { text: 'ab', font: font({ letterSpacing: 1 }) },
+        { text: 'cd', font: font() },
+      ],
+    };
+    const [a, b] = layoutBlocks([block], {
+      ...config(),
+      measureText: tracking,
+    }).pages[0].lines[0].segments;
+    expect(a.width).toBe(22); // 2×10 + 2×1
+    expect(b.width).toBe(20); // measured on its own, not as "abcd"
+    expect(b.x).toBe(a.x + 22);
+  });
+
   it('reduces super/subscript font size and flags the segment', () => {
     const block: FlowBlock = {
       type: 'paragraph',

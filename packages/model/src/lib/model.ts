@@ -475,6 +475,25 @@ export const schema = new Schema({
       ],
       toDOM: (mark) => [mark.attrs['value'] === 'sub' ? 'sub' : 'sup', 0],
     },
+    // w:spacing (rPr) — tracking in twips, positive = expanded. Absolute:
+    // unlike the font size it does not shrink for superscript or small caps.
+    letterSpacing: {
+      attrs: { twips: {} },
+      parseDOM: [
+        {
+          style: 'letter-spacing',
+          getAttrs: (value) => {
+            const m = /^(-?[\d.]+)pt$/.exec(String(value));
+            return m ? { twips: Math.round(Number(m[1]) * 20) } : false;
+          },
+        },
+      ],
+      toDOM: (mark) => [
+        'span',
+        { style: `letter-spacing: ${(mark.attrs['twips'] as number) / 20}pt` },
+        0,
+      ],
+    },
     // w:position — baseline shift in half-points, positive up. Unlike
     // super/subscript this does NOT resize the glyphs; Word treats the two
     // as independent and documents combine them.
