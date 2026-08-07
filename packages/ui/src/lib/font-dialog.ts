@@ -1,6 +1,6 @@
 import type { CharacterFormatting } from '@shadow-garden/bapbong-contracts';
 import { Dialog } from './dialog.js';
-import { injectStyle } from './internal.js';
+import { injectStyle, swatchRow } from './internal.js';
 
 /**
  * Format ▸ Font — the home for character formatting, in two tabs the way Word
@@ -39,23 +39,31 @@ export interface FontDialogOptions {
 
 const SCALE_PRESETS = [200, 150, 100, 90, 80, 66, 50, 33];
 
+/** Must track the layout engine's own constant: the preview is only useful
+ *  while it agrees with what gets drawn. */
+const SUPERSUB_SCALE = 0.66;
+
 const TEXT_COLORS = [
-  { label: 'Automatic', value: null },
-  { label: 'Black', value: '#000000' },
-  { label: 'Grey', value: '#5F5E5A' },
-  { label: 'Red', value: '#C0392B' },
-  { label: 'Blue', value: '#185FA5' },
-  { label: 'Green', value: '#1D9E75' },
-  { label: 'Orange', value: '#BA7517' },
+  '#000000',
+  '#5F5E5A',
+  '#B0B0B0',
+  '#C0392B',
+  '#BA7517',
+  '#1D9E75',
+  '#185FA5',
+  '#7F77DD',
 ];
 
+/** Word's own highlighter set, which is what a .docx round-trips exactly
+ *  (w:highlight is a named enum; anything else has to travel as w:shd). */
 const HIGHLIGHTS = [
-  { label: 'None', value: null },
-  { label: 'Yellow', value: '#FFFF00' },
-  { label: 'Green', value: '#00FF00' },
-  { label: 'Cyan', value: '#00FFFF' },
-  { label: 'Magenta', value: '#FF00FF' },
-  { label: 'Grey', value: '#C0C0C0' },
+  '#FFFF00',
+  '#00FF00',
+  '#00FFFF',
+  '#FF00FF',
+  '#0000FF',
+  '#FF0000',
+  '#C0C0C0',
 ];
 
 const STYLE = `
@@ -86,11 +94,23 @@ const STYLE = `
 .bb-fd-segbtn:last-child{border-right:0}
 .bb-fd-segbtn[aria-pressed="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c)}
 .bb-fd-segbtn[aria-pressed="mixed"]{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--bb-ui-active-bg,#e6f1fb) 4px 8px)}
+.bb-fd-swatches{display:flex;flex-wrap:wrap;gap:6px}
+.bb-fd-swatch{width:26px;height:26px;border-radius:6px;border:0.5px solid var(--bb-ui-border,#d8d6cf);padding:0;cursor:pointer}
+.bb-fd-swatch.on{box-shadow:0 0 0 2px var(--bb-ui-active-fg,#0c447c)}
+.bb-fd-swatch-none{display:flex;align-items:center;justify-content:center;background:var(--bb-ui-bg,#fff);font-size:15px;color:inherit;opacity:.55}
+/* The OS picker is a chip like the rest: strip the native chrome so it does
+   not read as a different KIND of control from the presets beside it. */
+.bb-fd-swatch-custom{background:conic-gradient(#c0392b,#ba7517,#1d9e75,#185fa5,#7f77dd,#c0392b)}
+.bb-fd-swatch-custom::-webkit-color-swatch-wrapper{padding:0}
+.bb-fd-swatch-custom::-webkit-color-swatch{border:0;border-radius:5px;opacity:0}
 .bb-fd-eff{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}
 .bb-fd-cb{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
-.bb-fd-prev{border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:8px;background:var(--bb-ui-bg,#fff);padding:15px 10px;text-align:center;overflow:hidden}
-.bb-fd-prev-cap{font-size:11px;opacity:.55;margin-bottom:9px}
-.bb-fd-prev-txt{font-size:17px;display:inline-block}
+.bb-fd-prev{border:0.5px solid var(--bb-ui-border,#d8d6cf);border-radius:8px;background:var(--bb-ui-bg,#fff);padding:13px 14px;overflow:hidden}
+.bb-fd-prev-cap{font-size:11px;opacity:.55;margin-bottom:9px;text-align:center}
+/* The surrounding sentence stays at a fixed size and weight — it is the ruler
+   the sample is read against, so it must not move when the sample does. */
+.bb-fd-prev-line{font-size:15px;line-height:2;text-align:center}
+.bb-fd-prev-txt{display:inline-block}
 .bb-fd-dim{opacity:.4}
 .bb-fd-note{font-size:11px;opacity:.55;margin-top:5px}
 .bb-fd-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
@@ -201,7 +221,8 @@ export function openFontDialog({
   );
 
   const topGrid = el('div', 'bb-fd-grid');
-  topGrid.style.gridTemplateColumns = '1fr 96px';
+  // Wide enough for the '(unchanged)' option, which is longer than any size.
+  topGrid.style.gridTemplateColumns = '1fr 118px';
   const famCell = el('div');
   famCell.append(el('div', 'bb-fd-lbl', 'Font'), familySel);
   const sizeCell = el('div');
@@ -230,24 +251,37 @@ export function openFontDialog({
   const italicBtn = mkSeg('I', initial.italic, 'font-style:italic');
   const underBtn = mkSeg('U', initial.underline, 'text-decoration:underline');
 
-  const colorSel = select(
-    TEXT_COLORS.map((c) => [c.value ?? '', c.label] as const),
-    initial.color ?? '',
-  );
-  const hlSel = select(
-    HIGHLIGHTS.map((c) => [c.value ?? '', c.label] as const),
-    initial.highlight ?? '',
-  );
+  // Colours get swatches and the platform picker, not a dropdown of names:
+  // a colour is chosen by looking at it.
+  let color: string | null = initial.color ?? null;
+  let highlight: string | null = initial.highlight ?? null;
+  const colorRow = swatchRow({
+    prefix: 'bb-fd',
+    presets: TEXT_COLORS,
+    clearLabel: 'Automatic',
+    get: () => color,
+    set: (c) => {
+      color = c;
+      paint();
+    },
+  });
+  const hlRow = swatchRow({
+    prefix: 'bb-fd',
+    presets: HIGHLIGHTS,
+    clearLabel: 'No highlight',
+    get: () => highlight,
+    set: (c) => {
+      highlight = c;
+      paint();
+    },
+  });
 
-  const styleGrid = el('div', 'bb-fd-grid');
-  styleGrid.style.gridTemplateColumns = 'auto 1fr 1fr';
-  const segCell = el('div');
-  segCell.append(el('div', 'bb-fd-lbl', 'Style'), seg);
+  const styleCell = el('div');
+  styleCell.append(el('div', 'bb-fd-lbl', 'Style'), seg);
   const colorCell = el('div');
-  colorCell.append(el('div', 'bb-fd-lbl', 'Text color'), colorSel);
+  colorCell.append(el('div', 'bb-fd-lbl', 'Text color'), colorRow.el);
   const hlCell = el('div');
-  hlCell.append(el('div', 'bb-fd-lbl', 'Highlight'), hlSel);
-  styleGrid.append(segCell, colorCell, hlCell);
+  hlCell.append(el('div', 'bb-fd-lbl', 'Highlight'), hlRow.el);
 
   const effWrap = el('div');
   effWrap.append(el('div', 'bb-fd-sec', 'Effects'));
@@ -282,7 +316,7 @@ export function openFontDialog({
     wrapOf(smallCapsCb),
   );
   effWrap.append(effGrid);
-  fontPane.append(topGrid, styleGrid, effWrap);
+  fontPane.append(topGrid, styleCell, colorCell, hlCell, effWrap);
 
   // ── Advanced tab ────────────────────────────────────────────────
   const advWrap = el('div');
@@ -338,8 +372,18 @@ export function openFontDialog({
   // One sample for both tabs: the settings compose, so showing them apart
   // would misrepresent what the run will look like.
   const prev = el('div', 'bb-fd-prev');
+  // The sample sits INSIDE a plain sentence, sharing its baseline. On its own
+  // a centred line cannot show what superscript, a baseline shift, tracking or
+  // a glyph scale actually do — each of those is only legible against
+  // unstyled text beside it.
+  const prevLine = el('div', 'bb-fd-prev-line');
   const prevTxt = el('span', 'bb-fd-prev-txt', 'The quick brown fox');
-  prev.append(el('div', 'bb-fd-prev-cap', 'Preview'), prevTxt);
+  prevLine.append(
+    document.createTextNode('Text before '),
+    prevTxt,
+    document.createTextNode(' and text after.'),
+  );
+  prev.append(el('div', 'bb-fd-prev-cap', 'Preview'), prevLine);
 
   const num = (i: HTMLInputElement) => {
     const v = Number(i.value);
@@ -375,14 +419,20 @@ export function openFontDialog({
       .join(' ');
     const s = prevTxt.style;
     s.fontFamily = familySel.value || 'inherit';
-    s.fontSize = sizeSel.value ? `${sizeSel.value}pt` : '17px';
+    // Super/subscript render at a REDUCED size, so the preview has to reduce
+    // too — the same factor the layout engine uses. Showing them at full size
+    // would make the preview disagree with the page it is previewing.
+    const shrink = supCb.checked || subCb.checked ? SUPERSUB_SCALE : 1;
+    s.fontSize = sizeSel.value
+      ? `${Number(sizeSel.value) * shrink}pt`
+      : `${15 * shrink}px`;
     s.fontWeight = pressed(boldBtn) ? '700' : '400';
     s.fontStyle = pressed(italicBtn) ? 'italic' : 'normal';
     s.textDecoration = deco || 'none';
     s.textDecorationStyle = dstrikeCb.checked ? 'double' : 'solid';
     s.fontVariant = smallCapsCb.checked ? 'small-caps' : 'normal';
-    s.color = colorSel.value || 'inherit';
-    s.background = hlSel.value || 'transparent';
+    s.color = color ?? 'inherit';
+    s.background = highlight ?? 'transparent';
     s.letterSpacing = `${spacingPt}pt`;
     s.transform = scale === 100 ? 'none' : `scaleX(${scale / 100})`;
     s.verticalAlign = supCb.checked
@@ -391,7 +441,7 @@ export function openFontDialog({
         ? 'sub'
         : `${positionPt}pt`;
   }
-  for (const c of [familySel, sizeSel, colorSel, hlSel, scaleSel])
+  for (const c of [familySel, sizeSel, scaleSel])
     c.addEventListener('change', paint);
   for (const i of [spacingInput, positionInput])
     i.addEventListener('input', paint);
@@ -418,8 +468,8 @@ export function openFontDialog({
       doubleStrike: checkedOrMixed(dstrikeCb),
       smallCaps: checkedOrMixed(smallCapsCb),
       vertAlign: supCb.checked ? 'super' : subCb.checked ? 'sub' : null,
-      color: colorSel.value || null,
-      highlight: hlSel.value || null,
+      color,
+      highlight,
       scalePercent: scale,
       letterSpacingTwips: ptToTwips(spacingPt),
       positionHalfPoints: ptToHalf(positionPt),
