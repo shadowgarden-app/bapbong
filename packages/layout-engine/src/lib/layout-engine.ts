@@ -1702,16 +1702,23 @@ function legalPartition(lines: LayoutLine[], cut: number): number {
 function splitTableAt(
   table: ResolvedTable,
   cut: number,
+  opts?: {
+    /** Recursively split a nested table straddling the cut when it is taller
+     *  than this (a full band's height): such a table can never fit whole on
+     *  ANY page, so moving it down just paints it off the sheet. Smaller
+     *  nested tables keep the whole-move behavior. Propagates down. */
+    splitNestedOver?: number;
+  },
 ): { top: ResolvedTable; rest: ResolvedTable } {
   interface Cont {
     /** The cell with centering slack removed — what BOTH fragments read. */
     view: ResolvedCell;
-    /** Line partition index: lines[0..part) stay, lines[part..] continue.
-     *  Snapped to the largest LEGAL boundary ≤ the geometric cut (keepNext /
-     *  keepLines / widow-orphan — see legalPartition). */
-    part: number;
-    remLines: LayoutLine[];
-    remTables: ResolvedTable[];
+    topLines: LayoutLine[];
+    topTables: ResolvedTable[];
+    /** Continuation content, already positioned at its 0-based y. */
+    contLines: LayoutLine[];
+    contTables: ResolvedTable[];
+    /** Original y of the first continued item (float re-anchoring). */
     firstY: number;
   }
   const straddlers = new Map<ResolvedCell, Cont>();
@@ -1724,23 +1731,140 @@ function splitTableAt(
     const view = unshiftCell(cell);
     const part = legalPartition(view.lines, cut);
     const remLines = view.lines.slice(part);
-    const remTables = (view.tables ?? []).filter((t) => t.y + t.height > cut);
-    const firstY = Math.min(
-      remLines.length ? Math.min(...remLines.map((l) => l.y)) : Infinity,
-      remTables.length ? Math.min(...remTables.map((t) => t.y)) : Infinity,
-    );
-    const first = firstY === Infinity ? cut : firstY;
-    const extent =
-      Math.max(
-        remLines.length
-          ? Math.max(...remLines.map((l) => l.y + l.height))
-          : first,
-        remTables.length
-          ? Math.max(...remTables.map((t) => t.y + t.height))
-          : first,
-      ) - first;
+    const topLines = view.lines.slice(0, part);
+    const minRemLineY = remLines.length
+      ? Math.min(...remLines.map((l) => l.y))
+      : Infinity;
+
+    // Classify the cell's nested tables. One continuation item per table or
+    // line, in source order; a straddling nested table taller than a full
+    // band splits recursively — its top part stays in place, its remainder
+    // becomes a continuation item whose height DIFFERS from the slot it
+    // vacated, which is what forces the sequential re-stack below.
+    interface ContItem {
+      origTop: number;
+      origBottom: number;
+      height: number;
+      line?: LayoutLine;
+      table?: ResolvedTable;
+    }
+    const topTables: ResolvedTable[] = [];
+    const items: ContItem[] = [];
+    let nestedSplit = false;
+    for (const t of view.tables ?? []) {
+      if (t.y + t.height <= cut) {
+        topTables.push(t);
+        continue;
+      }
+      if (t.y < cut) {
+        const tall =
+          opts?.splitNestedOver != null && t.height > opts.splitNestedOver;
+        // A keep-pushed line ABOVE the nested table forces the whole table
+        // down with it — splitting would put the line under rows it
+        // originally preceded.
+        if (tall && minRemLineY >= t.y) {
+          const local = cloneTable(t);
+          offsetTable(local, -t.y);
+          const localCut = cut - t.y;
+          let sub = splitTableAt(local, localCut, opts);
+          // Same policy as the outer placement loop, one level down: fill
+          // mid-row, but fall back to the nested table's own row boundary
+          // when the straddling nested row contributes nothing — otherwise
+          // its top fragment ends in an empty stub row.
+          let b = 0;
+          for (const c2 of local.cells)
+            if (c2.y > REMAINDER_EPS && c2.y <= localCut) b = Math.max(b, c2.y);
+          const rowContributed = sub.top.cells.some(
+            (c2) =>
+              c2.lines.some((l) => l.y + l.height > b + REMAINDER_EPS) ||
+              (c2.tables ?? []).some(
+                (nt) => nt.y + nt.height > b + REMAINDER_EPS,
+              ),
+          );
+          if (!rowContributed && b > 0) sub = splitTableAt(local, b, opts);
+          const subHasContent = sub.top.cells.some(
+            (c2) => c2.lines.length > 0 || (c2.tables?.length ?? 0) > 0,
+          );
+          if (subHasContent && sub.rest.height < t.height) {
+            offsetTable(sub.top, t.y);
+            topTables.push(sub.top);
+            items.push({
+              origTop: cut,
+              origBottom: t.y + t.height,
+              height: sub.rest.height,
+              table: sub.rest,
+            });
+            nestedSplit = true;
+            continue;
+          }
+        }
+      }
+      items.push({
+        origTop: t.y,
+        origBottom: t.y + t.height,
+        height: t.height,
+        table: cloneTable(t),
+      });
+    }
+    for (const l of remLines)
+      items.push({
+        origTop: l.y,
+        origBottom: l.y + l.height,
+        height: l.height,
+        line: l,
+      });
+    items.sort((a, b) => a.origTop - b.origTop);
+
+    const firstY = items.length ? items[0].origTop : cut;
+    const contLines: LayoutLine[] = [];
+    const contTables: ResolvedTable[] = [];
+    let extent = 0;
+    if (!nestedSplit) {
+      // Pure translation — every item keeps its relative position (the
+      // continuation is the original layout shifted up as one block).
+      const delta = -firstY;
+      let bottom = firstY;
+      for (const it of items) {
+        if (it.line) contLines.push({ ...it.line, y: it.line.y + delta });
+        else {
+          const tb = it.table as ResolvedTable;
+          offsetTable(tb, delta);
+          contTables.push(tb);
+        }
+        bottom = Math.max(bottom, it.origBottom);
+      }
+      extent = bottom - firstY;
+    } else {
+      // A nested table changed height when it split, so everything below it
+      // RE-STACKS sequentially: source order, original inter-item gaps, new
+      // heights. A single delta would leave the old gap where the vanished
+      // rows used to be.
+      let yCur = 0;
+      let prevBottom: number | null = null;
+      for (const it of items) {
+        const gap =
+          prevBottom === null ? 0 : Math.max(0, it.origTop - prevBottom);
+        const newTop = yCur + gap;
+        if (it.line) contLines.push({ ...it.line, y: newTop });
+        else {
+          const tb = it.table as ResolvedTable;
+          offsetTable(tb, newTop - tb.y);
+          contTables.push(tb);
+        }
+        yCur = newTop + it.height;
+        prevBottom = it.origBottom;
+      }
+      extent = yCur;
+    }
     contHeight = Math.max(contHeight, extent);
-    straddlers.set(cell, { view, part, remLines, remTables, firstY: first });
+    straddlers.set(cell, {
+      view,
+      topLines,
+      topTables,
+      contLines,
+      contTables,
+      firstY,
+    });
   }
 
   const topCells: ResolvedCell[] = [];
@@ -1757,18 +1881,15 @@ function splitTableAt(
       // Both fragments read the UN-CENTERED view (see unshiftCell) so the
       // first lines land on the first fragment, as Word splits. The partition
       // is the SNAPPED one — top and rem must complement exactly, or a line
-      // pushed down by a keep would also stay up.
-      const topLines = c.view.lines.slice(0, c.part);
-      const topTables = (c.view.tables ?? []).filter(
-        (t) => t.y + t.height <= cut,
-      );
+      // pushed down by a keep would also stay up. Nested tables were already
+      // classified (and possibly recursively split) in the first pass.
       const topCell: ResolvedCell = {
         ...cell,
         height: cut - cell.y,
-        lines: topLines,
+        lines: c.topLines,
       };
       delete topCell.vShift; // its content is top-stacked now
-      if (topTables.length > 0) topCell.tables = topTables;
+      if (c.topTables.length > 0) topCell.tables = c.topTables;
       else delete topCell.tables;
       const topFloats = (c.view.floats ?? []).filter(
         (f) => f.y + f.height <= cut,
@@ -1777,13 +1898,11 @@ function splitTableAt(
       else delete topCell.floats;
       topCells.push(topCell);
 
-      const delta = -c.firstY;
-      const lines = c.remLines.map((l) => ({ ...l, y: l.y + delta }));
-      const remTables = c.remTables.map(cloneTable);
-      remTables.forEach((t) => offsetTable(t, delta));
+      const lines = c.contLines;
+      const remTables = c.contTables;
       const remFloats = (c.view.floats ?? [])
         .filter((f) => f.y + f.height > cut)
-        .map((f) => ({ ...f, y: f.y + delta }));
+        .map((f) => ({ ...f, y: f.y - c.firstY }));
       // The continuation inherits everything that describes the CELL —
       // borders, fill — and overrides only what the split changes. Building
       // it field-by-field silently dropped `borders` and `background`: the
@@ -3507,10 +3626,13 @@ function placeBlocks(
           //    Fragments carrying fresh footnotes shrink the budget by the
           //    reserve their notes add — monotone, so a bounded walk-down
           //    settles it; footnote-free tables (the norm) skip it entirely.
+          // A nested table taller than a full fresh band can never fit whole
+          // anywhere — recursive splitting is its only way onto the paper.
+          const splitOpts = { splitNestedOver: limit() - bandTop };
           if (!straddleCantSplit) {
             let effBudget = budget;
             let view = remainderView(rem, effBudget);
-            let frag = splitTableAt(view, effBudget);
+            let frag = splitTableAt(view, effBudget, splitOpts);
             if (remFns.length > 0) {
               for (let i = 0; i < 3 && effBudget > 0; i++) {
                 const need = addedReserve(tableFootnoteNums(frag.top));
@@ -3518,7 +3640,7 @@ function placeBlocks(
                 effBudget = avail - ghostH - need;
                 if (effBudget <= 0) break;
                 view = remainderView(rem, effBudget);
-                frag = splitTableAt(view, effBudget);
+                frag = splitTableAt(view, effBudget, splitOpts);
               }
             }
             const contributed =
@@ -3540,7 +3662,11 @@ function placeBlocks(
           // 2) The straddling row moves whole: cut at the row boundary.
           if (boundary > 0) {
             const view = remainderView(rem, boundary);
-            const { top: topFrag, rest } = splitTableAt(view, boundary);
+            const { top: topFrag, rest } = splitTableAt(
+              view,
+              boundary,
+              splitOpts,
+            );
             if (rest.height >= H + ghostH) {
               // The cut moved nothing. Retry on a fresh band when this one
               // is already used; only a genuinely band-taller table, with
@@ -3575,7 +3701,11 @@ function placeBlocks(
           }
           {
             const view = remainderView(rem, budget);
-            const { top: topFrag, rest } = splitTableAt(view, budget);
+            const { top: topFrag, rest } = splitTableAt(
+              view,
+              budget,
+              splitOpts,
+            );
             const topHasContent = topFrag.cells.some(
               (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
             );

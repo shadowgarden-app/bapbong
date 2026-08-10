@@ -3061,3 +3061,114 @@ describe('table cells: paragraph rules and page fill', () => {
     expect((rowsOf(pages[1].tables?.[0])?.[0] ?? []).length).toBe(4);
   });
 });
+
+describe('nested table pagination', () => {
+  // A nested table taller than a full band used to move whole forever and
+  // paint straight off the bottom of the sheet (the painter does not clip to
+  // the page). It now splits recursively; a page-fitting nested table keeps
+  // the whole-move behavior.
+  const cellOf = (content: FlowBlock[]): FlowTableCell => ({
+    colspan: 1,
+    rowspan: 1,
+    colwidth: null,
+    content,
+  });
+  const p = (text: string): FlowParagraph => ({
+    type: 'paragraph',
+    runs: [{ text, font: font() }],
+  });
+  const nestedOf = (rows: number, pre: string): FlowBlock => ({
+    type: 'table',
+    rows: Array.from({ length: rows }, (_, r) => ({
+      cells: [cellOf([p(`${pre}${r + 1}`)])],
+    })),
+  });
+  const nestedRows = (pg: { tables?: ResolvedTable[] }) =>
+    (pg.tables ?? []).flatMap((t) =>
+      t.cells.flatMap((c) =>
+        (c.tables ?? []).map((nt) =>
+          nt.cells.map((nc) => nc.lines[0]?.segments[0]?.text),
+        ),
+      ),
+    );
+  const CONTENT_BOTTOM = 80; // height 100, margins 20 — nothing may pass this
+
+  const worstBottom = (pages: { tables?: ResolvedTable[] }[]) =>
+    Math.max(
+      ...pages.flatMap((pg) => (pg.tables ?? []).map((t) => t.y + t.height)),
+    );
+
+  it('a nested table taller than the page splits instead of overflowing', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cellOf([nestedOf(8, 'n')])] }],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(pages.length).toBeGreaterThan(1);
+    expect(worstBottom(pages)).toBeLessThanOrEqual(CONTENT_BOTTOM);
+    // Every nested row survives, in order, across the fragments.
+    const all = pages.flatMap((pg) => nestedRows(pg).flat());
+    expect(all).toEqual(['n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8']);
+  });
+
+  it('content after the split nested table re-stacks, not translates', () => {
+    // [tall nested][paragraph after] — the paragraph must land right under
+    // the nested remainder on the last fragment, not at its stale offset.
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cellOf([nestedOf(8, 'n'), p('after')])] }],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(worstBottom(pages)).toBeLessThanOrEqual(CONTENT_BOTTOM);
+    const last = pages[pages.length - 1].tables?.[0]?.cells[0];
+    const afterLine = last?.lines.find((l) => l.segments[0]?.text === 'after');
+    const lastNested = last?.tables?.[last.tables.length - 1];
+    expect(afterLine).toBeDefined();
+    expect(lastNested).toBeDefined();
+    // Right below the nested remainder (cell padding aside), no stale gap.
+    expect(afterLine?.y ?? 0).toBeLessThan(
+      (lastNested?.y ?? 0) + (lastNested?.height ?? 0) + 8,
+    );
+  });
+
+  it('a page-fitting nested table still moves whole', () => {
+    // 3-row nested (48px) fits a fresh band easily: Word-parity whole-move,
+    // no recursive split.
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        { cells: [cellOf([p('h1')])] },
+        { cells: [cellOf([nestedOf(3, 'n'), p('tail')])] },
+      ],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    const withNested = pages.filter((pg) => nestedRows(pg).length > 0);
+    expect(withNested).toHaveLength(1); // never fragmented
+    expect(nestedRows(withNested[0])[0]).toEqual(['n1', 'n2', 'n3']);
+  });
+
+  it('nested-in-nested taller than the page splits at every level', () => {
+    const inner = nestedOf(8, 'i');
+    const middle: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cellOf([inner])] }],
+    };
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cellOf([middle])] }],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(worstBottom(pages)).toBeLessThanOrEqual(CONTENT_BOTTOM);
+    // All inner rows survive across pages.
+    const texts: string[] = [];
+    const walk = (t2: ResolvedTable) => {
+      for (const c of t2.cells) {
+        for (const l of c.lines)
+          if (l.segments[0]?.text) texts.push(l.segments[0].text);
+        for (const nt of c.tables ?? []) walk(nt);
+      }
+    };
+    pages.forEach((pg) => (pg.tables ?? []).forEach(walk));
+    expect(texts).toEqual(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8']);
+  });
+});
