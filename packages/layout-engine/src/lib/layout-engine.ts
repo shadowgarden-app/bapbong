@@ -1814,6 +1814,155 @@ function cloneHeaderCells(
   }));
 }
 
+/**
+ * The unplaced remainder of a table mid-pagination, as a cursor into an
+ * IMMUTABLE base layout instead of a re-cloned table.
+ *
+ * The old representation (`table = rest` after each split) deep-cloned every
+ * row below the cut once per page — O(rows × pages) for a long table — and the
+ * per-page checkpoint cloned the whole remainder again. With this cursor the
+ * base is laid out once and never mutated: fragments CLONE the rows they place
+ * (each row is cloned exactly once across the table's whole run), checkpoints
+ * share `base` by reference and copy only `carry`, and a tail-splice rebase is
+ * a posDelta addition instead of a remainder-wide clone.
+ */
+interface TableRemainder {
+  /** The full table in its own y = 0 space. Never mutated after layout —
+   *  placed fragments clone out of it, checkpoints reference it. */
+  base: ResolvedTable;
+  /** Consumed prefix: base content above this y is already placed. Always a
+   *  row boundary (the bottom of the last fully-or-partially placed row). */
+  fromY: number;
+  /** Continuation cells of a row broken at the last cut, re-stacked at y = 0.
+   *  Owned by the live remainder (placement consumes them); checkpoints hold
+   *  their own clones. Null when the last cut fell on a row boundary. */
+  carry: ResolvedCell[] | null;
+  /** Stacked height of `carry` (0 when carry is null). */
+  carryHeight: number;
+  /** Pending PM-position shift for `base` and `carry`, applied lazily when a
+   *  checkpointed remainder is materialized for resume. Always 0 on the live
+   *  remainder; tail-splice rebasing adds the edit's delta here in O(1). */
+  posDelta: number;
+}
+
+/** Tolerance for comparing base-row coordinates against the accumulated
+ *  consume cursor: `fromY` is recovered from height arithmetic, so it can sit
+ *  a few ulps off the row boundary it logically equals. Pure float noise —
+ *  far below any real row height. */
+const REMAINDER_EPS = 1e-6;
+
+/** A base cell's y in remainder space (y = 0 at the carry's top). The delta
+ *  to the consume cursor is SNAPPED when it is float noise: the first
+ *  unconsumed row must land exactly at carryHeight, or a cut derived from it
+ *  misses the carry's own bottom edge by an ulp and the splitter sees a
+ *  straddler where a clean boundary was meant. */
+function remainderRelY(r: TableRemainder, cellY: number): number {
+  const d = cellY - r.fromY;
+  return r.carryHeight + (Math.abs(d) < REMAINDER_EPS ? 0 : d);
+}
+
+/** Full height of the unplaced remainder (excluding any repeated header). */
+function remainderHeight(r: TableRemainder): number {
+  return r.carryHeight + (r.base.height - r.fromY);
+}
+
+/** Whether the remainder is mid-table (anything already consumed). A fresh,
+ *  untouched table resumes identically from the item's start, which keeps the
+ *  page boundary CLEAN for the page cache's tail resync. */
+function remainderStarted(r: TableRemainder): boolean {
+  return r.fromY > 0 || r.carry !== null;
+}
+
+/** Deep-clone one resolved cell, shifting its PM positions by `delta`
+ *  (the per-cell body of cloneTableShifted, reused for carry cells). */
+function cloneCellPosShifted(cell: ResolvedCell, delta: number): ResolvedCell {
+  return {
+    ...cell,
+    borders: cell.borders ? { ...cell.borders } : cell.borders,
+    lines: cell.lines.map((l) => cloneLineShifted(l, delta)),
+    tables: cell.tables?.map((nt) => cloneTableShifted(nt, delta)),
+    floats: cell.floats?.map((f) => ({ ...f })),
+  };
+}
+
+/** Snapshot a live remainder for a checkpoint: `base` is shared (immutable),
+ *  only the small carry is cloned. O(carry), not O(remaining rows). */
+function snapshotRemainder(r: TableRemainder): TableRemainder {
+  return {
+    ...r,
+    carry: r.carry && r.carry.map((c) => cloneCellPosShifted(c, 0)),
+  };
+}
+
+/** Materialize a checkpointed remainder for resume: apply the pending
+ *  posDelta (base is cloned only when a tail-splice actually shifted it) and
+ *  hand the loop its own mutable carry. The checkpoint stays pristine across
+ *  retries, exactly like the old clone-on-restore. */
+function materializeRemainder(r: TableRemainder): TableRemainder {
+  return {
+    base: r.posDelta === 0 ? r.base : cloneTableShifted(r.base, r.posDelta),
+    fromY: r.fromY,
+    carry: r.carry && r.carry.map((c) => cloneCellPosShifted(c, r.posDelta)),
+    carryHeight: r.carryHeight,
+    posDelta: 0,
+  };
+}
+
+/**
+ * The remainder's cells within `windowH` px of its top, cloned and re-based
+ * to a y = 0 view the splitter (or a whole-remainder placement) can consume.
+ * Base rows land at `cell.y - fromY + carryHeight`; carry cells sit at their
+ * own y (already 0-based) and are handed over AS-IS — they are owned by the
+ * live remainder and die with this page either way. Cells at or below the
+ * window never enter the view, so they are never cloned: that is the whole
+ * point of the representation.
+ *
+ * Passing Infinity materializes the entire remainder (the final fragment, or
+ * a degenerate-geometry overflow placement).
+ */
+function remainderView(r: TableRemainder, windowH: number): ResolvedTable {
+  const shift = r.carryHeight - r.fromY;
+  const cells: ResolvedCell[] = [];
+  let cloned = 0;
+  if (r.carry) cells.push(...r.carry);
+  for (const cell of r.base.cells) {
+    // Cells starting before the cursor are spent: fully-consumed rows, and
+    // straddlers of an earlier cut (rowspan tails included) whose remains
+    // live on as carry cells — including the base original again would
+    // double their content.
+    if (cell.y < r.fromY - REMAINDER_EPS) continue;
+    const yr = remainderRelY(r, cell.y);
+    if (yr >= windowH - REMAINDER_EPS) continue; // out of this page's reach
+    const cellShift = yr - cell.y;
+    const copy = cloneCellPosShifted(cell, 0);
+    copy.y = yr;
+    for (const l of copy.lines) l.y += cellShift;
+    copy.floats?.forEach((f) => (f.y += cellShift));
+    copy.tables?.forEach((t) => offsetTable(t, cellShift));
+    cells.push(copy);
+    cloned++;
+  }
+  perf.bump('table.view.cellsCloned', cloned);
+  const view: ResolvedTable = {
+    ...r.base,
+    y: 0,
+    height: remainderHeight(r),
+    cells,
+  };
+  // Repeated headers are a fragment-level concern handled by the placement
+  // loop (withGhosts) against the base directly.
+  delete view.headerBottom;
+  // cantSplit bands re-base onto the view so placed fragments keep carrying
+  // them (part of the ResolvedTable contract — the spec asserts a fragment's
+  // bands are measured from ITS top); splitTableAt filters them per fragment.
+  const bands = r.base.cantSplitBands
+    ?.map((b) => ({ top: b.top + shift, bottom: b.bottom + shift }))
+    .filter((b) => b.bottom > 0 && b.top < view.height);
+  if (bands?.length) view.cantSplitBands = bands;
+  else delete view.cantSplitBands;
+  return view;
+}
+
 function buildCtx(config: LayoutConfig): Ctx {
   return {
     base: { ...DEFAULT_FONT, ...config.defaultFont },
@@ -1831,7 +1980,7 @@ function buildCtx(config: LayoutConfig): Ctx {
  *  function of (its items, this carry), which is what makes reusing it safe. */
 interface PageCheckpoint {
   itemIdx: number;
-  midTable: ResolvedTable | null;
+  midTable: TableRemainder | null;
   midDraftIdx: number | null;
   midBandedFrom: number | null;
   unreplayable: boolean;
@@ -1911,7 +2060,13 @@ function rebaseCp(
   return {
     ...cp,
     itemIdx: cp.itemIdx + idxDelta,
-    midTable: cp.midTable && cloneTableShifted(cp.midTable, delta),
+    // O(1): the shift is recorded, not applied — `base` stays shared and
+    // immutable; materializeRemainder applies the accumulated delta on the
+    // rare actual resume.
+    midTable: cp.midTable && {
+      ...cp.midTable,
+      posDelta: cp.midTable.posDelta + delta,
+    },
     midBandedFrom: cp.midBandedFrom != null ? cp.midBandedFrom + delta : null,
   };
 }
@@ -1986,7 +2141,7 @@ function placeBlocks(
   // flight; the mid-item fields record HOW FAR into it the page boundary
   // fell (a table's unplaced remainder / a paragraph's next draft line).
   let idx = 0;
-  let midTableRest: ResolvedTable | null = null;
+  let midTableRest: TableRemainder | null = null;
   let midParaDraftIdx: number | null = null;
   let inBandedPara = false; // inside a float paragraph's wrap call
   // Mid-wrap resume position of a float-anchoring paragraph: the PM start of
@@ -1994,7 +2149,7 @@ function placeBlocks(
   // positions (flat API) — such a page keeps the old can't-replay behavior.
   const UNRESUMABLE = -1;
   let midBandedFrom: number | null = null;
-  let resumeTable: ResolvedTable | null = null; // handed to the first item
+  let resumeTable: TableRemainder | null = null; // handed to the first item
   let resumeDraftIdx: number | null = null; // of a replayed page
   let resumeBandedFrom: number | null = null;
   const seeds = new Map<string, Exclusion>();
@@ -2229,6 +2384,21 @@ function placeBlocks(
     }
     return out;
   };
+  /** Fresh footnote numbers in a table remainder — the repeated-header band
+   *  (when it will be prepended), the carry, and the unconsumed base rows —
+   *  WITHOUT materializing it: the fits-whole check runs every page. */
+  const remainderFootnoteNums = (
+    r: TableRemainder,
+    ghostH: number,
+  ): number[] => {
+    const cells: ResolvedCell[] = [];
+    if (ghostH > 0)
+      for (const c of r.base.cells) if (c.y + c.height <= ghostH) cells.push(c);
+    if (r.carry) cells.push(...r.carry);
+    for (const c of r.base.cells)
+      if (c.y >= r.fromY - REMAINDER_EPS) cells.push(c);
+    return tableFootnoteNums({ ...r.base, cells });
+  };
 
   // Column balancing: on a multi-column section's final page, fill every column
   // to an even target height instead of packing column 0 first. `balanceTarget`
@@ -2359,7 +2529,7 @@ function placeBlocks(
 
   const takeCheckpoint = (): PageCheckpoint => ({
     itemIdx: idx,
-    midTable: midTableRest && cloneTableShifted(midTableRest, 0),
+    midTable: midTableRest && snapshotRemainder(midTableRest),
     midDraftIdx: midParaDraftIdx,
     midBandedFrom:
       inBandedPara && midBandedFrom !== UNRESUMABLE ? midBandedFrom : null,
@@ -2422,7 +2592,7 @@ function placeBlocks(
     colDirty = false;
     y = top;
     rebalance();
-    resumeTable = cp.midTable && cloneTableShifted(cp.midTable, 0);
+    resumeTable = cp.midTable && materializeRemainder(cp.midTable);
     resumeDraftIdx = cp.midDraftIdx;
     resumeBandedFrom = cp.midBandedFrom;
     midTableRest = null;
@@ -3031,18 +3201,23 @@ function placeBlocks(
         // possible, and mid-row when a single row is taller than a whole band.
         // Header rows (w:tblHeader) repeat at the top of every fragment. Tables
         // are laid out at column width, then shifted into the current column.
-        // Placement must never mutate its input: placeTable offsets the object
-        // it is given, and the replay pass (floats registered above already-
-        // placed content re-run the page) hands the SAME item in again — a
-        // shared reference would be offset twice. One clone per placement.
+        //
+        // The unplaced remainder is a CURSOR into the item's immutable layout
+        // (see TableRemainder), not a re-cloned table: each page clones only
+        // the rows it places (remainderView), so a table spanning K pages
+        // costs O(rows) in clones instead of O(rows × K), and the per-page
+        // checkpoint snapshots the small carry instead of every remaining row.
+        // item.table itself is never mutated — placed fragments are built from
+        // clones — so a replay pass re-reads it pristine.
         // A replayed page opening mid-table resumes from the checkpointed
         // remainder instead of the item's start.
-        let table = resumeTable ?? cloneTableShifted(item.table, 0);
-        // Whether `table` is already a split remainder: only then does a page
-        // boundary need the mid-table resume handle — an untouched table
-        // resumes identically from the item's start (and that keeps the
-        // boundary CLEAN for the page cache's tail resync).
-        let tableIsRemainder = resumeTable !== null;
+        let rem: TableRemainder = resumeTable ?? {
+          base: item.table,
+          fromY: 0,
+          carry: null,
+          carryHeight: 0,
+          posDelta: 0,
+        };
         resumeTable = null;
         // Word never flows a table BESIDE a floating object: text wraps around
         // one (see bandAt), but a table starts below its wrap zone. Without
@@ -3050,7 +3225,8 @@ function placeBlocks(
         // first table's opening rows. Skip past whatever the table would run
         // into, as long as the band still has somewhere to go.
         for (let guard = 0; guard < 8; guard++) {
-          const bottomOfRun = y + Math.min(table.height, colBottom() - y);
+          const bottomOfRun =
+            y + Math.min(remainderHeight(rem), colBottom() - y);
           const blockers = exclusions.filter(
             (ex) =>
               ex.bottom > y &&
@@ -3076,20 +3252,55 @@ function placeBlocks(
         };
         for (;;) {
           const avail = colBottom() - y;
-          if (table.height + addedReserve(tableFootnoteNums(table)) <= avail) {
-            placeTable(table);
+          const H = remainderHeight(rem);
+          // The header band repeats only on continuation fragments, and only
+          // while it leaves reasonable band room — judged against the page
+          // the fragment actually lands on.
+          let ghosts: ResolvedCell[] | null = null;
+          let ghostH = 0;
+          const hbBase = rem.base.headerBottom;
+          if (
+            remainderStarted(rem) &&
+            hbBase != null &&
+            hbBase < (limit() - bandTop) / 2
+          ) {
+            ghosts = cloneHeaderCells(rem.base, hbBase);
+            if (ghosts) ghostH = hbBase;
+          }
+          /** Prepend the repeated-header ghosts to a materialized fragment. */
+          const withGhosts = (frag: ResolvedTable): ResolvedTable => {
+            if (ghostH > 0 && ghosts) {
+              for (const cell of frag.cells) shiftCell(cell, ghostH);
+              frag.cells.unshift(...ghosts);
+              frag.height += ghostH;
+              frag.headerBottom = ghostH;
+              // The repeated header pushes the content down, so the cantSplit
+              // bands move with it — they are measured from the fragment's top.
+              if (frag.cantSplitBands) {
+                frag.cantSplitBands = frag.cantSplitBands.map((b) => ({
+                  top: b.top + ghostH,
+                  bottom: b.bottom + ghostH,
+                }));
+              }
+            }
+            return frag;
+          };
+          if (
+            ghostH + H + addedReserve(remainderFootnoteNums(rem, ghostH)) <=
+            avail
+          ) {
+            placeTable(withGhosts(remainderView(rem, Infinity)));
             break;
           }
-          // The header band repeats only while it leaves reasonable band room.
-          const hb =
-            table.headerBottom != null &&
-            table.headerBottom < (limit() - bandTop) / 2
-              ? table.headerBottom
-              : 0;
-          // Prefer the lowest row boundary that still fits (never inside the header).
+          // Prefer the lowest row boundary that still fits. Boundaries live in
+          // remainder space (y = 0 at the carry's top): base rows land at
+          // remainderRelY; cells already part of the carry offer none.
+          const budget = avail - ghostH;
           let cut = 0;
-          for (const cell of table.cells) {
-            if (cell.y > hb && cell.y <= avail) cut = Math.max(cut, cell.y);
+          for (const cell of rem.base.cells) {
+            if (cell.y < rem.fromY - REMAINDER_EPS) continue; // mid-carry
+            const yr = remainderRelY(rem, cell.y);
+            if (yr > REMAINDER_EPS && yr <= budget) cut = Math.max(cut, yr);
           }
           if (cut === 0) {
             // No row boundary fits the remaining space, i.e. the first row is
@@ -3097,50 +3308,59 @@ function placeBlocks(
             // pages, so it starts here and splits mid-row (no blank gap) — only
             // a row marked w:cantSplit moves whole to a fresh band (and even
             // then only when it would actually fit one).
-            let firstRowBottom = table.height;
-            for (const cell of table.cells) {
-              if (cell.y > hb && cell.y < firstRowBottom)
-                firstRowBottom = cell.y;
+            let firstRowBottom = H;
+            for (const cell of rem.base.cells) {
+              if (cell.y < rem.fromY - REMAINDER_EPS) continue;
+              const yr = remainderRelY(rem, cell.y);
+              if (yr > REMAINDER_EPS && yr < firstRowBottom)
+                firstRowBottom = yr;
             }
-            const fitsFullBand = firstRowBottom - hb <= limit() - bandTop;
-            const rowCantSplit = (table.cantSplitBands ?? []).some(
-              (b) => b.top <= hb + 0.5 && b.bottom >= firstRowBottom - 0.5,
+            const fitsFullBand = firstRowBottom <= limit() - bandTop;
+            const bandShift = rem.carryHeight - rem.fromY;
+            const rowCantSplit = (rem.base.cantSplitBands ?? []).some(
+              (b) =>
+                b.top + bandShift <= 0.5 &&
+                b.bottom + bandShift >= firstRowBottom - 0.5,
             );
             if (rowCantSplit && fitsFullBand && colDirty) {
-              midTableRest = tableIsRemainder ? table : null;
+              midTableRest = remainderStarted(rem) ? rem : null;
               breakBand(); // retry with a full fresh column/page
               midTableRest = null;
               continue;
             }
-            cut = avail; // split the row in the space we have
+            cut = budget; // split the row in the space we have
           }
-          if (cut <= hb) {
+          if (cut <= 0) {
             // Header band swallows the remaining space — try a fresh band, or
             // place whole when the geometry is truly degenerate.
             if (colDirty) {
-              midTableRest = tableIsRemainder ? table : null;
+              midTableRest = remainderStarted(rem) ? rem : null;
               breakBand();
               midTableRest = null;
               continue;
             }
-            placeTable(table);
+            placeTable(withGhosts(remainderView(rem, Infinity)));
             break;
           }
-          const { top: topFrag, rest } = splitTableAt(table, cut);
-          if (rest.height >= table.height) {
+          // Split a WINDOWED view instead of the whole remainder: only cells
+          // starting above the cut enter it, so rows past the cut are never
+          // cloned. rest then holds nothing but the broken row's continuation.
+          const view = remainderView(rem, cut);
+          const { top: topFrag, rest } = splitTableAt(view, cut);
+          if (rest.height >= H + ghostH) {
             // The cut moved nothing — the leftover strip is too thin to hold
             // even one line. Retry on a fresh band when this one is already
             // used (a table landing 8px above the page bottom must not be
             // dumped there whole, overflowing the page); only a genuinely
             // band-taller table, with nowhere better to go, is placed as-is.
-            // splitTableAt copies whatever it moves, so `table` is intact.
+            // The view is a copy, so the remainder is untouched either way.
             if (colDirty) {
-              midTableRest = tableIsRemainder ? table : null;
+              midTableRest = remainderStarted(rem) ? rem : null;
               breakBand();
               midTableRest = null;
               continue;
             }
-            placeTable(table);
+            placeTable(withGhosts(remainderView(rem, Infinity)));
             break;
           }
           const topHasContent = topFrag.cells.some(
@@ -3149,35 +3369,33 @@ function placeBlocks(
           if (!topHasContent && colDirty) {
             // Not even one line fits the leftover space — don't paint an empty
             // table stub; start on the next column/page instead.
-            midTableRest = tableIsRemainder ? table : null;
+            midTableRest = remainderStarted(rem) ? rem : null;
             breakBand();
             midTableRest = null;
             continue;
           }
-          if (hb > 0) {
-            const ghosts = cloneHeaderCells(table, hb);
-            if (ghosts) {
-              for (const cell of rest.cells) shiftCell(cell, hb);
-              rest.cells.unshift(...ghosts);
-              rest.height += hb;
-              rest.headerBottom = hb; // continuations keep repeating it
-              // The repeated header pushes the remaining rows down, so the
-              // cantSplit bands move with them — they are measured from the
-              // fragment's top.
-              if (rest.cantSplitBands) {
-                rest.cantSplitBands = rest.cantSplitBands.map((b) => ({
-                  top: b.top + hb,
-                  bottom: b.bottom + hb,
-                }));
-              }
-            }
-          }
-          placeTable(topFrag);
-          midTableRest = rest; // the break lands the remainder on the new page
+          // Advance the cursor. Every continuation cell splitTableAt built has
+          // height = contHeight, and (with no below-cut cells in the view)
+          // rest.height = contHeight + (view.height - splitBottom), which
+          // recovers the broken row's bottom. A cut on a row boundary has no
+          // continuation: the consumed prefix moves to the cut itself. A cut
+          // inside the carry consumes no base content (splitBottom ≤ carry
+          // height ⇒ fromY unchanged).
+          const contH = rest.cells.length > 0 ? rest.cells[0].height : 0;
+          const splitBottom = view.height - rest.height + contH;
+          const advance = splitBottom - rem.carryHeight;
+          const next: TableRemainder = {
+            base: rem.base,
+            fromY: rem.fromY + (advance > REMAINDER_EPS ? advance : 0),
+            carry: rest.cells.length > 0 ? rest.cells : null,
+            carryHeight: contH,
+            posDelta: 0,
+          };
+          placeTable(withGhosts(topFrag));
+          midTableRest = next; // the break lands the remainder on the new page
           breakBand();
           midTableRest = null;
-          table = rest;
-          tableIsRemainder = true;
+          rem = next;
         }
       }
     }
