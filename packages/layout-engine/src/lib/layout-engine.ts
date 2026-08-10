@@ -1313,6 +1313,19 @@ function eachCell(
   }
 }
 
+/** Inner-gridline space a rowspan of `span` rows starting at `startRow`
+ *  swallows (span-1 lines of insideH width, clamped to the table). */
+function bwInsideForSpan(
+  startRow: number,
+  span: number,
+  nrows: number,
+  insideH: { width: number } | false | undefined,
+): number {
+  if (!insideH) return 0;
+  const rows = Math.min(span, nrows - startRow);
+  return rows > 1 ? (rows - 1) * insideH.width : 0;
+}
+
 /** Lay out a table within [contentLeft, contentRight], relative to y = 0.
  *  Columns come from cell `colwidth` (unknowns split the remaining width).
  *  Row heights are the max cell content height; rowspan cells grow the last
@@ -1463,6 +1476,14 @@ function layoutTable(
       let span = 0;
       for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++)
         span += rowHeight[r];
+      // A merged cell also spans the inner gridlines between its rows (the
+      // border-height pass below reserves them), so count that space too.
+      span += bwInsideForSpan(
+        c.startRow,
+        c.rowspan,
+        nrows,
+        table.borders?.insideH,
+      );
       if (need > span) {
         const last = Math.min(c.startRow + c.rowspan - 1, nrows - 1);
         rowHeight[last] += need - span;
@@ -1474,14 +1495,37 @@ function layoutTable(
     const h = table.rows[r]?.height;
     if (h) rowHeight[r] = h.exact ? h.value : Math.max(rowHeight[r], h.value);
   }
+  // Horizontal border lines OCCUPY vertical space (Word-verified: a page
+  // fits 20 borderless 32px rows but only 16 with 5.25pt borders, and 20
+  // flush paragraph lines outside any table — the space belongs to the
+  // table's gridlines, not to a page epsilon). Each gridline reserves the
+  // table-level border width: the top edge, one line between each pair of
+  // rows (insideH), and the bottom edge — rowY[r] is the top of ROW r's
+  // content, BELOW the gridline above it; rowY[nrows] adds the bottom edge
+  // so the table's height includes it. Per-cell border overrides do not
+  // move gridlines (approximation; table-level widths dominate real docs).
+  const bw = (side: TableBorders[keyof TableBorders] | undefined): number =>
+    side ? side.width : 0;
+  const tTop = bw(table.borders?.top);
+  const tInside = bw(table.borders?.insideH);
+  const tBottom = bw(table.borders?.bottom);
   const rowY = new Array<number>(nrows + 1).fill(0);
-  for (let r = 0; r < nrows; r++) rowY[r + 1] = rowY[r] + rowHeight[r];
+  rowY[0] = tTop;
+  for (let r = 0; r < nrows; r++)
+    rowY[r + 1] = rowY[r] + rowHeight[r] + (r + 1 < nrows ? tInside : tBottom);
 
   // Position cells and shift their content into place.
   const cells: ResolvedCell[] = cellDrafts.map((c) => {
     let height = 0;
     for (let r = c.startRow; r < c.startRow + c.rowspan && r < nrows; r++)
       height += rowHeight[r];
+    // Merged cells swallow the inner gridlines they span.
+    height += bwInsideForSpan(
+      c.startRow,
+      c.rowspan,
+      nrows,
+      table.borders?.insideH,
+    );
     // w:vAlign: distribute the slack above/centered for non-top cells.
     const slack = Math.max(
       0,
@@ -3566,19 +3610,33 @@ function placeBlocks(
             ghosts = cloneHeaderCells(rem.base, hbBase);
             if (ghosts) ghostH = hbBase;
           }
-          /** Prepend the repeated-header ghosts to a materialized fragment. */
+          // A continuation fragment redraws the table's top border and
+          // reserves its thickness (Word-verified: a fat-bordered row split
+          // across pages fits 19 lines on the SECOND page too, not 20). The
+          // ghost header band, cloned from the base's own top, already
+          // carries that edge — so the extra reserve applies only when no
+          // ghosts are prepended.
+          const edgeTop =
+            remainderStarted(rem) && ghostH === 0 && rem.base.borders?.top
+              ? rem.base.borders.top.width
+              : 0;
+          const fragTop = ghostH + edgeTop;
+          /** Prepend the fragment chrome (continuation edge, ghost header). */
           const withGhosts = (frag: ResolvedTable): ResolvedTable => {
-            if (ghostH > 0 && ghosts) {
-              for (const cell of frag.cells) shiftCell(cell, ghostH);
-              frag.cells.unshift(...ghosts);
-              frag.height += ghostH;
-              frag.headerBottom = ghostH;
-              // The repeated header pushes the content down, so the band
-              // lists move with it — they are measured from the fragment's
-              // top.
+            if (fragTop > 0) {
+              for (const cell of frag.cells) shiftCell(cell, fragTop);
+              if (ghosts) {
+                // Ghost cells keep their base coordinates (their band starts
+                // at the table's own top edge) — only the LIVE content moved.
+                frag.cells.unshift(...ghosts);
+                frag.headerBottom = ghostH;
+              }
+              frag.height += fragTop;
+              // The chrome pushes the content down, so the band lists move
+              // with it — they are measured from the fragment's top.
               const bump = (b: { top: number; bottom: number }) => ({
-                top: b.top + ghostH,
-                bottom: b.bottom + ghostH,
+                top: b.top + fragTop,
+                bottom: b.bottom + fragTop,
               });
               if (frag.cantSplitBands)
                 frag.cantSplitBands = frag.cantSplitBands.map(bump);
@@ -3588,11 +3646,11 @@ function placeBlocks(
             return frag;
           };
           const remFns = remainderFootnoteNums(rem, ghostH);
-          if (ghostH + H + addedReserve(remFns) <= avail) {
+          if (fragTop + H + addedReserve(remFns) <= avail) {
             placeTable(withGhosts(remainderView(rem, Infinity)));
             break;
           }
-          const budget = avail - ghostH;
+          const budget = avail - fragTop;
           /** Move the remainder whole to a fresh column/page. */
           const freshBand = () => {
             midTableRest = remainderStarted(rem) ? rem : null;

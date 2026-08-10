@@ -787,11 +787,16 @@ export class CanvasPainter {
         const cb = cell.borders;
         const x0 = cell.x + 0.5;
         const x1 = cell.x + cell.width + 0.5;
-        const y0 = yOffset + cell.y + 0.5;
-        const y1 = yOffset + cell.y + cell.height + 0.5;
-        const topOuter = Math.abs(cell.y - table.y) < eps;
+        // Horizontal gridlines OCCUPY vertical space (the layout reserves
+        // their width above/below the cell boxes), so outer-edge detection
+        // allows for the reserved band, and the strokes sit OUTSIDE the box,
+        // centered in the band — adjacent cells' strokes then coincide. For
+        // 1px borders this is the same half-pixel crispness as before.
+        const topBandW = (b?.top ? b.top.width : 0) + eps;
+        const bottomBandW = (b?.bottom ? b.bottom.width : 0) + eps;
+        const topOuter = cell.y - table.y < topBandW;
         const bottomOuter =
-          Math.abs(cell.y + cell.height - (table.y + table.height)) < eps;
+          table.y + table.height - (cell.y + cell.height) < bottomBandW;
         const leftOuter = Math.abs(cell.x - table.x) < eps;
         const rightOuter =
           Math.abs(cell.x + cell.width - (table.x + table.width)) < eps;
@@ -801,6 +806,9 @@ export class CanvasPainter {
         const bottom = cb?.bottom ?? (bottomOuter ? b?.bottom : b?.insideH);
         const left = cb?.left ?? (leftOuter ? b?.left : b?.insideV);
         const right = cb?.right ?? (rightOuter ? b?.right : b?.insideV);
+        const y0 = yOffset + cell.y - (top ? top.width / 2 : -0.5);
+        const y1 =
+          yOffset + cell.y + cell.height + (bottom ? bottom.width / 2 : 0.5);
         if (top) this.strokeBorder(top, x0, y0, x1, y0);
         if (bottom) this.strokeBorder(bottom, x0, y1, x1, y1);
         if (left) this.strokeBorder(left, x0, y0, x0, y1);
