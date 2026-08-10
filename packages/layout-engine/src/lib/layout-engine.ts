@@ -1536,7 +1536,52 @@ function layoutTable(
     )
     .filter((b): b is { top: number; bottom: number } => b !== null);
   if (cantSplitBands.length > 0) resolved.cantSplitBands = cantSplitBands;
+  // Rows whose FIRST cell opens with a keepNext paragraph: Word does not
+  // START such a row in a band's leftover (see ResolvedTable.keepStartBands).
+  // Only the first cell counts — nested_table.docx row 2 has keepNext
+  // openers in cells 3-4 and Word starts it mid-page regardless, while row 3
+  // (keepNext in cell 1) is pushed whole.
+  const keepStartBands = table.rows
+    .map((row, r) => {
+      const first = row.cells[0]?.content[0];
+      return first?.type === 'paragraph' && first.keepNext === true
+        ? { top: rowY[r], bottom: rowY[r + 1] }
+        : null;
+    })
+    .filter((b): b is { top: number; bottom: number } => b !== null);
+  if (keepStartBands.length > 0) resolved.keepStartBands = keepStartBands;
   return resolved;
+}
+
+/** Re-base a band list onto a fragment: shift by `delta`, keep only bands
+ *  overlapping [limitTop, limitBottom). Shared by every band list on
+ *  ResolvedTable (cantSplitBands, keepStartBands) at every re-basing site —
+ *  band lists move together or a new one silently goes stale. */
+function shiftBands(
+  bands: { top: number; bottom: number }[] | undefined,
+  delta: number,
+  limitTop: number,
+  limitBottom: number,
+): { top: number; bottom: number }[] | undefined {
+  return bands
+    ?.map((b) => ({ top: b.top + delta, bottom: b.bottom + delta }))
+    .filter((b) => b.bottom > limitTop && b.top < limitBottom);
+}
+
+/** Apply shiftBands to BOTH band lists of a fragment in place. */
+function rebaseBandsOnto(
+  frag: ResolvedTable,
+  source: ResolvedTable,
+  delta: number,
+  limitTop: number,
+  limitBottom: number,
+): void {
+  const cant = shiftBands(source.cantSplitBands, delta, limitTop, limitBottom);
+  if (cant?.length) frag.cantSplitBands = cant;
+  else delete frag.cantSplitBands;
+  const keep = shiftBands(source.keepStartBands, delta, limitTop, limitBottom);
+  if (keep?.length) frag.keepStartBands = keep;
+  else delete frag.keepStartBands;
 }
 
 /** One laid-out top-level block awaiting vertical placement. */
@@ -1665,7 +1710,11 @@ function unshiftCell(cell: ResolvedCell): ResolvedCell {
  */
 function legalPartition(lines: LayoutLine[], cut: number): number {
   let g = 0;
-  while (g < lines.length && lines[g].y + lines[g].height <= cut) g++;
+  while (
+    g < lines.length &&
+    lines[g].y + lines[g].height <= cut + REMAINDER_EPS
+  )
+    g++;
   for (let p = g; p > 0; p--) {
     if (p >= lines.length) return p; // nothing moves — not a split at all
     const ka = lines[p - 1].keeps;
@@ -1703,11 +1752,12 @@ function splitTableAt(
   table: ResolvedTable,
   cut: number,
   opts?: {
-    /** Recursively split a nested table straddling the cut when it is taller
-     *  than this (a full band's height): such a table can never fit whole on
-     *  ANY page, so moving it down just paints it off the sheet. Smaller
-     *  nested tables keep the whole-move behavior. Propagates down. */
-    splitNestedOver?: number;
+    /** Recursively split a nested table straddling the cut. Word does this
+     *  regardless of the nested table's height (fixture-verified — even one
+     *  that would fit whole on a fresh page splits at the page edge), so
+     *  the placement loop always passes true; the flag exists so direct
+     *  callers (specs) keep pure geometric splitting. Propagates down. */
+    splitNested?: boolean;
   },
 ): { top: ResolvedTable; rest: ResolvedTable } {
   interface Cont {
@@ -1726,7 +1776,14 @@ function splitTableAt(
   let contHeight = 0; // height of the continuation row in `rest`
 
   for (const cell of table.cells) {
-    if (cell.y >= cut || cell.y + cell.height <= cut) continue;
+    // Seam tolerance: nested coordinates go through offset round-trips, so
+    // an adjacent cell's bottom can exceed the next row's top by an ulp —
+    // strict comparisons then invent an empty straddler stub at the seam.
+    if (
+      cell.y >= cut - REMAINDER_EPS ||
+      cell.y + cell.height <= cut + REMAINDER_EPS
+    )
+      continue;
     splitBottom = Math.max(splitBottom, cell.y + cell.height);
     const view = unshiftCell(cell);
     const part = legalPartition(view.lines, cut);
@@ -1752,17 +1809,15 @@ function splitTableAt(
     const items: ContItem[] = [];
     let nestedSplit = false;
     for (const t of view.tables ?? []) {
-      if (t.y + t.height <= cut) {
+      if (t.y + t.height <= cut + REMAINDER_EPS) {
         topTables.push(t);
         continue;
       }
-      if (t.y < cut) {
-        const tall =
-          opts?.splitNestedOver != null && t.height > opts.splitNestedOver;
+      if (t.y < cut - REMAINDER_EPS) {
         // A keep-pushed line ABOVE the nested table forces the whole table
         // down with it — splitting would put the line under rows it
         // originally preceded.
-        if (tall && minRemLineY >= t.y) {
+        if (opts?.splitNested && minRemLineY >= t.y) {
           const local = cloneTable(t);
           offsetTable(local, -t.y);
           const localCut = cut - t.y;
@@ -1870,9 +1925,9 @@ function splitTableAt(
   const topCells: ResolvedCell[] = [];
   const restCells: ResolvedCell[] = [];
   for (const cell of table.cells) {
-    if (cell.y + cell.height <= cut) {
+    if (cell.y + cell.height <= cut + REMAINDER_EPS) {
       topCells.push(cell);
-    } else if (cell.y >= cut) {
+    } else if (cell.y >= cut - REMAINDER_EPS) {
       // a row below the break: follows beneath the continuation row.
       // Copied so the caller can still fall back to placing the original whole.
       restCells.push(shiftCell(cloneCell(cell), contHeight - splitBottom));
@@ -1892,7 +1947,7 @@ function splitTableAt(
       if (c.topTables.length > 0) topCell.tables = c.topTables;
       else delete topCell.tables;
       const topFloats = (c.view.floats ?? []).filter(
-        (f) => f.y + f.height <= cut,
+        (f) => f.y + f.height <= cut + REMAINDER_EPS,
       );
       if (topFloats.length > 0) topCell.floats = topFloats;
       else delete topCell.floats;
@@ -1901,7 +1956,7 @@ function splitTableAt(
       const lines = c.contLines;
       const remTables = c.contTables;
       const remFloats = (c.view.floats ?? [])
-        .filter((f) => f.y + f.height > cut)
+        .filter((f) => f.y + f.height > cut + REMAINDER_EPS)
         .map((f) => ({ ...f, y: f.y - c.firstY }));
       // The continuation inherits everything that describes the CELL —
       // borders, fill — and overrides only what the split changes. Building
@@ -1930,20 +1985,11 @@ function splitTableAt(
   // what the split actually changed. Three kinds of field, spelled out so a
   // NEW one can't be forgotten (the property test in the spec enforces it):
   //   · carried as-is  — borders, and anything describing the table itself
-  //   · re-based       — cantSplitBands, measured from the fragment's top
+  //   · re-based       — the band lists, measured from the fragment's top
+  //     (shiftBands / rebaseBandsOnto)
   //   · dropped        — headerBottom on `rest`: the continuation has no
   //     header band unless ghost rows are actually prepended (the caller
   //     sets it then; cloneHeaderCells can refuse).
-  const shiftBands = (
-    bands: { top: number; bottom: number }[] | undefined,
-    delta: number,
-    limitTop: number,
-    limitBottom: number,
-  ) =>
-    bands
-      ?.map((b) => ({ top: b.top + delta, bottom: b.bottom + delta }))
-      .filter((b) => b.bottom > limitTop && b.top < limitBottom);
-
   const restDelta = contHeight - splitBottom;
   const top: ResolvedTable = {
     ...table,
@@ -1951,9 +1997,7 @@ function splitTableAt(
     height: cut,
     cells: topCells,
   };
-  const topBands = shiftBands(table.cantSplitBands, 0, 0, cut);
-  if (topBands?.length) top.cantSplitBands = topBands;
-  else delete top.cantSplitBands;
+  rebaseBandsOnto(top, table, 0, 0, cut);
 
   const rest: ResolvedTable = {
     ...table,
@@ -1962,9 +2006,7 @@ function splitTableAt(
     cells: restCells,
   };
   delete rest.headerBottom;
-  const restBands = shiftBands(table.cantSplitBands, restDelta, 0, rest.height);
-  if (restBands?.length) rest.cantSplitBands = restBands;
-  else delete rest.cantSplitBands;
+  rebaseBandsOnto(rest, table, restDelta, 0, rest.height);
   return { top, rest };
 }
 
@@ -2165,14 +2207,10 @@ function remainderView(r: TableRemainder, windowH: number): ResolvedTable {
   // Repeated headers are a fragment-level concern handled by the placement
   // loop (withGhosts) against the base directly.
   delete view.headerBottom;
-  // cantSplit bands re-base onto the view so placed fragments keep carrying
-  // them (part of the ResolvedTable contract — the spec asserts a fragment's
+  // Band lists re-base onto the view so placed fragments keep carrying them
+  // (part of the ResolvedTable contract — the spec asserts a fragment's
   // bands are measured from ITS top); splitTableAt filters them per fragment.
-  const bands = r.base.cantSplitBands
-    ?.map((b) => ({ top: b.top + shift, bottom: b.bottom + shift }))
-    .filter((b) => b.bottom > 0 && b.top < view.height);
-  if (bands?.length) view.cantSplitBands = bands;
-  else delete view.cantSplitBands;
+  rebaseBandsOnto(view, r.base, shift, 0, view.height);
   return view;
 }
 
@@ -3535,14 +3573,17 @@ function placeBlocks(
               frag.cells.unshift(...ghosts);
               frag.height += ghostH;
               frag.headerBottom = ghostH;
-              // The repeated header pushes the content down, so the cantSplit
-              // bands move with it — they are measured from the fragment's top.
-              if (frag.cantSplitBands) {
-                frag.cantSplitBands = frag.cantSplitBands.map((b) => ({
-                  top: b.top + ghostH,
-                  bottom: b.bottom + ghostH,
-                }));
-              }
+              // The repeated header pushes the content down, so the band
+              // lists move with it — they are measured from the fragment's
+              // top.
+              const bump = (b: { top: number; bottom: number }) => ({
+                top: b.top + ghostH,
+                bottom: b.bottom + ghostH,
+              });
+              if (frag.cantSplitBands)
+                frag.cantSplitBands = frag.cantSplitBands.map(bump);
+              if (frag.keepStartBands)
+                frag.keepStartBands = frag.keepStartBands.map(bump);
             }
             return frag;
           };
@@ -3612,11 +3653,24 @@ function placeBlocks(
             else if (yr < rowBottom) rowBottom = yr;
           }
           const bandShift = rem.carryHeight - rem.fromY;
+          const covers = (b: { top: number; bottom: number }) =>
+            b.top + bandShift <= boundary + 0.5 &&
+            b.bottom + bandShift >= rowBottom - 0.5;
           const straddleCantSplit = (rem.base.cantSplitBands ?? []).some(
-            (b) =>
-              b.top + bandShift <= boundary + 0.5 &&
-              b.bottom + bandShift >= rowBottom - 0.5,
+            covers,
           );
+          // Word's row-start veto: a row whose first cell opens with a
+          // keepNext paragraph must not START in a band's leftover — it
+          // begins on a fresh band and only then splits normally. The rule
+          // is about STARTING: a carry (the row already began) is exempt,
+          // and so is a row sitting at the top of a fresh band. A remainder
+          // that fits whole never reaches this point — no split touches the
+          // row, so the keep is satisfied where it lies.
+          const rowStartsHere = boundary > 0 || rem.carryHeight === 0;
+          const rowStartVeto =
+            rowStartsHere &&
+            (boundary > 0 || colDirty) &&
+            (rem.base.keepStartBands ?? []).some(covers);
           // 1) Word's default: FILL the leftover — split the row the page
           //    edge lands in, unless it is w:cantSplit. splitTableAt snaps
           //    the cut down to keep-legal line boundaries per cell, so the
@@ -3626,10 +3680,11 @@ function placeBlocks(
           //    Fragments carrying fresh footnotes shrink the budget by the
           //    reserve their notes add — monotone, so a bounded walk-down
           //    settles it; footnote-free tables (the norm) skip it entirely.
-          // A nested table taller than a full fresh band can never fit whole
-          // anywhere — recursive splitting is its only way onto the paper.
-          const splitOpts = { splitNestedOver: limit() - bandTop };
-          if (!straddleCantSplit) {
+          // Word splits a nested table whenever the page edge falls inside
+          // it — no height threshold (fixture-verified: a 10-row nested
+          // table with room to move whole still splits at the cut).
+          const splitOpts = { splitNested: true };
+          if (!straddleCantSplit && !rowStartVeto) {
             let effBudget = budget;
             let view = remainderView(rem, effBudget);
             let frag = splitTableAt(view, effBudget, splitOpts);
@@ -3691,7 +3746,14 @@ function placeBlocks(
           // 3) No row boundary fits and the straddling row would not (or may
           //    not) split. A w:cantSplit row that would fit a full fresh
           //    band moves there whole; past that, Word splits even a
-          //    cantSplit row rather than overflow the page.
+          //    cantSplit row rather than overflow the page. A row-start
+          //    veto moves to the fresh band UNCONDITIONALLY (Word pushes a
+          //    keep-start row even when it cannot fit any single band) —
+          //    the veto turns itself off there (band no longer dirty).
+          if (rowStartVeto && colDirty) {
+            freshBand();
+            continue;
+          }
           if (straddleCantSplit) {
             const fitsFullBand = rowBottom <= limit() - bandTop;
             if (fitsFullBand && colDirty) {

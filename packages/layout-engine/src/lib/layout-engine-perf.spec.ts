@@ -89,7 +89,10 @@ describe('table pagination cost', () => {
       const counters = () => g.__BAPBONG_PERF_STATE__?.counters ?? {};
       delete counters()['table.view.cellsCloned'];
       const { pages } = layoutBlocks([bigTable()], config(160));
-      expect(pages.length).toBeGreaterThan(300); // sanity: real splitting ran
+      // Sanity: real splitting ran. (Originally >300 — ulp-phantom straddlers
+      // inflated the page count with meaningless mid-row cuts; the seam-
+      // tolerant splitter paginates the same table into ~265 pages.)
+      expect(pages.length).toBeGreaterThan(150);
       const cloned = counters()['table.view.cellsCloned'] ?? 0;
       expect(cloned).toBeGreaterThan(0);
       expect(cloned).toBeLessThanOrEqual(ROWS * COLS * 3);

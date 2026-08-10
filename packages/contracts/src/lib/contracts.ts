@@ -584,6 +584,13 @@ export interface ResolvedTable {
   /** Vertical bands (px from the table top) of rows marked w:cantSplit — the
    *  paginator moves these whole instead of splitting them mid-content. */
   cantSplitBands?: { top: number; bottom: number }[];
+  /** Vertical bands of rows whose FIRST cell opens with a w:keepNext
+   *  paragraph. Word does not let such a row START in the leftover of a
+   *  band — it begins on a fresh band and only then splits normally.
+   *  (Word-verified: a keepNext opener in a LATER cell does not veto —
+   *  nested_table.docx row 2 vs row 3.) Layout-only; the painter ignores
+   *  it. Band lists re-base together on split fragments. */
+  keepStartBands?: { top: number; bottom: number }[];
   /** Visible borders; absent → the table paints borderless (OOXML default). */
   borders?: TableBorders;
 }

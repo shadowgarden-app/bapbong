@@ -3131,20 +3131,24 @@ describe('nested table pagination', () => {
     );
   });
 
-  it('a page-fitting nested table still moves whole', () => {
-    // 3-row nested (48px) fits a fresh band easily: Word-parity whole-move,
-    // no recursive split.
+  it('a page-fitting nested table splits when the page edge falls inside it', () => {
+    // Word-verified (fixture fx5): a nested table with room to move whole
+    // to the next page STILL splits at the page edge. This test used to
+    // assert the opposite (whole-move) — that assumption predated the
+    // Word ground truth and was wrong.
+    // Geometry: content 60px = 3 lines. Cell = [1 line][3-row nested][tail]:
+    // the page edge falls after the nested table's second row.
     const t: FlowBlock = {
       type: 'table',
-      rows: [
-        { cells: [cellOf([p('h1')])] },
-        { cells: [cellOf([nestedOf(3, 'n'), p('tail')])] },
-      ],
+      rows: [{ cells: [cellOf([p('a1'), nestedOf(3, 'n'), p('tail')])] }],
     };
     const { pages } = layoutBlocks([t], config({ height: 100 }));
-    const withNested = pages.filter((pg) => nestedRows(pg).length > 0);
-    expect(withNested).toHaveLength(1); // never fragmented
-    expect(nestedRows(withNested[0])[0]).toEqual(['n1', 'n2', 'n3']);
+    expect(pages).toHaveLength(2);
+    expect(nestedRows(pages[0])).toEqual([['n1', 'n2']]); // split mid-nested
+    expect(nestedRows(pages[1])).toEqual([['n3']]);
+    // The tail re-stacks under the nested remainder on page 2.
+    const last = pages[1].tables?.[0]?.cells[0];
+    expect(last?.lines.map((l) => l.segments[0]?.text)).toEqual(['tail']);
   });
 
   it('nested-in-nested taller than the page splits at every level', () => {
@@ -3170,5 +3174,95 @@ describe('nested table pagination', () => {
     };
     pages.forEach((pg) => (pg.tables ?? []).forEach(walk));
     expect(texts).toEqual(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8']);
+  });
+});
+
+describe('row-start veto (keepNext opening the first cell)', () => {
+  // Word-verified (fixture fx2 + nested_table.docx row 3): a row whose FIRST
+  // cell opens with a keepNext paragraph must not START in a band's
+  // leftover — it begins on a fresh band, and only then splits normally.
+  // A keepNext opener in a LATER cell does not veto (nested_table row 2).
+  const cellOf = (content: FlowBlock[]): FlowTableCell => ({
+    colspan: 1,
+    rowspan: 1,
+    colwidth: null,
+    content,
+  });
+  const p = (text: string, over: Partial<FlowParagraph> = {}): FlowParagraph =>
+    ({
+      type: 'paragraph',
+      runs: [{ text, font: font() }],
+      ...over,
+    }) as FlowParagraph;
+  const lines1 = (n: number, pre: string, start = 1) =>
+    Array.from({ length: n }, (_, i) => p(`${pre}${start + i}`));
+  const rowsOf = (t: ResolvedTable | undefined) =>
+    t?.cells.map((c) => c.lines.map((l) => l.segments[0]?.text));
+  // content 60px = 3 lines of 16px per page (config height 100).
+
+  it('pushes the row whole, then splits it normally (fx2 shape)', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        { cells: [cellOf([p('h1')])] },
+        {
+          cells: [cellOf([p('K1', { keepNext: true }), ...lines1(5, 'K', 2)])],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    // page 1: header row ONLY — the 6-line row must not start in the
+    // 2-line leftover, even though it cannot fit any single page whole.
+    expect(rowsOf(pages[0].tables?.[0])).toEqual([['h1']]);
+    // page 2: the row starts at the top of the fresh band and splits.
+    expect(rowsOf(pages[1].tables?.[0])).toEqual([['K1', 'K2', 'K3']]);
+    expect(rowsOf(pages[2].tables?.[0])).toEqual([['K4', 'K5', 'K6']]);
+  });
+
+  it('vetoes the whole table when its first row is keep-start mid-band', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        {
+          cells: [cellOf([p('K1', { keepNext: true }), ...lines1(4, 'K', 2)])],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([p('intro'), t], config({ height: 100 }));
+    expect(pages[0].tables ?? []).toHaveLength(0); // page 1: paragraph only
+    expect(rowsOf(pages[1].tables?.[0])).toEqual([['K1', 'K2', 'K3']]);
+  });
+
+  it('a keep-start row that FITS the leftover stays (no gratuitous push)', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cellOf([p('K1', { keepNext: true }), p('K2')])] }],
+    };
+    const { pages } = layoutBlocks([p('intro'), t], config({ height: 100 }));
+    expect(pages).toHaveLength(1); // 1 + 2 lines = 3 → fits, no split → no veto
+    expect(rowsOf(pages[0].tables?.[0])).toEqual([['K1', 'K2']]);
+  });
+
+  it('keepNext opening a LATER cell does not veto (nested_table row 2)', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        { cells: [cellOf([p('h1')]), cellOf([p('h2')])] },
+        {
+          cells: [
+            cellOf(lines1(5, 'A')),
+            cellOf([p('K1', { keepNext: true }), ...lines1(4, 'K', 2)]),
+          ],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    // The tall row STARTS in the leftover: page 1 carries its first lines.
+    expect(rowsOf(pages[0].tables?.[0])).toEqual([
+      ['h1'],
+      ['h2'],
+      ['A1', 'A2'],
+      ['K1', 'K2'],
+    ]);
   });
 });
