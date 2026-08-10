@@ -509,6 +509,19 @@ export interface LayoutImageSegment {
   pos?: number;
 }
 
+/** w:keepNext / w:keepLines / w:widowControl of one flowed paragraph. ONE
+ *  object per paragraph, shared by reference across all its lines (see
+ *  LayoutLine.keeps) — the identity is what groups a paragraph's lines back
+ *  together after clones and fragment splits scatter them. */
+export interface ParagraphKeeps {
+  /** w:keepNext — stay with the next block's opening. */
+  keepNext?: boolean;
+  /** w:keepLines — never split this paragraph when it fits a page. */
+  keepLines?: boolean;
+  /** false disables widow/orphan control; absent = Word's default ON. */
+  widowControl?: boolean;
+}
+
 /** A laid-out line; (x, y) is its top-left in page coordinates (px). */
 export interface LayoutLine {
   x: number;
@@ -524,6 +537,12 @@ export interface LayoutLine {
   from?: number;
   /** PM position after the line's last painted content. */
   to?: number;
+  /** Pagination facts of the paragraph this line came from — shared BY
+   *  REFERENCE with the paragraph's other lines so a splitter can regroup
+   *  them and re-evaluate split legality per fragment (facts, not baked
+   *  decisions: a second split sees the fragment's own line counts). Set for
+   *  lines flowed inside table cells; layout-only, the painter ignores it. */
+  keeps?: ParagraphKeeps;
 }
 
 /** A laid-out table cell. All coordinates are page-absolute (px); `lines` and

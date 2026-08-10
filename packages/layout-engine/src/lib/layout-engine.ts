@@ -23,6 +23,7 @@ import type {
   LayoutConfig,
   LayoutImageSegment,
   LayoutLine,
+  ParagraphKeeps,
   LayoutSegment,
   MarkerStyle,
   MeasureMetrics,
@@ -1236,6 +1237,19 @@ function layoutFlow(
   let y = 0;
   for (const block of blocks) {
     if (block.type === 'paragraph') {
+      // w:spacing before/after applies inside cells exactly as in the body
+      // flow (placeBlocks handles it there) — it was silently swallowed here,
+      // so a styled heading lost its breathing room the moment it sat in a
+      // table. The float anchor moves with it: the paragraph's top IS below
+      // the gap.
+      y += block.spacing?.before ?? 0;
+      // ONE keeps object per paragraph, shared by its lines — the reference
+      // identity is what lets the row splitter regroup a paragraph's lines
+      // and judge split legality per fragment.
+      const keeps: ParagraphKeeps = {};
+      if (block.keepNext) keeps.keepNext = true;
+      if (block.keepLines) keeps.keepLines = true;
+      if (block.widowControl === false) keeps.widowControl = false;
       for (const f of block.floats ?? []) {
         // Horizontal: alignment within the box, else offset from its left.
         // (hRel 'page' has no page here — the box is the closest analogue.)
@@ -1257,9 +1271,12 @@ function layoutFlow(
         });
       }
       for (const d of layoutParagraph(block, contentLeft, contentRight, ctx)) {
-        lines.push(draftToLine(d, y));
+        const line = draftToLine(d, y);
+        line.keeps = keeps;
+        lines.push(line);
         y += d.height;
       }
+      y += block.spacing?.after ?? 0;
     } else {
       const table = layoutTable(block, contentLeft, contentRight, ctx);
       offsetTable(table, y);
@@ -1635,6 +1652,44 @@ function unshiftCell(cell: ResolvedCell): ResolvedCell {
 }
 
 /**
+ * The index (0..lines.length) where a page cut through a cell's line stack
+ * may legally fall: the largest boundary at or below the geometric cut that
+ * violates no keep. Between paragraphs the boundary is blocked by the upper
+ * paragraph's w:keepNext; inside one paragraph by w:keepLines, and by widow/
+ * orphan control (Word default ON) unless ≥2 of the paragraph's lines stay on
+ * EACH side. Lines are grouped into paragraphs by their shared `keeps`
+ * reference, and counts are taken fresh from THIS line stack — facts, not
+ * precomputed decisions, so a fragment's second split judges the fragment's
+ * own remainder (a 3-line leftover of an already-split paragraph must move
+ * whole, whatever the original allowed).
+ */
+function legalPartition(lines: LayoutLine[], cut: number): number {
+  let g = 0;
+  while (g < lines.length && lines[g].y + lines[g].height <= cut) g++;
+  for (let p = g; p > 0; p--) {
+    if (p >= lines.length) return p; // nothing moves — not a split at all
+    const ka = lines[p - 1].keeps;
+    const kb = lines[p].keeps;
+    if (ka !== kb) {
+      // A paragraph boundary (or missing facts on either side).
+      if (ka?.keepNext) continue; // a keepNext block may not end a fragment
+      return p;
+    }
+    if (!ka) return p; // no facts on these lines — geometry decides
+    if (ka.keepLines) continue;
+    if (ka.widowControl !== false) {
+      let above = 0;
+      for (let i = 0; i < p; i++) if (lines[i].keeps === ka) above++;
+      let below = 0;
+      for (let i = p; i < lines.length; i++) if (lines[i].keeps === ka) below++;
+      if (above < 2 || below < 2) continue;
+    }
+    return p;
+  }
+  return 0;
+}
+
+/**
  * Split a resolved table (in its own y = 0 space) at `cut` px.
  *
  * Cells entirely above stay in `top`; cells entirely below shift into `rest`.
@@ -1651,6 +1706,10 @@ function splitTableAt(
   interface Cont {
     /** The cell with centering slack removed — what BOTH fragments read. */
     view: ResolvedCell;
+    /** Line partition index: lines[0..part) stay, lines[part..] continue.
+     *  Snapped to the largest LEGAL boundary ≤ the geometric cut (keepNext /
+     *  keepLines / widow-orphan — see legalPartition). */
+    part: number;
     remLines: LayoutLine[];
     remTables: ResolvedTable[];
     firstY: number;
@@ -1663,7 +1722,8 @@ function splitTableAt(
     if (cell.y >= cut || cell.y + cell.height <= cut) continue;
     splitBottom = Math.max(splitBottom, cell.y + cell.height);
     const view = unshiftCell(cell);
-    const remLines = view.lines.filter((l) => l.y + l.height > cut);
+    const part = legalPartition(view.lines, cut);
+    const remLines = view.lines.slice(part);
     const remTables = (view.tables ?? []).filter((t) => t.y + t.height > cut);
     const firstY = Math.min(
       remLines.length ? Math.min(...remLines.map((l) => l.y)) : Infinity,
@@ -1680,7 +1740,7 @@ function splitTableAt(
           : first,
       ) - first;
     contHeight = Math.max(contHeight, extent);
-    straddlers.set(cell, { view, remLines, remTables, firstY: first });
+    straddlers.set(cell, { view, part, remLines, remTables, firstY: first });
   }
 
   const topCells: ResolvedCell[] = [];
@@ -1695,8 +1755,10 @@ function splitTableAt(
     } else {
       const c = straddlers.get(cell) as Cont;
       // Both fragments read the UN-CENTERED view (see unshiftCell) so the
-      // first lines land on the first fragment, as Word splits.
-      const topLines = c.view.lines.filter((l) => l.y + l.height <= cut);
+      // first lines land on the first fragment, as Word splits. The partition
+      // is the SNAPPED one — top and rem must complement exactly, or a line
+      // pushed down by a keep would also stay up.
+      const topLines = c.view.lines.slice(0, c.part);
       const topTables = (c.view.tables ?? []).filter(
         (t) => t.y + t.height <= cut,
       );
@@ -3365,117 +3427,171 @@ function placeBlocks(
             }
             return frag;
           };
-          if (
-            ghostH + H + addedReserve(remainderFootnoteNums(rem, ghostH)) <=
-            avail
-          ) {
+          const remFns = remainderFootnoteNums(rem, ghostH);
+          if (ghostH + H + addedReserve(remFns) <= avail) {
             placeTable(withGhosts(remainderView(rem, Infinity)));
             break;
           }
-          // Prefer the lowest row boundary that still fits. Boundaries live in
-          // remainder space (y = 0 at the carry's top): base rows land at
-          // remainderRelY; cells already part of the carry offer none.
           const budget = avail - ghostH;
-          let cut = 0;
-          for (const cell of rem.base.cells) {
-            if (cell.y < rem.fromY - REMAINDER_EPS) continue; // mid-carry
-            const yr = remainderRelY(rem, cell.y);
-            if (yr > REMAINDER_EPS && yr <= budget) cut = Math.max(cut, yr);
-          }
-          if (cut === 0) {
-            // No row boundary fits the remaining space, i.e. the first row is
-            // taller than what's left. Word's default lets a row break across
-            // pages, so it starts here and splits mid-row (no blank gap) — only
-            // a row marked w:cantSplit moves whole to a fresh band (and even
-            // then only when it would actually fit one).
-            let firstRowBottom = H;
-            for (const cell of rem.base.cells) {
-              if (cell.y < rem.fromY - REMAINDER_EPS) continue;
-              const yr = remainderRelY(rem, cell.y);
-              if (yr > REMAINDER_EPS && yr < firstRowBottom)
-                firstRowBottom = yr;
-            }
-            const fitsFullBand = firstRowBottom <= limit() - bandTop;
-            const bandShift = rem.carryHeight - rem.fromY;
-            const rowCantSplit = (rem.base.cantSplitBands ?? []).some(
-              (b) =>
-                b.top + bandShift <= 0.5 &&
-                b.bottom + bandShift >= firstRowBottom - 0.5,
-            );
-            if (rowCantSplit && fitsFullBand && colDirty) {
-              midTableRest = remainderStarted(rem) ? rem : null;
-              breakBand(); // retry with a full fresh column/page
-              midTableRest = null;
-              continue;
-            }
-            cut = budget; // split the row in the space we have
-          }
-          if (cut <= 0) {
-            // Header band swallows the remaining space — try a fresh band, or
-            // place whole when the geometry is truly degenerate.
-            if (colDirty) {
-              midTableRest = remainderStarted(rem) ? rem : null;
-              breakBand();
-              midTableRest = null;
-              continue;
-            }
-            placeTable(withGhosts(remainderView(rem, Infinity)));
-            break;
-          }
-          // Split a WINDOWED view instead of the whole remainder: only cells
-          // starting above the cut enter it, so rows past the cut are never
-          // cloned. rest then holds nothing but the broken row's continuation.
-          const view = remainderView(rem, cut);
-          const { top: topFrag, rest } = splitTableAt(view, cut);
-          if (rest.height >= H + ghostH) {
-            // The cut moved nothing — the leftover strip is too thin to hold
-            // even one line. Retry on a fresh band when this one is already
-            // used (a table landing 8px above the page bottom must not be
-            // dumped there whole, overflowing the page); only a genuinely
-            // band-taller table, with nowhere better to go, is placed as-is.
-            // The view is a copy, so the remainder is untouched either way.
-            if (colDirty) {
-              midTableRest = remainderStarted(rem) ? rem : null;
-              breakBand();
-              midTableRest = null;
-              continue;
-            }
-            placeTable(withGhosts(remainderView(rem, Infinity)));
-            break;
-          }
-          const topHasContent = topFrag.cells.some(
-            (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
-          );
-          if (!topHasContent && colDirty) {
-            // Not even one line fits the leftover space — don't paint an empty
-            // table stub; start on the next column/page instead.
+          /** Move the remainder whole to a fresh column/page. */
+          const freshBand = () => {
             midTableRest = remainderStarted(rem) ? rem : null;
             breakBand();
             midTableRest = null;
+          };
+          /** Commit a split: place the top fragment, advance the cursor, and
+           *  land the remainder on the next band. Every continuation cell
+           *  splitTableAt built has height = contHeight, and (with no
+           *  below-cut cells in the view) rest.height = contHeight +
+           *  (view.height - splitBottom), which recovers the broken row's
+           *  bottom. A cut on a row boundary has no continuation: the
+           *  consumed prefix moves to the cut itself. A cut inside the carry
+           *  consumes no base content (splitBottom ≤ carry height ⇒ fromY
+           *  unchanged). */
+          const commitSplit = (
+            view: ResolvedTable,
+            top: ResolvedTable,
+            rest: ResolvedTable,
+          ) => {
+            const contH = rest.cells.length > 0 ? rest.cells[0].height : 0;
+            const splitBottom = view.height - rest.height + contH;
+            const advance = splitBottom - rem.carryHeight;
+            const next: TableRemainder = {
+              base: rem.base,
+              fromY: rem.fromY + (advance > REMAINDER_EPS ? advance : 0),
+              carry: rest.cells.length > 0 ? rest.cells : null,
+              carryHeight: contH,
+              posDelta: 0,
+            };
+            placeTable(withGhosts(top));
+            midTableRest = next; // the break lands the remainder on the new page
+            breakBand();
+            midTableRest = null;
+            rem = next;
+          };
+          if (budget <= 0) {
+            // Header band swallows the remaining space — try a fresh band, or
+            // place whole when the geometry is truly degenerate.
+            if (colDirty) {
+              freshBand();
+              continue;
+            }
+            placeTable(withGhosts(remainderView(rem, Infinity)));
+            break;
+          }
+          // Row boundaries in remainder space (y = 0 at the carry's top):
+          // `boundary` is the largest at or under the budget, `rowBottom` the
+          // first one past it — together they frame the row the page edge
+          // lands in. Cells already part of the carry offer no boundary.
+          let boundary = 0;
+          let rowBottom = H;
+          for (const cell of rem.base.cells) {
+            if (cell.y < rem.fromY - REMAINDER_EPS) continue; // mid-carry
+            const yr = remainderRelY(rem, cell.y);
+            if (yr <= REMAINDER_EPS) continue;
+            if (yr <= budget) boundary = Math.max(boundary, yr);
+            else if (yr < rowBottom) rowBottom = yr;
+          }
+          const bandShift = rem.carryHeight - rem.fromY;
+          const straddleCantSplit = (rem.base.cantSplitBands ?? []).some(
+            (b) =>
+              b.top + bandShift <= boundary + 0.5 &&
+              b.bottom + bandShift >= rowBottom - 0.5,
+          );
+          // 1) Word's default: FILL the leftover — split the row the page
+          //    edge lands in, unless it is w:cantSplit. splitTableAt snaps
+          //    the cut down to keep-legal line boundaries per cell, so the
+          //    attempt is taken only when the straddling row genuinely
+          //    contributes content past the row boundary (otherwise the row
+          //    boundary gives the same fragment without a continuation).
+          //    Fragments carrying fresh footnotes shrink the budget by the
+          //    reserve their notes add — monotone, so a bounded walk-down
+          //    settles it; footnote-free tables (the norm) skip it entirely.
+          if (!straddleCantSplit) {
+            let effBudget = budget;
+            let view = remainderView(rem, effBudget);
+            let frag = splitTableAt(view, effBudget);
+            if (remFns.length > 0) {
+              for (let i = 0; i < 3 && effBudget > 0; i++) {
+                const need = addedReserve(tableFootnoteNums(frag.top));
+                if (ghostH + effBudget + need <= avail) break;
+                effBudget = avail - ghostH - need;
+                if (effBudget <= 0) break;
+                view = remainderView(rem, effBudget);
+                frag = splitTableAt(view, effBudget);
+              }
+            }
+            const contributed =
+              effBudget > 0 &&
+              frag.top.cells.some(
+                (c) =>
+                  c.lines.some(
+                    (l) => l.y + l.height > boundary + REMAINDER_EPS,
+                  ) ||
+                  (c.tables ?? []).some(
+                    (t) => t.y + t.height > boundary + REMAINDER_EPS,
+                  ),
+              );
+            if (contributed && frag.rest.height < H + ghostH) {
+              commitSplit(view, frag.top, frag.rest);
+              continue;
+            }
+          }
+          // 2) The straddling row moves whole: cut at the row boundary.
+          if (boundary > 0) {
+            const view = remainderView(rem, boundary);
+            const { top: topFrag, rest } = splitTableAt(view, boundary);
+            if (rest.height >= H + ghostH) {
+              // The cut moved nothing. Retry on a fresh band when this one
+              // is already used; only a genuinely band-taller table, with
+              // nowhere better to go, is placed as-is (overflowing).
+              if (colDirty) {
+                freshBand();
+                continue;
+              }
+              placeTable(withGhosts(remainderView(rem, Infinity)));
+              break;
+            }
+            const topHasContent = topFrag.cells.some(
+              (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
+            );
+            if (!topHasContent && colDirty) {
+              freshBand();
+              continue;
+            }
+            commitSplit(view, topFrag, rest);
             continue;
           }
-          // Advance the cursor. Every continuation cell splitTableAt built has
-          // height = contHeight, and (with no below-cut cells in the view)
-          // rest.height = contHeight + (view.height - splitBottom), which
-          // recovers the broken row's bottom. A cut on a row boundary has no
-          // continuation: the consumed prefix moves to the cut itself. A cut
-          // inside the carry consumes no base content (splitBottom ≤ carry
-          // height ⇒ fromY unchanged).
-          const contH = rest.cells.length > 0 ? rest.cells[0].height : 0;
-          const splitBottom = view.height - rest.height + contH;
-          const advance = splitBottom - rem.carryHeight;
-          const next: TableRemainder = {
-            base: rem.base,
-            fromY: rem.fromY + (advance > REMAINDER_EPS ? advance : 0),
-            carry: rest.cells.length > 0 ? rest.cells : null,
-            carryHeight: contH,
-            posDelta: 0,
-          };
-          placeTable(withGhosts(topFrag));
-          midTableRest = next; // the break lands the remainder on the new page
-          breakBand();
-          midTableRest = null;
-          rem = next;
+          // 3) No row boundary fits and the straddling row would not (or may
+          //    not) split. A w:cantSplit row that would fit a full fresh
+          //    band moves there whole; past that, Word splits even a
+          //    cantSplit row rather than overflow the page.
+          if (straddleCantSplit) {
+            const fitsFullBand = rowBottom <= limit() - bandTop;
+            if (fitsFullBand && colDirty) {
+              freshBand();
+              continue;
+            }
+          }
+          {
+            const view = remainderView(rem, budget);
+            const { top: topFrag, rest } = splitTableAt(view, budget);
+            const topHasContent = topFrag.cells.some(
+              (c) => c.lines.length > 0 || (c.tables?.length ?? 0) > 0,
+            );
+            if (rest.height >= H + ghostH || !topHasContent) {
+              // Not even one line legally fits the leftover space — don't
+              // paint an empty table stub; start on the next column/page
+              // instead, or place whole when the geometry is degenerate.
+              if (colDirty) {
+                freshBand();
+                continue;
+              }
+              placeTable(withGhosts(remainderView(rem, Infinity)));
+              break;
+            }
+            commitSplit(view, topFrag, rest);
+          }
         }
       }
     }

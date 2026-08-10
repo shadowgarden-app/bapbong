@@ -6,6 +6,7 @@ import type {
   FontSpec,
   LayoutConfig,
   MeasureText,
+  ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
 import {
   createLayoutCache,
@@ -2908,5 +2909,155 @@ describe('mid-table tail resync', () => {
         );
       expect(flat(warm)).toEqual(flat(cold));
     });
+  });
+});
+
+describe('table cells: paragraph rules and page fill', () => {
+  // Cell content used to go through a reduced second layout engine: w:spacing
+  // was swallowed, keeps were dropped, and the paginator preferred a row
+  // boundary over filling the page. All three against Word ground truth
+  // (nested_table.docx: Word starts row 2 on page 1 and breaks it mid-row).
+  const cellOf = (content: FlowBlock[]): FlowTableCell => ({
+    colspan: 1,
+    rowspan: 1,
+    colwidth: null,
+    content,
+  });
+  const p = (text: string, over: Partial<FlowParagraph> = {}): FlowParagraph =>
+    ({
+      type: 'paragraph',
+      runs: [{ text, font: font() }],
+      ...over,
+    }) as FlowParagraph;
+  const lines1 = (n: number, pre: string) =>
+    Array.from({ length: n }, (_, i) => p(`${pre}${i + 1}`));
+  const rowsOf = (t: ResolvedTable | undefined) =>
+    t?.cells.map((c) => c.lines.map((l) => l.segments[0]?.text));
+
+  it('w:spacing before/after is honored inside a cell', () => {
+    const mk = (spaced: boolean) =>
+      layoutBlocks(
+        [
+          {
+            type: 'table',
+            rows: [
+              {
+                cells: [
+                  cellOf([
+                    p('a'),
+                    p(
+                      'b',
+                      spaced ? { spacing: { before: 30, after: 30 } } : {},
+                    ),
+                  ]),
+                ],
+              },
+            ],
+          },
+        ],
+        config(),
+      ).pages[0].tables?.[0];
+    const plain = mk(false);
+    const spaced = mk(true);
+    expect(spaced?.height).toBeGreaterThan((plain?.height ?? 0) + 59);
+    // The gap sits between the paragraphs, not after the first line.
+    expect(spaced?.cells[0].lines[1].y).toBe(
+      (plain?.cells[0].lines[1].y ?? 0) + 30,
+    );
+  });
+
+  it('fills the page before a tall row instead of leaving a blank gap', () => {
+    // Word ground truth (nested_table.docx page 1): a short first row, then
+    // the tall second row STARTS in the leftover space and breaks mid-row.
+    // Preferring the row boundary left ~90% of the page blank.
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        { cells: [cellOf([p('head')])] },
+        { cells: [cellOf(lines1(6, 'l'))] },
+      ],
+    };
+    const { pages } = layoutBlocks([t], config({ height: 100 }));
+    expect(pages).toHaveLength(3);
+    expect(rowsOf(pages[0].tables?.[0])).toEqual([['head'], ['l1', 'l2']]);
+    expect(rowsOf(pages[1].tables?.[0])).toEqual([['l3', 'l4', 'l5']]);
+    expect(rowsOf(pages[2].tables?.[0])).toEqual([['l6']]);
+  });
+
+  it('a keepNext heading in a cell moves with its body', () => {
+    // budget after 'hi' = 44px = 2 lines + slack. The geometric cut falls
+    // right after HEAD; keepNext forbids that boundary, so HEAD moves down
+    // with its body instead of ending the fragment alone.
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        {
+          cells: [
+            cellOf([p('b1'), p('HEAD', { keepNext: true }), ...lines1(4, 'c')]),
+          ],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([p('hi'), t], config({ height: 100 }));
+    expect(rowsOf(pages[0].tables?.[0])).toEqual([['b1']]);
+    expect(rowsOf(pages[1].tables?.[0])?.[0]?.slice(0, 2)).toEqual([
+      'HEAD',
+      'c1',
+    ]);
+  });
+
+  it('widow/orphan control holds inside a split row', () => {
+    // One 5-line paragraph; the geometric cut leaves 1 line above. Orphan
+    // rule (≥2 each side) pushes the whole paragraph down.
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [cellOf([p('aaa bbb ccc ddd eee')])] }],
+    };
+    const { pages } = layoutBlocks(
+      [p('hi'), p('hi2'), t],
+      config({ height: 100 }),
+    );
+    const first = rowsOf(pages[0].tables?.[0]) ?? [[]];
+    expect(first[0]).toEqual([]); // nothing stranded above
+    expect((rowsOf(pages[1].tables?.[0])?.[0] ?? []).length).toBeGreaterThan(1);
+  });
+
+  it('widowControl false splits wherever the band ends', () => {
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        {
+          cells: [cellOf([p('aaa bbb ccc ddd eee', { widowControl: false })])],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks(
+      [p('hi'), p('hi2'), t],
+      config({ height: 100 }),
+    );
+    expect(rowsOf(pages[0].tables?.[0])?.[0]).toEqual(['aaa']); // free split
+  });
+
+  it('keepLines moves the whole paragraph to the next fragment', () => {
+    // A narrow column forces the keepLines paragraph to wrap to 4 lines.
+    const t: FlowBlock = {
+      type: 'table',
+      rows: [
+        {
+          cells: [
+            {
+              ...cellOf([
+                p('b1'),
+                p('aaaaaa bbbbbb cccccc dddddd', { keepLines: true }),
+              ]),
+              colwidth: [80],
+            },
+          ],
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([p('hi'), t], config({ height: 100 }));
+    expect(rowsOf(pages[0].tables?.[0])).toEqual([['b1']]);
+    expect((rowsOf(pages[1].tables?.[0])?.[0] ?? []).length).toBe(4);
   });
 });
