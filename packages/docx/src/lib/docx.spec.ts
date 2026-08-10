@@ -2408,3 +2408,55 @@ describe('legacy VML shapes', () => {
     expect(doc.textContent).toBe('sau');
   });
 });
+
+describe('legacy VML: dash and vertical text', () => {
+  const vmlDoc2 = (body: string) =>
+    `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><w:body>${body}</w:body></w:document>`;
+  const firstImage = (doc: import('prosemirror-model').Node) => {
+    let img: import('prosemirror-model').Node | null = null;
+    doc.descendants((n) => {
+      if (n.type.name === 'image') img = n;
+      return true;
+    });
+    return img!;
+  };
+
+  it('a dashstyle connector imports as a dashed line', async () => {
+    const bytes = await makeDocx(
+      vmlDoc2(`<w:p><w:r><w:pict>
+        <v:shape style="position:absolute;width:120pt;height:0" o:connectortype="straight">
+          <v:stroke dashstyle="1 1" startarrow="block" endarrow="block"/>
+        </v:shape>
+      </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    expect(firstImage(doc).attrs['shape']).toMatchObject({
+      kind: 'line',
+      dash: true,
+      arrowStart: true,
+      arrowEnd: true,
+    });
+  });
+
+  it('layout-flow:vertical rotates the box, swapping dims around its center', async () => {
+    const bytes = await makeDocx(
+      vmlDoc2(`<w:p><w:r><w:pict>
+        <v:roundrect style="position:absolute;margin-left:100pt;margin-top:60pt;width:30pt;height:90pt">
+          <v:textbox style="layout-flow:vertical;mso-layout-flow-alt:bottom-to-top"><w:txbxContent>
+            <w:p><w:r><w:t>Khách hàng</w:t></w:r></w:p>
+          </w:txbxContent></v:textbox>
+        </v:roundrect>
+      </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    const a = firstImage(doc).attrs;
+    // 30x90pt = 40x120px box → laid out sideways 120x40, rotated -90 (CCW,
+    // bottom-to-top), re-centered on the original rect.
+    expect(a['rotation']).toBe(-90);
+    expect(a['width']).toBe(120);
+    expect(a['height']).toBe(40);
+    // center preserved: left 100pt=133.33px + (40-120)/2 → 93; top 60pt=80px + (120-40)/2 → 120
+    expect(a['float']).toMatchObject({ hOffset: 93, vOffset: 120 });
+    expect(JSON.stringify(a['textbox'])).toContain('Khách hàng');
+  });
+});

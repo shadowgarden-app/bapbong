@@ -200,6 +200,8 @@ export interface ShapeSpec {
    *  stroke width. */
   arrowStart?: boolean;
   arrowEnd?: boolean;
+  /** Dashed/dotted stroke (VML v:stroke dashstyle, DrawingML a:prstDash). */
+  dash?: boolean;
 }
 
 /** An atomic inline image laid out inline with text. Dimensions are CSS px. */

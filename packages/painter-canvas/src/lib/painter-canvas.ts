@@ -655,10 +655,12 @@ export class CanvasPainter {
         const y2 = s.flipV ? y : y + h;
         ctx.strokeStyle = s.stroke;
         ctx.lineWidth = lw;
+        if (s.dash) ctx.setLineDash([Math.max(2, lw * 2), Math.max(2, lw * 2)]);
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
         ctx.stroke();
+        ctx.setLineDash([]);
         // Arrowheads: filled triangles scaled from the stroke width (Word's
         // "block" arrow at medium size ≈ 3×). Drawn along the line direction.
         if (s.arrowStart || s.arrowEnd) {

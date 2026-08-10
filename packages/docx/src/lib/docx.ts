@@ -769,6 +769,8 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (!child(ln, 'a:noFill')) {
     const w = attrOf(ln, 'w'); // outline width in EMU
     shape['strokeWidth'] = w ? Math.max(1, Math.round(Number(w) / 9525)) : 1;
+    const prstDash = attrOf(child(ln, 'a:prstDash'), 'val');
+    if (prstDash && prstDash !== 'solid') shape['dash'] = true;
     // Direct outline color, else the style's line reference (how Word themes
     // shape outlines), else black.
     shape['stroke'] =
@@ -1006,27 +1008,53 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const endArrow = attrOf(strokeEl, 'endarrow');
   if (startArrow && startArrow !== 'none') shape['arrowStart'] = true;
   if (endArrow && endArrow !== 'none') shape['arrowEnd'] = true;
+  // Dashed connectors ("1 1" dotted, "dash", …) — anything but solid.
+  const dashstyle = attrOf(strokeEl, 'dashstyle');
+  if (dashstyle && dashstyle !== 'solid') shape['dash'] = true;
+
+  // v:textbox style layout-flow:vertical (+ mso-layout-flow-alt) — text runs
+  // along the box's vertical axis. The painter rotates a float's ENTIRE
+  // payload (shape + textbox lines), so model the box laid out SIDEWAYS
+  // (w/h swapped around the same center) and rotated back into place;
+  // bottom-to-top reads upward = counter-clockwise.
+  let rotation = 0;
+  const tbStyle = attrOf(child(el, 'v:textbox'), 'style');
+  if (tbStyle && /layout-flow:vertical/.test(tbStyle)) {
+    rotation = /mso-layout-flow-alt:bottom-to-top/.test(tbStyle) ? -90 : 90;
+  }
 
   // position:absolute floats at margin-left/top from the anchor paragraph
   // (VML's default relative frame is the text column / the paragraph).
+  const w = st.width ?? 0;
+  const h = st.height ?? 0;
+  // A rotated (vertical-text) box swaps its laid-out dimensions; the offsets
+  // shift so the rotated box lands on the ORIGINAL rectangle (same center).
+  const boxW = rotation ? h : w;
+  const boxH = rotation ? w : h;
+  const dx = rotation ? (w - h) / 2 : 0;
+  const dy = rotation ? (h - w) / 2 : 0;
+
   let float: Record<string, unknown> | null = null;
   if (st.absolute) {
     float = { wrap: 'none', hRel: 'margin', vRel: 'paragraph' };
-    if (st.left !== undefined) float['hOffset'] = Math.round(st.left);
-    if (st.top !== undefined) float['vOffset'] = Math.round(st.top);
+    if (st.left !== undefined) float['hOffset'] = Math.round(st.left + dx);
+    if (st.top !== undefined) float['vOffset'] = Math.round(st.top + dy);
     if ((st.zIndex ?? 0) < 0) float['behind'] = true;
   }
 
-  audit.markSubtree(el);
+  // NB: no blanket markSubtree here — properties the model does NOT honor
+  // (arcsize, an unread dash variant, …) must stay visible in the XML audit;
+  // everything consumed above was marked by reading it.
   audit.mark(pict);
   return ctx.schema.nodes['image'].create({
     src: '',
-    width: Math.round(st.width ?? 0),
-    height: Math.round(st.height ?? 0),
+    width: Math.round(boxW),
+    height: Math.round(boxH),
     alt: attrOf(el, 'id') ?? kind,
     float,
     shape,
     textbox,
+    ...(rotation ? { rotation } : {}),
   });
 }
 
