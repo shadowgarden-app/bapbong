@@ -195,6 +195,11 @@ export interface ShapeSpec {
   fill?: string;
   /** Line drawn bottom-left → top-right instead (a:xfrm flipV). */
   flipV?: boolean;
+  /** Arrowheads on a 'line' connector (VML startarrow/endarrow, DrawingML
+   *  a:headEnd/a:tailEnd). Painted as filled triangles scaled from the
+   *  stroke width. */
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
 }
 
 /** An atomic inline image laid out inline with text. Dimensions are CSS px. */

@@ -2297,3 +2297,114 @@ describe('sniffDocx + classified import errors', () => {
     expect(err.message).toContain('PDF');
   });
 });
+
+describe('legacy VML shapes', () => {
+  // Old Word draws flowcharts as w:pict + v:* — Word-verified against a real
+  // report whose 5-gap диаграм was entirely roundrects + t32 connectors.
+  const vmlDoc = (body: string) =>
+    `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word"><w:body>${body}</w:body></w:document>`;
+
+  it('imports a positioned roundrect with its textbox content', async () => {
+    const bytes = await makeDocx(
+      vmlDoc(`<w:p><w:r><w:pict>
+        <v:roundrect id="_x0000_s1041" style="position:absolute;margin-left:24.15pt;margin-top:5.3pt;width:81.75pt;height:23.25pt;z-index:251659264" arcsize="10923f">
+          <v:textbox inset="1.55pt,.65pt,1.55pt,.65pt"><w:txbxContent>
+            <w:p><w:r><w:t>Dịch vụ kì vọng</w:t></w:r></w:p>
+          </w:txbxContent></v:textbox>
+        </v:roundrect>
+      </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    let img: import('prosemirror-model').Node | null = null;
+    doc.descendants((n) => {
+      if (n.type.name === 'image') img = n;
+      return true;
+    });
+    expect(img).not.toBeNull();
+    const a = img!.attrs;
+    expect(a['shape']).toMatchObject({
+      kind: 'roundRect',
+      stroke: '#000000',
+      fill: '#ffffff',
+    });
+    expect(a['width']).toBe(109); // 81.75pt
+    expect(a['height']).toBe(31);
+    expect(a['float']).toMatchObject({
+      wrap: 'none',
+      hOffset: 32, // 24.15pt
+      vOffset: 7,
+      hRel: 'margin',
+      vRel: 'paragraph',
+    });
+    const tb = a['textbox'] as { paragraphs: unknown[]; inset?: object };
+    expect(tb.paragraphs).toHaveLength(1);
+    expect(JSON.stringify(tb.paragraphs)).toContain('Dịch vụ kì vọng');
+    expect(tb.inset).toMatchObject({ l: 2, t: 1, r: 2, b: 1 });
+  });
+
+  it('imports a t32 connector as an arrowed line via the shapetype registry', async () => {
+    const bytes = await makeDocx(
+      vmlDoc(`<w:p><w:r><w:pict>
+        <v:shapetype id="_x0000_t32" coordsize="21600,21600" o:spt="32" o:oned="t" path="m,l21600,21600e" filled="f">
+          <v:path arrowok="t" fillok="f" o:connecttype="none"/>
+        </v:shapetype>
+        <v:shape id="_x0000_s1028" type="#_x0000_t32" style="position:absolute;margin-left:28.05pt;margin-top:16.45pt;width:18.15pt;height:12pt;flip:y;z-index:251680256" o:connectortype="straight" strokeweight="1.5pt">
+          <v:stroke endarrow="block"/>
+        </v:shape>
+      </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    let img: import('prosemirror-model').Node | null = null;
+    doc.descendants((n) => {
+      if (n.type.name === 'image') img = n;
+      return true;
+    });
+    expect(img).not.toBeNull();
+    const a = img!.attrs;
+    expect(a['shape']).toMatchObject({
+      kind: 'line',
+      stroke: '#000000',
+      strokeWidth: 2, // 1.5pt
+      flipV: true,
+      arrowEnd: true,
+    });
+    expect((a['shape'] as Record<string, unknown>)['fill']).toBeUndefined();
+    expect(a['float']).toMatchObject({ wrap: 'none' });
+  });
+
+  it('a second pict resolves the type from a shapetype defined earlier', async () => {
+    const bytes = await makeDocx(
+      vmlDoc(`<w:p><w:r><w:pict>
+          <v:shapetype id="_x0000_t32" o:spt="32" path="m,l21600,21600e"/>
+          <v:shape type="#_x0000_t32" style="position:absolute;width:10pt;height:0"/>
+        </w:pict></w:r><w:r><w:pict>
+          <v:shape type="#_x0000_t32" style="position:absolute;width:20pt;height:0" strokecolor="white"/>
+        </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    const shapes: Record<string, unknown>[] = [];
+    doc.descendants((n) => {
+      if (n.type.name === 'image')
+        shapes.push(n.attrs['shape'] as Record<string, unknown>);
+      return true;
+    });
+    expect(shapes).toHaveLength(2);
+    expect(shapes[1]).toMatchObject({ kind: 'line', stroke: '#ffffff' });
+  });
+
+  it('unmapped VML stays dropped (no phantom nodes)', async () => {
+    const bytes = await makeDocx(
+      vmlDoc(
+        `<w:p><w:r><w:pict><v:curve style="width:10pt;height:10pt"/></w:pict></w:r><w:r><w:t>sau</w:t></w:r></w:p>`,
+      ),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    let images = 0;
+    doc.descendants((n) => {
+      if (n.type.name === 'image') images++;
+      return true;
+    });
+    expect(images).toBe(0);
+    expect(doc.textContent).toBe('sau');
+  });
+});

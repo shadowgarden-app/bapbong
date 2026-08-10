@@ -209,6 +209,10 @@ interface Ctx {
   /** Page content-box width in px (page minus side margins) — what
    *  percentage-based table widths (w:tblW/w:tcW type="pct") resolve against. */
   contentWidth: number;
+  /** VML shapetype registry (`v:shapetype` id → o:spt), filled as picts are
+   *  parsed in document order — Word always defines a type before its first
+   *  `type="#id"` reference. Lazily created by parseVmlShape. */
+  vmlShapeTypes?: Map<string, number>;
   /** Generated fields open across paragraph boundaries. A TOC field begins in
    *  its first entry's paragraph and closes many paragraphs later, so the span
    *  can't live in parseParagraph's local state: while this stack is non-empty
@@ -437,7 +441,10 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   const group = parseGroup(run, ctx);
   if (group) return group;
   const image =
-    parseImage(run, ctx) ?? parseShape(run, ctx) ?? parseVmlImage(run, ctx);
+    parseImage(run, ctx) ??
+    parseShape(run, ctx) ??
+    parseVmlImage(run, ctx) ??
+    parseVmlShape(run, ctx);
   if (image) return [image];
 
   const out: PMNode[] = [];
@@ -803,12 +810,11 @@ function parseTextbox(
   paragraphs: unknown[];
   inset?: { l: number; t: number; r: number; b: number };
 } | null {
-  const content = child(child(wsp, 'wps:txbx'), 'w:txbxContent');
-  if (!content) return null;
-  const paragraphs = children(content, 'w:p').map((p) =>
-    parseParagraph(p, ctx).toJSON(),
+  const paragraphs = txbxParagraphs(
+    child(child(wsp, 'wps:txbx'), 'w:txbxContent'),
+    ctx,
   );
-  if (paragraphs.length === 0) return null;
+  if (!paragraphs) return null;
   const bodyPr = child(wsp, 'wps:bodyPr');
   const ins = (name: string): number | undefined =>
     emuToPxZero(attrOf(bodyPr, name));
@@ -821,6 +827,207 @@ function parseTextbox(
       ? { l: l ?? 10, t: t ?? 5, r: r ?? 10, b: b ?? 5 }
       : undefined;
   return inset ? { paragraphs, inset } : { paragraphs };
+}
+
+/** Paragraph JSON of a `w:txbxContent` — shared by the modern (wps:txbx) and
+ *  legacy VML (v:textbox) textbox paths. */
+function txbxParagraphs(
+  content: OoxmlNode | undefined,
+  ctx: Ctx,
+): unknown[] | null {
+  if (!content) return null;
+  const paragraphs = children(content, 'w:p').map((p) =>
+    parseParagraph(p, ctx).toJSON(),
+  );
+  return paragraphs.length > 0 ? paragraphs : null;
+}
+
+// ── legacy VML shapes ───────────────────────────────────────────────
+// Old Word (and .doc conversions) draws flowcharts as w:pict + v:* — rounded
+// boxes with v:textbox content and straight connectors — with geometry in a
+// CSS-ish `style` string. Everything maps onto the SAME image-node payload
+// (shape / float / textbox) the modern wps path builds, so layout, painting,
+// dragging and export need nothing new past line arrowheads.
+
+/** A CSS-style VML length ("135pt", ".05in", "12px"; bare number = px) in
+ *  px, or undefined. */
+function cssLenToPx(v: string | undefined): number | undefined {
+  if (!v) return undefined;
+  const m = /^(-?[\d.]+)(pt|in|cm|mm|px)?$/.exec(v.trim());
+  if (!m) return undefined;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  const u = m[2] ?? 'px';
+  const f =
+    u === 'pt'
+      ? 96 / 72
+      : u === 'in'
+        ? 96
+        : u === 'cm'
+          ? 96 / 2.54
+          : u === 'mm'
+            ? 96 / 25.4
+            : 1;
+  return n * f;
+}
+
+/** The geometry bits of a VML `style` attribute. */
+function parseVmlStyle(style: string): {
+  absolute: boolean;
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+  zIndex?: number;
+  flipV?: boolean;
+} {
+  const out: ReturnType<typeof parseVmlStyle> = { absolute: false };
+  for (const part of style.split(';')) {
+    const i = part.indexOf(':');
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (k === 'position') out.absolute = v === 'absolute';
+    else if (k === 'margin-left') out.left = cssLenToPx(v);
+    else if (k === 'margin-top') out.top = cssLenToPx(v);
+    else if (k === 'width') out.width = cssLenToPx(v);
+    else if (k === 'height') out.height = cssLenToPx(v);
+    else if (k === 'z-index') out.zIndex = Number(v) || 0;
+    else if (k === 'flip') out.flipV = v.includes('y');
+  }
+  return out;
+}
+
+const VML_COLORS: Record<string, string> = {
+  black: '#000000',
+  white: '#ffffff',
+  red: '#ff0000',
+  green: '#008000',
+  blue: '#0000ff',
+  yellow: '#ffff00',
+  gray: '#808080',
+  silver: '#c0c0c0',
+};
+
+/** A VML colour attribute ("white", "#FF0000", "white [3212]"), or undefined. */
+function vmlColor(v: string | undefined): string | undefined {
+  if (!v) return undefined;
+  const c = v.trim().split(' ')[0];
+  if (c.startsWith('#')) return normalizeHex(c.slice(1)) ?? undefined;
+  return VML_COLORS[c.toLowerCase()];
+}
+
+/** v:textbox content + inset ("l,t,r,b" CSS lengths; defaults match the wps
+ *  bodyPr defaults — both are Word's 0.1"/0.05"). */
+function parseVmlTextbox(
+  el: OoxmlNode,
+  ctx: Ctx,
+): {
+  paragraphs: unknown[];
+  inset?: { l: number; t: number; r: number; b: number };
+} | null {
+  const tb = child(el, 'v:textbox');
+  const paragraphs = txbxParagraphs(child(tb, 'w:txbxContent'), ctx);
+  if (!paragraphs) return null;
+  const insetAttr = attrOf(tb, 'inset');
+  if (insetAttr) {
+    const p = insetAttr.split(',').map((s) => {
+      const px = cssLenToPx(s.trim());
+      return px === undefined ? undefined : Math.round(px);
+    });
+    return {
+      paragraphs,
+      inset: { l: p[0] ?? 10, t: p[1] ?? 5, r: p[2] ?? 10, b: p[3] ?? 5 },
+    };
+  }
+  return { paragraphs };
+}
+
+/** A drawn legacy VML shape in a run's w:pict: v:roundrect / v:rect / v:oval
+ *  boxes (with their v:textbox content) and straight connectors
+ *  (o:connectortype, or a `type="#id"` reference to a v:shapetype with
+ *  o:spt 32). Pictures took the parseVmlImage exit before this; unmapped
+ *  VML stays unmodelled and visible in the XML audit. */
+function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const pict = child(run, 'w:pict');
+  if (!pict) return null;
+  // Register the pict's shapetypes (id → o:spt) doc-wide: Word defines a
+  // type once, before its first reference, possibly in an earlier pict.
+  const types = (ctx.vmlShapeTypes ??= new Map());
+  for (const st of children(pict, 'v:shapetype')) {
+    const id = attrOf(st, 'id');
+    const spt = Number(attrOf(st, 'o:spt'));
+    if (id && Number.isFinite(spt)) types.set(id, spt);
+    audit.markSubtree(st);
+  }
+
+  let el = child(pict, 'v:roundrect');
+  let kind: ShapeSpec['kind'] | null = el ? 'roundRect' : null;
+  if (!el) {
+    el = child(pict, 'v:rect');
+    if (el) kind = 'rect';
+  }
+  if (!el) {
+    el = child(pict, 'v:oval');
+    if (el) kind = 'ellipse';
+  }
+  if (!el) {
+    el = child(pict, 'v:shape');
+    if (el) {
+      const ref = attrOf(el, 'type');
+      const spt = ref?.startsWith('#') ? types.get(ref.slice(1)) : undefined;
+      kind = attrOf(el, 'o:connectortype')
+        ? 'line'
+        : spt === 32
+          ? 'line'
+          : child(el, 'v:textbox') || spt === 202
+            ? 'rect'
+            : null;
+    }
+  }
+  if (!el || !kind) return null;
+
+  const st = parseVmlStyle(attrOf(el, 'style') ?? '');
+  const textbox = kind === 'line' ? null : parseVmlTextbox(el, ctx);
+
+  const shape: Record<string, unknown> = { kind };
+  // VML defaults: stroked in black at 1px, boxes filled white — both until
+  // the attribute says otherwise ("f").
+  if (attrOf(el, 'stroked') !== 'f') {
+    shape['stroke'] = vmlColor(attrOf(el, 'strokecolor')) ?? '#000000';
+    const w = cssLenToPx(attrOf(el, 'strokeweight'));
+    shape['strokeWidth'] = w ? Math.max(1, Math.round(w)) : 1;
+  }
+  if (kind !== 'line' && attrOf(el, 'filled') !== 'f')
+    shape['fill'] = vmlColor(attrOf(el, 'fillcolor')) ?? '#ffffff';
+  if (st.flipV) shape['flipV'] = true;
+  const strokeEl = child(el, 'v:stroke');
+  const startArrow = attrOf(strokeEl, 'startarrow');
+  const endArrow = attrOf(strokeEl, 'endarrow');
+  if (startArrow && startArrow !== 'none') shape['arrowStart'] = true;
+  if (endArrow && endArrow !== 'none') shape['arrowEnd'] = true;
+
+  // position:absolute floats at margin-left/top from the anchor paragraph
+  // (VML's default relative frame is the text column / the paragraph).
+  let float: Record<string, unknown> | null = null;
+  if (st.absolute) {
+    float = { wrap: 'none', hRel: 'margin', vRel: 'paragraph' };
+    if (st.left !== undefined) float['hOffset'] = Math.round(st.left);
+    if (st.top !== undefined) float['vOffset'] = Math.round(st.top);
+    if ((st.zIndex ?? 0) < 0) float['behind'] = true;
+  }
+
+  audit.markSubtree(el);
+  audit.mark(pict);
+  return ctx.schema.nodes['image'].create({
+    src: '',
+    width: Math.round(st.width ?? 0),
+    height: Math.round(st.height ?? 0),
+    alt: attrOf(el, 'id') ?? kind,
+    float,
+    shape,
+    textbox,
+  });
 }
 
 // ── carry-through fidelity ──────────────────────────────────────────

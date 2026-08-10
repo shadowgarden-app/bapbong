@@ -649,17 +649,40 @@ export class CanvasPainter {
       }
       case 'line': {
         if (!s.stroke) return;
+        const x1 = x;
+        const y1 = s.flipV ? y + h : y;
+        const x2 = x + w;
+        const y2 = s.flipV ? y : y + h;
         ctx.strokeStyle = s.stroke;
         ctx.lineWidth = lw;
         ctx.beginPath();
-        if (s.flipV) {
-          ctx.moveTo(x, y + h);
-          ctx.lineTo(x + w, y);
-        } else {
-          ctx.moveTo(x, y);
-          ctx.lineTo(x + w, y + h);
-        }
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
         ctx.stroke();
+        // Arrowheads: filled triangles scaled from the stroke width (Word's
+        // "block" arrow at medium size ≈ 3×). Drawn along the line direction.
+        if (s.arrowStart || s.arrowEnd) {
+          const ang = Math.atan2(y2 - y1, x2 - x1);
+          const len = Math.max(6, lw * 4);
+          const half = Math.max(2.5, lw * 1.6);
+          const head = (px: number, py: number, a: number) => {
+            ctx.fillStyle = s.stroke as string;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(
+              px - len * Math.cos(a) + half * Math.sin(a),
+              py - len * Math.sin(a) - half * Math.cos(a),
+            );
+            ctx.lineTo(
+              px - len * Math.cos(a) - half * Math.sin(a),
+              py - len * Math.sin(a) + half * Math.cos(a),
+            );
+            ctx.closePath();
+            ctx.fill();
+          };
+          if (s.arrowEnd) head(x2, y2, ang);
+          if (s.arrowStart) head(x1, y1, ang + Math.PI);
+        }
         return;
       }
       case 'ellipse': {
