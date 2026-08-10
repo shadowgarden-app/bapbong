@@ -5,9 +5,9 @@ import type {
   PagePoint,
   PluginContext,
   ResolvedCell,
-  ResolvedLayout,
   ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
+import { commonTableAt } from '@shadow-garden/bapbong-selection';
 
 /** The editor state type, from the plugin context (no direct PM dep). */
 type State = PluginContext['state'];
@@ -42,35 +42,6 @@ declare module '@shadow-garden/bapbong-contracts' {
   interface EditorPluginHandles {
     'table-selection': TableSelectionPlugin;
   }
-}
-
-interface CellHit {
-  table: ResolvedTable;
-  cell: ResolvedCell;
-}
-
-/** The table cell at a page-local point (top-level tables only), or null. */
-function cellAtPoint(
-  layout: ResolvedLayout | null,
-  point: PagePoint,
-): CellHit | null {
-  const page = layout?.pages[point.pageIndex];
-  if (!page?.tables) return null;
-  for (const table of page.tables) {
-    if (point.x < table.x || point.x > table.x + table.width) continue;
-    if (point.y < table.y || point.y > table.y + table.height) continue;
-    for (const cell of table.cells) {
-      if (
-        point.x >= cell.x &&
-        point.x <= cell.x + cell.width &&
-        point.y >= cell.y &&
-        point.y <= cell.y + cell.height
-      ) {
-        return { table, cell };
-      }
-    }
-  }
-  return null;
 }
 
 /** Cells of `table` overlapping the bounding box of cells `a` and `b`. */
@@ -135,10 +106,16 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
   };
 
   const finalize = (c: PluginContext): void => {
-    const a = anchor && cellAtPoint(c.layout, anchor);
-    const h = lastHead && cellAtPoint(c.layout, lastHead);
-    if (!a || !h || a.table !== h.table) return;
-    const cells = blockCells(a.table, a.cell, h.cell);
+    // The block forms in the DEEPEST table containing both endpoints — a
+    // drag inside a nested table selects nested cells; a drag from a nested
+    // cell out into another outer cell selects in the OUTER table, the
+    // nested table's whole host cell included (Word's semantics).
+    // (cellA === cellB here means the drag crossed a border and came back —
+    // that finalizes as a one-cell block, as it always has.)
+    const common =
+      anchor && lastHead && commonTableAt(c.layout, anchor, lastHead);
+    if (!common) return;
+    const cells = blockCells(common.table, common.cellA, common.cellB);
     // Grid position from distinct cell tops/lefts.
     const ys = [...new Set(cells.map((cell) => Math.round(cell.y)))].sort(
       (p, q) => p - q,
@@ -195,25 +172,28 @@ export function tableSelectionPlugin(): TableSelectionPlugin {
 
       if (ev.type === 'move') {
         if (!anchor || !(ev.buttons & 1) || !ev.point) return false;
-        const a = cellAtPoint(c.layout, anchor);
-        const h = cellAtPoint(c.layout, ev.point);
-        if (!a || !h || a.table !== h.table) return selecting;
-        if (a.cell === h.cell && !selecting) return false; // same cell → text drag
+        const common = commonTableAt(c.layout, anchor, ev.point);
+        if (!common) return selecting;
+        // Same cell of the deepest common table on both ends: the drag never
+        // crossed a cell border at any level — a text drag, not a block.
+        if (common.cellA === common.cellB && !selecting) return false;
         selecting = true;
         lastHead = ev.point;
         if (!collapsed) {
           c.setSelection(c.state.selection.from); // collapse text selection (layout unchanged)
           collapsed = true;
         }
-        const rects: OverlayRect[] = blockCells(a.table, a.cell, h.cell).map(
-          (cell) => ({
-            pageIndex: ev.point!.pageIndex,
-            x: cell.x,
-            y: cell.y,
-            width: cell.width,
-            height: cell.height,
-          }),
-        );
+        const rects: OverlayRect[] = blockCells(
+          common.table,
+          common.cellA,
+          common.cellB,
+        ).map((cell) => ({
+          pageIndex: ev.point!.pageIndex,
+          x: cell.x,
+          y: cell.y,
+          width: cell.width,
+          height: cell.height,
+        }));
         c.setHighlight(rects);
         return true; // claim → suppress the editor's text drag
       }

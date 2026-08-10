@@ -4,6 +4,7 @@ import type {
   LayoutLine,
   MeasureText,
   PagePoint,
+  ResolvedCell,
   ResolvedLayout,
   ResolvedPage,
   ResolvedTable,
@@ -376,4 +377,72 @@ export function imageAtPoint(
     }
   }
   return null;
+}
+
+/** One level of a table hit: the table and the cell of it containing the
+ *  point. */
+export interface TableHit {
+  table: ResolvedTable;
+  cell: ResolvedCell;
+}
+
+/**
+ * The chain of tables containing a page-local point, outermost → innermost,
+ * with the containing cell at each level. Empty when the point sits in no
+ * table. This is THE table hit-test — pointer features that walk
+ * `page.tables` by hand tend to forget `cell.tables` and go blind inside
+ * nested tables (cell-block selection and column resize both did).
+ */
+export function tableHitPath(
+  layout: ResolvedLayout | null,
+  point: PagePoint,
+): TableHit[] {
+  const page = layout?.pages[point.pageIndex];
+  const path: TableHit[] = [];
+  let tables = page?.tables;
+  while (tables) {
+    let next: ResolvedTable[] | undefined;
+    for (const table of tables) {
+      if (point.x < table.x || point.x > table.x + table.width) continue;
+      if (point.y < table.y || point.y > table.y + table.height) continue;
+      const cell = table.cells.find(
+        (c) =>
+          point.x >= c.x &&
+          point.x <= c.x + c.width &&
+          point.y >= c.y &&
+          point.y <= c.y + c.height,
+      );
+      if (!cell) break; // inside the table box but on no cell (border slack)
+      path.push({ table, cell });
+      next = cell.tables;
+      break;
+    }
+    tables = next;
+  }
+  return path;
+}
+
+/** The deepest table containing BOTH points, with each point's cell in it —
+ *  the table a cross-cell drag selects in (Word's semantics: dragging from a
+ *  nested cell out into another outer cell selects in the OUTER table, the
+ *  nested table's host cell included whole). Null when the points share no
+ *  table. `cellA === cellB` means the drag never left one cell of the
+ *  deepest common table — a text drag, not a cell-block drag. */
+export function commonTableAt(
+  layout: ResolvedLayout | null,
+  a: PagePoint,
+  b: PagePoint,
+): { table: ResolvedTable; cellA: ResolvedCell; cellB: ResolvedCell } | null {
+  const pa = tableHitPath(layout, a);
+  const pb = tableHitPath(layout, b);
+  let out: ReturnType<typeof commonTableAt> = null;
+  const depth = Math.min(pa.length, pb.length);
+  for (let i = 0; i < depth; i++) {
+    // Identity: fragments and re-layouts produce fresh objects, but within
+    // one resolved layout each table is one object. Once the cells diverge,
+    // deeper tables live in different cells and can never match again.
+    if (pa[i].table !== pb[i].table) break;
+    out = { table: pa[i].table, cellA: pa[i].cell, cellB: pb[i].cell };
+  }
+  return out;
 }

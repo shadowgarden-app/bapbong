@@ -5,6 +5,7 @@ import type {
   PluginContext,
   ResolvedCell,
   ResolvedLayout,
+  ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
 
 /** The editor state type, taken from the plugin context (no direct PM dep). */
@@ -30,42 +31,67 @@ interface BorderHit {
 
 const near = (a: number, b: number) => Math.abs(a - b) < 1;
 
-function borderAt(
+/** This one table's own resizable border near the point, or null. */
+function ownBorder(table: ResolvedTable, point: PagePoint): BorderHit | null {
+  const simple = table.cells.filter((c) => c.colspan === 1);
+  for (const cell of simple) {
+    if (point.y < cell.y || point.y > cell.y + cell.height) continue;
+    const rightEdge = cell.x + cell.width;
+    if (Math.abs(point.x - rightEdge) > EDGE_TOL) continue;
+    const leftCells = simple.filter((c) => near(c.x + c.width, rightEdge));
+    const rightCells = simple.filter((c) => near(c.x, rightEdge));
+    if (rightCells.length === 0) continue; // outer-right edge → not resizable
+    const leftX = Math.min(...leftCells.map((c) => c.x));
+    const rightX = Math.max(...rightCells.map((c) => c.x + c.width));
+    return {
+      pageIndex: point.pageIndex,
+      borderX: rightEdge,
+      leftX,
+      rightX,
+      leftCells,
+      rightCells,
+      tableY: table.y,
+      tableHeight: table.height,
+    };
+  }
+  return null;
+}
+
+/** The resizable column border near a page-local point, INNERMOST table
+ *  first: inside a cell hosting a nested table the nested borders win, and
+ *  where they miss (a nested table's outer edges are not resizable, same
+ *  rule as everywhere) the search falls back to the host table's borders —
+ *  so a nested edge flush with an outer border resolves to the outer column.
+ *  Exported for tests. */
+export function borderAt(
   layout: ResolvedLayout | null,
   point: PagePoint,
 ): BorderHit | null {
   const page = layout?.pages[point.pageIndex];
-  if (!page?.tables) return null;
-  for (const table of page.tables) {
-    if (point.y < table.y || point.y > table.y + table.height) continue;
-    if (
-      point.x < table.x - EDGE_TOL ||
-      point.x > table.x + table.width + EDGE_TOL
-    )
-      continue;
-    const simple = table.cells.filter((c) => c.colspan === 1);
-    for (const cell of simple) {
-      if (point.y < cell.y || point.y > cell.y + cell.height) continue;
-      const rightEdge = cell.x + cell.width;
-      if (Math.abs(point.x - rightEdge) > EDGE_TOL) continue;
-      const leftCells = simple.filter((c) => near(c.x + c.width, rightEdge));
-      const rightCells = simple.filter((c) => near(c.x, rightEdge));
-      if (rightCells.length === 0) return null; // outer-right edge → not resizable
-      const leftX = Math.min(...leftCells.map((c) => c.x));
-      const rightX = Math.max(...rightCells.map((c) => c.x + c.width));
-      return {
-        pageIndex: point.pageIndex,
-        borderX: rightEdge,
-        leftX,
-        rightX,
-        leftCells,
-        rightCells,
-        tableY: table.y,
-        tableHeight: table.height,
-      };
+  const search = (tables: ResolvedTable[] | undefined): BorderHit | null => {
+    for (const table of tables ?? []) {
+      if (point.y < table.y || point.y > table.y + table.height) continue;
+      if (
+        point.x < table.x - EDGE_TOL ||
+        point.x > table.x + table.width + EDGE_TOL
+      )
+        continue;
+      // Deepest wins. The point may sit within EDGE_TOL of a nested border
+      // while inside any of this table's cells, so every cell's nested
+      // tables are candidates — their own box checks narrow it down.
+      for (const cell of table.cells) {
+        const hit = search(cell.tables);
+        if (hit) return hit;
+      }
+      const own = ownBorder(table, point);
+      if (own) return own;
+      // No border of this table either — keep scanning its siblings (the
+      // old code returned null here and a near-miss on one table hid every
+      // other table on the page).
     }
-  }
-  return null;
+    return null;
+  };
+  return search(page?.tables);
 }
 
 /** The `table_cell` doc position for a resolved cell (via its first line's
@@ -110,6 +136,12 @@ export function tableResizePlugin(): EditorPlugin {
   const commit = (c: PluginContext, d: DragState): void => {
     const { hit, borderX } = d;
     if (near(borderX, hit.borderX)) return; // no move → nothing to commit
+    // Widths are committed as on-screen px. A nested table whose grid is
+    // wider than its host cell renders SCALED (layoutTable clamps it), so
+    // the stored widths are post-scale — the same nuance an outer table has
+    // inside a narrow section column. If the grid still over-fills after
+    // the edit, the re-clamp can land the border slightly off the drop
+    // point; not a nested-specific defect.
     const leftWidth = Math.round(borderX - hit.leftX);
     const rightWidth = Math.round(hit.rightX - borderX);
     const state = c.state;

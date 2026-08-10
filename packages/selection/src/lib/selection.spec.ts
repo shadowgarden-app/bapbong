@@ -7,7 +7,9 @@ import type {
 } from '@shadow-garden/bapbong-contracts';
 import {
   caretRect,
+  commonTableAt,
   hitTest,
+  tableHitPath,
   imageAtPoint,
   selectionRects,
   verticalCaret,
@@ -294,5 +296,91 @@ describe('imageAtPoint', () => {
       ],
     };
     expect(imageAtPoint(both, { pageIndex: 0, x: 30, y: 26 })?.pos).toBe(30);
+  });
+});
+
+describe('tableHitPath / commonTableAt', () => {
+  // Synthetic geometry: an outer 1×2 table; its left cell hosts a nested 2×2
+  // table, whose first cell hosts one more (three levels).
+  const mkCell = (x: number, y: number, w: number, h: number, tables?: any[]) =>
+    ({
+      x,
+      y,
+      width: w,
+      height: h,
+      colspan: 1,
+      rowspan: 1,
+      lines: [],
+      ...(tables ? { tables } : {}),
+    }) as any;
+  const inner = {
+    x: 25,
+    y: 25,
+    width: 20,
+    height: 10,
+    cells: [mkCell(25, 25, 20, 10)],
+  } as any;
+  const nested = {
+    x: 20,
+    y: 20,
+    width: 80,
+    height: 40,
+    cells: [
+      mkCell(20, 20, 40, 20, [inner]),
+      mkCell(60, 20, 40, 20),
+      mkCell(20, 40, 40, 20),
+      mkCell(60, 40, 40, 20),
+    ],
+  } as any;
+  const cellA = mkCell(10, 10, 100, 100, [nested]);
+  const cellB = mkCell(110, 10, 100, 100);
+  const outer = {
+    x: 10,
+    y: 10,
+    width: 200,
+    height: 100,
+    cells: [cellA, cellB],
+  } as any;
+  const lay: ResolvedLayout = {
+    pages: [page([], 0, { tables: [outer] }), page([], 1, { tables: [] })],
+  };
+  const at = (x: number, y: number, pageIndex = 0) => ({ pageIndex, x, y });
+
+  it('returns the outermost→innermost chain with the containing cells', () => {
+    expect(tableHitPath(lay, at(150, 50)).map((h) => h.cell)).toEqual([cellB]);
+    const inNested = tableHitPath(lay, at(70, 30)); // nested cell 2
+    expect(inNested.map((h) => h.table)).toEqual([outer, nested]);
+    expect(inNested[1].cell).toBe(nested.cells[1]);
+    const threeDeep = tableHitPath(lay, at(30, 30)); // inner table
+    expect(threeDeep.map((h) => h.table)).toEqual([outer, nested, inner]);
+    // Inside the host cell but below the nested table: one level only.
+    expect(tableHitPath(lay, at(30, 80)).map((h) => h.cell)).toEqual([cellA]);
+    expect(tableHitPath(lay, at(300, 50))).toEqual([]);
+  });
+
+  it('commonTableAt picks the deepest table holding both points', () => {
+    // Two nested cells → the nested table (a 1×2 block there).
+    const n = commonTableAt(lay, at(30, 45), at(70, 45));
+    expect(n?.table).toBe(nested);
+    expect(n?.cellA).toBe(nested.cells[2]);
+    expect(n?.cellB).toBe(nested.cells[3]);
+    // Nested cell → the OTHER outer cell: the OUTER table (Word drags the
+    // nested table's whole host cell into the block).
+    const o = commonTableAt(lay, at(30, 45), at(150, 50));
+    expect(o?.table).toBe(outer);
+    expect(o?.cellA).toBe(cellA);
+    expect(o?.cellB).toBe(cellB);
+    // Same nested cell twice: deepest common, cellA === cellB (text drag).
+    const same = commonTableAt(lay, at(25, 45), at(35, 45));
+    expect(same?.table).toBe(nested);
+    expect(same?.cellA).toBe(same?.cellB);
+    // Nested cell → host cell outside the nested table: outer level,
+    // cellA === cellB — still a text drag, never a one-cell "block".
+    const out = commonTableAt(lay, at(30, 45), at(30, 80));
+    expect(out?.table).toBe(outer);
+    expect(out?.cellA).toBe(cellA);
+    expect(out?.cellB).toBe(cellA);
+    // Different pages → fragments are different objects → no common table.
+    expect(commonTableAt(lay, at(30, 45), at(30, 45, 1))).toBeNull();
   });
 });
