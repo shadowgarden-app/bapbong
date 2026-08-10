@@ -1885,6 +1885,38 @@ function cloneCellPosShifted(cell: ResolvedCell, delta: number): ResolvedCell {
   };
 }
 
+/** Whether two checkpointed remainders describe the same resume point,
+ *  geometry-only: PM positions may differ by the edit's delta (the splice
+ *  shifts them), so only the consume cursor, the carry's shape, and the
+ *  base's frame are compared. The caller has already matched the table NODE
+ *  by identity, and layout is deterministic, so equal cursors over the same
+ *  node imply the same continuation. */
+function remainderEq(a: TableRemainder, b: TableRemainder): boolean {
+  if (a.fromY !== b.fromY || a.carryHeight !== b.carryHeight) return false;
+  if (
+    a.base.height !== b.base.height ||
+    a.base.width !== b.base.width ||
+    a.base.cells.length !== b.base.cells.length
+  )
+    return false;
+  const ac = a.carry ?? [];
+  const bc = b.carry ?? [];
+  if (ac.length !== bc.length) return false;
+  for (let i = 0; i < ac.length; i++) {
+    const x = ac[i];
+    const y = bc[i];
+    if (
+      x.x !== y.x ||
+      x.y !== y.y ||
+      x.width !== y.width ||
+      x.height !== y.height ||
+      x.lines.length !== y.lines.length
+    )
+      return false;
+  }
+  return true;
+}
+
 /** Snapshot a live remainder for a checkpoint: `base` is shared (immutable),
  *  only the small carry is cloned. O(carry), not O(remaining rows). */
 function snapshotRemainder(r: TableRemainder): TableRemainder {
@@ -2180,6 +2212,27 @@ function placeBlocks(
       priorFirstNode.set(n, i);
     }
   });
+  // Mid-TABLE entries of the previous run, indexed by the in-flight table's
+  // node — several pages of one long table share that node, so this maps to
+  // a candidate list and the resync check picks the entry whose remainder
+  // cursor matches. Mid-paragraph boundaries stay non-resyncable.
+  const priorMidTableEntries = new Map<PMNode, number[]>();
+  prior?.entries.forEach((e, i) => {
+    const n = e.itemNodes[0];
+    const cp = e.cp;
+    if (
+      n &&
+      cp.midTable !== null &&
+      cp.midDraftIdx === null &&
+      cp.midBandedFrom === null &&
+      cp.activePBdr === null &&
+      !cp.unreplayable
+    ) {
+      const list = priorMidTableEntries.get(n);
+      if (list) list.push(i);
+      else priorMidTableEntries.set(n, [i]);
+    }
+  });
   const record: PageRunEntry[] = [];
   let pageNodes: PMNode[] = [];
   let pageFirstOffset: number | null = null;
@@ -2199,10 +2252,9 @@ function placeBlocks(
     pageNodes = it?.node ? [it.node] : [];
     pageFirstOffset = it?.node ? (it.nodeOffset ?? null) : null;
   };
-  /** Two clean page-start carries describe the same resume point. */
-  const carryEq = (a: PageCheckpoint, b: PageCheckpoint): boolean =>
-    a.midTable === null &&
-    b.midTable === null &&
+  /** The scalar half of a page-start carry comparison — everything except
+   *  the mid-table resume handle, whose policy differs per call site. */
+  const carryScalarsEq = (a: PageCheckpoint, b: PageCheckpoint): boolean =>
     a.midDraftIdx === null &&
     b.midDraftIdx === null &&
     a.midBandedFrom === null &&
@@ -2225,6 +2277,17 @@ function placeBlocks(
     a.balancing === b.balancing &&
     a.sectionRemaining === b.sectionRemaining &&
     sameGeom(a.curPage, b.curPage);
+  /** Two clean page-start carries describe the same resume point. */
+  const carryEq = (a: PageCheckpoint, b: PageCheckpoint): boolean =>
+    a.midTable === null && b.midTable === null && carryScalarsEq(a, b);
+  /** Two MID-TABLE page starts describe the same resume point: the scalars
+   *  match and both remainders sit at the same cursor over the same (node-
+   *  identical) table. */
+  const midTableCarryEq = (a: PageCheckpoint, b: PageCheckpoint): boolean =>
+    a.midTable !== null &&
+    b.midTable !== null &&
+    remainderEq(a.midTable, b.midTable) &&
+    carryScalarsEq(a, b);
   /** The remaining items match the recorded run from `entryIdx` on. */
   const tailMatches = (entryIdx: number): boolean => {
     if (!prior) return false;
@@ -2510,17 +2573,34 @@ function placeBlocks(
     pageStartCp = takeCheckpoint();
     if (pageCache) {
       seedRecording(pageStartCp);
-      // Tail resync: this fresh page opens at a CLEAN boundary whose carry
-      // and remaining items match a page of the previous run — every page
-      // from there on is reusable (shifted by the position delta) instead
-      // of re-placed. The splice signal unwinds to the page loop.
-      if (prior && !midAny() && idx < items.length) {
+      // Tail resync: this fresh page opens at a boundary whose carry and
+      // remaining items match a page of the previous run — every page from
+      // there on is reusable (shifted by the position delta) instead of
+      // re-placed. Clean boundaries compare by scalars alone; a page opening
+      // MID-TABLE also compares the remainder cursor, so an edit above a
+      // long table splices its unchanged pages back instead of re-splitting
+      // to the table's end. The splice signal unwinds to the page loop.
+      if (prior && idx < items.length) {
         const n = items[idx]?.node;
-        const k = n ? priorFirstNode.get(n) : undefined;
-        if (k !== undefined) {
-          const e = prior.entries[k];
-          if (carryEq(pageStartCp, e.cp) && tailMatches(k)) {
-            throw new TailSpliceSignal(k);
+        if (n && !midAny()) {
+          const k = priorFirstNode.get(n);
+          if (k !== undefined) {
+            const e = prior.entries[k];
+            if (carryEq(pageStartCp, e.cp) && tailMatches(k)) {
+              throw new TailSpliceSignal(k);
+            }
+          }
+        } else if (
+          n &&
+          midTableRest !== null &&
+          midParaDraftIdx === null &&
+          !inBandedPara
+        ) {
+          for (const k of priorMidTableEntries.get(n) ?? []) {
+            const e = prior.entries[k];
+            if (midTableCarryEq(pageStartCp, e.cp) && tailMatches(k)) {
+              throw new TailSpliceSignal(k);
+            }
           }
         }
       }

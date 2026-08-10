@@ -2802,3 +2802,111 @@ describe('layout with LayoutCache', () => {
     expect(m.calls).toEqual(['aa']); // width changed → re-wrapped
   });
 });
+
+describe('mid-table tail resync', () => {
+  // An edit ABOVE a long table used to re-place every page from the edit to
+  // the table's end: mid-table boundaries never matched the previous run.
+  // With the remainder cursor they can — same table node, same consume
+  // cursor, same page scalars ⇒ the tail splices back.
+  const sch = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*' },
+      text: { group: 'inline' },
+      table: { group: 'block', content: 'table_row+' },
+      table_row: {
+        content: 'table_cell+',
+        attrs: { header: { default: false }, height: { default: null } },
+      },
+      table_cell: {
+        content: 'block+',
+        attrs: {
+          colspan: { default: 1 },
+          rowspan: { default: 1 },
+          colwidth: { default: null },
+          background: { default: null },
+          vAlign: { default: null },
+          borders: { default: null },
+        },
+      },
+    },
+    marks: {},
+  });
+  const para = (t: string) => sch.node('paragraph', null, [sch.text(t)]);
+  // ONE 12-row table node shared across docs (PM structural sharing): three
+  // pages of 60px content hold ~3 one-line 16px rows each, so the table
+  // spans several page boundaries.
+  const tableNode = sch.node(
+    'table',
+    null,
+    Array.from({ length: 12 }, (_, r) =>
+      sch.node('table_row', null, [
+        sch.node('table_cell', null, [para(`r${r}`)]),
+      ]),
+    ),
+  );
+  const mkDoc = (lead: string) =>
+    sch.node('doc', null, [para(lead), tableNode]);
+  const cfg = () => config({ height: 100 });
+
+  it('an edit above the table splices its unchanged pages by identity', () => {
+    const cache = createLayoutCache();
+    const r1 = layout(mkDoc('aaa'), cfg(), cache);
+    expect(r1.pages.length).toBeGreaterThan(3); // sanity: table crosses pages
+    // Same-length edit: the table's fragments land identically, so every
+    // page after the edited one must come back as the SAME object.
+    const r2 = layout(mkDoc('bbb'), cfg(), cache);
+    expect(r2.pages.length).toBe(r1.pages.length);
+    expect(r2.pages[0].lines[0].segments[0]?.text).toBe('bbb');
+    for (let p = 1; p < r2.pages.length; p++) {
+      expect(r2.pages[p]).toBe(r1.pages[p]);
+    }
+  });
+
+  it('a size-changing edit splices with shifted PM positions', () => {
+    const cache = createLayoutCache();
+    const r1 = layout(mkDoc('aaa'), cfg(), cache);
+    const r2 = layout(mkDoc('aaaaa'), cfg(), cache); // +2 positions
+    expect(r2.pages.length).toBe(r1.pages.length);
+    const oldCell = r1.pages[1].tables?.[0]?.cells[0];
+    const newCell = r2.pages[1].tables?.[0]?.cells[0];
+    expect(newCell?.lines[0]?.from).toBe((oldCell?.lines[0]?.from ?? 0) + 2);
+    expect(newCell?.lines[0]?.y).toBe(oldCell?.lines[0]?.y);
+    // A THIRD pass resyncs against the REBASED entries (posDelta path).
+    const r3 = layout(mkDoc('aaaaaaa'), cfg(), cache); // +2 again
+    const c3 = r3.pages[1].tables?.[0]?.cells[0];
+    expect(c3?.lines[0]?.from).toBe((oldCell?.lines[0]?.from ?? 0) + 4);
+    expect(c3?.lines[0]?.y).toBe(oldCell?.lines[0]?.y);
+  });
+
+  it('an edit INSIDE the table still re-places its pages', () => {
+    // The table node itself changed → no resync candidate; correctness
+    // baseline: output equals a cold layout.
+    const cache = createLayoutCache();
+    layout(mkDoc('aaa'), cfg(), cache);
+    const edited = sch.node('doc', null, [
+      para('aaa'),
+      sch.node(
+        'table',
+        null,
+        Array.from({ length: 12 }, (_, r) =>
+          sch.node('table_row', null, [
+            sch.node('table_cell', null, [para(r === 6 ? 'EDIT' : `r${r}`)]),
+          ]),
+        ),
+      ),
+    ]);
+    const warm = layout(edited, cfg(), cache);
+    const cold = layout(edited, cfg());
+    expect(warm.pages.length).toBe(cold.pages.length);
+    warm.pages.forEach((pg, i) => {
+      const flat = (r: typeof cold) =>
+        (r.pages[i].tables ?? []).flatMap((t) =>
+          t.cells.flatMap((c) =>
+            c.lines.map((l) => [l.y, l.segments[0]?.text]),
+          ),
+        );
+      expect(flat(warm)).toEqual(flat(cold));
+    });
+  });
+});
