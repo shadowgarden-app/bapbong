@@ -662,7 +662,12 @@ export class EditorPlayground implements OnDestroy {
     if (!ed) return '';
     const labels = ed.layout?.pageLabels;
     const cur = labels?.[slot.pageIndex] ?? String(slot.pageIndex + 1);
-    if (this.chipSection(slot)?.pageNumbers?.start == null)
+    // "ii → 1" is a statement about a VISIBLE transition, so it needs the page
+    // before the break to actually show its number. pageLabels comes from
+    // w:pgNumType alone and keeps counting through a section whose numbers are
+    // hidden — quoting it there would advertise a number the reader never sees.
+    const restarts = this.chipSection(slot)?.pageNumbers?.start != null;
+    if (!restarts || !ed.sectionShowsPageNumbers(slot.boundary))
       return `page ${cur}`;
     const prev = labels?.[slot.pageIndex - 1] ?? String(slot.pageIndex);
     return `page ${prev} → ${cur}`;
