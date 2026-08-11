@@ -764,13 +764,48 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (!kind) return null;
 
   const shape: Record<string, unknown> = { kind };
+  // Adjust value → corner ratio, and ONLY for roundRect: `adj` is per-preset
+  // (a horizontalScroll's adj is the size of its curl), so reading it blindly
+  // would feed one preset's parameter into another's geometry.
+  if (prst === 'roundRect') {
+    const gd = child(child(child(spPr, 'a:prstGeom'), 'a:avLst'), 'a:gd');
+    const fmla = attrOf(gd, 'fmla'); // "val 12500"
+    const n = fmla?.startsWith('val ') ? Number(fmla.slice(4)) : NaN;
+    if (Number.isFinite(n))
+      shape['cornerRatio'] = Math.min(Math.max(n / 100000, 0), 0.5);
+  }
   const style = child(wsp, 'wps:style');
   const ln = child(spPr, 'a:ln');
   if (!child(ln, 'a:noFill')) {
     const w = attrOf(ln, 'w'); // outline width in EMU
     shape['strokeWidth'] = w ? Math.max(1, Math.round(Number(w) / 9525)) : 1;
-    const prstDash = attrOf(child(ln, 'a:prstDash'), 'val');
-    if (prstDash && prstDash !== 'solid') shape['dash'] = true;
+    // Dash: a:custDash states the pattern exactly (d/sp are ST_Percentage
+    // "relative to the line width", 100000 = 100% = one stroke width — the
+    // same unit the model uses), so it converts without loss. A named
+    // a:prstDash only says WHICH preset, and the spec doesn't publish their
+    // lengths, so it keeps the generic pattern rather than an invented one.
+    const custDash = child(ln, 'a:custDash');
+    const stops = custDash ? children(custDash, 'a:ds') : [];
+    if (stops.length > 0) {
+      const pattern: number[] = [];
+      for (const ds of stops) {
+        pattern.push(pctToRatio(attrOf(ds, 'd')), pctToRatio(attrOf(ds, 'sp')));
+      }
+      shape['dash'] = pattern;
+    } else {
+      const prstDash = attrOf(child(ln, 'a:prstDash'), 'val');
+      if (prstDash && prstDash !== 'solid') shape['dash'] = DML_NAMED_DASH;
+    }
+    // cap: honored only when stated. ECMA says an omitted cap means `square`,
+    // but every Word-authored theme in the wild writes cap="flat" on its line
+    // styles, and shapes inherit that — so assuming square for a bare a:ln
+    // would lengthen the ends of every existing line by half a stroke.
+    // `flat` is the model's absent case, so it is not stored — that keeps one
+    // canonical shape for a value with one meaning, and makes the round-trip
+    // symmetric (no cap → cap="flat" on write → no cap on read).
+    const cap = attrOf(ln, 'cap');
+    if (cap === 'rnd') shape['cap'] = 'round';
+    else if (cap === 'sq') shape['cap'] = 'square';
     // Direct outline color, else the style's line reference (how Word themes
     // shape outlines), else black.
     shape['stroke'] =
@@ -950,6 +985,18 @@ function vmlArcSize(v: string | undefined): number {
  *  one — rather than invent a table per name, every named style keeps the
  *  generic dash this code has always drawn. Numeric styles are exact. */
 const VML_NAMED_DASH = [4, 3];
+
+/** Same reasoning for DrawingML's a:prstDash names (dash, sysDot, lgDashDot…):
+ *  the preset is named, its lengths are not published, so it renders generic.
+ *  a:custDash, which DOES state lengths, is read exactly. */
+const DML_NAMED_DASH = VML_NAMED_DASH;
+
+/** ST_Percentage → ratio. The type is thousandths of a percent (100000 =
+ *  100%), so a dash stop's `d="100000"` is one stroke width. */
+function pctToRatio(v: string | undefined): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, n / 100000) : 0;
+}
 
 /** `v:stroke @dashstyle` → dash pattern in multiples of the stroke width.
  *  Numeric form ("1 1", "3 1 1 1") is the document's own measurement and is

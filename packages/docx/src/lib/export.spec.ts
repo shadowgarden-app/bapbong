@@ -642,6 +642,85 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(table.child(1).attrs['cantSplit']).toBe(false);
   });
 
+  it('round-trips a dashed round-capped line and a rounded rect', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: '',
+          width: 120,
+          height: 0,
+          // What a Word 2003 dotted connector imports as: the file's own
+          // lengths in stroke widths, plus a round cap.
+          shape: {
+            kind: 'line',
+            stroke: '#000000',
+            strokeWidth: 2,
+            dash: [1, 1],
+            cap: 'round',
+          },
+        }),
+        schema.node('image', {
+          src: '',
+          width: 80,
+          height: 40,
+          shape: {
+            kind: 'roundRect',
+            stroke: '#000000',
+            strokeWidth: 1,
+            cornerRatio: 0.08333,
+          },
+        }),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    // d/sp are thousandths of a percent OF THE LINE WIDTH, so 1× reads 100000
+    // — no preset name is guessed at.
+    expect(xml).toContain(
+      '<a:custDash><a:ds d="100000" sp="100000"/></a:custDash>',
+    );
+    expect(xml).toContain('cap="rnd"');
+    expect(xml).toContain('<a:gd name="adj" fmla="val 8333"/>');
+
+    const { doc: back } = await importDocx(bytes);
+    const shapes = [...range(back.child(0))].filter(
+      (n) => n.type.name === 'image',
+    );
+    expect(shapes[0].attrs['shape']).toMatchObject({
+      kind: 'line',
+      dash: [1, 1],
+      cap: 'round',
+    });
+    expect(
+      (shapes[1].attrs['shape'] as { cornerRatio: number }).cornerRatio,
+    ).toBeCloseTo(0.08333, 4);
+  });
+
+  it('writes cap even when flat, since an omitted cap would mean square', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: '',
+          width: 100,
+          height: 0,
+          shape: { kind: 'line', stroke: '#000000', strokeWidth: 1 },
+        }),
+      ]),
+    ]);
+    const zip = await JSZip.loadAsync(await exportDocx(doc));
+    const xml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    expect(xml).toContain('cap="flat"');
+    // …and reading it back does NOT add a field: absent IS flat in the model.
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const img = [...range(back.child(0))].find((n) => n.type.name === 'image');
+    expect(img?.attrs['shape']).toEqual({
+      kind: 'line',
+      stroke: '#000000',
+      strokeWidth: 1,
+    });
+  });
+
   it('round-trips drawn shapes (anchored rect + inline line)', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

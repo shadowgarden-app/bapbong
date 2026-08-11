@@ -30,6 +30,8 @@ const PKG_REL_NS =
 const WP_NS =
   'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const WPS_NS_G =
+  'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
 // 1x1 transparent PNG.
 const PNG_1x1 =
@@ -2341,6 +2343,52 @@ describe('sniffDocx + classified import errors', () => {
     const err = await importFailure(importDocx(bytes('%PDF-')));
     expect(err.message).toBe(IMPORT_ERROR_MESSAGES.pdf);
     expect(err.message).toContain('PDF');
+  });
+});
+
+describe('DrawingML shape stroke + geometry adjust', () => {
+  const dmlDoc = (spPr: string) =>
+    `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:wps="${WPS_NS_G}"><w:body>
+      <w:p><w:r><w:drawing><wp:inline><wp:extent cx="1270000" cy="635000"/>
+        <a:graphic><a:graphicData><wps:wsp><wps:spPr>${spPr}</wps:spPr></wps:wsp></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r></w:p>
+    </w:body></w:document>`;
+  const shapeOf = async (spPr: string) => {
+    const { doc } = await importDocx(
+      (await makeDocx(dmlDoc(spPr))).buffer as ArrayBuffer,
+      { schema },
+    );
+    const imgs: import('prosemirror-model').Node[] = [];
+    doc.descendants((n) => {
+      if (n.type.name === 'image') imgs.push(n);
+      return true;
+    });
+    return (imgs[0]?.attrs['shape'] ?? null) as Record<string, unknown> | null;
+  };
+
+  it('reads a:custDash exactly and a:ln@cap by its real tokens', async () => {
+    // d/sp are thousandths of a percent of the LINE WIDTH: 100000 = 1×.
+    const s = await shapeOf(
+      `<a:prstGeom prst="line"><a:avLst/></a:prstGeom>` +
+        `<a:ln w="12700" cap="rnd"><a:solidFill><a:srgbClr val="000000"/></a:solidFill>` +
+        `<a:custDash><a:ds d="300000" sp="100000"/></a:custDash></a:ln>`,
+    );
+    expect(s).toMatchObject({ kind: 'line', dash: [3, 1], cap: 'round' });
+  });
+
+  it('takes roundRect adj as the corner ratio but ignores another preset adj', async () => {
+    const round = await shapeOf(
+      `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 12500"/></a:avLst></a:prstGeom>` +
+        `<a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln>`,
+    );
+    expect(round).toMatchObject({ kind: 'roundRect', cornerRatio: 0.125 });
+    // Same attribute on horizontalScroll means the size of its curl — reading
+    // it as roundness would deform the shape (khbd.docx has exactly this).
+    const scroll = await shapeOf(
+      `<a:prstGeom prst="horizontalScroll"><a:avLst><a:gd name="adj" fmla="val 12500"/></a:avLst></a:prstGeom>` +
+        `<a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln>`,
+    );
+    expect(scroll?.['cornerRatio']).toBeUndefined();
   });
 });
 

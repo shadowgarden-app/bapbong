@@ -240,6 +240,15 @@ function rotAttr(node: PMNode): string {
 }
 
 /** A drawn shape (rect/line) → wps drawing; inline or anchored per `float`. */
+/** [d0, sp0, d1, sp1, …] → [[d0, sp0], [d1, sp1], …]. An odd trailing value
+ *  (a dash with no stated gap) pairs with a zero space. */
+function pairs(flat: readonly number[]): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < flat.length; i += 2)
+    out.push([flat[i], flat[i + 1] ?? 0]);
+  return out;
+}
+
 function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const s = node.attrs['shape'] as ShapeSpec;
   const rot = rotAttr(node);
@@ -249,9 +258,31 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const fill = s.fill
     ? `<a:solidFill><a:srgbClr val="${s.fill.replace(/^#/, '')}"/></a:solidFill>`
     : '<a:noFill/>';
+  // Dash stops: d/sp are ST_Percentage against the line width (100000 = one
+  // stroke width), which is exactly the model's unit — so the pattern writes
+  // out losslessly, with no preset-name guessing. Child order inside a:ln is
+  // schema-fixed: fill, then dash, then cap rides as an attribute.
+  const custDash = s.dash?.length
+    ? `<a:custDash>${pairs(s.dash)
+        .map(
+          ([d, sp]) =>
+            `<a:ds d="${Math.round(d * 100000)}" sp="${Math.round(sp * 100000)}"/>`,
+        )
+        .join('')}</a:custDash>`
+    : '';
+  // cap is written even when flat: ECMA says an omitted cap means SQUARE, so
+  // staying silent would hand a reader the wrong ends for our flat default.
+  const capAttr = ` cap="${s.cap === 'round' ? 'rnd' : s.cap === 'square' ? 'sq' : 'flat'}"`;
   const ln = s.stroke
-    ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill></a:ln>`
+    ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"${capAttr}><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill>${custDash}</a:ln>`
     : '<a:ln><a:noFill/></a:ln>';
+  // Preset geometry adjust — roundRect's corner ratio, back in adj units
+  // (adj/100000 of the shorter side). Other presets carry no modelled adjust,
+  // so their avLst stays empty rather than inheriting a meaning we don't have.
+  const avLst =
+    s.kind === 'roundRect' && s.cornerRatio != null
+      ? `<a:avLst><a:gd name="adj" fmla="val ${Math.round(s.cornerRatio * 100000)}"/></a:avLst>`
+      : '<a:avLst/>';
   // Textbox paragraphs ride the node as PM JSON; re-emit them as txbxContent
   // so the text survives the round-trip.
   const tb = node.attrs['textbox'] as {
@@ -269,7 +300,7 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const graphic =
     `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr${tb ? ' txBox="1"' : ''}/>` +
     `<wps:spPr><a:xfrm${rot}${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
-    `<a:prstGeom prst="${s.kind}"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>` +
+    `<a:prstGeom prst="${s.kind}">${avLst}</a:prstGeom>${fill}${ln}</wps:spPr>` +
     `${txbx}${bodyPr}</wps:wsp></a:graphicData></a:graphic>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
