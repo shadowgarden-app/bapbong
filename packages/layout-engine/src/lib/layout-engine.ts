@@ -4240,6 +4240,93 @@ function layoutFootnoteBody(
   return { lines: flow.lines, height: flow.height };
 }
 
+// ── Display page numbers (w:pgNumType) ─────────────────────────────
+
+const ROMAN: [number, string][] = [
+  [1000, 'M'],
+  [900, 'CM'],
+  [500, 'D'],
+  [400, 'CD'],
+  [100, 'C'],
+  [90, 'XC'],
+  [50, 'L'],
+  [40, 'XL'],
+  [10, 'X'],
+  [9, 'IX'],
+  [5, 'V'],
+  [4, 'IV'],
+  [1, 'I'],
+];
+
+function toRoman(n: number): string {
+  let out = '';
+  for (const [v, s] of ROMAN) {
+    while (n >= v) {
+      out += s;
+      n -= v;
+    }
+  }
+  return out;
+}
+
+/** Word's letter numbering repeats the letter past z: 1→a … 26→z, 27→aa,
+ *  28→bb (NOT spreadsheet-style aa/ab). */
+function toLetters(n: number): string {
+  const letter = String.fromCharCode(97 + ((n - 1) % 26));
+  return letter.repeat(Math.floor((n - 1) / 26) + 1);
+}
+
+/** A display page number in an OOXML ST_NumberFormat. Unrecognized formats
+ *  (and values the format can't express, like roman 0) fall back to decimal —
+ *  the model keeps the raw fmt string, so nothing is lost by rendering it
+ *  conservatively. */
+export function formatPageNumber(n: number, fmt?: string): string {
+  if (n < 1) return String(n);
+  switch (fmt) {
+    case 'upperRoman':
+      return toRoman(n);
+    case 'lowerRoman':
+      return toRoman(n).toLowerCase();
+    case 'upperLetter':
+      return toLetters(n).toUpperCase();
+    case 'lowerLetter':
+      return toLetters(n);
+    default:
+      return String(n);
+  }
+}
+
+/** Per-page display numbers from the sections' w:pgNumType, or undefined when
+ *  no section declares one (display number = index + 1, nothing to store).
+ *  Each page is governed by the section in effect where it starts
+ *  (`chromeIndex`); entering a new section applies the LAST restart declared
+ *  by the sections crossed — so a restart on a continuous section wholly
+ *  inside a page still takes effect on the next page, matching how Word
+ *  settles the same ambiguity. Formats don't inherit: a section without
+ *  pgNumType shows decimal (the spec default). */
+export function computePageLabels(
+  pages: readonly { chromeIndex?: number }[],
+  sections: readonly SectionConfig[],
+): string[] | undefined {
+  if (!sections.some((s) => s.pageNumbers)) return undefined;
+  const labels: string[] = [];
+  let si = 0;
+  let counter = 0;
+  for (const page of pages) {
+    const next = Math.min(page.chromeIndex ?? si, sections.length - 1);
+    let restart: number | undefined;
+    // First page scans its own section too (a start on section 0 applies).
+    for (let i = labels.length === 0 ? 0 : si + 1; i <= next; i++) {
+      const s = sections[i].pageNumbers?.start;
+      if (s != null && Number.isInteger(s) && s >= 0) restart = s;
+    }
+    counter = restart ?? counter + 1;
+    si = Math.max(si, next);
+    labels.push(formatPageNumber(counter, sections[si].pageNumbers?.fmt));
+  }
+  return labels;
+}
+
 /** Lay out a ProseMirror document into paint-ready pages. With a `cache`,
  *  only paragraphs whose node changed since the previous call are re-measured.
  *  `chrome` (page header/footer documents) repeats on every page; the body
@@ -4577,6 +4664,11 @@ export function layout(
     ),
   );
 
+  // Display page numbers (w:pgNumType): a fresh O(pages) pass over the final
+  // page list every layout — cached/reused pages are read, never mutated.
+  const pageLabels = computePageLabels(resolved.pages, sections);
+  if (pageLabels) resolved.pageLabels = pageLabels;
+
   // Chrome with page-number fields: re-lay every variant now that the page
   // total is known, so each field slot is as wide as the widest number shown.
   const setsHaveFields = (chromeSets ?? []).some(
@@ -4597,9 +4689,14 @@ export function layout(
     anyBandHasFields(footers) ||
     setsHaveFields
   ) {
+    // The slot must fit the widest value a PAGE/NUMPAGES field can show:
+    // the page total, or the longest display label ("xxviii" beats "28").
     const fieldCtx: Ctx = {
       ...ctx,
-      fieldPlaceholder: String(resolved.pages.length),
+      fieldPlaceholder: (pageLabels ?? []).reduce(
+        (a, b) => (b.length > a.length ? b : a),
+        String(resolved.pages.length),
+      ),
     };
     headers = layHeaders(fieldCtx);
     footers = layFooters(fieldCtx);

@@ -2202,6 +2202,26 @@ interface SectionConfig {
   /** Geometry override when this section's w:pgSz/w:pgMar differ from the
    *  document default (the body sectPr). */
   page?: PageConfig;
+  /** w:pgNumType — page-number restart (`start`) and/or display format
+   *  (`fmt`, raw ST_NumberFormat value). Absent when the sectPr carries none:
+   *  numbering then continues from the previous section in decimal. */
+  pageNumbers?: { start?: number; fmt?: string };
+}
+
+/** A section's w:pgNumType, or undefined when it declares neither a restart
+ *  value nor a format (an empty element is a no-op). */
+function parsePageNumbers(
+  sectPr: OoxmlNode | undefined,
+): SectionConfig['pageNumbers'] {
+  const pgNum = sectPr && child(sectPr, 'w:pgNumType');
+  if (!pgNum) return undefined;
+  const startRaw = attrOf(pgNum, 'w:start');
+  const fmt = attrOf(pgNum, 'w:fmt');
+  const start = startRaw == null ? NaN : Number(startRaw);
+  const out: SectionConfig['pageNumbers'] = {};
+  if (Number.isInteger(start) && start >= 0) out.start = start;
+  if (fmt) out.fmt = fmt;
+  return out.start != null || out.fmt ? out : undefined;
 }
 
 /** Column flow from a section's w:cols (equal-width only). count defaults to 1;
@@ -2240,7 +2260,7 @@ function parseBodyBlocks(
       blocks.push(parseParagraph(node, ctx));
       const sectPr = child(child(node, 'w:pPr'), 'w:sectPr');
       if (sectPr) {
-        sections.push({
+        const section: SectionConfig = {
           blockCount: blocks.length - start,
           columns: parseColumns(sectPr),
           newPage: sectionStartsNewPage(sectPr),
@@ -2248,7 +2268,10 @@ function parseBodyBlocks(
           // importDocx drops `page` again on sections matching the document
           // default, so single-geometry docs stay on the fast path.
           page: parsePageGeometry(sectPr),
-        });
+        };
+        const pageNumbers = parsePageNumbers(sectPr);
+        if (pageNumbers) section.pageNumbers = pageNumbers;
+        sections.push(section);
         start = blocks.length;
       }
     } else if (node.name === 'w:tbl') {
@@ -2258,11 +2281,14 @@ function parseBodyBlocks(
   // The trailing body sectPr closes the last (or only) section.
   const bodySectPr = child(body, 'w:sectPr');
   if (blocks.length > start || sections.length === 0) {
-    sections.push({
+    const section: SectionConfig = {
       blockCount: blocks.length - start,
       columns: parseColumns(bodySectPr),
       newPage: sectionStartsNewPage(bodySectPr),
-    });
+    };
+    const pageNumbers = parsePageNumbers(bodySectPr);
+    if (pageNumbers) section.pageNumbers = pageNumbers;
+    sections.push(section);
   }
   return { blocks, sections };
 }
@@ -2727,9 +2753,11 @@ async function importDocxImpl(
     if (s.page && samePage(s.page, pageGeom)) delete s.page;
   }
   // Only ride the sections attr when it changes layout (>1 section, columns,
-  // or a per-section geometry override).
+  // a per-section geometry override, or page numbering — even a one-section
+  // doc can restart/reformat its page numbers).
   const multiSection =
-    sections.length > 1 || sections.some((s) => s.columns.count > 1 || s.page);
+    sections.length > 1 ||
+    sections.some((s) => s.columns.count > 1 || s.page || s.pageNumbers);
   // Comment threads only ride the doc when the schema carries the comment mark
   // (the comment plugin is present); otherwise comment values are filtered out.
   const hasComments = !!ctx.schema.marks['comment'];

@@ -35,6 +35,19 @@ export interface SectionConfig {
    *  Geometry can only change at a page boundary, so a continuous section
    *  with a differing `page` is laid out as next-page (Word's own promotion). */
   page?: PageConfig;
+  /** Page-number restart/format (w:pgNumType) declared on this section's
+   *  sectPr. Absent → numbering continues from the previous section in
+   *  decimal. `fmt` keeps the raw OOXML ST_NumberFormat value so unmodelled
+   *  formats round-trip; the layout falls back to decimal when it doesn't
+   *  recognize one. */
+  pageNumbers?: PageNumbering;
+}
+
+/** w:pgNumType: `start` restarts the page counter at the section's first
+ *  page; `fmt` names the display format ("lowerRoman", "decimal", …). */
+export interface PageNumbering {
+  start?: number;
+  fmt?: string;
 }
 
 /** A document comment (w:comment) referenced by a w:commentRange in the body.
@@ -717,6 +730,11 @@ export interface ResolvedLayout {
    *  Present only when sections carry distinct chrome; otherwise the flat
    *  pageHeader/pageFooter fields above apply to every page. */
   chromeSets?: ResolvedChromeSet[];
+  /** Display page number per page (w:pgNumType applied: per-section restart +
+   *  format, e.g. "ii" then "1"). Present only when some section declares
+   *  pgNumType; absent → the display number is `index + 1`. Consumers (PAGE
+   *  fields, TOC updates) read this instead of the physical index. */
+  pageLabels?: string[];
 }
 
 /** One section's laid-out chrome bands (all variants), plus its titlePg

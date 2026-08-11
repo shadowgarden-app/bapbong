@@ -9,7 +9,9 @@ import type {
   ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
 import {
+  computePageLabels,
   createLayoutCache,
+  formatPageNumber,
   layout,
   layoutBlocks,
   toFlowBlocks,
@@ -3264,5 +3266,97 @@ describe('row-start veto (keepNext opening the first cell)', () => {
       ['A1', 'A2'],
       ['K1', 'K2'],
     ]);
+  });
+});
+
+describe('display page numbers (w:pgNumType)', () => {
+  const sec = (
+    blockCount: number,
+    pageNumbers?: { start?: number; fmt?: string },
+  ) => ({
+    blockCount,
+    columns: { count: 1, gap: 0 },
+    newPage: true,
+    ...(pageNumbers ? { pageNumbers } : {}),
+  });
+
+  it('formats decimal, roman and letter numbers', () => {
+    expect(formatPageNumber(7)).toBe('7');
+    expect(formatPageNumber(4, 'lowerRoman')).toBe('iv');
+    expect(formatPageNumber(28, 'upperRoman')).toBe('XXVIII');
+    expect(formatPageNumber(1, 'lowerLetter')).toBe('a');
+    expect(formatPageNumber(26, 'upperLetter')).toBe('Z');
+    expect(formatPageNumber(28, 'lowerLetter')).toBe('bb'); // Word repeats, no "ab"
+    expect(formatPageNumber(3, 'decimalEnclosedCircle')).toBe('3'); // unknown → decimal
+    expect(formatPageNumber(0, 'lowerRoman')).toBe('0'); // roman can't say 0
+  });
+
+  it('returns undefined when no section declares pgNumType', () => {
+    const pages = [{ chromeIndex: 0 }, { chromeIndex: 1 }];
+    expect(computePageLabels(pages, [sec(1), sec(1)])).toBeUndefined();
+  });
+
+  it('restarts and reformats at section boundaries (roman front matter)', () => {
+    // Section 0: i, ii — section 1 restarts at 1 in decimal.
+    const pages = [
+      { chromeIndex: 0 },
+      { chromeIndex: 0 },
+      { chromeIndex: 1 },
+      { chromeIndex: 1 },
+    ];
+    const sections = [
+      sec(2, { start: 1, fmt: 'lowerRoman' }),
+      sec(2, { start: 1 }),
+    ];
+    expect(computePageLabels(pages, sections)).toEqual(['i', 'ii', '1', '2']);
+  });
+
+  it('continues counting through a section without a restart', () => {
+    // Section 1 declares only a format — numbering flows on: 5, 6, VII.
+    const pages = [{ chromeIndex: 0 }, { chromeIndex: 0 }, { chromeIndex: 1 }];
+    const sections = [sec(2, { start: 5 }), sec(1, { fmt: 'upperRoman' })];
+    expect(computePageLabels(pages, sections)).toEqual(['5', '6', 'VII']);
+  });
+
+  it('applies the restart of a section skipped between page starts', () => {
+    // Section 1 (with a restart) lives wholly inside page 1 — the restart
+    // still lands when page 2 opens in section 2.
+    const pages = [{ chromeIndex: 0 }, { chromeIndex: 2 }];
+    const sections = [sec(1), sec(1, { start: 10 }), sec(1)];
+    expect(computePageLabels(pages, sections)).toEqual(['1', '10']);
+  });
+
+  it('handles a first page without a stamped chromeIndex', () => {
+    // Page 0 may carry no chromeIndex (single-chrome docs) — section 0 governs.
+    const pages = [{}, {}];
+    const sections = [sec(2, { start: 3 })];
+    expect(computePageLabels(pages, sections)).toEqual(['3', '4']);
+  });
+
+  it('rides pageLabels on the resolved layout for a sectioned doc', () => {
+    const pmSchema = new Schema({
+      nodes: {
+        doc: {
+          content: 'paragraph+',
+          attrs: { sections: { default: null } },
+        },
+        paragraph: { content: 'text*' },
+        text: {},
+      },
+    });
+    const doc = pmSchema.node(
+      'doc',
+      {
+        sections: [sec(1, { start: 1, fmt: 'lowerRoman' }), sec(1, {})],
+      },
+      [
+        pmSchema.node('paragraph', null, [pmSchema.text('front')]),
+        pmSchema.node('paragraph', null, [pmSchema.text('body')]),
+      ],
+    );
+    const resolved = layout(doc, config());
+    // Two next-page sections → two pages: "i" then a decimal continuation.
+    expect(resolved.pages).toHaveLength(2);
+    expect(resolved.pageLabels).toEqual(['i', '2']);
   });
 });

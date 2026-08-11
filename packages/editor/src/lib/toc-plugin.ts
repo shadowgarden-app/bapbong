@@ -60,7 +60,10 @@ function trailingNumber(
   para.forEach((child, offset) => {
     if (!child.isText || !child.text) return;
     const text = child.text;
-    const m = /^(\s*)(\d+)\s*$/.exec(text);
+    // A page-number tail is digits or a roman numeral (w:pgNumType roman
+    // sections put "ii" here). Letters beyond the roman alphabet stay
+    // unmatched — a trailing word must never be mistaken for a number.
+    const m = /^(\s*)(\d+|[ivxlcdm]+|[IVXLCDM]+)\s*$/.exec(text);
     if (m) {
       const start = paraPos + 1 + offset + m[1].length;
       hit = {
@@ -129,7 +132,9 @@ export function tocPlugin(): TocPlugin {
         if (target === null) return; // stale entry: leave its number alone
         const page = ctx?.caretRect(target)?.pageIndex;
         if (page == null) return;
-        const text = String(page + 1);
+        // Display number, not physical index — w:pgNumType restart/format
+        // (front matter "ii", body restarting at "1") applied by the layout.
+        const text = ctx?.layout?.pageLabels?.[page] ?? String(page + 1);
         if (text !== tail.text) edits.push({ ...tail, text });
       });
       if (edits.length === 0) return 0;

@@ -708,6 +708,52 @@ describe('importDocx', () => {
     expect(sections[1].page).toBeUndefined();
   });
 
+  it('imports w:pgNumType (page-number restart + format) per section', async () => {
+    // Front matter numbered i, ii… then the body restarting at 1 — the shape
+    // real reports use (roman TOC pages before a decimal body).
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:sectPr>
+        <w:pgSz w:w="11906" w:h="16838"/>
+        <w:pgNumType w:fmt="lowerRoman" w:start="1"/>
+      </w:sectPr></w:pPr><w:r><w:t>front matter</w:t></w:r></w:p>
+      <w:p><w:r><w:t>body</w:t></w:r></w:p>
+      <w:sectPr>
+        <w:pgSz w:w="11906" w:h="16838"/>
+        <w:pgNumType w:start="1"/>
+      </w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const sections = doc.attrs.sections as {
+      pageNumbers?: { start?: number; fmt?: string };
+    }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].pageNumbers).toEqual({ start: 1, fmt: 'lowerRoman' });
+    expect(sections[1].pageNumbers).toEqual({ start: 1 });
+  });
+
+  it('rides sections for a single-section doc whose pgNumType restarts', async () => {
+    // One section, but numbering starts at 5 — the sections attr must ride
+    // (the layout can't know the restart otherwise). An EMPTY pgNumType is a
+    // no-op and must not force the attr.
+    const numbered = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>x</w:t></w:r></w:p>
+      <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgNumType w:start="5"/></w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(numbered));
+    const sections = doc.attrs.sections as {
+      pageNumbers?: { start?: number };
+    }[];
+    expect(sections).toHaveLength(1);
+    expect(sections[0].pageNumbers).toEqual({ start: 5 });
+
+    const plain = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>x</w:t></w:r></w:p>
+      <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgNumType/></w:sectPr>
+    </w:body></w:document>`;
+    const back = await importDocx(await makeDocx(plain));
+    expect(back.doc.attrs.sections).toBeNull();
+  });
+
   it('survives a PAGE field packed into a single run (Google Docs shape)', async () => {
     // begin + instrText + separate + end all in ONE w:r, the visible text in
     // the NEXT run. The old per-run state machine left the field open and

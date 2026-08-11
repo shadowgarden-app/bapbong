@@ -1319,6 +1319,67 @@ describe('exportDocx (sections + footnotes)', () => {
     expect(xml.match(/<w:sectPr>/g)?.length).toBe(2);
   });
 
+  it('serializes and round-trips w:pgNumType on a section break', async () => {
+    const doc = schema.node(
+      'doc',
+      {
+        sections: [
+          {
+            blockCount: 1,
+            columns: { count: 1, gap: 0 },
+            newPage: true,
+            pageNumbers: { start: 1, fmt: 'lowerRoman' },
+          },
+          { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: true },
+        ],
+      },
+      [
+        schema.node('paragraph', null, [schema.text('front matter')]),
+        schema.node('paragraph', null, [schema.text('body')]),
+      ],
+    );
+    const xml = await docXml(doc);
+    // Schema slot: between pgMar and cols.
+    expect(xml).toContain(
+      '<w:pgNumType w:fmt="lowerRoman" w:start="1"/><w:cols',
+    );
+    const back = await importDocx(await exportDocx(doc));
+    const sections = back.doc.attrs.sections as {
+      pageNumbers?: { start?: number; fmt?: string };
+    }[];
+    expect(sections).toHaveLength(2);
+    expect(sections[0].pageNumbers).toEqual({ start: 1, fmt: 'lowerRoman' });
+    expect(sections[1].pageNumbers).toBeUndefined();
+  });
+
+  it('carries an aligned original pgNumType verbatim (unmodelled attrs survive)', async () => {
+    // w:chapStyle isn't modelled — only the verbatim carry can keep it.
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>` +
+        `<w:p><w:pPr><w:sectPr><w:pgSz w:w="11906" w:h="16838"/>` +
+        `<w:pgNumType w:chapStyle="1" w:fmt="upperRoman"/></w:sectPr></w:pPr>` +
+        `<w:r><w:t>front</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>body</w:t></w:r></w:p>` +
+        `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>` +
+        `</w:body></w:document>`,
+    );
+    const { doc, raw } = await importDocx(
+      await zip.generateAsync({ type: 'uint8array' }),
+    );
+    const xml = await docXml(doc, { carry: raw });
+    expect(xml).toContain('<w:pgNumType w:chapStyle="1" w:fmt="upperRoman"/>');
+  });
+
   it('serializes a footnote reference for a footnote-marked run', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [

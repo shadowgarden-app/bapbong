@@ -413,11 +413,15 @@ function inlineContent(node: PMNode, ctx: ExportCtx): string {
 function sectionSectPr(
   s: SectionConfig,
   docPage: PageConfig,
-  carried?: { refs: string; titlePg: string },
+  carried?: { refs: string; titlePg: string; pgNumType: string },
 ): string {
   const type = `<w:type w:val="${s.newPage ? 'nextPage' : 'continuous'}"/>`;
   const p = s.page ?? docPage;
   const geom = pgSzXml(p) + pgMarXml(p.margin);
+  // Page numbering: the original tag verbatim when the carry is aligned (it
+  // may hold attrs the model doesn't, e.g. chapStyle); rebuilt from the model
+  // otherwise. Schema slot: after pgMar, before cols.
+  const pgNumType = carried?.pgNumType || pgNumTypeXml(s.pageNumbers);
   const cols =
     s.columns.count > 1
       ? `<w:cols w:num="${s.columns.count}" w:space="${pxToTwips(s.columns.gap)}"/>`
@@ -425,11 +429,24 @@ function sectionSectPr(
   // Carried header/footer references + titlePg re-attach in their schema
   // slots (refs first, titlePg after cols) — their parts and rels survive via
   // the carry package, so the old rIds stay valid.
-  return `<w:sectPr>${carried?.refs ?? ''}${type}${geom}${cols}${carried?.titlePg ?? ''}</w:sectPr>`;
+  return `<w:sectPr>${carried?.refs ?? ''}${type}${geom}${pgNumType}${cols}${carried?.titlePg ?? ''}</w:sectPr>`;
 }
 
-/** The header/footer references + titlePg of a carried sectPr, verbatim. */
-function chromeRefsOf(sectPr: string): { refs: string; titlePg: string } {
+/** w:pgNumType from the model (empty string when the section declares none). */
+function pgNumTypeXml(pn: SectionConfig['pageNumbers']): string {
+  if (!pn || (pn.fmt == null && pn.start == null)) return '';
+  const fmt = pn.fmt != null ? ` w:fmt="${esc(pn.fmt)}"` : '';
+  const start = pn.start != null ? ` w:start="${pn.start}"` : '';
+  return `<w:pgNumType${fmt}${start}/>`;
+}
+
+/** The header/footer references, titlePg and pgNumType of a carried sectPr,
+ *  verbatim. */
+function chromeRefsOf(sectPr: string): {
+  refs: string;
+  titlePg: string;
+  pgNumType: string;
+} {
   const refs = (
     sectPr.match(/<w:(?:header|footer)Reference\b[^>]*\/>/g) ?? []
   ).join('');
@@ -437,7 +454,8 @@ function chromeRefsOf(sectPr: string): { refs: string; titlePg: string } {
     /<w:titlePg\b[^>]*\/>|<w:titlePg\b(?:[^>]*[^/>])?><\/w:titlePg>/.exec(
       sectPr,
     )?.[0] ?? '';
-  return { refs, titlePg };
+  const pgNumType = /<w:pgNumType\b[^>]*\/>/.exec(sectPr)?.[0] ?? '';
+  return { refs, titlePg, pgNumType };
 }
 
 /** A paragraph's w:pPr children (no wrapper). */

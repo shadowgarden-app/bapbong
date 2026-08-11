@@ -48,9 +48,11 @@ export interface PainterDeps {
   createCanvas?: () => HTMLCanvasElement;
 }
 
-/** Live numbering for the page being painted (PAGE / NUMPAGES fields). */
+/** Live numbering for the page being painted (PAGE / NUMPAGES fields).
+ *  `page` is the DISPLAY number — w:pgNumType restart/format applied
+ *  (layout.pageLabels), so it may be "ii" rather than a digit string. */
 interface PageInfo {
-  page: number;
+  page: string;
   pages: number;
 }
 
@@ -225,7 +227,7 @@ export class CanvasPainter {
     this.ctx.textBaseline = 'alphabetic';
 
     const pageInfo = {
-      page: page.index + 1,
+      page: this.lastLayout?.pageLabels?.[page.index] ?? String(page.index + 1),
       pages: this.lastLayout?.pages.length ?? 1,
     };
     // Each canvas is page-local, so everything draws at yOffset 0.
@@ -520,7 +522,9 @@ export class CanvasPainter {
       // Page-number fields render the live value for the page being painted.
       const text =
         seg.field && pageInfo
-          ? String(seg.field === 'pageNumber' ? pageInfo.page : pageInfo.pages)
+          ? seg.field === 'pageNumber'
+            ? pageInfo.page
+            : String(pageInfo.pages)
           : seg.text;
       // Super/subscript shift the (already-reduced) glyphs off the baseline;
       // w:position adds its own shift on top, at full size.
