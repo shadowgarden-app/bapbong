@@ -172,6 +172,108 @@ export function setPageDimensions(width: number, height: number): Command {
   });
 }
 
+const clonePage = (p: PageConfig): PageConfig => ({
+  ...p,
+  margin: { ...p.margin },
+});
+
+const samePage = (a: PageConfig, b: PageConfig) =>
+  a.width === b.width &&
+  a.height === b.height &&
+  sameMargin(a.margin, b.margin);
+
+/**
+ * Section-scoped geometry edit (the section-break marker's Orientation /
+ * Page size menus). A non-last section carries the change as its own
+ * `section.page` override (dropped again when it matches the document
+ * geometry). The LAST section's geometry IS `doc.attrs.page` — editing it
+ * rewrites the doc attr, but only after freezing an explicit override onto
+ * every other section that was inheriting the old geometry, so exactly one
+ * section changes (Word's per-section semantics).
+ */
+function applySectionPage(
+  name: string,
+  sectionIndex: number,
+  patch: (page: PageConfig) => PageConfig | null,
+): Command {
+  return {
+    name,
+    run(state, dispatch) {
+      const sections = state.doc.attrs['sections'] as SectionConfig[] | null;
+      if (!sections || sectionIndex < 0 || sectionIndex >= sections.length)
+        return false;
+      const docPage = currentPage(state);
+      const next = patch(clonePage(sections[sectionIndex].page ?? docPage));
+      if (!next) return true; // already in effect — no undo step
+      if (dispatch) {
+        const last = sections.length - 1;
+        if (sectionIndex === last) {
+          const frozen = sections.map((s, j) => {
+            if (j === last) {
+              const { page: _p, ...rest } = s;
+              return rest;
+            }
+            return s.page ? s : { ...s, page: clonePage(docPage) };
+          });
+          dispatch(
+            state.tr
+              .setDocAttribute('sections', frozen)
+              .setDocAttribute('page', next),
+          );
+        } else {
+          const updated = sections.map((s, j) => {
+            if (j !== sectionIndex) return s;
+            const { page: _p, ...rest } = s;
+            return samePage(next, docPage) ? rest : { ...rest, page: next };
+          });
+          dispatch(state.tr.setDocAttribute('sections', updated));
+        }
+      }
+      return true;
+    },
+  };
+}
+
+/** Per-section {@link setOrientation}. */
+export function setSectionOrientation(
+  sectionIndex: number,
+  o: 'portrait' | 'landscape',
+): Command {
+  return applySectionPage(`section-orientation-${o}`, sectionIndex, (page) => {
+    if (isLandscape(page) === (o === 'landscape')) return null;
+    return { ...page, width: page.height, height: page.width };
+  });
+}
+
+/** Per-section {@link setPaperSize} — keeps the section's orientation. */
+export function setSectionPaperSize(
+  sectionIndex: number,
+  size: PaperSize,
+): Command {
+  const dims = PAPER_SIZES[size];
+  return applySectionPage(`section-paper-${size}`, sectionIndex, (page) => {
+    const [w, h] = isLandscape(page)
+      ? [dims.height, dims.width]
+      : [dims.width, dims.height];
+    if (page.width === w && page.height === h) return null;
+    return { ...page, width: w, height: h };
+  });
+}
+
+/** Per-section {@link setPageDimensions} (custom size). */
+export function setSectionPageDimensions(
+  sectionIndex: number,
+  width: number,
+  height: number,
+): Command {
+  return applySectionPage('section-page-size-custom', sectionIndex, (page) => {
+    const w = Math.max(MIN_PAGE, Math.round(width));
+    const h = Math.max(MIN_PAGE, Math.round(height));
+    if (page.width === w && page.height === h) return null;
+    return { ...page, width: w, height: h };
+  });
+}
+
 /**
  * Insert a landscape page after the block at the caret: a fresh empty
  * paragraph, fenced off as its own section whose geometry is the document

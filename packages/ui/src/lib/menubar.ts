@@ -102,10 +102,256 @@ const STYLE = `
 .bb-menu-shortcut{flex:none;opacity:.5;font-size:12px;padding-left:24px}
 .bb-menu-arrow{flex:none;opacity:.55;padding-left:12px}
 .bb-menu-sep{height:1px;margin:4px 6px;background:var(--bb-ui-border,#e3e3e0)}
+.bb-popup{position:fixed;top:auto;left:auto;margin-top:0;z-index:1200;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);font-size:13px}
 .bb-menubar-v{flex-direction:column;align-items:stretch;gap:1px;border-bottom:none;padding:4px}
 .bb-menubar-v .bb-menubar-title{text-align:left;width:100%}
 .bb-menubar-v .bb-menu{top:auto;bottom:0;left:100%;margin-top:0;margin-left:4px}
 `;
+
+/** One dropdown row: check column, label, optional shortcut / submenu arrow. */
+function makeRow(
+  label: string,
+  opts: { shortcut?: string; hasSub?: boolean },
+): { item: HTMLButtonElement; check: HTMLSpanElement } {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'bb-menu-item' + (opts.hasSub ? ' bb-has-sub' : '');
+  item.addEventListener('mousedown', (e) => e.preventDefault()); // keep editor selection
+  const check = document.createElement('span');
+  check.className = 'bb-menu-check';
+  const text = document.createElement('span');
+  text.className = 'bb-menu-label';
+  text.textContent = label;
+  item.append(check, text);
+  if (opts.shortcut) {
+    const sc = document.createElement('span');
+    sc.className = 'bb-menu-shortcut';
+    sc.textContent = opts.shortcut;
+    item.appendChild(sc);
+  }
+  if (opts.hasSub) {
+    const arrow = document.createElement('span');
+    arrow.className = 'bb-menu-arrow';
+    arrow.textContent = '›';
+    item.appendChild(arrow);
+  }
+  return { item, check };
+}
+
+/** How a menu wires its rows to live state: the menubar registers check /
+ *  enabled trackers (refreshed on every editor change while open); a one-shot
+ *  popup evaluates them once at build time. One builder, both consumers —
+ *  so a popup menu is pixel- and behavior-identical to a menubar dropdown. */
+interface MenuBuildCtx {
+  close(): void;
+  labels: Record<string, string>;
+  editor?: EditorHandle;
+  /** Latest editor state, or null before a document loads. */
+  state(): EditorStateOf | null;
+  check(el: HTMLElement, active: (s: EditorStateOf) => boolean): void;
+  enable(el: HTMLButtonElement, enabled: (s: EditorStateOf) => boolean): void;
+}
+
+/** THE dropdown renderer — rows, separators, nested submenus, and widget
+ *  flyouts, shared by the menubar and `showMenu` popups. */
+function buildMenuEntries(
+  entries: MenuEntry[],
+  container: HTMLElement,
+  ctx: MenuBuildCtx,
+): void {
+  for (const entry of entries) {
+    if (entry === 'separator') {
+      const sep = document.createElement('div');
+      sep.className = 'bb-menu-sep';
+      sep.setAttribute('role', 'separator');
+      container.appendChild(sep);
+    } else if ('submenu' in entry || 'widget' in entry) {
+      const wrap = document.createElement('div');
+      wrap.className = 'bb-menu-sub';
+      const { item } = makeRow(entry.label, { hasSub: true });
+      item.setAttribute('aria-haspopup', 'true');
+      const flyout = document.createElement('div');
+      flyout.className = 'bb-menu bb-submenu';
+      flyout.setAttribute('role', 'menu');
+      if ('widget' in entry) {
+        flyout.classList.add('bb-submenu-widget');
+        // Built on reveal, and rebuilt on every reveal. A widget that mirrors
+        // document state (the page-setup pickers preview the live geometry
+        // and check the active preset) would otherwise be a snapshot taken
+        // at mount — stale after the first edit, and evaluated before a
+        // document has even loaded.
+        const build = () =>
+          flyout.replaceChildren(entry.widget(() => ctx.close()));
+        wrap.addEventListener('mouseenter', build);
+        wrap.addEventListener('focusin', build);
+      } else {
+        buildMenuEntries(entry.submenu, flyout, ctx);
+      }
+      wrap.append(item, flyout);
+      container.appendChild(wrap);
+    } else if ('command' in entry) {
+      const editor = ctx.editor;
+      const cmd = editor?.commands.get(entry.command);
+      if (!editor || !cmd) continue; // skip commands the schema/registry doesn't provide
+      const { item, check } = makeRow(
+        entry.label ?? ctx.labels[entry.command] ?? entry.command,
+        {},
+      );
+      item.setAttribute('role', 'menuitemcheckbox');
+      item.addEventListener('click', () => {
+        const s = ctx.state();
+        if (s)
+          editor.commands
+            .get(entry.command)
+            ?.run(s, (tr) => editor.dispatch(tr));
+        ctx.close();
+        editor.focus();
+      });
+      ctx.check(check, (s) => cmd.isActive?.(s) ?? false);
+      if (cmd.isEnabled) ctx.enable(item, (s) => cmd.isEnabled!(s));
+      container.appendChild(item);
+    } else {
+      // ActionEntry
+      const { item, check } = makeRow(entry.label, {
+        shortcut: entry.shortcut,
+      });
+      item.setAttribute(
+        'role',
+        entry.isActive ? 'menuitemcheckbox' : 'menuitem',
+      );
+      item.addEventListener('click', () => {
+        entry.run();
+        ctx.close();
+      });
+      if (entry.isActive) ctx.check(check, () => entry.isActive!());
+      if (entry.isEnabled) ctx.enable(item, () => entry.isEnabled!());
+      container.appendChild(item);
+    }
+  }
+}
+
+export interface PopupHandle {
+  close(): void;
+  /** The popup root, for a host that needs to reposition or inspect it. */
+  el: HTMLElement;
+}
+
+let currentPopup: (() => void) | null = null;
+function closeCurrentPopup(): void {
+  if (currentPopup) {
+    const dispose = currentPopup;
+    currentPopup = null;
+    dispose();
+  }
+}
+
+/** Mount `el` as a fixed one-shot popup at viewport point `at` (clamped to
+ *  the viewport), closing on outside pointerdown, Escape, or scroll. Only one
+ *  popup is open at a time. */
+export function showPopup(
+  content: HTMLElement,
+  at: { x: number; y: number },
+  onClose?: () => void,
+): PopupHandle {
+  injectStyle('bb-ui-menubar-styles', STYLE);
+  closeCurrentPopup();
+
+  const el = document.createElement('div');
+  el.className = 'bb-menu bb-popup';
+  el.setAttribute('role', 'menu');
+  el.appendChild(content);
+  document.body.appendChild(el);
+
+  // Clamp into the viewport after mounting (the size is only known now).
+  const place = (): void => {
+    const r = el.getBoundingClientRect();
+    el.style.left = `${Math.max(4, Math.min(at.x, window.innerWidth - r.width - 4))}px`;
+    el.style.top = `${Math.max(4, Math.min(at.y, window.innerHeight - r.height - 4))}px`;
+  };
+  place();
+
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return; // a pointerdown can close the old popup while a new
+    disposed = true; //      one opens on the same gesture — dispose once
+    document.removeEventListener('pointerdown', onPointer, true);
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('scroll', onScroll, true);
+    el.remove();
+    onClose?.();
+  };
+  const close = (): void => {
+    if (currentPopup === dispose) currentPopup = null;
+    dispose();
+  };
+  const onPointer = (e: Event): void => {
+    if (!el.contains(e.target as Node)) close();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  const onScroll = (e: Event): void => {
+    if (!el.contains(e.target as Node)) close();
+  };
+  document.addEventListener('pointerdown', onPointer, true);
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('scroll', onScroll, true);
+  currentPopup = dispose;
+
+  return { close, el };
+}
+
+export interface ShowMenuOptions {
+  /** Resolves CommandEntry rows (state, dispatch, focus). Without it they are
+   *  skipped; Action/Submenu/Widget entries need nothing. */
+  editor?: EditorHandle;
+  labels?: Record<string, string>;
+  onClose?: () => void;
+}
+
+/** A one-shot dropdown at viewport point `at`, rendered by the SAME builder as
+ *  the menubar's menus — identical rows, checkmarks, submenu and widget
+ *  flyouts. Check/enabled state is evaluated once, when the menu opens. */
+export function showMenu(
+  entries: MenuEntry[],
+  at: { x: number; y: number },
+  options: ShowMenuOptions = {},
+): PopupHandle {
+  const labels = { ...DEFAULT_LABELS, ...(options.labels ?? {}) };
+  const stateOf = (): EditorStateOf | null => {
+    try {
+      return options.editor?.state ?? null;
+    } catch {
+      return null; // no document loaded yet
+    }
+  };
+  const container = document.createElement('div');
+  let handle: PopupHandle | null = null;
+  const evalNow = <T>(fn: (s: EditorStateOf) => T, fallback: T): T => {
+    try {
+      return fn(stateOf() as EditorStateOf);
+    } catch {
+      return fallback; // a state-reading check before any document exists
+    }
+  };
+  buildMenuEntries(entries, container, {
+    close: () => handle?.close(),
+    labels,
+    editor: options.editor,
+    state: stateOf,
+    check: (el, active) => {
+      el.textContent = evalNow(active, false) ? '✓' : '';
+    },
+    enable: (el, enabled) => {
+      el.disabled = !evalNow(enabled, true);
+    },
+  });
+  handle = showPopup(container, at, options.onClose);
+  return handle;
+}
 
 /** Default menus: a "Format" menu of marks, a separator, then alignments —
  *  only the commands the registry actually has. */
@@ -178,107 +424,16 @@ export function mountMenubar(
       p.dropdown.querySelector<HTMLButtonElement>('.bb-menu-item')?.focus();
   };
 
-  const makeRow = (
-    label: string,
-    opts: { shortcut?: string; hasSub?: boolean },
-  ) => {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'bb-menu-item' + (opts.hasSub ? ' bb-has-sub' : '');
-    item.addEventListener('mousedown', (e) => e.preventDefault()); // keep editor selection
-    const check = document.createElement('span');
-    check.className = 'bb-menu-check';
-    const text = document.createElement('span');
-    text.className = 'bb-menu-label';
-    text.textContent = label;
-    item.append(check, text);
-    if (opts.shortcut) {
-      const sc = document.createElement('span');
-      sc.className = 'bb-menu-shortcut';
-      sc.textContent = opts.shortcut;
-      item.appendChild(sc);
-    }
-    if (opts.hasSub) {
-      const arrow = document.createElement('span');
-      arrow.className = 'bb-menu-arrow';
-      arrow.textContent = '›';
-      item.appendChild(arrow);
-    }
-    return { item, check };
+  const buildCtx: MenuBuildCtx = {
+    close: () => close(),
+    labels,
+    editor,
+    state: () => latest,
+    check: (el, active) => checks.push({ el, active }),
+    enable: (el, enabled) => enables.push({ el, enabled }),
   };
-
-  const buildEntries = (entries: MenuEntry[], container: HTMLElement): void => {
-    for (const entry of entries) {
-      if (entry === 'separator') {
-        const sep = document.createElement('div');
-        sep.className = 'bb-menu-sep';
-        sep.setAttribute('role', 'separator');
-        container.appendChild(sep);
-      } else if ('submenu' in entry || 'widget' in entry) {
-        const wrap = document.createElement('div');
-        wrap.className = 'bb-menu-sub';
-        const { item } = makeRow(entry.label, { hasSub: true });
-        item.setAttribute('aria-haspopup', 'true');
-        const flyout = document.createElement('div');
-        flyout.className = 'bb-menu bb-submenu';
-        flyout.setAttribute('role', 'menu');
-        if ('widget' in entry) {
-          flyout.classList.add('bb-submenu-widget');
-          // Built on reveal, and rebuilt on every reveal. A widget that mirrors
-          // document state (the page-setup pickers preview the live geometry
-          // and check the active preset) would otherwise be a snapshot taken
-          // at mount — stale after the first edit, and evaluated before a
-          // document has even loaded.
-          const build = () =>
-            flyout.replaceChildren(entry.widget(() => close()));
-          wrap.addEventListener('mouseenter', build);
-          wrap.addEventListener('focusin', build);
-        } else {
-          buildEntries(entry.submenu, flyout);
-        }
-        wrap.append(item, flyout);
-        container.appendChild(wrap);
-      } else if ('command' in entry) {
-        const cmd = editor.commands.get(entry.command);
-        if (!cmd) continue; // skip commands the schema/registry doesn't provide
-        const { item, check } = makeRow(
-          entry.label ?? labels[entry.command] ?? entry.command,
-          {},
-        );
-        item.setAttribute('role', 'menuitemcheckbox');
-        item.addEventListener('click', () => {
-          if (latest)
-            editor.commands
-              .get(entry.command)
-              ?.run(latest, (tr) => editor.dispatch(tr));
-          close();
-          editor.focus();
-        });
-        checks.push({ el: check, active: (s) => cmd.isActive?.(s) ?? false });
-        if (cmd.isEnabled)
-          enables.push({ el: item, enabled: (s) => cmd.isEnabled!(s) });
-        container.appendChild(item);
-      } else {
-        // ActionEntry
-        const { item, check } = makeRow(entry.label, {
-          shortcut: entry.shortcut,
-        });
-        item.setAttribute(
-          'role',
-          entry.isActive ? 'menuitemcheckbox' : 'menuitem',
-        );
-        item.addEventListener('click', () => {
-          entry.run();
-          close();
-        });
-        if (entry.isActive)
-          checks.push({ el: check, active: () => entry.isActive!() });
-        if (entry.isEnabled)
-          enables.push({ el: item, enabled: () => entry.isEnabled!() });
-        container.appendChild(item);
-      }
-    }
-  };
+  const buildEntries = (entries: MenuEntry[], container: HTMLElement): void =>
+    buildMenuEntries(entries, container, buildCtx);
 
   menus.forEach((menu, idx) => {
     const wrap = document.createElement('div');

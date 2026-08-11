@@ -37,6 +37,7 @@ import type {
   PagePoint,
   PluginContext,
   RangeDecoration,
+  ResolvedLayout,
   SectionConfig,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
@@ -99,6 +100,10 @@ export interface BapbongEditorOptions {
   measureText?: MeasureText;
   /** Vertical-metrics provider paired with {@link measureText}. */
   measureMetrics?: MeasureMetrics;
+  /** Vertical gap between pages in layout px (painter default when omitted).
+   *  Widen it when the host draws chrome in the gap (section-break markers);
+   *  read back via {@link BapbongEditor.getPageGap}. */
+  pageGap?: number;
   /** Fallback clipboard reader for hosts whose webview denies the async
    *  Clipboard API (e.g. the desktop shell reads the OS clipboard natively).
    *  Return every flavor present; null when empty / unavailable. */
@@ -212,6 +217,7 @@ export class BapbongEditor {
       viewport: opts.viewport,
       measureText: opts.measureText,
       measureMetrics: opts.measureMetrics,
+      pageGap: opts.pageGap,
     });
     // The core resolves plugin decorations to page rects at paint time.
     this.core.setDecorationProvider(() => this.pluginDecorations());
@@ -499,6 +505,13 @@ export class BapbongEditor {
     return this.core.caretRect(pos);
   }
 
+  /** The current paint-ready layout (page geometry, display page labels), or
+   *  null before a document loads. Read-only — hosts use it to label chrome
+   *  around the canvas (e.g. the section-break marker's "ii → 1"). */
+  get layout(): ResolvedLayout | null {
+    return this.core.layout;
+  }
+
   /** Map a page-local point to container (canvas-stack) coordinates, or null. */
   pageToCanvas(p: PagePoint): { x: number; y: number } | null {
     return this.core.pageToCanvas(p);
@@ -558,6 +571,11 @@ export class BapbongEditor {
   /** The current zoom factor (1 = 100%). */
   getZoom(): number {
     return this.core.getZoom();
+  }
+
+  /** The inter-page gap in layout px (multiply by zoom for canvas px). */
+  getPageGap(): number {
+    return this.core.getPageGap();
   }
 
   /** Print the whole document — renders every page (not just the visible

@@ -49,6 +49,10 @@ export interface RenderCoreOptions {
   viewport?: HTMLElement;
   /** Initial zoom factor (1 = 100%). */
   zoom?: number;
+  /** Vertical gap between pages in layout px (the painter's default when
+   *  omitted). Hosts that draw chrome in the gap (section-break markers) can
+   *  widen it — read the value back via {@link RenderCore.getPageGap}. */
+  pageGap?: number;
   /** Build a visually-hidden ARIA mirror of the document for screen readers
    *  (the canvas is opaque to assistive tech). Default true; pass false to opt
    *  out. `a11yLabel` sets its `aria-label`. */
@@ -90,6 +94,7 @@ export class RenderCore {
   private resolved: ResolvedLayout | null = null;
   private doc: ProseMirrorNode | null = null;
   private zoomFactor: number;
+  private readonly pageGapPx: number;
 
   // Page chrome from the imported docx, keyed by w:type (default/first/even).
   private chromeHeaders: Record<string, ProseMirrorNode> = {};
@@ -148,6 +153,7 @@ export class RenderCore {
     this.measureText = opts.measureText ?? createCanvasMeasurer();
     this.measureMetrics = opts.measureMetrics ?? createCanvasMetrics();
     this.zoomFactor = opts.zoom ?? 1;
+    this.pageGapPx = opts.pageGap ?? 24; // the painter's own default
     this.a11y =
       opts.a11y === false
         ? null
@@ -363,6 +369,7 @@ export class RenderCore {
     perf.span('paintContent', () =>
       this.painter.paint(this.resolved!, {
         zoom: this.zoomFactor,
+        pageGap: this.pageGapPx,
         caret: this.lastOverlay.caret,
         selection: this.lastOverlay.selection,
         viewport,
@@ -393,6 +400,11 @@ export class RenderCore {
   /** The current zoom factor. */
   getZoom(): number {
     return this.zoomFactor;
+  }
+
+  /** The inter-page gap in layout px (multiply by zoom for canvas px). */
+  getPageGap(): number {
+    return this.pageGapPx;
   }
 
   /**

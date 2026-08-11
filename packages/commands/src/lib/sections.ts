@@ -118,6 +118,35 @@ export function removeSectionBreak(boundaryIndex: number): Command {
 }
 
 /**
+ * Set (or clear, with null) section `sectionIndex`'s page numbering
+ * (w:pgNumType: restart value and/or display format). Targets an explicit
+ * index rather than the caret because its UI lives on the section-break
+ * marker, not in the text flow. No scrollIntoView — the edit happens far from
+ * the caret and the viewport should stay put.
+ */
+export function setSectionPageNumbers(
+  sectionIndex: number,
+  pageNumbers: { start?: number; fmt?: string } | null,
+): Command {
+  return {
+    name: 'set-section-page-numbers',
+    run(state, dispatch) {
+      const raw = state.doc.attrs['sections'] as SectionConfig[] | null;
+      if (!raw || sectionIndex < 0 || sectionIndex >= raw.length) return false;
+      if (dispatch) {
+        const next = raw.map((s, j) => {
+          if (j !== sectionIndex) return s;
+          const { pageNumbers: _old, ...rest } = s;
+          return pageNumbers ? { ...rest, pageNumbers } : rest;
+        });
+        dispatch(state.tr.setDocAttribute('sections', next));
+      }
+      return true;
+    },
+  };
+}
+
+/**
  * Set the column count of the section the caret sits in (Format → Columns). A
  * count > 1 needs a section to flow into, so a single-section doc becomes
  * multi-column as a whole; scope columns to a region by inserting section

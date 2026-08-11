@@ -71,6 +71,8 @@ const STYLE = `
 .bb-pd-input{flex:1 1 auto;min-width:0;width:100%;height:30px;padding:0 8px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px}
 .bb-pd-input:focus{outline:2px solid var(--bb-ui-active-border,#7fb2ec);outline-offset:-1px}
 .bb-pd-actions{display:flex;justify-content:flex-end;gap:8px}
+.bb-pn-input{width:52px;height:24px;padding:0 6px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:5px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:12px}
+.bb-pn-input:focus{outline:2px solid var(--bb-ui-active-border,#7fb2ec);outline-offset:-1px}
 `;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -473,4 +475,147 @@ export function openMarginsDialog(options: MarginsDialogOptions): void {
   dialog.open();
   top.input.focus();
   top.input.select();
+}
+
+// ── Page numbering (w:pgNumType) ────────────────────────────────────
+
+/** The preview frame with a sample number drawn on the page. */
+function numberPreview(sample: string): SVGSVGElement {
+  const svg = pagePreview(0.773);
+  const t = svgEl('text', {
+    x: 17,
+    y: 25,
+    'text-anchor': 'middle',
+    'font-size': 11,
+    fill: 'var(--bb-ui-fg,#2c2c2a)',
+    'fill-opacity': 0.75,
+  });
+  t.textContent = sample;
+  svg.appendChild(t);
+  return svg;
+}
+
+/** [model fmt (undefined = decimal, the spec default), row label, sample]. */
+const PGNUM_FORMATS: ReadonlyArray<[string | undefined, string, string]> = [
+  [undefined, '1, 2, 3, 4…', '1'],
+  ['lowerRoman', 'i, ii, iii, iv…', 'i'],
+  ['upperRoman', 'I, II, III, IV…', 'I'],
+  ['lowerLetter', 'a, b, c, d…', 'a'],
+  ['upperLetter', 'A, B, C, D…', 'A'],
+];
+
+export interface PageNumberPickerOptions {
+  /** The section's current format (raw ST_NumberFormat); undefined or
+   *  "decimal" both check the decimal row. */
+  fmt?: string;
+  /** The section's restart value; undefined = continue from the previous
+   *  section. */
+  start?: number;
+  /** Caption on the continue row, e.g. the numbers it would produce
+   *  ("ii, iii…"). */
+  continueHint?: string;
+  labels?: { restart?: string; continueFrom?: string };
+  /** Called with the section's next pageNumbers value — null when the pick
+   *  lands back on the defaults (decimal, no restart). */
+  onPick: (pageNumbers: { fmt?: string; start?: number } | null) => void;
+}
+
+/**
+ * The section-break marker's page-numbering flyout: one row per display
+ * format plus restart / continue rows — same row family as the page-setup
+ * pickers, so the marker's menus read like the Layout menu.
+ */
+export function pageNumberPicker(
+  options: PageNumberPickerOptions,
+): HTMLElement {
+  injectStyle('bb-ui-pagesetup-styles', STYLE);
+  const root = document.createElement('div');
+  root.className = 'bb-ps';
+  root.setAttribute('role', 'menu');
+
+  const curFmt = options.fmt === 'decimal' ? undefined : options.fmt;
+  const emit = (fmt: string | undefined, start: number | undefined): void => {
+    options.onPick(
+      fmt == null && start == null
+        ? null
+        : {
+            ...(fmt != null ? { fmt } : {}),
+            ...(start != null ? { start } : {}),
+          },
+    );
+  };
+
+  for (const [key, label, sample] of PGNUM_FORMATS) {
+    root.appendChild(
+      presetRow(
+        numberPreview(sample),
+        label,
+        captionLine(''),
+        curFmt === key,
+        () => emit(key, options.start),
+      ),
+    );
+  }
+
+  const sep = document.createElement('div');
+  sep.className = 'bb-ps-sep';
+  root.appendChild(sep);
+
+  // Restart row — carries the editable start value, so it's a div (a nested
+  // input inside a button is invalid HTML and steals the click).
+  const restart = document.createElement('div');
+  restart.className = 'bb-ps-row';
+  restart.setAttribute('role', 'menuitemradio');
+  restart.setAttribute('aria-checked', String(options.start != null));
+  const restartName = document.createElement('span');
+  restartName.className = 'bb-ps-name';
+  restartName.style.flex = '1 1 auto';
+  restartName.textContent = options.labels?.restart ?? 'Restart at';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.step = '1';
+  input.className = 'bb-pn-input';
+  input.value = String(options.start ?? 1);
+  // Invalid/empty input falls back to the CURRENT value (or 1) — never to a
+  // silent 0. And the value is only ever applied on an explicit gesture
+  // (Enter, or clicking the row): a `change`-on-blur listener would dispatch
+  // a restart just because the popup closed while the input held a half-typed
+  // value.
+  const readStart = (): number => {
+    const v = Math.floor(Number(input.value));
+    return Number.isFinite(v) && v >= 0 && input.value.trim() !== ''
+      ? v
+      : (options.start ?? 1);
+  };
+  restart.append(restartName, input);
+  restart.addEventListener('mousedown', (e) => {
+    if (e.target !== input) e.preventDefault(); // keep the editor selection
+  });
+  restart.addEventListener('click', (e) => {
+    if (e.target !== input) emit(curFmt, readStart());
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      emit(curFmt, readStart());
+    }
+  });
+  // A wheel over a focused number input silently steps the value (Chrome) —
+  // a scroll gesture must never rewrite the document's numbering.
+  input.addEventListener('wheel', (e) => e.preventDefault(), {
+    passive: false,
+  });
+  root.appendChild(restart);
+
+  root.appendChild(
+    presetRow(
+      numberPreview('→'),
+      options.labels?.continueFrom ?? 'Continue from previous section',
+      captionLine(options.continueHint ?? ''),
+      options.start == null,
+      () => emit(curFmt, undefined),
+    ),
+  );
+  return root;
 }

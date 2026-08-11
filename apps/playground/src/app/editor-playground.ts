@@ -34,6 +34,13 @@ import {
   removeSectionBreak,
   activeCharacterFormatting,
   applyCharacterFormatting,
+  currentPageConfig,
+  PAPER_SIZES,
+  setSectionOrientation,
+  setSectionPageDimensions,
+  setSectionPageNumbers,
+  setSectionPaperSize,
+  type PaperSize,
   setFontFamily,
   setFontSize,
   setHighlight,
@@ -44,6 +51,8 @@ import type {
   BorderSide,
   Command,
   EditorPointerEvent,
+  PageConfig,
+  SectionConfig,
 } from '@shadow-garden/bapbong-contracts';
 import {
   createCanvasMeasurer,
@@ -56,18 +65,26 @@ import { audit, type AuditEntry } from '@shadow-garden/bapbong-docx';
 import { loadBundledFonts } from './fonts';
 import {
   createFindDialog,
+  createSectionChip,
   Dialog,
   mountMenubar,
   mountToolbar,
   openCellProperties,
   openFontDialog,
+  openPageSizeDialog,
+  orientationPicker,
+  pageNumberPicker,
+  pageSizePicker,
   promptDialog,
   showContextMenu,
   showLinkPanel,
+  showMenu,
+  showPopup,
   tableGridPicker,
   type BorderPreset,
   type LinkPanelHandle,
   type ContextMenuEntry,
+  type SectionChipHandle,
   type FindDialogHandle,
   type Menu,
   type MenubarHandle,
@@ -265,7 +282,7 @@ export class EditorPlayground implements OnDestroy {
     try {
       await this.fontsReady; // real metrics ready before the first layout
       const editor = this.ensureEditor();
-      if (!editor) throw new Error('Canvas chưa sẵn sàng.');
+      if (!editor) throw new Error('Canvas is not ready.');
       const { headerKeys, footerKeys } = await editor.loadDocx(bytes);
       this.headerKeys.set(headerKeys);
       this.footerKeys.set(footerKeys);
@@ -312,6 +329,9 @@ export class EditorPlayground implements OnDestroy {
     const reg = this.fontRegistry;
     const editor = new BapbongEditor(stack, {
       viewport: this.wrapHost()?.nativeElement,
+      // Wider than the painter's 24px default: the section-break chip lives
+      // in the gap and needs breathing room at 100% zoom.
+      pageGap: 32,
       // Measure from bundled font metrics (engine-independent), falling back to
       // canvas for families we don't bundle. Omitted (canvas default) if the
       // bundled fonts failed to load.
@@ -459,7 +479,12 @@ export class EditorPlayground implements OnDestroy {
               // Zoom lives on the render core, not in editor state — read it from
               // the editor (the toolbar re-reads on every change anyway).
               value: () => String(Math.round(editor.getZoom() * 100)),
-              onSelect: (v) => editor.setZoom(Number(v) / 100),
+              onSelect: (v) => {
+                editor.setZoom(Number(v) / 100);
+                // Zoom repaints without an editor change — the section
+                // markers track page coords, so reposition them here.
+                this.renderSectionMarkers();
+              },
             },
           ],
         ],
@@ -490,28 +515,45 @@ export class EditorPlayground implements OnDestroy {
 
   /** Show/hide the in-document section-break markers (View toggle). */
   protected readonly showSections = signal(true);
-  /** Pool of marker lines (each with an × delete button) appended to the stack. */
+  /** Pool of marker lines (each with an × delete button) appended to the
+   *  stack — CONTINUOUS breaks only (they happen mid-page). */
   private readonly sectionMarkerEls: HTMLDivElement[] = [];
+  /** Pool of next-page break markers: a dashed line across the page gap plus
+   *  the segmented chip (page numbering / paper menus + delete). `boundary`
+   *  is rebound on every render, so the chip's callbacks stay closures over
+   *  the slot, not over a stale index. */
+  private readonly sectionChipSlots: {
+    line: HTMLDivElement;
+    chip: SectionChipHandle;
+    boundary: number;
+    pageIndex: number;
+  }[] = [];
 
-  /** Draw a thin dashed line at each section boundary with an × to delete the
-   *  break. Markers live in the stack, so they scroll with the pages and only
-   *  need repositioning when the layout changes (on every `onChange`). */
+  /** Draw the section-break markers. A continuous break is a dashed line at
+   *  its in-page boundary (with an × to delete); a next-page break IS the
+   *  page boundary, so its marker — dashed line + quick-action chip — lives
+   *  centered in the gap between the two pages. Markers live in the stack, so
+   *  they scroll with the pages and only need repositioning when the layout
+   *  changes (on every `onChange`). */
   private renderSectionMarkers(): void {
     const ed = this.editor;
     const stack = this.stackHost()?.nativeElement;
     if (!ed || !stack) return;
     const boundaries = this.showSections() ? ed.sectionBoundaries() : [];
-    while (this.sectionMarkerEls.length < boundaries.length) {
+    const lineBs = boundaries.filter((b) => !b.newPage);
+    const chipBs = boundaries.filter((b) => b.newPage);
+
+    while (this.sectionMarkerEls.length < lineBs.length) {
       const line = document.createElement('div');
       line.style.cssText =
-        'position:absolute;z-index:7;border-top:1px dashed #378add;pointer-events:none;';
+        'position:absolute;z-index:7;border-top:1px dashed var(--bb-ui-active-fg,#378add);pointer-events:none;';
       const x = document.createElement('button');
       x.type = 'button';
-      x.setAttribute('aria-label', 'Xoá section break');
+      x.setAttribute('aria-label', 'Remove section break');
       x.style.cssText =
         'position:absolute;left:-9px;top:-9px;width:18px;height:18px;display:flex;align-items:center;' +
-        'justify-content:center;padding:0;border:1px solid #378add;border-radius:50%;background:#fff;' +
-        'color:#378add;cursor:pointer;pointer-events:auto;';
+        'justify-content:center;padding:0;border:1px solid var(--bb-ui-active-fg,#378add);border-radius:50%;background:var(--bb-ui-menu-bg,#fff);' +
+        'color:var(--bb-ui-active-fg,#378add);cursor:pointer;pointer-events:auto;';
       x.innerHTML =
         '<svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 3l10 10M13 3 3 13"/></svg>';
       x.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -521,7 +563,7 @@ export class EditorPlayground implements OnDestroy {
       this.sectionMarkerEls.push(line);
     }
     this.sectionMarkerEls.forEach((line, i) => {
-      const rect = boundaries[i]?.rect;
+      const rect = lineBs[i]?.rect;
       const tl =
         rect &&
         ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.x, y: rect.y });
@@ -540,12 +582,197 @@ export class EditorPlayground implements OnDestroy {
       line.style.left = `${tl.x}px`;
       line.style.top = `${tl.y - 4}px`;
       line.style.width = `${tr.x - tl.x}px`;
-      const index = boundaries[i].index;
+      const index = lineBs[i].index;
       (line.querySelector('button') as HTMLButtonElement).onclick = (e) => {
         e.stopPropagation();
         this.exec(removeSectionBreak(index));
       };
     });
+
+    while (this.sectionChipSlots.length < chipBs.length) {
+      const line = document.createElement('div');
+      line.style.cssText =
+        'position:absolute;z-index:7;border-top:1.5px dashed var(--bb-ui-active-fg,#378add);opacity:.7;pointer-events:none;';
+      stack.appendChild(line);
+      const slot = {
+        line,
+        boundary: 0,
+        pageIndex: 0,
+        chip: null as unknown as SectionChipHandle,
+      };
+      slot.chip = createSectionChip({
+        title: 'Next page',
+        ariaPageNumbers: 'Section page numbering',
+        ariaPaper: 'Section paper size',
+        ariaDelete: 'Remove section break',
+        onPageNumbers: (anchor) => this.openSectionNumbering(slot, anchor),
+        onPaper: (anchor) => this.openSectionPaper(slot, anchor),
+        onDelete: () => this.exec(removeSectionBreak(slot.boundary)),
+      });
+      stack.appendChild(slot.chip.el);
+      this.sectionChipSlots.push(slot);
+    }
+    this.sectionChipSlots.forEach((slot, i) => {
+      const b = chipBs[i];
+      const rect = b?.rect;
+      const tl =
+        rect && ed.pageToCanvas({ pageIndex: rect.pageIndex, x: 0, y: 0 });
+      const tr =
+        rect &&
+        ed.pageToCanvas({ pageIndex: rect.pageIndex, x: rect.width, y: 0 });
+      if (!rect || !tl || !tr) {
+        slot.line.style.display = 'none';
+        slot.chip.el.style.display = 'none';
+        return;
+      }
+      slot.boundary = b.index;
+      slot.pageIndex = rect.pageIndex;
+      // Center of the inter-page gap (scaled by zoom, like every page coord).
+      const gapY = tl.y - (ed.getPageGap() * ed.getZoom()) / 2;
+      slot.line.style.display = 'block';
+      slot.line.style.left = `${tl.x}px`;
+      slot.line.style.top = `${gapY}px`;
+      slot.line.style.width = `${tr.x - tl.x}px`;
+      slot.chip.el.style.display = '';
+      slot.chip.el.style.left = `${(tl.x + tr.x) / 2}px`;
+      slot.chip.el.style.top = `${gapY}px`;
+      slot.chip.update({
+        pageNumbers: this.sectionNumberingLabel(slot),
+        paper: this.sectionPaperLabel(slot),
+      });
+    });
+  }
+
+  /** The section AFTER break `boundary` — the one the chip's menus edit. */
+  private chipSection(slot: { boundary: number }): SectionConfig | null {
+    const sections = this.editor?.state.doc.attrs['sections'] as
+      | SectionConfig[]
+      | null;
+    return sections?.[slot.boundary + 1] ?? null;
+  }
+
+  /** "page ii → 1" (restart) or "page 5" (continuing). */
+  private sectionNumberingLabel(slot: {
+    boundary: number;
+    pageIndex: number;
+  }): string {
+    const ed = this.editor;
+    if (!ed) return '';
+    const labels = ed.layout?.pageLabels;
+    const cur = labels?.[slot.pageIndex] ?? String(slot.pageIndex + 1);
+    if (this.chipSection(slot)?.pageNumbers?.start == null)
+      return `page ${cur}`;
+    const prev = labels?.[slot.pageIndex - 1] ?? String(slot.pageIndex);
+    return `page ${prev} → ${cur}`;
+  }
+
+  /** Effective geometry of the chip's section (its override, else the doc). */
+  private chipSectionPage(slot: { boundary: number }): PageConfig {
+    const ed = this.editor;
+    const docPage = ed
+      ? currentPageConfig(ed.state)
+      : {
+          width: 794,
+          height: 1123,
+          margin: { top: 96, right: 96, bottom: 96, left: 96 },
+        };
+    return this.chipSection(slot)?.page ?? docPage;
+  }
+
+  /** "A4 portrait" / "Letter landscape" / "Custom portrait". */
+  private sectionPaperLabel(slot: { boundary: number }): string {
+    const page = this.chipSectionPage(slot);
+    const landscape = page.width > page.height;
+    const [pw, ph] = landscape
+      ? [page.height, page.width]
+      : [page.width, page.height];
+    const paper = Object.values(PAPER_SIZES).find(
+      (d) => d.width === pw && d.height === ph,
+    );
+    return `${paper?.label ?? 'Custom'} ${landscape ? 'landscape' : 'portrait'}`;
+  }
+
+  /** The chip's page-numbering flyout (the shared pageNumberPicker). */
+  private openSectionNumbering(
+    slot: { boundary: number; pageIndex: number },
+    anchor: HTMLElement,
+  ): void {
+    const target = slot.boundary + 1;
+    const pn = this.chipSection(slot)?.pageNumbers;
+    const r = anchor.getBoundingClientRect();
+    const popup = showPopup(
+      pageNumberPicker({
+        fmt: pn?.fmt,
+        start: pn?.start,
+        onPick: (next) => {
+          popup.close();
+          this.exec(setSectionPageNumbers(target, next));
+        },
+      }),
+      { x: r.left, y: r.bottom + 4 },
+    );
+  }
+
+  /** The chip's Orientation / Page size menu — the same rows and picker
+   *  widgets as the desktop app's Layout menu, scoped to one section. */
+  private openSectionPaper(
+    slot: { boundary: number },
+    anchor: HTMLElement,
+  ): void {
+    const target = slot.boundary + 1;
+    const PAPERS: PaperSize[] = ['letter', 'legal', 'executive', 'a4', 'a5'];
+    const r = anchor.getBoundingClientRect();
+    showMenu(
+      [
+        {
+          label: 'Orientation',
+          widget: (close) => {
+            const page = this.chipSectionPage(slot);
+            return orientationPicker({
+              page,
+              active: page.width > page.height ? 'landscape' : 'portrait',
+              onPick: (o) => {
+                close();
+                this.exec(setSectionOrientation(target, o));
+              },
+            });
+          },
+        },
+        {
+          label: 'Page size',
+          widget: (close) => {
+            const page = this.chipSectionPage(slot);
+            const short = Math.min(page.width, page.height);
+            const long = Math.max(page.width, page.height);
+            return pageSizePicker({
+              items: PAPERS.map((key) => {
+                const size = PAPER_SIZES[key];
+                return {
+                  key,
+                  label: size.label,
+                  cm: size.cm,
+                  px: [size.width, size.height] as const,
+                  active: short === size.width && long === size.height,
+                };
+              }),
+              onPick: (key) => {
+                close();
+                this.exec(setSectionPaperSize(target, key as PaperSize));
+              },
+              onCustom: () => {
+                close();
+                openPageSizeDialog({
+                  initial: { width: page.width, height: page.height },
+                  onApply: ({ width, height }) =>
+                    this.exec(setSectionPageDimensions(target, width, height)),
+                });
+              },
+            });
+          },
+        },
+      ],
+      { x: r.left, y: r.bottom + 4 },
+    );
   }
 
   /** Debounced sync of the JSON / DOM-preview inspection panels. */
@@ -829,11 +1056,13 @@ export class EditorPlayground implements OnDestroy {
     const activeField = ed.plugin('toc').fieldAt();
     if (activeField?.field.kind === 'toc') {
       entries.push('separator', {
-        label: 'Cập nhật mục lục (số trang)',
+        label: 'Update table of contents (page numbers)',
         run: () => {
           const n = ed.plugin('toc').updatePageNumbers();
           this.error.set(
-            n > 0 ? null : 'Mục lục đã khớp với số trang hiện tại.',
+            n > 0
+              ? null
+              : 'Table of contents already matches the current page numbers.',
           );
           ed.focus();
         },

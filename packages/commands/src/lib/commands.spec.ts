@@ -38,6 +38,7 @@ import {
   insertSectionBreak,
   removeSectionBreak,
   setColumns,
+  setSectionPageNumbers,
 } from './sections.js';
 import {
   PAPER_SIZES,
@@ -47,6 +48,8 @@ import {
   setPageDimensions,
   setPageMargins,
   setPaperSize,
+  setSectionOrientation,
+  setSectionPaperSize,
 } from './page-setup.js';
 import {
   activeListPresetId,
@@ -908,5 +911,81 @@ describe('page-setup transactions mark the doc changed', () => {
     const tr = trOf(make());
     expect(tr).not.toBeNull();
     expect(tr?.docChanged).toBe(true);
+  });
+});
+
+describe('section-scoped commands (section-break marker menus)', () => {
+  const twoSectionDoc = () =>
+    n(
+      'doc',
+      {
+        sections: [
+          { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: false },
+          { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: true },
+        ],
+      },
+      [
+        n('paragraph', null, schema.text('a')),
+        n('paragraph', null, schema.text('b')),
+        n('paragraph', null, schema.text('c')),
+      ],
+    );
+  const stateOf = (doc = twoSectionDoc()) =>
+    EditorState.create({ schema, doc });
+  const sectionsOf = (s: EditorState) =>
+    s.doc.attrs['sections'] as {
+      pageNumbers?: { start?: number; fmt?: string };
+      page?: { width: number; height: number };
+    }[];
+
+  it('setSectionPageNumbers sets, replaces, and clears pgNumType', () => {
+    let s = apply(
+      stateOf(),
+      setSectionPageNumbers(1, { start: 1, fmt: 'lowerRoman' }),
+    );
+    expect(sectionsOf(s)[1].pageNumbers).toEqual({
+      start: 1,
+      fmt: 'lowerRoman',
+    });
+    expect(sectionsOf(s)[0].pageNumbers).toBeUndefined();
+    s = apply(s, setSectionPageNumbers(1, { fmt: 'decimal' }));
+    expect(sectionsOf(s)[1].pageNumbers).toEqual({ fmt: 'decimal' }); // replace, not merge
+    s = apply(s, setSectionPageNumbers(1, null));
+    expect(sectionsOf(s)[1].pageNumbers).toBeUndefined();
+  });
+
+  it('setSectionPageNumbers rejects a doc without a sections attr', () => {
+    const doc = n('doc', null, n('paragraph', null, schema.text('only')));
+    const s = EditorState.create({ schema, doc });
+    expect(setSectionPageNumbers(0, { start: 5 }).run(s, () => undefined)).toBe(
+      false,
+    );
+  });
+
+  it('setSectionPaperSize on a NON-last section rides section.page only', () => {
+    const s = apply(stateOf(), setSectionPaperSize(0, 'letter'));
+    const secs = sectionsOf(s);
+    expect(secs[0].page).toMatchObject({
+      width: PAPER_SIZES.letter.width,
+      height: PAPER_SIZES.letter.height,
+    });
+    expect(secs[1].page).toBeUndefined();
+    expect(s.doc.attrs['page']).toBeNull(); // document geometry untouched
+  });
+
+  it('setSectionOrientation on the LAST section freezes siblings and rewrites the doc page', () => {
+    const s = apply(stateOf(), setSectionOrientation(1, 'landscape'));
+    const secs = sectionsOf(s);
+    // Section 0 inherited A4 portrait — frozen as an explicit override.
+    expect(secs[0].page).toMatchObject({ width: 794, height: 1123 });
+    expect(secs[1].page).toBeUndefined(); // last section = the doc geometry
+    expect(s.doc.attrs['page']).toMatchObject({ width: 1123, height: 794 });
+  });
+
+  it('a section-page edit landing back on the doc geometry drops the override', () => {
+    let s = apply(stateOf(), setSectionOrientation(0, 'landscape'));
+    expect(sectionsOf(s)[0].page).toBeTruthy();
+    s = apply(s, setSectionOrientation(0, 'portrait'));
+    expect(sectionsOf(s)[0].page).toBeUndefined(); // back to inherit
   });
 });
