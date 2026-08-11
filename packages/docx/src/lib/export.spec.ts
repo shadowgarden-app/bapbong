@@ -657,6 +657,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
             strokeWidth: 2,
             dash: [1, 1],
             cap: 'round',
+            arrowEnd: true,
           },
         }),
         schema.node('image', {
@@ -682,6 +683,9 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     );
     expect(xml).toContain('cap="rnd"');
     expect(xml).toContain('<a:gd name="adj" fmla="val 8333"/>');
+    // An arrowhead is the meaning of a flowchart connector — losing it on
+    // save is worse than losing its style.
+    expect(xml).toContain('<a:tailEnd type="triangle"/>');
 
     const { doc: back } = await importDocx(bytes);
     const shapes = [...range(back.child(0))].filter(
@@ -692,6 +696,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
       dash: [1, 1],
       cap: 'round',
     });
+    expect(shapes[0].attrs['shape']).toMatchObject({ arrowEnd: true });
     expect(
       (shapes[1].attrs['shape'] as { cornerRatio: number }).cornerRatio,
     ).toBeCloseTo(0.08333, 4);

@@ -806,6 +806,13 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     const cap = attrOf(ln, 'cap');
     if (cap === 'rnd') shape['cap'] = 'round';
     else if (cap === 'sq') shape['cap'] = 'square';
+    // Arrowheads (ST_LineEndType: none|triangle|stealth|diamond|oval|arrow).
+    // The model records only their presence, so any head that isn't `none`
+    // counts — the painter draws one triangle either way.
+    const headEnd = attrOf(child(ln, 'a:headEnd'), 'type');
+    const tailEnd = attrOf(child(ln, 'a:tailEnd'), 'type');
+    if (headEnd && headEnd !== 'none') shape['arrowStart'] = true;
+    if (tailEnd && tailEnd !== 'none') shape['arrowEnd'] = true;
     // Direct outline color, else the style's line reference (how Word themes
     // shape outlines), else black.
     shape['stroke'] =

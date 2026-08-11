@@ -273,8 +273,15 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   // cap is written even when flat: ECMA says an omitted cap means SQUARE, so
   // staying silent would hand a reader the wrong ends for our flat default.
   const capAttr = ` cap="${s.cap === 'round' ? 'rnd' : s.cap === 'square' ? 'sq' : 'flat'}"`;
+  // Arrowheads. The model only says whether there IS one, so it writes the
+  // triangle Word itself uses for a "block" arrow; size attrs are left off,
+  // which the reader takes as medium. headEnd is the START of the line.
+  const ends =
+    (s.arrowStart ? '<a:headEnd type="triangle"/>' : '') +
+    (s.arrowEnd ? '<a:tailEnd type="triangle"/>' : '');
+  // CT_LineProperties order is fixed: fill, dash, join, then the two ends.
   const ln = s.stroke
-    ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"${capAttr}><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill>${custDash}</a:ln>`
+    ? `<a:ln w="${pxToEmu(s.strokeWidth ?? 1)}"${capAttr}><a:solidFill><a:srgbClr val="${s.stroke.replace(/^#/, '')}"/></a:solidFill>${custDash}${ends}</a:ln>`
     : '<a:ln><a:noFill/></a:ln>';
   // Preset geometry adjust — roundRect's corner ratio, back in adj units
   // (adj/100000 of the shorter side). Other presets carry no modelled adjust,
