@@ -6,6 +6,7 @@ import type {
   BorderStyle,
   CommentNode,
   PageConfig,
+  SectionChromeOverrides,
   SectionConfig,
   ShapeSpec,
   TableBorders,
@@ -799,7 +800,8 @@ function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
  *  properties live in the body sectPr). */
 function sectionBoundaries(
   doc: PMNode,
-  origDocXml?: string,
+  origSectPrs: string[],
+  refPatch?: ChromePlan['refPatch'],
 ): Map<number, string> {
   const sections = doc.attrs['sections'] as SectionConfig[] | null;
   const out = new Map<number, string>();
@@ -809,16 +811,15 @@ function sectionBoundaries(
   // sectPrs — the model doesn't hold rIds. Reattached positionally, so only
   // when the section count still matches (an edited section map would
   // misalign them; refs are then dropped, the pre-existing behavior).
-  const origSectPrs =
-    origDocXml?.match(
-      /<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g,
-    ) ?? [];
   const aligned = origSectPrs.length === sections.length;
   let acc = 0;
   for (let i = 0; i < sections.length - 1; i++) {
     acc += sections[i].blockCount;
     const carried = aligned ? chromeRefsOf(origSectPrs[i]) : undefined;
-    out.set(acc - 1, sectionSectPr(sections[i], docPage, carried)); // last block of section i
+    let sectPr = sectionSectPr(sections[i], docPage, carried);
+    const patch = refPatch?.get(i);
+    if (patch?.length) sectPr = applyChromeRefs(sectPr, patch);
+    out.set(acc - 1, sectPr); // last block of section i
   }
   return out;
 }
@@ -956,6 +957,7 @@ function contentTypes(
   exts: Set<string>,
   hasComments: boolean,
   hasNumbering = false,
+  chromeOverrides: readonly string[] = [],
 ): string {
   const parts = [
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
@@ -972,6 +974,7 @@ function contentTypes(
     '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>',
   );
   if (hasNumbering) parts.push(NUMBERING_OVERRIDE);
+  parts.push(...chromeOverrides);
   if (hasComments) {
     parts.push(
       '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>',
@@ -990,6 +993,7 @@ function mergeContentTypes(
   exts: Set<string>,
   hasComments: boolean,
   hasNewNumbering = false,
+  chromeOverrides: readonly string[] = [],
 ): string {
   let out = xml;
   const add = (frag: string, key: string) => {
@@ -997,6 +1001,10 @@ function mergeContentTypes(
       out = out.replace('</Types>', `${frag}</Types>`);
   };
   if (hasNewNumbering) add(NUMBERING_OVERRIDE, '/word/numbering.xml');
+  for (const frag of chromeOverrides) {
+    const part = /PartName="([^"]*)"/.exec(frag)?.[1] ?? frag;
+    add(frag, part);
+  }
   for (const ext of exts)
     add(
       `<Default Extension="${ext}" ContentType="${EXT_MIME[ext] ?? `image/${ext}`}"/>`,
@@ -1306,7 +1314,14 @@ export async function exportDocx(
   const origDocXml = opts?.carry
     ? await opts.carry.file('word/document.xml')?.async('string')
     : undefined;
-  const boundaries = sectionBoundaries(doc, origDocXml);
+  const origSectPrs =
+    origDocXml?.match(
+      /<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g,
+    ) ?? [];
+  // Chrome overrides (the page-number toggle) become real header/footer
+  // parts; their sectPr references are patched in below.
+  const chromePlan = planChromeOverrides(doc, origSectPrs, ctx);
+  const boundaries = sectionBoundaries(doc, origSectPrs, chromePlan?.refPatch);
   let body = '';
   perf.span('export.body', () =>
     doc.forEach(
@@ -1336,6 +1351,7 @@ export async function exportDocx(
     );
 
   const zip = new JSZip();
+  const chromeCt = (chromePlan?.parts ?? []).map((p) => p.ctOverride);
   const styleIds = usedStyleIds(doc);
   let sectPr = ''; // re-attached from the original (carry) for page setup + headers
   if (opts?.carry) {
@@ -1348,8 +1364,14 @@ export async function exportDocx(
     zip.file(
       '[Content_Types].xml',
       ct
-        ? mergeContentTypes(ct, ctx.exts, hasComments, newNumberingPart)
-        : contentTypes(ctx.exts, hasComments, numberingPart != null),
+        ? mergeContentTypes(
+            ct,
+            ctx.exts,
+            hasComments,
+            newNumberingPart,
+            chromeCt,
+          )
+        : contentTypes(ctx.exts, hasComments, numberingPart != null, chromeCt),
     );
     // Styles referenced by pStyle but never defined by the source (headings /
     // Title / Subtitle authored in bapbong) get their defs appended.
@@ -1368,7 +1390,7 @@ export async function exportDocx(
     zip.file('word/styles.xml', stylesXml(styleIds));
     zip.file(
       '[Content_Types].xml',
-      contentTypes(ctx.exts, hasComments, numberingPart != null),
+      contentTypes(ctx.exts, hasComments, numberingPart != null, chromeCt),
     );
     zip.file('_rels/.rels', ROOT_RELS);
     zip.file(
@@ -1378,6 +1400,10 @@ export async function exportDocx(
   }
 
   if (numberingPart) zip.file('word/numbering.xml', numberingPart);
+  for (const part of chromePlan?.parts ?? []) {
+    zip.file(part.path, part.xml);
+    if (part.relsPath && part.relsXml) zip.file(part.relsPath, part.relsXml);
+  }
 
   // Page setup: the modelled geometry (doc.attrs.page) wins over the carried
   // sectPr — but only a real edit rewrites it (byte fidelity otherwise). No
@@ -1391,6 +1417,12 @@ export async function exportDocx(
     const p = pageAttr ?? A4_PAGE;
     sectPr = `<w:sectPr>${pgSzXml(p)}${pgMarXml(p.margin)}</w:sectPr>`;
   }
+
+  // The LAST section's chrome refs live on the body sectPr.
+  const lastSection =
+    ((doc.attrs['sections'] as SectionConfig[] | null)?.length ?? 1) - 1;
+  const lastPatch = chromePlan?.refPatch.get(lastSection);
+  if (lastPatch?.length) sectPr = applyChromeRefs(sectPr, lastPatch);
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
@@ -1410,4 +1442,198 @@ export async function exportDocx(
   return perf.spanAsync('export.generate', () =>
     zip.generateAsync({ type: 'uint8array' }),
   );
+}
+
+// ── Section chrome overrides (the page-number toggle) ───────────────
+
+const HEADER_CT =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml';
+const FOOTER_CT =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml';
+
+/** One header/footer part generated from `doc.attrs.sectionChromeOverrides`. */
+interface ChromePart {
+  path: string;
+  xml: string;
+  /** The part's own rels (hyperlinks/images inside the story), or null. */
+  relsPath: string | null;
+  relsXml: string | null;
+  ctOverride: string;
+}
+
+interface ChromePlan {
+  parts: ChromePart[];
+  /** Section index → explicit references to install on its sectPr. */
+  refPatch: Map<
+    number,
+    { story: 'header' | 'footer'; variant: string; rId: string }[]
+  >;
+}
+
+const CHROME_REF_RX = /<w:(?:header|footer)Reference\b[^>]*\/>/g;
+
+/** "story:variant" → rId for every reference a sectPr declares. */
+function refsOf(sectPr: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of sectPr.match(CHROME_REF_RX) ?? []) {
+    const story = /<w:(header|footer)Reference/.exec(m)?.[1];
+    const variant = /w:type="([^"]*)"/.exec(m)?.[1] ?? 'default';
+    const rId = /r:id="([^"]*)"/.exec(m)?.[1];
+    if (story && rId) out.set(`${story}:${variant}`, rId);
+  }
+  return out;
+}
+
+/**
+ * Plan the parts + reference rewiring for the model's chrome overrides. Each
+ * overridden story becomes a REAL header/footer part (what Word itself writes
+ * when a section unlinks from the previous one); the owning section's sectPr
+ * gets an explicit reference to it. A following section that INHERITED the
+ * overridden story is pinned to the original part — the override must change
+ * exactly one section.
+ */
+function planChromeOverrides(
+  doc: PMNode,
+  origSectPrs: string[],
+  ctx: ExportCtx,
+): ChromePlan | null {
+  const overrides = doc.attrs[
+    'sectionChromeOverrides'
+  ] as SectionChromeOverrides | null;
+  if (!overrides || Object.keys(overrides).length === 0) return null;
+  const nSections =
+    (doc.attrs['sections'] as SectionConfig[] | null)?.length ?? 1;
+  const aligned = origSectPrs.length === nSections;
+  // Effective ORIGINAL refs per section, Link-to-Previous resolved.
+  const effective: Map<string, string>[] = [];
+  for (let i = 0; i < nSections; i++) {
+    const prev = effective[i - 1] ?? new Map<string, string>();
+    const own = aligned ? refsOf(origSectPrs[i]) : new Map<string, string>();
+    effective.push(new Map([...prev, ...own]));
+  }
+  const plan: ChromePlan = { parts: [], refPatch: new Map() };
+  const push = (
+    si: number,
+    e: { story: 'header' | 'footer'; variant: string; rId: string },
+  ): void => {
+    const list = plan.refPatch.get(si) ?? [];
+    list.push(e);
+    plan.refPatch.set(si, list);
+  };
+  let seq = 1;
+  const entries = Object.entries(overrides).sort(
+    ([a], [b]) => Number(a) - Number(b),
+  );
+  for (const [key, o] of entries) {
+    const si = Number(key);
+    if (!Number.isInteger(si) || si < 0 || si >= nSections) continue;
+    for (const [storyKey, tag, relType, ct] of [
+      ['headers', 'w:hdr', 'header', HEADER_CT],
+      ['footers', 'w:ftr', 'footer', FOOTER_CT],
+    ] as const) {
+      const stories = o[storyKey] ?? {};
+      for (const [variant, json] of Object.entries(stories)) {
+        const part = chromeStoryPart(json, tag, doc, ctx);
+        if (!part) continue;
+        const name = `${relType}B${seq}.xml`;
+        const rId = `rIdChromeB${seq}`;
+        seq++;
+        plan.parts.push({
+          path: `word/${name}`,
+          xml: part.xml,
+          relsPath: part.rels ? `word/_rels/${name}.rels` : null,
+          relsXml: part.rels,
+          ctOverride: `<Override PartName="/word/${name}" ContentType="${ct}"/>`,
+        });
+        ctx.rels.push(
+          `<Relationship Id="${rId}" Type="${R_NS}/${relType}" Target="${name}"/>`,
+        );
+        push(si, { story: relType, variant, rId });
+        // Pin the FOLLOWING section to its original story when it inherited
+        // this one (its sectPr has no own reference): the part it pointed at
+        // implicitly just changed underneath it.
+        const next = si + 1;
+        if (
+          aligned &&
+          next < nSections &&
+          !refsOf(origSectPrs[next]).has(`${relType}:${variant}`)
+        ) {
+          const orig = effective[si].get(`${relType}:${variant}`);
+          if (orig) push(next, { story: relType, variant, rId: orig });
+        }
+      }
+    }
+  }
+  return plan.parts.length > 0 ? plan : null;
+}
+
+/** Serialize one story doc (override JSON) into a header/footer part. */
+function chromeStoryPart(
+  json: unknown,
+  tag: 'w:hdr' | 'w:ftr',
+  doc: PMNode,
+  ctx: ExportCtx,
+): { xml: string; rels: string | null } | null {
+  let node: PMNode;
+  try {
+    node = doc.type.schema.nodeFromJSON(json);
+  } catch {
+    return null; // malformed attr data must not take the export down
+  }
+  // Fresh comment state (chrome stories carry none) but SHARED media/ids —
+  // image targets are "media/…", relative to word/ for headers too.
+  const storyCtx: ExportCtx = {
+    rels: [],
+    media: ctx.media,
+    exts: ctx.exts,
+    nextId: ctx.nextId,
+    numIdMap: ctx.numIdMap,
+    knownComments: new Set(),
+    lastRun: new Map(),
+    openComments: new Set(),
+    runIdx: 0,
+  };
+  let body = '';
+  node.forEach((b) => {
+    body += blockXml(b, storyCtx);
+  });
+  ctx.nextId = storyCtx.nextId;
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<${tag} xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wps="${WPS_NS}">${body}</${tag}>`;
+  const rels =
+    storyCtx.rels.length > 0
+      ? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${storyCtx.rels.join('')}</Relationships>`
+      : null;
+  return { xml, rels };
+}
+
+/** Install explicit header/footer references on a sectPr, replacing any
+ *  existing reference of the same story+variant (an absent w:type counts as
+ *  "default"). References sit first inside sectPr — schema order. */
+function applyChromeRefs(
+  sectPr: string,
+  patch: { story: 'header' | 'footer'; variant: string; rId: string }[],
+): string {
+  const self = /^<w:sectPr\b([^>]*)\/>\s*$/.exec(sectPr.trim());
+  let out = self ? `<w:sectPr${self[1]}></w:sectPr>` : sectPr;
+  for (const p of patch) {
+    const rx =
+      p.variant === 'default'
+        ? new RegExp(
+            `<w:${p.story}Reference\\b(?![^>]*w:type="(?:first|even)")[^>]*/>`,
+            'g',
+          )
+        : new RegExp(
+            `<w:${p.story}Reference\\b(?=[^>]*w:type="${p.variant}")[^>]*/>`,
+            'g',
+          );
+    out = out.replace(rx, '');
+  }
+  const refs = patch
+    .map(
+      (p) => `<w:${p.story}Reference w:type="${p.variant}" r:id="${p.rId}"/>`,
+    )
+    .join('');
+  return out.replace(/<w:sectPr\b[^>]*>/, (m) => m + refs);
 }

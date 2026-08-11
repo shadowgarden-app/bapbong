@@ -107,6 +107,13 @@ export const schema = new Schema({
         // CommentNode[] (contracts) — comment threads keyed to `comment` marks.
         // Edited via setDocAttribute so add/reply/resolve/delete undo cleanly.
         comments: { default: null },
+        // Per-section header/footer story OVERRIDES, keyed by section index →
+        // story ('headers'|'footers') → variant ('default'|'first'|'even') →
+        // the full story doc as JSON. The first chrome EDIT the model supports
+        // (the section marker's page-number toggle): an override replaces the
+        // section's inherited story (Word's "unlink from previous"), rides the
+        // doc so it undoes cleanly, and exports as a real header/footer part.
+        sectionChromeOverrides: { default: null },
       },
     },
 

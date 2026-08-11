@@ -50,6 +50,20 @@ export interface PageNumbering {
   fmt?: string;
 }
 
+/** `doc.attrs.sectionChromeOverrides` — per-section header/footer story
+ *  overrides, the model's first chrome EDIT (the page-number toggle). Keyed
+ *  by section index (as a string — attrs are JSON); each story variant holds
+ *  the FULL replacement story doc as ProseMirror JSON. An override severs
+ *  that story's "Link to Previous" inheritance for that section only; export
+ *  writes it as a real header/footer part. */
+export type SectionChromeOverrides = Record<
+  string,
+  {
+    headers?: Record<string, unknown>;
+    footers?: Record<string, unknown>;
+  }
+>;
+
 /** A document comment (w:comment) referenced by a w:commentRange in the body.
  *  `id` matches the comment mark's ids; `text` is the flattened comment body. */
 export interface CommentData {

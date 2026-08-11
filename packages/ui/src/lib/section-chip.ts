@@ -22,6 +22,7 @@ const STYLE = `
 .bb-secchip-seg{display:inline-flex;align-items:center;gap:4px;height:16px;padding:0 7px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:11px;cursor:pointer}
 .bb-secchip-seg:hover,.bb-secchip-seg[aria-expanded="true"]{background:var(--bb-ui-hover,#f1efe8)}
 .bb-secchip-caret{font-size:8px;opacity:.55}
+.bb-secchip-seg[data-muted="true"] .bb-secchip-seglabel{font-style:italic;opacity:.55}
 .bb-secchip-div{flex:none;width:1px;height:11px;margin:0 2px;background:var(--bb-ui-border,#e3e3e0)}
 .bb-secchip-x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:16px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;opacity:.65;cursor:pointer}
 .bb-secchip-x:hover{background:var(--bb-ui-hover,#f1efe8);opacity:1}
@@ -44,8 +45,13 @@ export interface SectionChipOptions {
 export interface SectionChipHandle {
   /** Position with `left`/`top` (the chip centers itself on that point). */
   el: HTMLElement;
-  /** Refresh the two data segments' labels. */
-  update(data: { pageNumbers: string; paper: string }): void;
+  /** Refresh the two data segments' labels. `pageNumbersMuted` styles the
+   *  numbering segment as inactive ("no page number") — still clickable. */
+  update(data: {
+    pageNumbers: string;
+    pageNumbersMuted?: boolean;
+    paper: string;
+  }): void;
   destroy(): void;
 }
 
@@ -105,6 +111,7 @@ export function createSectionChip(
     el,
     update(data) {
       nums.label.textContent = data.pageNumbers;
+      nums.btn.dataset['muted'] = String(!!data.pageNumbersMuted);
       paper.label.textContent = data.paper;
     },
     destroy() {

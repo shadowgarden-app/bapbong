@@ -1450,3 +1450,98 @@ describe('named paragraph styles (Title/Subtitle/HeadingN) + styles.xml', () => 
     expect(styles).toContain('w:styleId="Title"');
   });
 });
+
+describe('exportDocx (section chrome overrides — page-number toggle)', () => {
+  /** Two sections: section 0 owns header1.xml (a PAGE field), section 1
+   *  inherits it (no reference of its own — Word's Link to Previous). */
+  async function sourceWithNumberedHeader(): Promise<Uint8Array> {
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/_rels/document.xml.rels',
+      `<?xml version="1.0"?><Relationships xmlns="${PR_NS}"><Relationship Id="rId10" Type="${R_NS}/header" Target="header1.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/header1.xml',
+      `<?xml version="1.0"?><w:hdr xmlns:w="${W_NS}"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:hdr>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>` +
+        `<w:p><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rId10"/><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:pPr>` +
+        `<w:r><w:t>front</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>body</w:t></w:r></w:p>` +
+        `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>` +
+        `</w:body></w:document>`,
+    );
+    return zip.generateAsync({ type: 'uint8array' });
+  }
+
+  it('writes an override as a real part, rewires its section, pins the next', async () => {
+    const { doc, raw } = await importDocx(await sourceWithNumberedHeader());
+    // The toggle's model shape: section 0's default header replaced by a
+    // stripped story (the PAGE field removed).
+    const withOverride = doc.type.create(
+      {
+        ...doc.attrs,
+        sectionChromeOverrides: {
+          '0': {
+            headers: {
+              default: {
+                type: 'doc',
+                content: [{ type: 'paragraph', attrs: { align: 'center' } }],
+              },
+            },
+          },
+        },
+      },
+      doc.content,
+    );
+    const bytes = await exportDocx(withOverride, { carry: raw });
+    const zip = await JSZip.loadAsync(bytes);
+
+    const partXml = await zip.file('word/headerB1.xml')?.async('string');
+    expect(partXml).toBeTruthy();
+    expect(partXml).not.toContain('fldSimple'); // the number is really gone
+
+    const docXml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    // Section 0 now references the override part…
+    expect(docXml).toContain(
+      '<w:headerReference w:type="default" r:id="rIdChromeB1"/>',
+    );
+    // …and section 1, which INHERITED the old header, is pinned to it so the
+    // override changes exactly one section.
+    expect(docXml).toContain(
+      '<w:headerReference w:type="default" r:id="rId10"/>',
+    );
+
+    const rels =
+      (await zip.file('word/_rels/document.xml.rels')?.async('string')) ?? '';
+    expect(rels).toContain('Id="rIdChromeB1"');
+    expect(rels).toContain('Target="headerB1.xml"');
+    const ct = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
+    expect(ct).toContain('/word/headerB1.xml');
+
+    // Round-trip: the exported file is a plain Word doc — reimporting sees
+    // section 0 without a page number and section 1 still numbered.
+    const back = await importDocx(bytes);
+    const hasField = (n: import('prosemirror-model').Node | undefined) => {
+      let found = false;
+      n?.descendants((c) => {
+        if (c.type.name === 'page_field') found = true;
+        return !found;
+      });
+      return found;
+    };
+    expect(back.sectionChrome).toBeTruthy();
+    expect(hasField(back.sectionChrome?.[0]?.headers['default'])).toBe(false);
+    expect(hasField(back.sectionChrome?.[1]?.headers['default'])).toBe(true);
+  });
+});

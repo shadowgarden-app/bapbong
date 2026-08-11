@@ -72,13 +72,11 @@ import {
   openCellProperties,
   openFontDialog,
   openPageSizeDialog,
-  orientationPicker,
   pageNumberPicker,
-  pageSizePicker,
   promptDialog,
+  sectionPaperPanel,
   showContextMenu,
   showLinkPanel,
-  showMenu,
   showPopup,
   tableGridPicker,
   type BorderPreset,
@@ -636,8 +634,12 @@ export class EditorPlayground implements OnDestroy {
       slot.chip.el.style.display = '';
       slot.chip.el.style.left = `${(tl.x + tr.x) / 2}px`;
       slot.chip.el.style.top = `${gapY}px`;
+      const shows = ed.sectionShowsPageNumbers(slot.boundary + 1);
       slot.chip.update({
-        pageNumbers: this.sectionNumberingLabel(slot),
+        pageNumbers: shows
+          ? this.sectionNumberingLabel(slot)
+          : 'no page number',
+        pageNumbersMuted: !shows,
         paper: this.sectionPaperLabel(slot),
       });
     });
@@ -700,8 +702,14 @@ export class EditorPlayground implements OnDestroy {
     const target = slot.boundary + 1;
     const pn = this.chipSection(slot)?.pageNumbers;
     const r = anchor.getBoundingClientRect();
+    const ed = this.editor;
     const popup = showPopup(
       pageNumberPicker({
+        shown: ed?.sectionShowsPageNumbers(target) ?? true,
+        onToggleShown: (show) => {
+          popup.close();
+          ed?.setSectionPageNumbersShown(target, show);
+        },
         fmt: pn?.fmt,
         start: pn?.start,
         onPick: (next) => {
@@ -713,8 +721,8 @@ export class EditorPlayground implements OnDestroy {
     );
   }
 
-  /** The chip's Orientation / Page size menu — the same rows and picker
-   *  widgets as the desktop app's Layout menu, scoped to one section. */
+  /** The chip's paper menu: ONE flat panel (orientation tiles + paper
+   *  presets + custom), scoped to the section after the break. */
   private openSectionPaper(
     slot: { boundary: number },
     anchor: HTMLElement,
@@ -722,55 +730,39 @@ export class EditorPlayground implements OnDestroy {
     const target = slot.boundary + 1;
     const PAPERS: PaperSize[] = ['letter', 'legal', 'executive', 'a4', 'a5'];
     const r = anchor.getBoundingClientRect();
-    showMenu(
-      [
-        {
-          label: 'Orientation',
-          widget: (close) => {
-            const page = this.chipSectionPage(slot);
-            return orientationPicker({
-              page,
-              active: page.width > page.height ? 'landscape' : 'portrait',
-              onPick: (o) => {
-                close();
-                this.exec(setSectionOrientation(target, o));
-              },
-            });
-          },
+    const page = this.chipSectionPage(slot);
+    const short = Math.min(page.width, page.height);
+    const long = Math.max(page.width, page.height);
+    const popup = showPopup(
+      sectionPaperPanel({
+        page,
+        items: PAPERS.map((key) => {
+          const size = PAPER_SIZES[key];
+          return {
+            key,
+            label: size.label,
+            cm: size.cm,
+            px: [size.width, size.height] as const,
+            active: short === size.width && long === size.height,
+          };
+        }),
+        onOrientation: (o) => {
+          popup.close();
+          this.exec(setSectionOrientation(target, o));
         },
-        {
-          label: 'Page size',
-          widget: (close) => {
-            const page = this.chipSectionPage(slot);
-            const short = Math.min(page.width, page.height);
-            const long = Math.max(page.width, page.height);
-            return pageSizePicker({
-              items: PAPERS.map((key) => {
-                const size = PAPER_SIZES[key];
-                return {
-                  key,
-                  label: size.label,
-                  cm: size.cm,
-                  px: [size.width, size.height] as const,
-                  active: short === size.width && long === size.height,
-                };
-              }),
-              onPick: (key) => {
-                close();
-                this.exec(setSectionPaperSize(target, key as PaperSize));
-              },
-              onCustom: () => {
-                close();
-                openPageSizeDialog({
-                  initial: { width: page.width, height: page.height },
-                  onApply: ({ width, height }) =>
-                    this.exec(setSectionPageDimensions(target, width, height)),
-                });
-              },
-            });
-          },
+        onPick: (key) => {
+          popup.close();
+          this.exec(setSectionPaperSize(target, key as PaperSize));
         },
-      ],
+        onCustom: () => {
+          popup.close();
+          openPageSizeDialog({
+            initial: { width: page.width, height: page.height },
+            onApply: ({ width, height }) =>
+              this.exec(setSectionPageDimensions(target, width, height)),
+          });
+        },
+      }),
       { x: r.left, y: r.bottom + 4 },
     );
   }

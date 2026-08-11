@@ -38,6 +38,7 @@ import type {
   PluginContext,
   RangeDecoration,
   ResolvedLayout,
+  SectionChromeOverrides,
   SectionConfig,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
@@ -153,6 +154,31 @@ let lastInteracted: BapbongEditor | null = null;
 
 function markInteracted(editor: BapbongEditor): void {
   lastInteracted = editor;
+}
+
+/** True when a chrome story contains a PAGE/NUMPAGES field atom. */
+function storyHasPageField(story: ProseMirrorNode | undefined): boolean {
+  let found = false;
+  story?.descendants((n) => {
+    if (n.type.name === 'page_field') found = true;
+    return !found;
+  });
+  return found;
+}
+
+/** A story's JSON minus every page_field atom (PAGE and NUMPAGES both go —
+ *  hiding page numbers should not leave a dangling "of 12"). Literal text
+ *  around the fields is the user's and stays. */
+function stripPageFields(json: unknown): unknown {
+  const node = json as { type?: string; content?: unknown[] };
+  if (!node || typeof node !== 'object' || !Array.isArray(node.content))
+    return json;
+  return {
+    ...node,
+    content: node.content
+      .filter((c) => (c as { type?: string } | null)?.type !== 'page_field')
+      .map((c) => stripPageFields(c)),
+  };
 }
 
 export class BapbongEditor {
@@ -546,6 +572,100 @@ export class BapbongEditor {
       });
     }
     return out;
+  }
+
+  /** True when section `sectionIndex`'s pages display a page number — some
+   *  effective header/footer story (overrides applied, Link-to-Previous
+   *  resolved) contains a PAGE field. */
+  sectionShowsPageNumbers(sectionIndex: number): boolean {
+    const { headers, footers } = this.sectionStories(sectionIndex);
+    return [...Object.values(headers), ...Object.values(footers)].some(
+      storyHasPageField,
+    );
+  }
+
+  /**
+   * Show/hide page numbers on ONE section, with Word's semantics: the toggle
+   * edits the section's header/footer stories themselves, not a display flag.
+   * Hiding strips the PAGE fields out of a copy of the effective stories and
+   * installs it as the section's own chrome (severing "Link to Previous" for
+   * exactly those stories); showing removes that override — or, when the
+   * inherited chrome never had a number, inserts a centered PAGE field into
+   * the section's footer (Word's Insert ▸ Page Number). Rides
+   * `doc.attrs.sectionChromeOverrides`, so it undoes cleanly and exports as
+   * real header/footer parts.
+   */
+  setSectionPageNumbersShown(sectionIndex: number, show: boolean): void {
+    if (!this.bridge) return;
+    const state = this.bridge.state;
+    const schema = state.schema;
+    const attr =
+      (state.doc.attrs[
+        'sectionChromeOverrides'
+      ] as SectionChromeOverrides | null) ?? {};
+    const key = String(sectionIndex);
+    let next: SectionChromeOverrides | null = null;
+
+    if (!show) {
+      const { headers, footers } = this.sectionStories(sectionIndex);
+      const override: SectionChromeOverrides[string] = {};
+      for (const [variant, story] of Object.entries(headers)) {
+        if (storyHasPageField(story))
+          (override.headers ??= {})[variant] = stripPageFields(story.toJSON());
+      }
+      for (const [variant, story] of Object.entries(footers)) {
+        if (storyHasPageField(story))
+          (override.footers ??= {})[variant] = stripPageFields(story.toJSON());
+      }
+      if (!override.headers && !override.footers) return; // already hidden
+      next = { ...attr, [key]: override };
+    } else {
+      // Inherited = the chrome as imported, IGNORING overrides.
+      const inherited =
+        this.core.effectiveSectionChrome(null)?.[sectionIndex] ??
+        this.core.flatChrome();
+      const inheritedShows = [
+        ...Object.values(inherited.headers),
+        ...Object.values(inherited.footers),
+      ].some(storyHasPageField);
+      if (inheritedShows) {
+        if (!(key in attr)) return; // already shown
+        next = { ...attr };
+        delete next[key];
+        if (Object.keys(next).length === 0) next = null;
+      } else {
+        const numberPara = schema.node('paragraph', { align: 'center' }, [
+          schema.node('page_field', { kind: 'page' }),
+        ]);
+        const base = inherited.footers['default'];
+        const footer = base
+          ? base.copy(base.content.addToEnd(numberPara))
+          : schema.node('doc', null, [numberPara]);
+        next = {
+          ...attr,
+          [key]: {
+            ...attr[key],
+            footers: { ...attr[key]?.footers, default: footer.toJSON() },
+          },
+        };
+      }
+    }
+    this.dispatch(state.tr.setDocAttribute('sectionChromeOverrides', next));
+  }
+
+  /** Section `sectionIndex`'s effective stories (overrides > per-section
+   *  chrome > the flat document chrome). */
+  private sectionStories(sectionIndex: number): {
+    headers: Record<string, ProseMirrorNode>;
+    footers: Record<string, ProseMirrorNode>;
+  } {
+    const merged = this.bridge
+      ? this.core.effectiveSectionChrome(this.bridge.state.doc)
+      : null;
+    const s = merged?.[sectionIndex];
+    return s
+      ? { headers: s.headers, footers: s.footers }
+      : this.core.flatChrome();
   }
 
   /** Move the selection (caret if `to` omitted) and anchor the IME. */

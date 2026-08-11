@@ -33,6 +33,8 @@ import type {
   PaintDecoration,
   RangeDecoration,
   ResolvedLayout,
+  SectionChromeOverrides,
+  SectionConfig,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
@@ -104,6 +106,10 @@ export class RenderCore {
   /** Per-section chrome (aligned with doc.attrs.sections), when it differs
    *  from the flat fields above. */
   private sectionChrome: SectionChrome[] | null = null;
+  /** Parsed story docs from `doc.attrs.sectionChromeOverrides`, cached by the
+   *  JSON object's identity (attrs are structurally shared across
+   *  transactions, so an unchanged override never re-parses). */
+  private readonly chromeOverrideCache = new WeakMap<object, ProseMirrorNode>();
   // Footnote bodies keyed by display number (laid out at the page bottom).
   private footnotes: Record<number, ProseMirrorNode> | undefined;
   // The imported source package — passed to exportDocx({ carry }) so styles /
@@ -340,21 +346,92 @@ export class RenderCore {
           footerEven: this.chromeFooters['even'],
           titlePg: this.chromeTitlePg,
           evenAndOdd: this.chromeEvenAndOdd,
-          sections: this.sectionChrome
-            ? this.sectionChrome.map((s) => ({
-                header: s.headers['default'],
-                footer: s.footers['default'],
-                headerFirst: s.headers['first'],
-                footerFirst: s.footers['first'],
-                headerEven: s.headers['even'],
-                footerEven: s.footers['even'],
-                titlePg: s.titlePg,
-              }))
-            : undefined,
+          sections: (() => {
+            const merged = this.effectiveSectionChrome(doc);
+            return merged
+              ? merged.map((s) => ({
+                  header: s.headers['default'],
+                  footer: s.footers['default'],
+                  headerFirst: s.headers['first'],
+                  footerFirst: s.footers['first'],
+                  headerEven: s.headers['even'],
+                  footerEven: s.footers['even'],
+                  titlePg: s.titlePg,
+                }))
+              : undefined;
+          })(),
         },
         this.footnotes,
       ),
     );
+  }
+
+  /** The per-section chrome the layout actually uses: the imported stories
+   *  with `doc.attrs.sectionChromeOverrides` applied on top. Without
+   *  overrides this is the imported `sectionChrome` verbatim; with them, a
+   *  doc whose chrome was flat gets a synthesized per-section array first so
+   *  the override can differ from its siblings. */
+  effectiveSectionChrome(
+    doc: ProseMirrorNode | null = this.doc,
+  ): SectionChrome[] | null {
+    if (!doc) return this.sectionChrome;
+    const overrides = doc.attrs[
+      'sectionChromeOverrides'
+    ] as SectionChromeOverrides | null;
+    if (!overrides || Object.keys(overrides).length === 0)
+      return this.sectionChrome;
+    const count = Math.max(
+      (doc.attrs['sections'] as SectionConfig[] | null)?.length ?? 1,
+      this.sectionChrome?.length ?? 0,
+    );
+    const base: SectionChrome[] =
+      this.sectionChrome ??
+      Array.from({ length: count }, () => ({
+        headers: this.chromeHeaders,
+        footers: this.chromeFooters,
+        titlePg: this.chromeTitlePg,
+      }));
+    const out = base.map((s) => ({
+      headers: { ...s.headers },
+      footers: { ...s.footers },
+      titlePg: s.titlePg,
+    }));
+    for (const [key, o] of Object.entries(overrides)) {
+      const si = Number(key);
+      const target = out[si];
+      if (!target) continue;
+      for (const [variant, json] of Object.entries(o.headers ?? {})) {
+        const parsed = this.parseChromeStory(json);
+        if (parsed) target.headers[variant] = parsed;
+      }
+      for (const [variant, json] of Object.entries(o.footers ?? {})) {
+        const parsed = this.parseChromeStory(json);
+        if (parsed) target.footers[variant] = parsed;
+      }
+    }
+    return out;
+  }
+
+  /** Header/footer stories shared by every section (the imported flat set) —
+   *  what a section without its own chrome inherits. */
+  flatChrome(): {
+    headers: Record<string, ProseMirrorNode>;
+    footers: Record<string, ProseMirrorNode>;
+  } {
+    return { headers: this.chromeHeaders, footers: this.chromeFooters };
+  }
+
+  private parseChromeStory(json: unknown): ProseMirrorNode | null {
+    if (json == null || typeof json !== 'object') return null;
+    const cached = this.chromeOverrideCache.get(json);
+    if (cached) return cached;
+    try {
+      const node = this.docSchema.nodeFromJSON(json);
+      this.chromeOverrideCache.set(json, node);
+      return node;
+    } catch {
+      return null; // malformed attr data must not take layout down
+    }
   }
 
   /** Full content repaint, virtualized to the scroll viewport. Pass an overlay

@@ -73,6 +73,14 @@ const STYLE = `
 .bb-pd-actions{display:flex;justify-content:flex-end;gap:8px}
 .bb-pn-input{width:52px;height:24px;padding:0 6px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:5px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:12px}
 .bb-pn-input:focus{outline:2px solid var(--bb-ui-active-border,#7fb2ec);outline-offset:-1px}
+.bb-pn-check{flex:none;width:15px;height:15px;display:inline-flex;align-items:center;justify-content:center;border:1.5px solid var(--bb-ui-border,#b4b2a9);border-radius:4px;background:var(--bb-ui-bg,#fff);color:#fff;font-size:10px;line-height:1}
+.bb-pn-check[data-on="true"]{background:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-fg,#0c447c)}
+.bb-pn-body[data-disabled="true"]{opacity:.35;pointer-events:none}
+.bb-ps-group{padding:5px 10px 2px;font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;opacity:.55}
+.bb-ps-tiles{display:flex;gap:6px;padding:2px 6px 4px}
+.bb-ps-tile{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 0 5px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.bb-ps-tile:hover,.bb-ps-tile:focus{background:var(--bb-ui-hover,#f1efe8);outline:none}
+.bb-ps-tile[aria-checked="true"]{background:var(--bb-ui-active-bg,#e6f1fb)}
 `;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -505,6 +513,11 @@ const PGNUM_FORMATS: ReadonlyArray<[string | undefined, string, string]> = [
 ];
 
 export interface PageNumberPickerOptions {
+  /** Whether the section currently SHOWS page numbers (its headers/footers
+   *  contain a PAGE field). Paired with `onToggleShown` it adds a leading
+   *  checkbox row; when false the format/restart body is disabled. */
+  shown?: boolean;
+  onToggleShown?: (show: boolean) => void;
   /** The section's current format (raw ST_NumberFormat); undefined or
    *  "decimal" both check the decimal row. */
   fmt?: string;
@@ -514,7 +527,7 @@ export interface PageNumberPickerOptions {
   /** Caption on the continue row, e.g. the numbers it would produce
    *  ("ii, iii…"). */
   continueHint?: string;
-  labels?: { restart?: string; continueFrom?: string };
+  labels?: { restart?: string; continueFrom?: string; shown?: string };
   /** Called with the section's next pageNumbers value — null when the pick
    *  lands back on the defaults (decimal, no restart). */
   onPick: (pageNumbers: { fmt?: string; start?: number } | null) => void;
@@ -533,6 +546,36 @@ export function pageNumberPicker(
   root.className = 'bb-ps';
   root.setAttribute('role', 'menu');
 
+  // Optional leading toggle: whether this section shows page numbers at all.
+  // The rest of the picker configures HOW they show, so it dims when off.
+  let body: HTMLElement = root;
+  if (options.onToggleShown) {
+    const on = options.shown !== false;
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'bb-ps-row';
+    row.setAttribute('role', 'menuitemcheckbox');
+    row.setAttribute('aria-checked', String(on));
+    const box = document.createElement('span');
+    box.className = 'bb-pn-check';
+    box.dataset['on'] = String(on);
+    box.textContent = on ? '✓' : '';
+    const name = document.createElement('span');
+    name.className = 'bb-ps-name';
+    name.textContent = options.labels?.shown ?? 'Show page numbers';
+    row.append(box, name);
+    row.addEventListener('mousedown', (e) => e.preventDefault());
+    row.addEventListener('click', () => options.onToggleShown?.(!on));
+    root.appendChild(row);
+    const sep0 = document.createElement('div');
+    sep0.className = 'bb-ps-sep';
+    root.appendChild(sep0);
+    body = document.createElement('div');
+    body.className = 'bb-pn-body';
+    if (!on) body.dataset['disabled'] = 'true';
+    root.appendChild(body);
+  }
+
   const curFmt = options.fmt === 'decimal' ? undefined : options.fmt;
   const emit = (fmt: string | undefined, start: number | undefined): void => {
     options.onPick(
@@ -546,7 +589,7 @@ export function pageNumberPicker(
   };
 
   for (const [key, label, sample] of PGNUM_FORMATS) {
-    root.appendChild(
+    body.appendChild(
       presetRow(
         numberPreview(sample),
         label,
@@ -606,15 +649,106 @@ export function pageNumberPicker(
   input.addEventListener('wheel', (e) => e.preventDefault(), {
     passive: false,
   });
-  root.appendChild(restart);
+  body.appendChild(restart);
 
-  root.appendChild(
+  body.appendChild(
     presetRow(
       numberPreview('→'),
       options.labels?.continueFrom ?? 'Continue from previous section',
       captionLine(options.continueHint ?? ''),
       options.start == null,
       () => emit(curFmt, undefined),
+    ),
+  );
+  return root;
+}
+
+// ── Flat per-section paper panel (the section marker's paper menu) ──
+
+export interface SectionPaperPanelOptions {
+  /** Current section geometry in px — drives previews + the active states. */
+  page: { width: number; height: number };
+  items: readonly PaperChoice[];
+  labels?: { orientation?: string; pageSize?: string; custom?: string };
+  onOrientation: (orientation: 'portrait' | 'landscape') => void;
+  onPick: (key: string) => void;
+  onCustom: () => void;
+}
+
+/**
+ * ONE flat panel: an orientation tile pair, then the paper presets, then the
+ * custom row — no submenus, so every option is a single tap (touch-first,
+ * same reasoning as the always-expanded section chip).
+ */
+export function sectionPaperPanel(
+  options: SectionPaperPanelOptions,
+): HTMLElement {
+  injectStyle('bb-ui-pagesetup-styles', STYLE);
+  const root = document.createElement('div');
+  root.className = 'bb-ps';
+  root.setAttribute('role', 'menu');
+
+  const group = (text: string): HTMLElement => {
+    const el = document.createElement('div');
+    el.className = 'bb-ps-group';
+    el.textContent = text;
+    return el;
+  };
+  const sep = (): HTMLElement => {
+    const el = document.createElement('div');
+    el.className = 'bb-ps-sep';
+    return el;
+  };
+
+  root.appendChild(group(options.labels?.orientation ?? 'Orientation'));
+  const tiles = document.createElement('div');
+  tiles.className = 'bb-ps-tiles';
+  const landscapeNow = options.page.width > options.page.height;
+  const short = Math.min(options.page.width, options.page.height);
+  const long = Math.max(options.page.width, options.page.height);
+  for (const [key, label, ratio] of [
+    ['portrait', 'Portrait', short / long],
+    ['landscape', 'Landscape', long / short],
+  ] as const) {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'bb-ps-tile';
+    tile.setAttribute('role', 'menuitemradio');
+    tile.setAttribute(
+      'aria-checked',
+      String(landscapeNow === (key === 'landscape')),
+    );
+    const icon = pagePreview(ratio);
+    icon.setAttribute('style', 'width:26px;height:32px');
+    const name = document.createElement('span');
+    name.textContent = label;
+    tile.append(icon, name);
+    tile.addEventListener('mousedown', (e) => e.preventDefault());
+    tile.addEventListener('click', () => options.onOrientation(key));
+    tiles.appendChild(tile);
+  }
+  root.appendChild(tiles);
+
+  root.appendChild(sep());
+  root.appendChild(group(options.labels?.pageSize ?? 'Page size'));
+  for (const item of options.items) {
+    root.appendChild(
+      presetRow(
+        pagePreview(item.px[0] / item.px[1]),
+        item.label,
+        captionLine(`${fmtCm(item.cm[0])} x ${fmtCm(item.cm[1])}`),
+        !!item.active,
+        () => options.onPick(item.key),
+      ),
+    );
+  }
+  root.appendChild(sep());
+  root.appendChild(
+    customRow(
+      pagePreview(0.773),
+      options.labels?.custom ?? 'Custom page size',
+      'Define custom page size',
+      options.onCustom,
     ),
   );
   return root;
