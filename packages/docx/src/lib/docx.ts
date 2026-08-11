@@ -919,6 +919,51 @@ function vmlColor(v: string | undefined): string | undefined {
   return VML_COLORS[c.toLowerCase()];
 }
 
+/**
+ * `v:roundrect @arcsize` → the model's corner ratio.
+ *
+ * The spec states the value as a fraction **of half the shorter side** (0%
+ * square, 100% circular, default 20%), while the model — and DrawingML's
+ * `a:gd` adj — measure against the WHOLE shorter side. Hence the ÷2: a Word
+ * 2003 rounded rectangle at the usual `10923f` is rounded 0.083 of its short
+ * side, half as much as the DrawingML default the painter falls back to.
+ *
+ * Three encodings appear in the wild: `10923f` (fixed point, /65536), `25%`,
+ * and a bare fraction.
+ */
+function vmlArcSize(v: string | undefined): number {
+  const raw = v?.trim();
+  let a = 0.2; // spec default
+  if (raw) {
+    const num = Number.parseFloat(raw);
+    if (Number.isFinite(num)) {
+      if (raw.endsWith('f')) a = num / 65536;
+      else if (raw.endsWith('%')) a = num / 100;
+      else a = num;
+    }
+  }
+  return Math.min(Math.max(a, 0), 1) / 2;
+}
+
+/** Fallback pattern for the NAMED dashstyles (dash, longdashdot, …). The spec
+ *  lists the names but not their lengths, and no document in our corpus uses
+ *  one — rather than invent a table per name, every named style keeps the
+ *  generic dash this code has always drawn. Numeric styles are exact. */
+const VML_NAMED_DASH = [4, 3];
+
+/** `v:stroke @dashstyle` → dash pattern in multiples of the stroke width.
+ *  Numeric form ("1 1", "3 1 1 1") is the document's own measurement and is
+ *  taken verbatim; a named form falls back (see {@link VML_NAMED_DASH}). */
+function vmlDashPattern(v: string): number[] {
+  const nums = v
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  return nums.length > 0 && nums.every((n) => Number.isFinite(n) && n >= 0)
+    ? nums
+    : VML_NAMED_DASH;
+}
+
 /** v:textbox content + inset ("l,t,r,b" CSS lengths; defaults match the wps
  *  bodyPr defaults — both are Word's 0.1"/0.05"). */
 function parseVmlTextbox(
@@ -1003,6 +1048,8 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (kind !== 'line' && attrOf(el, 'filled') !== 'f')
     shape['fill'] = vmlColor(attrOf(el, 'fillcolor')) ?? '#ffffff';
   if (st.flipV) shape['flipV'] = true;
+  if (kind === 'roundRect')
+    shape['cornerRatio'] = vmlArcSize(attrOf(el, 'arcsize'));
   const strokeEl = child(el, 'v:stroke');
   const startArrow = attrOf(strokeEl, 'startarrow');
   const endArrow = attrOf(strokeEl, 'endarrow');
@@ -1010,7 +1057,12 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (endArrow && endArrow !== 'none') shape['arrowEnd'] = true;
   // Dashed connectors ("1 1" dotted, "dash", …) — anything but solid.
   const dashstyle = attrOf(strokeEl, 'dashstyle');
-  if (dashstyle && dashstyle !== 'solid') shape['dash'] = true;
+  if (dashstyle && dashstyle !== 'solid')
+    shape['dash'] = vmlDashPattern(dashstyle);
+  // endcap: flat (the spec default) needs no model field — the painter's
+  // canvas default is already butt.
+  const endcap = attrOf(strokeEl, 'endcap');
+  if (endcap === 'round' || endcap === 'square') shape['cap'] = endcap;
 
   // v:textbox style layout-flow:vertical (+ mso-layout-flow-alt) — text runs
   // along the box's vertical axis. The painter rotates a float's ENTIRE
@@ -1043,7 +1095,7 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   }
 
   // NB: no blanket markSubtree here — properties the model does NOT honor
-  // (arcsize, an unread dash variant, …) must stay visible in the XML audit;
+  // (v:shadow, o:extrusion, …) must stay visible in the XML audit;
   // everything consumed above was marked by reading it.
   audit.mark(pict);
   return ctx.schema.nodes['image'].create({

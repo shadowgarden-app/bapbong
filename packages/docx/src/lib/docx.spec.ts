@@ -2388,6 +2388,30 @@ describe('legacy VML shapes', () => {
     expect(tb.inset).toMatchObject({ l: 2, t: 1, r: 2, b: 1 });
   });
 
+  it('reads arcsize in each encoding, halving it against the shorter side', async () => {
+    const ratioOf = async (attr: string) => {
+      const bytes = await makeDocx(
+        vmlDoc(`<w:p><w:r><w:pict>
+          <v:roundrect style="position:absolute;width:60pt;height:30pt"${attr}/>
+        </w:pict></w:r></w:p>`),
+      );
+      const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+      let img: import('prosemirror-model').Node | null = null;
+      doc.descendants((n) => {
+        if (n.type.name === 'image') img = n;
+        return true;
+      });
+      return (img!.attrs['shape'] as Record<string, number>)['cornerRatio'];
+    };
+    // VML states roundness against HALF the shorter side, the model against
+    // the whole one — hence every value here is the file's number ÷ 2.
+    expect(await ratioOf(' arcsize="10923f"')).toBeCloseTo(0.08333, 4); // 10923/65536/2
+    expect(await ratioOf(' arcsize="25%"')).toBeCloseTo(0.125, 4);
+    expect(await ratioOf(' arcsize="0.5"')).toBeCloseTo(0.25, 4);
+    expect(await ratioOf(' arcsize="200%"')).toBeCloseTo(0.5, 4); // clamped
+    expect(await ratioOf('')).toBeCloseTo(0.1, 4); // spec default 0.2 ÷ 2
+  });
+
   it('imports a t32 connector as an arrowed line via the shapetype registry', async () => {
     const bytes = await makeDocx(
       vmlDoc(`<w:p><w:r><w:pict>
@@ -2467,21 +2491,49 @@ describe('legacy VML: dash and vertical text', () => {
     return img!;
   };
 
-  it('a dashstyle connector imports as a dashed line', async () => {
+  it('a dashstyle connector keeps the document dash lengths verbatim', async () => {
     const bytes = await makeDocx(
       vmlDoc2(`<w:p><w:r><w:pict>
         <v:shape style="position:absolute;width:120pt;height:0" o:connectortype="straight">
-          <v:stroke dashstyle="1 1" startarrow="block" endarrow="block"/>
+          <v:stroke dashstyle="1 1" startarrow="block" endarrow="block" endcap="round"/>
         </v:shape>
       </w:pict></w:r></w:p>`),
     );
     const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    // "1 1" is dash 1 × stroke width, gap 1 × stroke width — kept verbatim
+    // rather than flattened to a boolean the painter would have to guess at.
     expect(firstImage(doc).attrs['shape']).toMatchObject({
       kind: 'line',
-      dash: true,
+      dash: [1, 1],
+      cap: 'round',
       arrowStart: true,
       arrowEnd: true,
     });
+  });
+
+  it('a named dashstyle falls back to the generic pattern; solid stays solid', async () => {
+    const one = async (stroke: string) => {
+      const bytes = await makeDocx(
+        vmlDoc2(`<w:p><w:r><w:pict>
+          <v:shape style="position:absolute;width:120pt;height:0" o:connectortype="straight">
+            ${stroke}
+          </v:shape>
+        </w:pict></w:r></w:p>`),
+      );
+      const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+      return firstImage(doc).attrs['shape'] as Record<string, unknown>;
+    };
+    // The spec names the styles but not their lengths, so a named one keeps
+    // the generic dash instead of a table invented here.
+    expect((await one('<v:stroke dashstyle="longdashdot"/>'))['dash']).toEqual([
+      4, 3,
+    ]);
+    expect(
+      (await one('<v:stroke dashstyle="solid"/>'))['dash'],
+    ).toBeUndefined();
+    // flat is the spec default for endcap — nothing to model.
+    expect((await one('<v:stroke endcap="flat"/>'))['cap']).toBeUndefined();
+    expect((await one('<v:stroke endcap="square"/>'))['cap']).toBe('square');
   });
 
   it('layout-flow:vertical rotates the box, swapping dims around its center', async () => {

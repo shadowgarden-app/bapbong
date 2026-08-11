@@ -1,6 +1,7 @@
 import type {
   FontSpec,
   ResolvedLayout,
+  ShapeSpec,
 } from '@shadow-garden/bapbong-contracts';
 import { CanvasPainter } from './painter-canvas.js';
 
@@ -20,6 +21,17 @@ class RecordingCtx {
   strokeStyle = '';
   lineWidth = 1;
   textBaseline = '';
+  /** lineCap is set as a PROPERTY, so a plain field would only ever show the
+   *  value left behind after the reset. Recording each write keeps the order
+   *  (set → stroke → reset) assertable, like setLineDash already is. */
+  private capValue: CanvasLineCap = 'butt';
+  get lineCap(): CanvasLineCap {
+    return this.capValue;
+  }
+  set lineCap(v: CanvasLineCap) {
+    this.capValue = v;
+    this.record('lineCap', [v]);
+  }
 
   setTransform(...args: unknown[]) {
     this.record('setTransform', args);
@@ -784,6 +796,85 @@ describe('CanvasPainter', () => {
     }
   });
 
+  it('rounds a roundRect by its cornerRatio, not a fixed fraction', () => {
+    const radiusOf = (shape: ShapeSpec) => {
+      const { painter, container } = setup();
+      painter.paint(
+        {
+          pages: [
+            {
+              ...page([]),
+              floats: [{ x: 0, y: 0, width: 100, height: 40, src: '', shape }],
+            },
+          ],
+        },
+        { devicePixelRatio: 1 },
+      );
+      const ctx = ctxAt(container, 0);
+      // First lineTo of the path ends at x0 + r on the top edge; x0 is the
+      // ½-stroke inset, so r = moveTo.x - inset.
+      const move = ctx.of('moveTo')[0].args as number[];
+      return move[0] - 0.5;
+    };
+    // Word 2003's usual arcsize (10923f) normalizes to 0.0833 — half the
+    // DrawingML default, which is exactly what the fallback keeps drawing.
+    expect(
+      radiusOf({ kind: 'roundRect', stroke: '#000', cornerRatio: 0.08333 }),
+    ).toBeCloseTo(0.08333 * 40, 2);
+    expect(radiusOf({ kind: 'roundRect', stroke: '#000' })).toBeCloseTo(
+      0.16667 * 40,
+      2,
+    );
+  });
+
+  it('scales the dash pattern by stroke width and folds the cap into it', () => {
+    const dashOf = (shape: ShapeSpec) => {
+      const { painter, container } = setup();
+      painter.paint(
+        {
+          pages: [
+            {
+              ...page([]),
+              floats: [{ x: 0, y: 0, width: 100, height: 0, src: '', shape }],
+            },
+          ],
+        },
+        { devicePixelRatio: 1 },
+      );
+      return ctxAt(container, 0);
+    };
+
+    // Flat cap: the document's own lengths, scaled by the stroke width.
+    const flat = dashOf({
+      kind: 'line',
+      stroke: '#000',
+      strokeWidth: 2,
+      dash: [1, 1],
+    });
+    expect(flat.of('setLineDash')[0].args).toEqual([[2, 2]]);
+    expect(flat.of('lineCap')).toHaveLength(0); // never touched
+
+    // Round cap: canvas grows each dash by a stroke width, so the pattern
+    // gives that width back — "1 1" becomes dots two widths apart.
+    const round = dashOf({
+      kind: 'line',
+      stroke: '#000',
+      strokeWidth: 2,
+      dash: [1, 1],
+      cap: 'round',
+    });
+    expect(round.of('setLineDash')[0].args).toEqual([[0, 4]]);
+    // Set before the stroke, reset after — the ctx is long-lived and shared.
+    const seq = round.calls
+      .map((c) => c.method)
+      .filter((m) => m === 'lineCap' || m === 'stroke');
+    expect(seq.slice(0, 3)).toEqual(['lineCap', 'stroke', 'lineCap']);
+    expect(round.of('lineCap').map((c) => c.args[0])).toEqual([
+      'round',
+      'butt',
+    ]);
+  });
+
   it('draws preset geometry floats (ellipse, roundRect, horizontalScroll)', () => {
     const { painter, container } = setup();
     const floats = [
@@ -832,7 +923,9 @@ describe('CanvasPainter', () => {
     expect(ell[0].args).toEqual([30, 30, 19, 9, 0, 0, Math.PI * 2]);
     expect(ctx.of('fill').length).toBeGreaterThan(0);
 
-    // Round rect traces four corner curves.
+    // Round rect traces four corner curves. With no cornerRatio the painter
+    // keeps the DrawingML default adj: r = 0.16667 × 40 ≈ 6.67, so the first
+    // curve's control point sits at the box's right edge (inset ½ stroke).
     expect(ctx.of('quadraticCurveTo')).toHaveLength(4);
 
     // Scroll: paper band + two rolled ends (full-height ellipses).

@@ -71,6 +71,32 @@ const LINK_COLOR = '#0563c1';
 /** Idle page canvases kept for reuse rather than discarded on scroll. */
 const POOL_LIMIT = 8;
 
+/**
+ * A shape's dash pattern (multiples of the stroke width) → canvas px.
+ *
+ * The cap adjustment is an INFERENCE, not something either spec spells out:
+ * canvas — like PDF — grows every dash by half the stroke width at each end
+ * once the cap is round or square, so a "1 1" dotted connector would come out
+ * a solid line. Word plainly shows those as separated dots, so the cap must
+ * be drawn INSIDE the dash length. Shortening each dash by one stroke width
+ * (and lengthening each gap to match) reproduces that: "1 1" round becomes a
+ * zero-length dash — a dot — spaced two widths apart. If a document ever
+ * renders wrong because of this, it is this assumption to revisit first.
+ */
+function dashArray(
+  pattern: readonly number[],
+  lw: number,
+  cap: 'flat' | 'square' | 'round' | undefined,
+): number[] {
+  const round = cap === 'round' || cap === 'square';
+  return pattern.map((n, i) => {
+    const len = n * lw;
+    // Even slots are dashes, odd are gaps.
+    if (!round) return len;
+    return i % 2 === 0 ? Math.max(0, len - lw) : len + lw;
+  });
+}
+
 const DEFAULTS: Omit<ResolvedOptions, 'caret' | 'selection'> = {
   zoom: 1,
   pageGap: 24,
@@ -659,12 +685,18 @@ export class CanvasPainter {
         const y2 = s.flipV ? y : y + h;
         ctx.strokeStyle = s.stroke;
         ctx.lineWidth = lw;
-        if (s.dash) ctx.setLineDash([Math.max(2, lw * 2), Math.max(2, lw * 2)]);
+        if (s.dash?.length) ctx.setLineDash(dashArray(s.dash, lw, s.cap));
+        // Only touch lineCap when it actually changes: the context is shared
+        // and long-lived, so an unconditional write (and reset) would be one
+        // more state change on every line the document draws.
+        const capped = s.cap === 'round' || s.cap === 'square';
+        if (capped) ctx.lineCap = s.cap === 'square' ? 'square' : 'round';
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
         ctx.stroke();
         ctx.setLineDash([]);
+        if (capped) ctx.lineCap = 'butt';
         // Arrowheads: filled triangles scaled from the stroke width (Word's
         // "block" arrow at medium size ≈ 3×). Drawn along the line direction.
         if (s.arrowStart || s.arrowEnd) {
@@ -706,8 +738,11 @@ export class CanvasPainter {
         return;
       }
       case 'roundRect': {
-        // OOXML default corner adj 16667/100000 of the shorter side.
-        const r = Math.min(0.16667 * Math.min(w, h), w / 2, h / 2);
+        // The importer normalizes each dialect's own statement of roundness
+        // to a fraction of the shorter side; absent, fall back to the
+        // DrawingML default adj (16667/100000 of the shorter side).
+        const ratio = s.cornerRatio ?? 0.16667;
+        const r = Math.min(ratio * Math.min(w, h), w / 2, h / 2);
         const [x0, y0, x1, y1] = [
           x + lw / 2,
           y + lw / 2,

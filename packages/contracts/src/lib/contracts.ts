@@ -227,8 +227,27 @@ export interface ShapeSpec {
    *  stroke width. */
   arrowStart?: boolean;
   arrowEnd?: boolean;
-  /** Dashed/dotted stroke (VML v:stroke dashstyle, DrawingML a:prstDash). */
-  dash?: boolean;
+  /**
+   * Dash pattern as alternating dash/gap lengths **in multiples of the stroke
+   * width** — the unit both dialects use ("The lengths are relative to the
+   * line width: a length of 1 is equal to the line width", VML v:stroke
+   * dashstyle; DrawingML a:custDash likewise scales by line width). Absent =
+   * solid. Keeping the real numbers rather than a boolean is what lets the
+   * painter reproduce the document's own density instead of inventing one.
+   */
+  dash?: number[];
+  /** Stroke end cap (VML v:stroke endcap, DrawingML a:ln@cap). Absent = the
+   *  spec default, `flat`. Only meaningful on open paths ('line'). */
+  cap?: 'flat' | 'square' | 'round';
+  /**
+   * Corner rounding of a 'roundRect', as a FRACTION OF THE SHORTER SIDE —
+   * 0 square, 0.5 fully rounded. Deliberately not called `cornerRadius`: it
+   * is not px. Each dialect states it differently and the importer
+   * normalizes: VML `arcsize` is a fraction of HALF the shorter side (so it
+   * is halved on the way in), DrawingML `a:gd` adj is adj/100000 of the
+   * shorter side. Absent → the painter's DrawingML default (0.16667).
+   */
+  cornerRatio?: number;
 }
 
 /** An atomic inline image laid out inline with text. Dimensions are CSS px. */
