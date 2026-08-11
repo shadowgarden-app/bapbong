@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-commands",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "bapbong — headless editor commands + queries + registry (isomorphic; backend and UI share the same ops)",
   "license": "MIT",
   "repository": {

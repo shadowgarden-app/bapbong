@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-mcp",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "bapbong — MCP server for AI agents: host-agnostic document tools (read/find/edit/format) over a DocumentSession port. Desktop app and headless server mount the same contract.",
   "license": "MIT",
   "repository": {
