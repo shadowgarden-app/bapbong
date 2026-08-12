@@ -1013,6 +1013,51 @@ describe('importDocx', () => {
     expect(p.attrs.tabs).toEqual([{ pos: 600, val: 'right', leader: 'dot' }]); // bar/clear dropped
   });
 
+  it('accumulates tab stops across the cascade; w:val=clear removes one', async () => {
+    // Word's footers are the everyday case: the Footer style sets a centre
+    // stop and a right stop, and a paragraph clears one of them.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:styleId="Base"><w:pPr><w:tabs>
+        <w:tab w:val="center" w:pos="4320"/>
+      </w:tabs></w:pPr></w:style>
+      <w:style w:styleId="Footer"><w:basedOn w:val="Base"/><w:pPr><w:tabs>
+        <w:tab w:val="right" w:pos="8640" w:leader="underscore"/>
+      </w:tabs></w:pPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Footer"/></w:pPr><w:r><w:t>inherits both</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Footer"/><w:tabs>
+        <w:tab w:val="clear" w:pos="4320"/>
+        <w:tab w:val="left" w:pos="1440"/>
+      </w:tabs></w:pPr><w:r><w:t>clears the inherited centre</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Footer"/><w:tabs>
+        <w:tab w:val="clear" w:pos="4320"/>
+        <w:tab w:val="clear" w:pos="8640"/>
+      </w:tabs></w:pPr><w:r><w:t>clears everything</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Footer"/><w:tabs>
+        <w:tab w:val="decimal" w:pos="8640"/>
+      </w:tabs></w:pPr><w:r><w:t>redefines a position</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // Two layers of the style chain add up — the derived one does not replace.
+    expect(doc.child(0).attrs.tabs).toEqual([
+      { pos: 288, val: 'center' },
+      { pos: 576, val: 'right', leader: 'underscore' },
+    ]);
+    // A clear takes the inherited stop out; the paragraph's own stop stays.
+    expect(doc.child(1).attrs.tabs).toEqual([
+      { pos: 96, val: 'left' },
+      { pos: 576, val: 'right', leader: 'underscore' },
+    ]);
+    // Clearing them all falls back to Word's default tab grid (null).
+    expect(doc.child(2).attrs.tabs).toBeNull();
+    // Same position, different alignment: the derived layer wins that slot.
+    expect(doc.child(3).attrs.tabs).toEqual([
+      { pos: 288, val: 'center' },
+      { pos: 576, val: 'decimal' },
+    ]);
+  });
+
   it('imports wp:anchor drawings as floating images', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
       <w:p><w:r><w:drawing><wp:anchor distL="114300" distR="114300" distT="0" distB="0">

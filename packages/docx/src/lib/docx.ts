@@ -1903,39 +1903,70 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   return ctx.schema.nodes['paragraph'].create(attrs, inline);
 }
 
-/** Custom tab stops from the cascade: the most-derived w:tabs list wins
- *  (per-layer merging with w:val="clear" is a later refinement). 'clear' and
- *  unsupported 'bar' stops are dropped; 'num' behaves like 'left'. */
+/**
+ * Custom tab stops from the cascade — ACCUMULATED, not overridden.
+ *
+ * Unlike the other pPr properties, tab stops from each layer add to the ones
+ * below: that is the only reading under which `w:val="clear"` means anything.
+ * The spec defines clear as a stop that "shall be removed"
+ * (ECMA-376, w:tab/@val), and python-docx's analysis says out loud why it
+ * exists — it "allows a tab stop inherited from a style, for example, to be
+ * ignored". You cannot remove from a set the derived layer has already
+ * replaced. Taking only the most-derived w:tabs, as this did, silently kept
+ * inherited stops the document had explicitly cleared, and skipped clear
+ * entries without even reading their @w:pos.
+ *
+ * Positions key the set in TWIPS, the unit the file writes, so a clear finds
+ * exactly the stop it names — matching in px would let rounding collide two
+ * neighbouring stops into one.
+ *
+ * 'bar' is a vertical rule rather than a stop and is not painted, so it never
+ * enters the set; 'num' behaves like 'left'.
+ */
 function resolveTabs(
   chain: (OoxmlNode | undefined)[],
 ): { pos: number; val: string; leader?: string }[] | null {
-  const layer = lastWith(chain, 'w:tabs');
-  if (!layer) return null;
-  const stops: { pos: number; val: string; leader?: string }[] = [];
-  for (const tab of children(child(layer, 'w:tabs'), 'w:tab')) {
-    const val = attrOf(tab, 'w:val') ?? 'left';
-    if (val === 'clear' || val === 'bar') continue;
-    const pos = attrOf(tab, 'w:pos');
-    if (pos === undefined) continue;
-    const stop: { pos: number; val: string; leader?: string } = {
-      pos: twipsToPx(Number(pos)),
-      val:
-        val === 'right' || val === 'center' || val === 'decimal' ? val : 'left',
-    };
-    const leader = attrOf(tab, 'w:leader');
-    if (leader && leader !== 'none') {
-      stop.leader =
-        leader === 'hyphen'
-          ? 'hyphen'
-          : leader === 'underscore'
-            ? 'underscore'
-            : leader === 'middleDot'
-              ? 'middleDot'
-              : 'dot';
+  const stops = new Map<
+    number,
+    { pos: number; val: string; leader?: string }
+  >();
+  for (const layer of chain) {
+    const tabs = child(layer, 'w:tabs');
+    if (!tabs) continue;
+    for (const tab of children(tabs, 'w:tab')) {
+      const val = attrOf(tab, 'w:val') ?? 'left';
+      const pos = attrOf(tab, 'w:pos');
+      if (pos === undefined) continue;
+      const tw = Number(pos);
+      if (!Number.isFinite(tw)) continue;
+      if (val === 'clear') {
+        stops.delete(tw);
+        continue;
+      }
+      if (val === 'bar') continue;
+      const stop: { pos: number; val: string; leader?: string } = {
+        pos: twipsToPx(tw),
+        val:
+          val === 'right' || val === 'center' || val === 'decimal'
+            ? val
+            : 'left',
+      };
+      const leader = attrOf(tab, 'w:leader');
+      if (leader && leader !== 'none') {
+        stop.leader =
+          leader === 'hyphen'
+            ? 'hyphen'
+            : leader === 'underscore'
+              ? 'underscore'
+              : leader === 'middleDot'
+                ? 'middleDot'
+                : 'dot';
+      }
+      stops.set(tw, stop);
     }
-    stops.push(stop);
   }
-  return stops.length > 0 ? stops.sort((a, b) => a.pos - b.pos) : null;
+  if (stops.size === 0) return null;
+  return [...stops.values()].sort((a, b) => a.pos - b.pos);
 }
 
 /** Mark every `childName` in the layers BELOW `winner` as handled.
