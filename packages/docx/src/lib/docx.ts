@@ -440,6 +440,9 @@ const RUN_CHILD_TAGS = new Set([
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   const group = parseGroup(run, ctx);
   if (group) return group;
+  // Shapetypes are registered for every pict up front — see
+  // registerVmlShapeTypes for why this cannot live in the shape parser.
+  registerVmlShapeTypes(run, ctx);
   const image =
     parseImage(run, ctx) ??
     parseShape(run, ctx) ??
@@ -694,6 +697,29 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
  *  v:imagedata's relationship; the display size lives in the v:shape style
  *  ("width:108.3pt;height:61.35pt"), with w:object's dxaOrig/dyaOrig (twips)
  *  as the fallback. */
+/**
+ * Register a pict's shapetypes (id → o:spt) doc-wide. Word defines a type
+ * once, before its first reference, and later picts point at it by `@type`.
+ *
+ * Runs for EVERY pict before the image/shape paths are tried, not inside the
+ * shape parser: a pict that holds a picture returns from `parseVmlImage`
+ * first, so a type declared alongside it would never be registered — and a
+ * later shape referencing it would be dropped for want of a kind.
+ */
+function registerVmlShapeTypes(run: OoxmlNode, ctx: Ctx): void {
+  const pict = child(run, 'w:pict');
+  if (!pict) return;
+  const types = (ctx.vmlShapeTypes ??= new Map());
+  for (const st of children(pict, 'v:shapetype')) {
+    const id = attrOf(st, 'id');
+    const spt = Number(attrOf(st, 'o:spt'));
+    if (id && Number.isFinite(spt)) types.set(id, spt);
+    // A shapetype is a definition, not content — nothing inside it is ours
+    // to render, so the whole subtree counts as consumed by design.
+    audit.markSubtree(st);
+  }
+}
+
 function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const holder = child(run, 'w:object') ?? child(run, 'w:pict');
   if (!holder) return null;
@@ -705,7 +731,23 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
   if (!src) return null;
 
-  const style = attrOf(findDescendant(holder, 'v:shape'), 'style') ?? '';
+  const vshape = findDescendant(holder, 'v:shape');
+  const style = attrOf(vshape, 'style') ?? '';
+  // Alt text, in the order the formats define it: VML's own `alt` is THE
+  // alternative text ("displayed instead of a graphic", read out by screen
+  // readers); o:title is an Office label, useful only as a fallback.
+  //
+  // Both are read BEFORE choosing. `a || b` would short-circuit, and the
+  // audit counts an attribute as covered only when the code asks for it —
+  // so the fallback would show up as an unread gap on every file that has
+  // the first one.
+  const altAttr = attrOf(vshape, 'alt');
+  const oTitle = attrOf(imagedata, 'o:title');
+  const vmlAltText = altAttr || oTitle || '';
+  // The frame preset this picture rides (`type="#_x0000_t75"`, o:spt 75).
+  // Read so the shape is fully accounted for — the registry has already
+  // recorded the definition it points at.
+  attrOf(vshape, 'type');
   const ptToPx = (m: RegExpExecArray | null) =>
     m ? Math.round((parseFloat(m[1]) * 96) / 72) : null;
   const width =
@@ -723,7 +765,7 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     src,
     width,
     height,
-    alt: attrOf(imagedata, 'o:title') ?? '',
+    alt: vmlAltText,
     float: null,
   });
 }
@@ -832,11 +874,17 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
 
   const extent = findDescendant(drawing, 'wp:extent');
   const docPr = findDescendant(drawing, 'wp:docPr');
+  const shapeDescr = attrOf(docPr, 'descr');
+  const shapeTitle = attrOf(docPr, 'title');
   return ctx.schema.nodes['image'].create({
     src: '',
     width: emuToPxZero(attrOf(extent, 'cx')) ?? 0,
     height: emuToPxZero(attrOf(extent, 'cy')) ?? 0,
-    alt: attrOf(docPr, 'name') ?? kind,
+    // descr is "Alternative Text for Object"; `name` is what Word auto-names
+    // the shape ("Rectangle 5"), which is no more a description than an id.
+    // Both attrs are read up front (see parseVmlImage) so neither reads as a
+    // gap when the other one wins.
+    alt: shapeDescr || shapeTitle || '',
     float: parseAnchorFloat(drawing),
     shape,
     textbox,
@@ -1052,15 +1100,9 @@ function parseVmlTextbox(
 function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const pict = child(run, 'w:pict');
   if (!pict) return null;
-  // Register the pict's shapetypes (id → o:spt) doc-wide: Word defines a
-  // type once, before its first reference, possibly in an earlier pict.
-  const types = (ctx.vmlShapeTypes ??= new Map());
-  for (const st of children(pict, 'v:shapetype')) {
-    const id = attrOf(st, 'id');
-    const spt = Number(attrOf(st, 'o:spt'));
-    if (id && Number.isFinite(spt)) types.set(id, spt);
-    audit.markSubtree(st);
-  }
+  // Filled by registerVmlShapeTypes for every pict, so a type declared in
+  // one that turned out to hold a picture is still resolvable here.
+  const types = ctx.vmlShapeTypes ?? new Map<string, number>();
 
   let el = child(pict, 'v:roundrect');
   let kind: ShapeSpec['kind'] | null = el ? 'roundRect' : null;
@@ -1156,7 +1198,11 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     src: '',
     width: Math.round(boxW),
     height: Math.round(boxH),
-    alt: attrOf(el, 'id') ?? kind,
+    // The shape's OWN alt text, or nothing. `id` used to stand in here, which
+    // meant a screen reader announced "_x0000_s1026" — an identifier is not a
+    // description, and an empty alt is the honest way to say a shape carries
+    // no description of its own.
+    alt: attrOf(el, 'alt') || '',
     float,
     shape,
     textbox,

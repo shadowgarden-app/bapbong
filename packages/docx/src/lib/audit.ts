@@ -231,6 +231,11 @@ function isIgnoredAttr(tag: string, name: string): boolean {
       (name === 'w:id' || name === 'w:displacedByCustomXml')) ||
     // Drawing object ids/names are display metadata; export regenerates them.
     (tag === 'wp:docPr' && (name === 'id' || name === 'name')) ||
+    // Same for VML: `id`/`o:spid` identify a shape within the part (OLE and
+    // legacy form controls point at them); they name nothing and the exporter
+    // writes DrawingML with fresh ids. The DESCRIPTION lives in `alt`, which
+    // is read.
+    (tag.startsWith('v:') && (name === 'id' || name === 'o:spid')) ||
     // Inline-drawing gaps: Word hard-codes 0 on wp:inline (the float-side
     // dist* on wp:anchor IS read and applied).
     (tag === 'wp:inline' && name.startsWith('dist')) ||

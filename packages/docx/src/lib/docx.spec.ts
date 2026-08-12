@@ -2396,7 +2396,7 @@ describe('legacy VML shapes', () => {
   // Old Word draws flowcharts as w:pict + v:* — Word-verified against a real
   // report whose 5-gap диаграм was entirely roundrects + t32 connectors.
   const vmlDoc = (body: string) =>
-    `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word"><w:body>${body}</w:body></w:document>`;
+    `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word"><w:body>${body}</w:body></w:document>`;
 
   it('imports a positioned roundrect with its textbox content', async () => {
     const bytes = await makeDocx(
@@ -2458,6 +2458,59 @@ describe('legacy VML shapes', () => {
     expect(await ratioOf(' arcsize="0.5"')).toBeCloseTo(0.25, 4);
     expect(await ratioOf(' arcsize="200%"')).toBeCloseTo(0.5, 4); // clamped
     expect(await ratioOf('')).toBeCloseTo(0.1, 4); // spec default 0.2 ÷ 2
+  });
+
+  it('takes alt text from the shape, never from its id', async () => {
+    const bytes = await makeDocx(
+      vmlDoc(`<w:p><w:r><w:pict>
+        <v:roundrect id="_x0000_s1026" o:spid="_x0000_s1026" alt="Kỳ vọng của khách"
+                     style="position:absolute;width:60pt;height:30pt"/>
+      </w:pict></w:r></w:p>
+      <w:p><w:r><w:pict>
+        <v:roundrect id="_x0000_s1027" style="position:absolute;width:60pt;height:30pt"/>
+      </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    const alts: string[] = [];
+    doc.descendants((n) => {
+      if (n.type.name === 'image') alts.push(n.attrs['alt'] as string);
+      return true;
+    });
+    // The described shape says what it is; the undescribed one says nothing —
+    // an identifier read aloud ("_x0000_s1027") is worse than silence.
+    expect(alts).toEqual(['Kỳ vọng của khách', '']);
+  });
+
+  it('a shapetype declared in a PICTURE pict still resolves for a later shape', async () => {
+    // The picture path returns before the shape parser, so a type declared
+    // beside an image used to vanish — and the connector below it, whose kind
+    // depends on that type, was dropped.
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId9" Type="${R_NS}/image" Target="media/i.png"/></Relationships>`;
+    const bytes = await makeDocx(
+      vmlDoc(`<w:p><w:r><w:pict>
+        <v:shapetype id="_x0000_t32" o:spt="32" coordsize="21600,21600"/>
+        <v:shape id="Picture 2" type="#_x0000_t75" alt="Ảnh minh hoạ" style="width:75pt;height:75pt">
+          <v:imagedata r:id="rId9" o:title=""/>
+        </v:shape>
+      </w:pict></w:r></w:p>
+      <w:p><w:r><w:pict>
+        <v:shape id="_x0000_s1030" type="#_x0000_t32"
+                 style="position:absolute;width:120pt;height:0"/>
+      </w:pict></w:r></w:p>`),
+      undefined,
+      undefined,
+      relsXml,
+      { 'i.png': PNG_1x1 },
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    const imgs: import('prosemirror-model').Node[] = [];
+    doc.descendants((n) => {
+      if (n.type.name === 'image') imgs.push(n);
+      return true;
+    });
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0].attrs['alt']).toBe('Ảnh minh hoạ'); // from v:shape @alt
+    expect((imgs[1].attrs['shape'] as { kind: string }).kind).toBe('line');
   });
 
   it('imports a t32 connector as an arrowed line via the shapetype registry', async () => {

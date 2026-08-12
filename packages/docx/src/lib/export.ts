@@ -309,11 +309,15 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
     `<wps:spPr><a:xfrm${rot}${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="${s.kind}">${avLst}</a:prstGeom>${fill}${ln}</wps:spPr>` +
     `${txbx}${bodyPr}</wps:wsp></a:graphicData></a:graphic>`;
+  // A shape's alt text had nowhere to go: its docPr carried only id + name,
+  // so anything the document said about the shape was dropped on save.
+  const alt = (node.attrs['alt'] as string | null) ?? '';
+  const docPr = `<wp:docPr id="${n}" name="Shape ${n}"${alt ? ` descr="${esc(alt)}"` : ''}/>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
-    ? anchorXml(float, cx, cy, n, graphic)
+    ? anchorXml(float, cx, cy, n, graphic, docPr)
     : `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>` +
-      `<wp:docPr id="${n}" name="Shape ${n}"/>${graphic}</wp:inline>`;
+      `${docPr}${graphic}</wp:inline>`;
   return `<w:r><w:drawing>${body}</w:drawing></w:r>`;
 }
 

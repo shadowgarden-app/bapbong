@@ -702,6 +702,27 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     ).toBeCloseTo(0.08333, 4);
   });
 
+  it('carries a shape alt text out to docPr descr and back', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: '',
+          width: 80,
+          height: 40,
+          alt: 'Sơ đồ khoảng cách 1',
+          shape: { kind: 'roundRect', stroke: '#000000', strokeWidth: 1 },
+        }),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    expect(xml).toContain('descr="Sơ đồ khoảng cách 1"');
+    const { doc: back } = await importDocx(bytes);
+    const img = [...range(back.child(0))].find((n) => n.type.name === 'image');
+    expect(img?.attrs['alt']).toBe('Sơ đồ khoảng cách 1');
+  });
+
   it('writes cap even when flat, since an omitted cap would mean square', async () => {
     const doc = schema.node('doc', null, [
       schema.node('paragraph', null, [
