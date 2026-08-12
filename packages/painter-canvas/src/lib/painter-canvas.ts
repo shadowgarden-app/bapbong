@@ -880,6 +880,20 @@ export class CanvasPainter {
       }
       ctx.setLineDash([]);
     }
+    // w:tl2br / w:br2tl cross the cell corner to corner instead of running
+    // along an edge, so they belong to the cell alone — painted whether or
+    // not the table declares any borders at all. Both present draws an X.
+    for (const cell of table.cells) {
+      const d = cell.diagonals;
+      if (!d) continue;
+      const x0 = cell.x + 0.5;
+      const x1 = cell.x + cell.width + 0.5;
+      const y0 = yOffset + cell.y + 0.5;
+      const y1 = yOffset + cell.y + cell.height + 0.5;
+      if (d.tl2br) this.strokeBorder(d.tl2br, x0, y0, x1, y1);
+      if (d.br2tl) this.strokeBorder(d.br2tl, x0, y1, x1, y0);
+      ctx.setLineDash([]);
+    }
     // Anchored images/shapes positioned in the cells, on top (Word paints
     // non-behindDoc drawings over the table grid).
     for (const cell of table.cells) {
@@ -888,8 +902,13 @@ export class CanvasPainter {
     }
   }
 
-  /** Stroke one border edge with its width / style / colour. The edge is always
-   *  horizontal or vertical (table grid lines). */
+  /** Stroke one border edge with its width / style / colour. Edges are
+   *  horizontal or vertical (table grid lines), with one exception: the cell
+   *  diagonals w:tl2br / w:br2tl. Dashes and solid strokes follow the line
+   *  whatever its angle; the `double` style offsets its two rules
+   *  perpendicular to a horizontal or vertical edge, so on a diagonal it
+   *  falls back to the vertical offset. Word draws double diagonals so
+   *  rarely that a proper normal-vector offset would be untested code. */
   private strokeBorder(
     side: BorderSide,
     x1: number,

@@ -1249,6 +1249,82 @@ describe('importDocx', () => {
     expect(doc.child(2).textContent).toBe('block inside customXml');
   });
 
+  it('parses w:tl2br / w:br2tl as cell diagonals, not sides', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr>
+          <w:tc><w:tcPr><w:tcBorders><w:tl2br w:val="single" w:sz="4" w:color="auto"/></w:tcBorders></w:tcPr><w:p/></w:tc>
+          <w:tc><w:tcPr><w:tcBorders>
+            <w:tl2br w:val="single" w:sz="4" w:color="auto"/>
+            <w:br2tl w:val="single" w:sz="4" w:color="auto"/>
+          </w:tcBorders></w:tcPr><w:p/></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const row = doc.child(0).child(0);
+    const struck = row.child(0).attrs.diagonals as Record<string, unknown>;
+    expect(Object.keys(struck)).toEqual(['tl2br']);
+    // A diagonal is not one of the four sides — it must not leak into them.
+    expect(row.child(0).attrs.borders).toBeNull();
+    // Both together are the X Vietnamese school tables use for "no data".
+    expect(
+      Object.keys(row.child(1).attrs.diagonals as Record<string, unknown>),
+    ).toEqual(['tl2br', 'br2tl']);
+  });
+
+  it('applies a row w:tblPrEx in place of the table borders', async () => {
+    // "Properties which shall be applied to the contents of this row in place
+    // of the table properties" — Word writes it when two tables are merged.
+    // Row 1 has the exception; row 0 keeps the table's own (absent) borders.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr>
+          <w:tc><w:p/></w:tc><w:tc><w:p/></w:tc>
+        </w:tr>
+        <w:tr>
+          <w:tblPrEx><w:tblBorders>
+            <w:top w:val="double" w:sz="8" w:color="FF0000"/>
+            <w:bottom w:val="double" w:sz="8" w:color="FF0000"/>
+            <w:left w:val="double" w:sz="8" w:color="FF0000"/>
+            <w:right w:val="double" w:sz="8" w:color="FF0000"/>
+            <w:insideH w:val="dashed" w:sz="4" w:color="0000FF"/>
+            <w:insideV w:val="single" w:sz="4" w:color="00FF00"/>
+          </w:tblBorders></w:tblPrEx>
+          <w:tc><w:tcPr><w:tcBorders><w:left w:val="nil"/></w:tcBorders></w:tcPr><w:p/></w:tc>
+          <w:tc><w:p/></w:tc>
+        </w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const rows = doc.child(0);
+    // The row without an exception is untouched.
+    expect(rows.child(0).child(0).attrs.borders).toBeNull();
+    const left = rows.child(1).child(0).attrs.borders as Record<
+      string,
+      unknown
+    >;
+    // Which of the exception's six sides reaches an edge depends on where
+    // the cell sits, exactly as it does for the table's own set. This is the
+    // LAST row's FIRST column: the bottom is the table's outline (so it takes
+    // the exception's `bottom`) while the top is shared with row 0 (so it
+    // takes `insideH`, NOT the exception's `top`).
+    expect(left.top).toMatchObject({ style: 'dashed', color: '#0000FF' });
+    expect(left.bottom).toMatchObject({ style: 'double', color: '#FF0000' });
+    expect(left.right).toMatchObject({ style: 'solid', color: '#00FF00' });
+    // The cell's own w:tcBorders still win — the exception replaces the
+    // TABLE's edges, not the cell's.
+    expect(left.left).toBe(false);
+    const right = rows.child(1).child(1).attrs.borders as Record<
+      string,
+      unknown
+    >;
+    expect(right.left).toMatchObject({ color: '#00FF00' });
+    expect(right.right).toMatchObject({ style: 'double' });
+  });
+
   it('parses per-cell borders (w:tcBorders) and w:sym symbols', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:sym w:font="Wingdings" w:char="F0B7"/><w:t> item</w:t></w:r></w:p>

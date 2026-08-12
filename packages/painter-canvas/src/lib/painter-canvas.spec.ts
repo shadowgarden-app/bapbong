@@ -381,6 +381,49 @@ describe('CanvasPainter', () => {
     expect(ctx.of('fillText')[0].args).toEqual(['Hello', 20, 32]);
   });
 
+  it('draws cell diagonals corner to corner, borders or not', () => {
+    const { painter, container } = setup();
+    const s = { width: 1, style: 'solid' as const, color: '#000' };
+    const p = {
+      ...page([]),
+      tables: [
+        {
+          x: 20,
+          y: 20,
+          width: 100,
+          height: 16,
+          // No table borders at all: a diagonal belongs to the cell, so it
+          // must not depend on the grid being drawn.
+          cells: [
+            {
+              x: 20,
+              y: 20,
+              width: 100,
+              height: 16,
+              colspan: 1,
+              rowspan: 1,
+              lines: [],
+              diagonals: { tl2br: s, br2tl: s },
+            },
+          ],
+        },
+      ],
+    };
+    painter.paint({ pages: [p] }, { devicePixelRatio: 1 });
+    const ctx = ctxAt(container, 0);
+    const moves = ctx.of('moveTo').map((c) => c.args);
+    const lines = ctx.of('lineTo').map((c) => c.args);
+    // tl2br runs top-left → bottom-right, br2tl bottom-left → top-right.
+    expect(moves).toEqual([
+      [20.5, 20.5],
+      [20.5, 36.5],
+    ]);
+    expect(lines).toEqual([
+      [120.5, 36.5],
+      [120.5, 20.5],
+    ]);
+  });
+
   it('draws per-cell border overrides even with no table borders', () => {
     const { painter, container } = setup();
     const p = {

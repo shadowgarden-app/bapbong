@@ -7,6 +7,7 @@ import {
 } from '@shadow-garden/bapbong-model';
 import type {
   Align,
+  CellDiagonals,
   CellPadding,
   ColumnConfig,
   FlowBlock,
@@ -401,6 +402,7 @@ function tableToFlow(
         background: (a['background'] as string | null) ?? undefined,
         vAlign: (a['vAlign'] as 'center' | 'bottom' | null) ?? undefined,
         borders: (a['borders'] as TableBorders | null) ?? undefined,
+        diagonals: (a['diagonals'] as CellDiagonals | null) ?? undefined,
         padding: (a['padding'] as CellPadding | null) ?? undefined,
         content,
       });
@@ -1430,6 +1432,7 @@ function layoutTable(
     background?: string;
     vAlign?: 'center' | 'bottom';
     borders?: TableBorders;
+    diagonals?: CellDiagonals;
     pad: { left: number; right: number; top: number; bottom: number };
   }
 
@@ -1466,6 +1469,7 @@ function layoutTable(
       background: cell.background,
       vAlign: cell.vAlign,
       borders: cell.borders,
+      diagonals: cell.diagonals,
       pad: cellPad,
     });
   });
@@ -2210,6 +2214,7 @@ function cloneCellPosShifted(cell: ResolvedCell, delta: number): ResolvedCell {
   return {
     ...cell,
     borders: cell.borders ? { ...cell.borders } : cell.borders,
+    diagonals: cell.diagonals ? { ...cell.diagonals } : cell.diagonals,
     lines: cell.lines.map((l) => cloneLineShifted(l, delta)),
     tables: cell.tables?.map((nt) => cloneTableShifted(nt, delta)),
     floats: cell.floats?.map((f) => ({ ...f })),
@@ -4116,6 +4121,7 @@ function cloneTableShifted(t: ResolvedTable, delta: number): ResolvedTable {
     cells: t.cells.map((c) => ({
       ...c,
       borders: c.borders ? { ...c.borders } : c.borders,
+      diagonals: c.diagonals ? { ...c.diagonals } : c.diagonals,
       lines: c.lines.map((l) => cloneLineShifted(l, delta)),
       tables: c.tables?.map((nt) => cloneTableShifted(nt, delta)),
       floats: c.floats?.map((f) => ({ ...f })),

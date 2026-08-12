@@ -426,6 +426,8 @@ export interface FlowTableCell {
   vAlign?: 'center' | 'bottom';
   /** Per-cell border overrides (w:tcBorders); each side overrides the table. */
   borders?: TableBorders;
+  /** Corner-to-corner rules across the cell (w:tl2br / w:br2tl). */
+  diagonals?: CellDiagonals;
   /** Per-cell margin overrides (w:tcMar); each side overrides the table's
    *  cellPadding (and that the Word defaults). */
   padding?: CellPadding;
@@ -472,6 +474,19 @@ export interface TableBorders {
   right?: BorderSide | false;
   insideH?: BorderSide | false;
   insideV?: BorderSide | false;
+}
+
+/**
+ * Diagonal rules across a table cell (w:tcBorders/w:tl2br and w:br2tl). Not
+ * sides — they cross the cell corner to corner, and Vietnamese school tables
+ * use them to strike out a cell that has no data. Both may be present, which
+ * draws an X.
+ */
+export interface CellDiagonals {
+  /** Top-left to bottom-right. */
+  tl2br?: BorderSide;
+  /** Bottom-left to top-right. */
+  br2tl?: BorderSide;
 }
 
 /** Cell padding overrides (px) from w:tblCellMar; unset sides use defaults. */
@@ -617,6 +632,8 @@ export interface ResolvedCell {
   background?: string;
   /** Per-cell border overrides; each side overrides the table's edge. */
   borders?: TableBorders;
+  /** Corner-to-corner rules across the cell (w:tl2br / w:br2tl). */
+  diagonals?: CellDiagonals;
   /** Tables nested inside this cell. */
   tables?: ResolvedTable[];
   /** Anchored images/shapes positioned within this cell (v1: painted at their

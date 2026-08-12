@@ -75,6 +75,7 @@ function pastedCellAttrs(el: unknown) {
     background: bg ? bg[1].trim() : null,
     vAlign: e.getAttribute('data-valign'),
     borders: dataJson(el, 'data-borders'),
+    diagonals: dataJson(el, 'data-diagonals'),
     padding: dataJson(el, 'data-padding'),
     carry: dataJson(el, 'data-carry'),
   };
@@ -364,6 +365,8 @@ export const schema = new Schema({
         background: { default: null }, // w:shd w:fill — cell fill "#RRGGBB"
         vAlign: { default: null }, // w:vAlign — 'center' | 'bottom' (top default)
         borders: { default: null }, // w:tcBorders per-side visibility override
+        // w:tcBorders/w:tl2br + w:br2tl — rules across the cell's corners
+        diagonals: { default: null },
         padding: { default: null }, // w:tcMar per-side margin override (px)
         // Carry-through fidelity: unmodelled w:tcPr children ({ tcPr: string
         // } — textDirection, noWrap, tcFitText, …), or null. Importer-set.
@@ -387,6 +390,8 @@ export const schema = new Schema({
           attrs['data-valign'] = String(node.attrs['vAlign']);
         if (node.attrs['borders'])
           attrs['data-borders'] = JSON.stringify(node.attrs['borders']);
+        if (node.attrs['diagonals'])
+          attrs['data-diagonals'] = JSON.stringify(node.attrs['diagonals']);
         if (node.attrs['padding'])
           attrs['data-padding'] = JSON.stringify(node.attrs['padding']);
         if (node.attrs['carry'])

@@ -58,6 +58,7 @@ import {
 } from './ooxml.js';
 import type {
   BorderSide,
+  CellDiagonals,
   BorderStyle,
   ShapeSpec,
   TableBorders,
@@ -2089,6 +2090,7 @@ interface LogicalCell {
   background: string | null;
   vAlign: string | null;
   borders: TableBorders | null;
+  diagonals: CellDiagonals | null;
   padding: {
     left?: number;
     right?: number;
@@ -2202,6 +2204,55 @@ function parseBordersEl(
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** The two corner-to-corner rules a w:tcBorders may carry. Unlike the four
+ *  sides these have no "explicit none" state worth modelling — a hidden
+ *  diagonal is simply absent — so parseBorderSide's `false` drops out. */
+function parseDiagonals(
+  tcBorders: OoxmlNode | undefined,
+): CellDiagonals | null {
+  if (!tcBorders) return null;
+  const out: CellDiagonals = {};
+  for (const [key, tag] of [
+    ['tl2br', 'w:tl2br'],
+    ['br2tl', 'w:br2tl'],
+  ] as const) {
+    const el = child(tcBorders, tag);
+    if (!el) continue;
+    const side = parseBorderSide(el);
+    if (side) out[key] = side;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** A row's w:tblPrEx border set folded into ONE cell of that row. The cell's
+ *  own w:tcBorders still win — the exception replaces the TABLE's edges, not
+ *  the cell's. Which of the exception's six sides reaches a given edge is the
+ *  same question the painter answers for the table: an edge on the table's
+ *  outline takes top/bottom/left/right, an interior one takes insideH/V. */
+function applyRowException(
+  own: TableBorders | null,
+  ex: TableBorders,
+  at: {
+    firstRow: boolean;
+    lastRow: boolean;
+    firstCol: boolean;
+    lastCol: boolean;
+  },
+): TableBorders | null {
+  const out: TableBorders = { ...(own ?? {}) };
+  const put = (
+    side: 'top' | 'bottom' | 'left' | 'right',
+    from: BorderSide | false | undefined,
+  ) => {
+    if (out[side] === undefined && from !== undefined) out[side] = from;
+  };
+  put('top', at.firstRow ? ex.top : ex.insideH);
+  put('bottom', at.lastRow ? ex.bottom : ex.insideH);
+  put('left', at.firstCol ? ex.left : ex.insideV);
+  put('right', at.lastCol ? ex.right : ex.insideV);
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 const TABLE_SIDES = [
   'top',
   'bottom',
@@ -2293,9 +2344,28 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 
   // Phase 1: logical grid — every w:tc (incl. vMerge-continue placeholders),
   // tracking each cell's starting grid column.
-  const logicalRows: LogicalCell[][] = children(tbl, 'w:tr').map((tr) => {
+  const rowEls = children(tbl, 'w:tr');
+  const logicalRows: LogicalCell[][] = rowEls.map((tr, rowIdx) => {
     const cells: LogicalCell[] = [];
     let col = 0;
+    // w:tblPrEx — "table properties which shall be applied to the contents of
+    // this row IN PLACE OF the table properties" (ECMA-376). Word writes it
+    // when two tables are merged and the second one's look has to survive.
+    // The painter only knows table edges and per-cell overrides, so the row's
+    // exception is resolved HERE into the cells it covers, using the same
+    // outer-vs-inside mapping the painter applies to the table's own set.
+    const rowEx = parseBordersEl(
+      child(child(tr, 'w:tblPrEx'), 'w:tblBorders'),
+      TABLE_SIDES,
+    );
+    const rowCols = children(tr, 'w:tc').reduce(
+      (n, tc) =>
+        n +
+        (Number(
+          attrOf(child(child(tc, 'w:tcPr'), 'w:gridSpan'), 'w:val') ?? '1',
+        ) || 1),
+      0,
+    );
     for (const tc of children(tr, 'w:tc')) {
       const tcPr = child(tc, 'w:tcPr');
       const colspan =
@@ -2312,7 +2382,16 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
       const vAlign =
         vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
-      const borders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
+      const ownBorders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
+      const borders = rowEx
+        ? applyRowException(ownBorders, rowEx, {
+            firstRow: rowIdx === 0,
+            lastRow: rowIdx === rowEls.length - 1,
+            firstCol: col === 0,
+            lastCol: col + colspan >= rowCols,
+          })
+        : ownBorders;
+      const diagonals = parseDiagonals(child(tcPr, 'w:tcBorders'));
       const padding = parseMarginsEl(child(tcPr, 'w:tcMar'));
       const carry = collectCarry(tcPr, CONSUMED_TCPR);
       const content = parseBlocks(tc, ctx);
@@ -2326,6 +2405,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         background,
         vAlign,
         borders,
+        diagonals,
         padding,
         carry,
         content,
@@ -2379,6 +2459,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
             background: cell.background,
             vAlign: cell.vAlign,
             borders: cell.borders,
+            diagonals: cell.diagonals,
             padding: cell.padding,
             carry: cell.carry ? { tcPr: cell.carry } : null,
           },
