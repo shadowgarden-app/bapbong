@@ -1247,6 +1247,39 @@ describe('layoutBlocks', () => {
     expect(narrow.pages[0].lines[1].y).toBe(50);
   });
 
+  it('drops a contextual side, matching the spec worked example', () => {
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    // Both items of a list carry the flag (it comes from their shared style),
+    // and the spec's own arithmetic puts them flush: max(after, before) minus
+    // each flagged side is 0.
+    const item = (
+      text: string,
+      over: Partial<FlowParagraph> = {},
+    ): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text, font: font() }],
+      spacing: { after: 13 },
+      ...over,
+    });
+    const flush = layoutBlocks(
+      [
+        item('one', { spacing: { after: 0 } }), // after dropped: same-style sibling below
+        item('two', { spacing: { after: 0 } }),
+      ],
+      cfg,
+    );
+    // 20 (margin) + 16 (line) = 36, no gap at all.
+    expect(flush.pages[0].lines[1].y).toBe(36);
+
+    // The last item of a list keeps its space-after: the paragraph below is a
+    // different style, so nothing collapses there.
+    const tail = layoutBlocks([item('last'), item('body')], cfg);
+    expect(tail.pages[0].lines[1].y).toBe(36 + 13);
+  });
+
   it('does not collapse a paragraph gap across a table', () => {
     const cfg: LayoutConfig = {
       ...config(),

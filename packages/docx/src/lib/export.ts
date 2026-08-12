@@ -581,6 +581,10 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
       at.push(`w:firstLine="${pxToTwips(ind.firstLine)}"`);
     if (at.length) out.push(`<w:ind ${at.join(' ')}/>`);
   }
+  // CT_PPr puts contextualSpacing between w:ind and w:jc. The model stores
+  // which SIDES collapsed, but the file only records that the flag is on —
+  // the sides are re-derived from neighbours on the next import.
+  if (a['contextualSpacing']) out.push('<w:contextualSpacing/>');
   const align = a['align'] as string | null;
   if (align)
     out.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`);

@@ -157,6 +157,11 @@ export const schema = new Schema({
         field: { default: null },
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
+        // w:contextualSpacing — "ignore spacing above and below when using
+        // identical styles". Present ⇒ the flag is on; the two booleans say
+        // which side actually borders a paragraph of the SAME style, which is
+        // resolved at import (only there is both sides of a boundary visible).
+        contextualSpacing: { default: null },
         // w:keepNext — stay on the same page as the next block's first line.
         keepNext: { default: false },
         // w:keepLines — never split this paragraph across pages.

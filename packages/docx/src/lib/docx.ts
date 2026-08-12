@@ -1256,6 +1256,7 @@ const CONSUMED_PPR = new Set([
   'w:keepLines',
   'w:widowControl',
   'w:outlineLvl',
+  'w:contextualSpacing',
   'w:sectPr', // section breaks — parsed by parseBodyBlocks
   'w:rPr', // the paragraph mark's run props — carried separately (markRPr)
 ]);
@@ -1582,6 +1583,11 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   };
   const keepNext = toggleLayer('w:keepNext', false);
   const keepLines = toggleLayer('w:keepLines', false);
+  // "Ignore spacing above and below when using identical styles" — resolved
+  // against neighbours later (parseBodyBlocks / the cell loop), since only a
+  // sibling walk can tell whether the paragraph beside this one shares its
+  // style. Stored here as "the flag is on, nothing collapsed yet".
+  const contextualSpacing = toggleLayer('w:contextualSpacing', false);
   const widowControl = toggleLayer('w:widowControl', true);
   // Where rendered inline content lands: the open field's result if we're
   // past its separate mark, the paragraph otherwise.
@@ -1765,6 +1771,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     bookmarks?: string[];
     field?: FieldInfo;
     pageBreakBefore?: boolean;
+    contextualSpacing?: { before: boolean; after: boolean };
     keepNext?: boolean;
     keepLines?: boolean;
     widowControl?: boolean;
@@ -1800,6 +1807,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const fieldForPara = fieldAtStart ?? ctx.openFields[0] ?? null;
   if (fieldForPara) attrs.field = fieldForPara;
   if (pageBreak) attrs.pageBreakBefore = true;
+  // Both sides start false: whether a side actually collapses depends on the
+  // neighbouring paragraph, which only the block walk can see.
+  if (contextualSpacing)
+    attrs.contextualSpacing = { before: false, after: false };
   if (keepNext) attrs.keepNext = true;
   if (keepLines) attrs.keepLines = true;
   if (!widowControl) attrs.widowControl = false;
@@ -2339,12 +2350,20 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 /** Walk an element's children in document order, mapping w:p / w:tbl to blocks. */
 function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   const blocks: PMNode[] = [];
+  const styleKeys: (string | null)[] = [];
   for (const node of unwrapSdt(parent.children)) {
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
-    if (node.name === 'w:p') blocks.push(parseParagraph(node, ctx));
-    else if (node.name === 'w:tbl') blocks.push(parseTable(node, ctx));
+    if (node.name === 'w:p') {
+      blocks.push(parseParagraph(node, ctx));
+      styleKeys.push(paraStyleKey(node, ctx));
+    } else if (node.name === 'w:tbl') {
+      blocks.push(parseTable(node, ctx));
+      styleKeys.push(null);
+    }
   }
-  return blocks;
+  // Contextual spacing is resolved per container: a cell's first paragraph
+  // has no predecessor to collapse against, exactly as Word treats it.
+  return resolveContextualSpacing(blocks, styleKeys);
 }
 
 interface SectionConfig {
@@ -2399,17 +2418,75 @@ function sectionStartsNewPage(sectPr: OoxmlNode | undefined): boolean {
 /** Parse the body into blocks while recording section boundaries. A w:p whose
  *  w:pPr carries a w:sectPr ends a section (with that sectPr's columns); the
  *  trailing w:body/w:sectPr ends the final section. */
+/**
+ * Resolve `w:contextualSpacing` against neighbours: *"any space specified
+ * before or after this paragraph … should not be applied when the preceding
+ * and following paragraphs are of the same paragraph style"*. Each paragraph's
+ * own flag governs its own two sides; the neighbour only has to SHARE its
+ * style, flag or not.
+ *
+ * This runs over assembled blocks because it is the one place both sides of a
+ * boundary are visible. Doing it in layout instead would mean carrying every
+ * paragraph's style name in the model and folding the neighbour into the
+ * paragraph cache key — a stale-layout bug waiting to happen.
+ *
+ * Known deviation, deliberate: the spec subtracts the flagged side from the
+ * collapsed gap, whereas this drops that side outright. The two agree whenever
+ * both neighbours carry the flag — which is always, when it comes from the
+ * shared style. They differ only if the flag is set INLINE on exactly one of
+ * two same-styled paragraphs (spec's worked example: after 10pt vs before
+ * 12pt → 2pt, where this yields 12pt). No document in our corpus declares it
+ * inline. Closing that gap means deferring space-after inside the placer,
+ * which would have to join the page-cache checkpoint state.
+ */
+function resolveContextualSpacing(
+  blocks: PMNode[],
+  styleKeys: (string | null)[],
+): PMNode[] {
+  return blocks.map((node, i) => {
+    const flag = node.attrs['contextualSpacing'] as {
+      before: boolean;
+      after: boolean;
+    } | null;
+    if (!flag) return node;
+    const mine = styleKeys[i];
+    const before = mine !== null && i > 0 && styleKeys[i - 1] === mine;
+    const after =
+      mine !== null && i + 1 < blocks.length && styleKeys[i + 1] === mine;
+    if (!before && !after) return node;
+    return node.type.create(
+      { ...node.attrs, contextualSpacing: { before, after } },
+      node.content,
+      node.marks,
+    );
+  });
+}
+
+/** The style a paragraph resolves to, for "same paragraph style" comparisons.
+ *  Unstyled content still lands on the default style, so two bare paragraphs
+ *  count as identical. Non-paragraph blocks get null and never match. */
+function paraStyleKey(node: OoxmlNode, ctx: Ctx): string | null {
+  if (node.name !== 'w:p') return null;
+  return (
+    attrOf(child(child(node, 'w:pPr'), 'w:pStyle'), 'w:val') ??
+    ctx.styles.defaultStyleIdFor('paragraph') ??
+    'Normal'
+  );
+}
+
 function parseBodyBlocks(
   body: OoxmlNode,
   ctx: Ctx,
 ): { blocks: PMNode[]; sections: SectionConfig[] } {
   const blocks: PMNode[] = [];
+  const styleKeys: (string | null)[] = [];
   const sections: SectionConfig[] = [];
   let start = 0;
   for (const node of unwrapSdt(body.children)) {
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
       blocks.push(parseParagraph(node, ctx));
+      styleKeys.push(paraStyleKey(node, ctx));
       const sectPr = child(child(node, 'w:pPr'), 'w:sectPr');
       if (sectPr) {
         const section: SectionConfig = {
@@ -2428,6 +2505,7 @@ function parseBodyBlocks(
       }
     } else if (node.name === 'w:tbl') {
       blocks.push(parseTable(node, ctx));
+      styleKeys.push(null);
     }
   }
   // The trailing body sectPr closes the last (or only) section.
@@ -2442,7 +2520,7 @@ function parseBodyBlocks(
     if (pageNumbers) section.pageNumbers = pageNumbers;
     sections.push(section);
   }
-  return { blocks, sections };
+  return { blocks: resolveContextualSpacing(blocks, styleKeys), sections };
 }
 
 async function readPart(zip: JSZip, path: string): Promise<string | undefined> {

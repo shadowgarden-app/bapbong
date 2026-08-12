@@ -288,7 +288,13 @@ function paragraphToFlow(
   if (floats.length > 0) flow.floats = floats;
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
-  const spacing = node.attrs['spacing'] as ParagraphSpacing | null;
+  const spacing = effectiveSpacing(
+    node.attrs['spacing'] as ParagraphSpacing | null,
+    node.attrs['contextualSpacing'] as {
+      before: boolean;
+      after: boolean;
+    } | null,
+  );
   if (spacing) flow.spacing = spacing;
   if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
   if (node.attrs['keepNext'] === true) flow.keepNext = true;
@@ -1671,6 +1677,26 @@ type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
   node?: PMNode;
   nodeOffset?: number;
 };
+
+/**
+ * A paragraph's spacing as the placer should see it, with `w:contextualSpacing`
+ * applied: a side that borders a paragraph of the SAME style contributes
+ * nothing ("ignore spacing above and below when using identical styles").
+ * Which sides those are is decided at import, where both neighbours are
+ * visible — see resolveContextualSpacing in the docx package.
+ */
+function effectiveSpacing(
+  spacing: ParagraphSpacing | null,
+  contextual: { before: boolean; after: boolean } | null,
+): ParagraphSpacing | null {
+  if (!spacing || !contextual) return spacing;
+  if (!contextual.before && !contextual.after) return spacing;
+  return {
+    ...spacing,
+    ...(contextual.before ? { before: 0 } : {}),
+    ...(contextual.after ? { after: 0 } : {}),
+  };
+}
 
 /**
  * The gap owed ABOVE a block, given the space-after the block before it
@@ -4577,7 +4603,13 @@ export function layout(
       const hasFloats = nodeHasFloats(node);
       const getFlow = () =>
         paragraphToFlow(node, ctx.base, offset, true, marker, markerStyle);
-      const sp = node.attrs['spacing'] as ParagraphSpacing | null;
+      const sp = effectiveSpacing(
+        node.attrs['spacing'] as ParagraphSpacing | null,
+        node.attrs['contextualSpacing'] as {
+          before: boolean;
+          after: boolean;
+        } | null,
+      );
       const mkItem = (drafts: LineDraft[] | null): ParaItem => ({
         getFlow,
         drafts,

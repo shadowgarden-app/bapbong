@@ -1751,6 +1751,81 @@ describe('importDocx', () => {
     expect(doc.child(1).attrs.spacing).toMatchObject({ after: 0, line: 1 });
   });
 
+  it('resolves contextualSpacing against same-styled neighbours', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:pPr><w:spacing w:after="200"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="ListParagraph">
+        <w:basedOn w:val="Normal"/><w:pPr><w:contextualSpacing/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const p = (style: string | null, text: string) =>
+      `<w:p>${style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ''}<w:r><w:t>${text}</w:t></w:r></w:p>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${p('ListParagraph', 'one')}
+      ${p('ListParagraph', 'two')}
+      ${p('ListParagraph', 'three')}
+      ${p(null, 'body')}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const cs = (i: number) => doc.child(i).attrs['contextualSpacing'];
+    // First item: nothing above it, a sibling below.
+    expect(cs(0)).toEqual({ before: false, after: true });
+    // Middle item: collapses on both sides.
+    expect(cs(1)).toEqual({ before: true, after: true });
+    // Last item: the paragraph below is a DIFFERENT style, so its space-after
+    // survives — that is the gap Word keeps at the end of a list.
+    expect(cs(2)).toEqual({ before: true, after: false });
+    // The plain paragraph never carries the flag at all.
+    expect(cs(3)).toBeNull();
+    // The declared spacing is untouched — only the layout applies the collapse,
+    // so export still writes what the document said.
+    expect(doc.child(1).attrs['spacing']).toMatchObject({ after: 13 });
+  });
+
+  it('does not collapse between two different styles that both set the flag', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:pPr><w:spacing w:after="200"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="ListA">
+        <w:basedOn w:val="Normal"/><w:pPr><w:contextualSpacing/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="ListB">
+        <w:basedOn w:val="Normal"/><w:pPr><w:contextualSpacing/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="ListA"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="ListB"/></w:pPr><w:r><w:t>b</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // "Identical styles" means the same style, not merely the same flag.
+    expect(doc.child(0).attrs['contextualSpacing']).toEqual({
+      before: false,
+      after: false,
+    });
+  });
+
+  it('honours w:contextualSpacing w:val="false" over the style', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="L">
+        <w:pPr><w:contextualSpacing/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="L"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="L"/><w:contextualSpacing w:val="false"/></w:pPr><w:r><w:t>b</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs['contextualSpacing']).toEqual({
+      before: false,
+      after: true,
+    });
+    expect(doc.child(1).attrs['contextualSpacing']).toBeNull();
+  });
+
   it('resolves pagination keeps through the style cascade (toggle-aware)', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:style w:type="paragraph" w:styleId="Glue">
