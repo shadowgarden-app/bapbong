@@ -1414,27 +1414,34 @@ interface FieldState {
   parent: FieldState | null;
 }
 
-/** Heading level (1–6) for a paragraph, from its style id ("Heading1"…) or an
- *  explicit `w:outlineLvl` (0-based) in the pPr cascade; undefined for body. */
+/** Heading level (1–6) for a paragraph, from `w:outlineLvl` in the pPr cascade
+ *  or, failing that, from a style id spelled "Heading1"…; undefined for body.
+ *
+ *  `w:outlineLvl` comes first because it is the property Word actually ranks
+ *  paragraphs by (Navigation pane, TOC, collapse), and `lastWith` has already
+ *  resolved the cascade so direct formatting beats the style. Values 0–8 are
+ *  heading levels 1–9; **9 means body text** and makes the paragraph a
+ *  non-heading even when its style is named like one. bc_rieng shows why that
+ *  matters: `TOCHeading` is `basedOn="Heading1"` with `outlineLvl=9` — Word's
+ *  way of building a heading-looking title that stays out of its own TOC.
+ *
+ *  The style-name regex is a fallback for documents that declare no outline
+ *  level at all. It only reads the paragraph's own style id, so it is English-
+ *  only; matching on the style's `w:name` is a separate job. */
 function headingLevel(
   pStyleId: string | undefined,
   pPrChain: (OoxmlNode | undefined)[],
 ): number | undefined {
-  if (pStyleId) {
-    const m = /^heading\s*([1-9])$/i.exec(pStyleId);
-    if (m) {
-      // The style name settled it, so the chain's w:outlineLvl is never
-      // consulted — but Word bakes the matching level into every built-in
-      // HeadingN style, so it agrees and was handled, not missed.
-      if (audit.collecting)
-        markOverridden(pPrChain, pPrChain.length, 'w:outlineLvl');
-      return Math.min(6, Number(m[1]));
-    }
-  }
-  const ol = lastWith(pPrChain, 'w:outlineLvl');
+  const olLayer = lastWith(pPrChain, 'w:outlineLvl');
+  const ol = child(olLayer, 'w:outlineLvl');
   if (ol) {
     const v = Number(attrOf(ol, 'w:val'));
-    if (!Number.isNaN(v) && v >= 0 && v <= 8) return Math.min(6, v + 1);
+    if (Number.isInteger(v) && v >= 0 && v <= 8) return Math.min(6, v + 1);
+    if (v === 9) return undefined;
+  }
+  if (pStyleId) {
+    const m = /^heading\s*([1-9])$/i.exec(pStyleId);
+    if (m) return Math.min(6, Number(m[1]));
   }
   return undefined;
 }

@@ -321,6 +321,44 @@ describe('importDocx', () => {
     expect(counter.next('2', 0)).toBe('5.');
   });
 
+  it('ranks headings by w:outlineLvl, falling back to the style name', async () => {
+    // Word ranks paragraphs by outline level, not by what the style is
+    // called. The style name is only a fallback for documents that declare
+    // no outline level at all.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Heading1">
+        <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="Heading2">
+        <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="ChuongMuc">
+        <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="TOCHeading">
+        <w:basedOn w:val="Heading1"/>
+        <w:pPr><w:outlineLvl w:val="9"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="Heading3"/>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="ChuongMuc"/></w:pPr><w:r><w:t>non-English style name</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Heading2"/><w:outlineLvl w:val="0"/></w:pPr><w:r><w:t>promoted inline</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="TOCHeading"/></w:pPr><w:r><w:t>Table of Contents</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>name only</w:t></w:r></w:p>
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // A style Word never named "HeadingN" is still a heading — level 2.
+    expect(doc.child(0).attrs.heading).toBe(2);
+    // Direct formatting outranks the style, and outlineLvl outranks the name.
+    expect(doc.child(1).attrs.heading).toBe(1);
+    // outlineLvl 9 is body text: basedOn Heading1 does NOT make this one.
+    expect(doc.child(2).attrs.heading).toBeFalsy();
+    // Nothing in the cascade declares a level → the name decides.
+    expect(doc.child(3).attrs.heading).toBe(3);
+  });
+
   it('links paragraph styles to their numbering level via lvl w:pStyle', async () => {
     // Numbered heading styles: the style's numPr names only the numId; the
     // LEVEL comes from whichever lvl claims the style with w:pStyle.
