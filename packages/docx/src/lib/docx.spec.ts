@@ -1954,6 +1954,39 @@ describe('importDocx', () => {
     );
   });
 
+  it('lets a border w:themeColor supersede its cached w:color', async () => {
+    // "If the border specifies the use of a theme color via the themeColor
+    // attribute, this value is superseded by the theme color value" — w:color
+    // is the last-computed rendering, kept for consumers with no theme part.
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
+      <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+    </a:clrScheme></a:themeElements></a:theme>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pBdr>
+        <w:top w:val="single" w:sz="6" w:color="STALE0" w:themeColor="accent1"/>
+        <w:bottom w:val="single" w:sz="6" w:color="00FF00"/>
+      </w:pBdr></w:pPr><w:r><w:t>ruled</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    const b = doc.child(0).attrs.borders as Record<
+      string,
+      { color: string } | false
+    >;
+    // The theme wins even though w:color says something else.
+    expect((b.top as { color: string }).color).toBe('#4472C4');
+    // No themeColor → the literal colour still applies.
+    expect((b.bottom as { color: string }).color).toBe('#00FF00');
+  });
+
   it('runs the field machine inside w:hyperlink (TOC PAGEREF entries)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

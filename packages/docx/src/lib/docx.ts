@@ -960,6 +960,7 @@ function parseTextbox(
 ): {
   paragraphs: unknown[];
   inset?: { l: number; t: number; r: number; b: number };
+  anchor?: 'ctr' | 'b';
 } | null {
   const paragraphs = txbxParagraphs(
     child(child(wsp, 'wps:txbx'), 'w:txbxContent'),
@@ -977,7 +978,20 @@ function parseTextbox(
     l !== undefined || t !== undefined || r !== undefined || b !== undefined
       ? { l: l ?? 10, t: t ?? 5, r: r ?? 10, b: b ?? 5 }
       : undefined;
-  return inset ? { paragraphs, inset } : { paragraphs };
+  // ST_TextAnchoringType: where the text block sits in the box vertically.
+  // 't' is the default and needs nothing. 'just' and 'dist' stretch the gaps
+  // BETWEEN paragraphs to fill the box rather than moving the block — a
+  // different mechanism, not implemented, so they fall back to top. The attr
+  // is read either way, which means the audit cannot tell those two apart
+  // from the handled ones (the known value-level blind spot in audit.ts).
+  const anchorAttr = attrOf(bodyPr, 'anchor');
+  const anchor =
+    anchorAttr === 'ctr' ? 'ctr' : anchorAttr === 'b' ? 'b' : undefined;
+  return {
+    paragraphs,
+    ...(inset && { inset }),
+    ...(anchor && { anchor }),
+  };
 }
 
 /** Paragraph JSON of a `w:txbxContent` — shared by the modern (wps:txbx) and
@@ -1824,7 +1838,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // ('between' isn't modelled; w:val="none" sides drop out).
   const pBdrLayer = lastWith(pPrChain, 'w:pBdr');
   const pBdrSides = pBdrLayer
-    ? parseBordersEl(child(pBdrLayer, 'w:pBdr'), CELL_SIDES)
+    ? parseBordersEl(child(pBdrLayer, 'w:pBdr'), CELL_SIDES, ctx.resolveTheme)
     : null;
   const paraBorders: Record<string, BorderSide> = {};
   if (pBdrSides) {
@@ -2208,24 +2222,43 @@ const BORDER_STYLE_IN: Record<string, BorderStyle> = {
 
 /** A side element (w:top/bottom/…) → its appearance, or `false` when hidden.
  *  w:sz is eighths of a point; w:color "auto"/absent keeps the default grey. */
-function parseBorderSide(el: OoxmlNode): BorderSide | false {
+function parseBorderSide(
+  el: OoxmlNode,
+  resolveTheme?: ThemeResolver,
+): BorderSide | false {
   const val = attrOf(el, 'w:val');
   if (val === 'none' || val === 'nil') {
     // Hidden side: its sz/color/space are meaningless, but "ask" them so the
     // coverage audit doesn't flag decoration attrs on borders we DID handle.
     attrOf(el, 'w:sz');
     attrOf(el, 'w:color');
+    attrOf(el, 'w:themeColor');
     attrOf(el, 'w:space');
     return false;
   }
   const sz = Number(attrOf(el, 'w:sz') ?? '4');
   const width = Math.max(0.75, (sz / 8) * (96 / 72));
   const style = BORDER_STYLE_IN[val ?? 'single'] ?? 'solid';
+  // "If the border specifies the use of a theme color via the themeColor
+  // attribute, this value is superseded by the theme color value" — w:color
+  // is the cached rendering of the theme slot, kept for consumers with no
+  // theme part. Every attribute is read into a variable BEFORE choosing, so
+  // the audit sees them all: a short-circuit here would hide whichever one
+  // lost. (Read the theme even when the two agree, as they do in
+  // large_sample, where accent1 IS 5B9BD5.)
   const colorAttr = attrOf(el, 'w:color');
+  const themeColor = attrOf(el, 'w:themeColor');
+  const themeTint = attrOf(el, 'w:themeTint');
+  const themeShade = attrOf(el, 'w:themeShade');
+  const themed =
+    themeColor && resolveTheme
+      ? resolveTheme(themeColor, themeTint, themeShade)
+      : undefined;
   const color =
-    colorAttr && colorAttr !== 'auto'
+    themed ??
+    (colorAttr && colorAttr !== 'auto'
       ? (normalizeHex(colorAttr) ?? '#b0b0b0')
-      : '#b0b0b0';
+      : '#b0b0b0');
   const side: BorderSide = { width, style, color };
   // w:space (points) — border-to-content gap; kept for round-trip fidelity.
   const sp = Number(attrOf(el, 'w:space') ?? '0');
@@ -2238,13 +2271,14 @@ function parseBorderSide(el: OoxmlNode): BorderSide | false {
 function parseBordersEl(
   bordersEl: OoxmlNode | undefined,
   sides: readonly string[],
+  resolveTheme?: ThemeResolver,
 ): TableBorders | null {
   if (!bordersEl) return null;
   const out: TableBorders = {};
   for (const side of sides) {
     const el = child(bordersEl, `w:${side}`);
     if (!el) continue;
-    out[side as keyof TableBorders] = parseBorderSide(el);
+    out[side as keyof TableBorders] = parseBorderSide(el, resolveTheme);
   }
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -2254,6 +2288,7 @@ function parseBordersEl(
  *  diagonal is simply absent — so parseBorderSide's `false` drops out. */
 function parseDiagonals(
   tcBorders: OoxmlNode | undefined,
+  resolveTheme?: ThemeResolver,
 ): CellDiagonals | null {
   if (!tcBorders) return null;
   const out: CellDiagonals = {};
@@ -2263,7 +2298,7 @@ function parseDiagonals(
   ] as const) {
     const el = child(tcBorders, tag);
     if (!el) continue;
-    const side = parseBorderSide(el);
+    const side = parseBorderSide(el, resolveTheme);
     if (side) out[key] = side;
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -2315,7 +2350,7 @@ function parseTableBorders(tbl: OoxmlNode, ctx: Ctx): TableBorders | null {
   const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
   const bordersEl =
     child(tblPr, 'w:tblBorders') ?? ctx.styles.resolveTableBorders(styleId);
-  const out = parseBordersEl(bordersEl, TABLE_SIDES);
+  const out = parseBordersEl(bordersEl, TABLE_SIDES, ctx.resolveTheme);
   // Only treat the table as bordered if at least one side is actually visible.
   return out && Object.values(out).some(Boolean) ? out : null;
 }
@@ -2402,6 +2437,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     const rowEx = parseBordersEl(
       child(child(tr, 'w:tblPrEx'), 'w:tblBorders'),
       TABLE_SIDES,
+      ctx.resolveTheme,
     );
     const rowCols = children(tr, 'w:tc').reduce(
       (n, tc) =>
@@ -2427,7 +2463,11 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
       const vAlign =
         vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
-      const ownBorders = parseBordersEl(child(tcPr, 'w:tcBorders'), CELL_SIDES);
+      const ownBorders = parseBordersEl(
+        child(tcPr, 'w:tcBorders'),
+        CELL_SIDES,
+        ctx.resolveTheme,
+      );
       const borders = rowEx
         ? applyRowException(ownBorders, rowEx, {
             firstRow: rowIdx === 0,
@@ -2436,7 +2476,10 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
             lastCol: col + colspan >= rowCols,
           })
         : ownBorders;
-      const diagonals = parseDiagonals(child(tcPr, 'w:tcBorders'));
+      const diagonals = parseDiagonals(
+        child(tcPr, 'w:tcBorders'),
+        ctx.resolveTheme,
+      );
       const padding = parseMarginsEl(child(tcPr, 'w:tcMar'));
       const carry = collectCarry(tcPr, CONSUMED_TCPR);
       const content = parseBlocks(tc, ctx);

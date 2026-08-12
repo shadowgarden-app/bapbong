@@ -146,7 +146,7 @@ describe('xml audit (import)', () => {
     // test is the bucketing rule, not where Word would really put them.
     const body =
       `<?xml version="1.0"?><w:document ${NS}><w:body><w:p>` +
-      textboxRun('anchor="t" rot="0" wrap="square" compatLnSpc="1"') +
+      textboxRun('rot="0" wrap="square" compatLnSpc="1"') +
       `<w:r>` +
       `<a:effectLst/><a:srcRect/>` +
       `<a:ln><a:noFill/></a:ln>` +
@@ -163,7 +163,6 @@ describe('xml audit (import)', () => {
 
     // Attributes sitting at their ECMA-376 default, and elements the spec
     // defines as no-ops in exactly this state.
-    expect(inert).toContain('wps:bodyPr @anchor');
     expect(inert).toContain('wps:bodyPr @rot');
     expect(inert).toContain('wps:bodyPr @wrap');
     expect(inert).toEqual(expect.arrayContaining(['a:effectLst', 'a:srcRect']));
@@ -209,8 +208,8 @@ describe('xml audit (import)', () => {
     audit.setEnabled(true);
     const body =
       `<?xml version="1.0"?><w:document ${NS}><w:body><w:p>` +
-      textboxRun('anchor="t"') +
-      textboxRun('anchor="ctr"') +
+      textboxRun('vert="horz"') +
+      textboxRun('vert="vert270"') +
       `</w:p><w:sectPr/></w:body></w:document>`;
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     await importDocx(await makeDocx(body));
@@ -218,10 +217,8 @@ describe('xml audit (import)', () => {
 
     // An ignore-list keyed by NAME would silence both. Keying by VALUE keeps
     // the one that actually moves text on the page visible.
-    expect(keys(audit.lastReport?.inert ?? [])).toContain('wps:bodyPr @anchor');
-    expect(keys(audit.lastReport?.unknown ?? [])).toContain(
-      'wps:bodyPr @anchor',
-    );
+    expect(keys(audit.lastReport?.inert ?? [])).toContain('wps:bodyPr @vert');
+    expect(keys(audit.lastReport?.unknown ?? [])).toContain('wps:bodyPr @vert');
   });
 
   it('does not demote values that merely match our own fallback', async () => {

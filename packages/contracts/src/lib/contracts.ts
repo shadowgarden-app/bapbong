@@ -313,6 +313,9 @@ export interface FlowFloat {
   content?: FlowParagraph[];
   /** Textbox interior padding (wps:bodyPr lIns…), px. Absent → Word defaults. */
   inset?: { l: number; t: number; r: number; b: number };
+  /** Where the text block sits vertically in the box (wps:bodyPr @anchor).
+   *  Absent → the schema default, top. */
+  anchor?: 'ctr' | 'b';
   /** Clockwise degrees around the box center — paint-only: wrap exclusions
    *  keep the axis-aligned box. */
   rotation?: number;

@@ -256,6 +256,7 @@ function paragraphToFlow(
         const tb = child.attrs['textbox'] as {
           paragraphs: unknown[];
           inset?: { l: number; t: number; r: number; b: number };
+          anchor?: 'ctr' | 'b';
         } | null;
         if (tb && tb.paragraphs.length > 0) {
           const schema = child.type.schema;
@@ -263,6 +264,7 @@ function paragraphToFlow(
             paragraphToFlow(schema.nodeFromJSON(json), base, i),
           );
           if (tb.inset) f.inset = tb.inset;
+          if (tb.anchor) f.anchor = tb.anchor;
         }
         floats.push(f);
       } else {
@@ -1216,7 +1218,12 @@ function resolveFloat(
     const inset = f.inset ?? TEXTBOX_INSET;
     const right = Math.max(inset.l + MIN_BAND, f.width - inset.r);
     const inner = layoutFlow(f.content, inset.l, right, ctx);
-    const lines = inner.lines.map((l) => ({ ...l, y: l.y + inset.t }));
+    // wps:bodyPr @anchor — the whole text block slides down the leftover
+    // height. Word clamps at the top when the text overflows the box, which
+    // is what a negative slack would otherwise undo.
+    const slack = Math.max(0, f.height - inset.t - inset.b - inner.height);
+    const shift = f.anchor === 'ctr' ? slack / 2 : f.anchor === 'b' ? slack : 0;
+    const lines = inner.lines.map((l) => ({ ...l, y: l.y + inset.t + shift }));
     stripPositions(lines, inner.tables);
     if (lines.length > 0) rf.lines = lines;
   }

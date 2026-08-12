@@ -327,8 +327,9 @@ const isNum = (n: number) => (v: string) => Number(v) === n;
  *  rotated shape); most predicates ignore it. */
 const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // CT_TextBodyProperties. Word stamps the whole default set onto every
-  // textbox it writes. NOT listed: @compatLnSpc, whose default is false — a
-  // written "1" really does change line spacing inside the shape.
+  // textbox it writes. NOT listed: @anchor, which is READ now (the text block
+  // slides to ctr/b), and @compatLnSpc, whose default is false — a written
+  // "1" really does change line spacing inside the shape.
   'wps:bodyPr @rot': isNum(0),
   'wps:bodyPr @spcFirstLastPara': isFalse,
   'wps:bodyPr @vertOverflow': (v) => v === 'overflow',
@@ -339,7 +340,6 @@ const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   'wps:bodyPr @spcCol': isNum(0),
   'wps:bodyPr @rtlCol': isFalse,
   'wps:bodyPr @fromWordArt': isFalse,
-  'wps:bodyPr @anchor': (v) => v === 't',
   'wps:bodyPr @anchorCtr': isFalse,
   'wps:bodyPr @forceAA': isFalse,
   // "Keep the text upright while the shape is rotated" — nothing to keep

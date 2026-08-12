@@ -1786,6 +1786,66 @@ describe('textbox floats', () => {
     // Never caret-addressable — PM positions are stripped.
     expect(f?.lines?.[0].segments[0].pos).toBeUndefined();
   });
+
+  it('slides the text block down for wps:bodyPr @anchor ctr / b', () => {
+    // Same box: 120x60, default inset t 5 / b 5, one 16px line.
+    // Slack = 60 - 5 - 5 - 16 = 34.
+    const boxPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa', font: font() }],
+    };
+    const withAnchor = (anchor?: 'ctr' | 'b'): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 120,
+          height: 60,
+          wrap: 'none',
+          hOffset: 40,
+          vOffset: 10,
+          vRel: 'paragraph',
+          content: [boxPara],
+          ...(anchor && { anchor }),
+        },
+      ],
+    });
+    const yOf = (anchor?: 'ctr' | 'b') =>
+      layoutBlocks([withAnchor(anchor)], config()).pages[0].floats?.[0]
+        .lines?.[0].y;
+    expect(yOf()).toBe(5); // top is the schema default
+    expect(yOf('ctr')).toBe(22); // 5 + 34/2
+    expect(yOf('b')).toBe(39); // 5 + 34
+  });
+
+  it('keeps overflowing textbox text at the top whatever the anchor', () => {
+    // Four 16px lines in a 30px box: the block is taller than the interior,
+    // so there is no slack to slide into and Word pins it at the top.
+    const boxPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc dddd', font: font() }],
+    };
+    const host: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 60,
+          height: 30,
+          wrap: 'none',
+          hOffset: 40,
+          vOffset: 10,
+          vRel: 'paragraph',
+          content: [boxPara],
+          anchor: 'b',
+        },
+      ],
+    };
+    const f = layoutBlocks([host], config()).pages[0].floats?.[0];
+    expect(f?.lines?.[0].y).toBe(5);
+  });
 });
 
 describe('floating images', () => {
