@@ -382,6 +382,10 @@ function hasPageBreak(run: OoxmlNode): boolean {
   );
 }
 
+/** The wrappers' own property bags — the markup's name/uri metadata, never
+ *  content. Dropped whole so the audit counts them handled, not missed. */
+const WRAPPER_PROPS = new Set(['w:smartTagPr', 'w:customXmlPr']);
+
 /** Flatten tracked changes for the "accept all changes" view: w:ins unwraps
  *  to its child runs (inserted text was otherwise lost — the run loop only
  *  walked top-level w:r), w:del is dropped (deleted text). Other nodes pass
@@ -394,11 +398,23 @@ function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
       audit.markSubtree(node);
       continue;
     }
+    if (WRAPPER_PROPS.has(node.name)) {
+      audit.markSubtree(node);
+      continue;
+    }
     if (node.name === 'w:ins' || node.name === 'w:moveTo') {
       audit.mark(node);
       out.push(...effectiveChildren(node.children));
-    } else if (node.name === 'w:sdt') {
-      out.push(...effectiveChildren(unwrapSdt([node])));
+    } else if (node.name === 'w:smartTag') {
+      // CT_SmartTagRun: a transparent wrapper around inline content (runs,
+      // hyperlinks, fields, math, other smart tags). Word writes these when
+      // it recognises a place or a date; the tag itself renders nothing, but
+      // whatever it wraps is ordinary text — bc_rieng lost the "Nam" of
+      // "Việt Nam" to one before this unwrapped.
+      audit.mark(node);
+      out.push(...effectiveChildren(node.children));
+    } else if (node.name === 'w:sdt' || node.name === 'w:customXml') {
+      out.push(...effectiveChildren(unwrapContainers([node])));
     } else {
       out.push(node);
     }
@@ -406,17 +422,24 @@ function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
   return out;
 }
 
-/** Content controls (w:sdt) unwrap to their w:sdtContent children — the
- *  control chrome is dropped, the content (paragraphs/tables at block level,
- *  runs inline — a w14:checkbox's ☒/☐ glyph run included) survives. Recurses
- *  so nested controls (cover pages hold several) fully unwrap. */
-function unwrapSdt(nodes: OoxmlNode[]): OoxmlNode[] {
+/** Chrome wrappers that carry content and nothing of their own, at BLOCK or
+ *  inline level: w:sdt (content controls — content sits in w:sdtContent) and
+ *  w:customXml (custom-XML markup — content is the children themselves). The
+ *  chrome is dropped, the content (paragraphs/tables at block level, runs
+ *  inline — a w14:checkbox's ☒/☐ glyph run included) survives. Recurses so
+ *  nested wrappers (cover pages hold several) fully unwrap. */
+function unwrapContainers(nodes: OoxmlNode[]): OoxmlNode[] {
   const out: OoxmlNode[] = [];
   for (const node of nodes) {
-    if (node.name === 'w:sdt') {
+    if (WRAPPER_PROPS.has(node.name)) {
+      audit.markSubtree(node);
+    } else if (node.name === 'w:sdt') {
       audit.mark(node);
       const content = child(node, 'w:sdtContent');
-      if (content) out.push(...unwrapSdt(content.children));
+      if (content) out.push(...unwrapContainers(content.children));
+    } else if (node.name === 'w:customXml') {
+      audit.mark(node);
+      out.push(...unwrapContainers(node.children));
     } else {
       out.push(node);
     }
@@ -1707,8 +1730,13 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
         : undefined;
       const anchor = attrOf(node, 'w:anchor');
       const href = rel?.target ?? (anchor ? `#${anchor}` : null);
-      for (const run of children(node, 'w:r')) {
-        handleRun(run, href);
+      // Through the same wrappers as the paragraph loop: a link's runs can sit
+      // inside w:ins or a smart tag. Non-run content a link may legally hold
+      // (a nested field, math) still falls through — a separate gap.
+      for (const c of effectiveChildren(node.children)) {
+        if (c.name !== 'w:r') continue;
+        audit.mark(c); // children() marked these before the loop changed
+        handleRun(c, href);
       }
     } else if (node.name === 'm:oMath' || node.name === 'm:oMathPara') {
       // OMML equations, flattened to a plain-text run (v1: content over
@@ -2358,7 +2386,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   const blocks: PMNode[] = [];
   const styleKeys: (string | null)[] = [];
-  for (const node of unwrapSdt(parent.children)) {
+  for (const node of unwrapContainers(parent.children)) {
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
       blocks.push(parseParagraph(node, ctx));
@@ -2489,7 +2517,7 @@ function parseBodyBlocks(
   const styleKeys: (string | null)[] = [];
   const sections: SectionConfig[] = [];
   let start = 0;
-  for (const node of unwrapSdt(body.children)) {
+  for (const node of unwrapContainers(body.children)) {
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
       blocks.push(parseParagraph(node, ctx));
@@ -3066,7 +3094,7 @@ async function importDocxImpl(
   // body sectPr closed no section of its own).
   const sectPrList: (OoxmlNode | undefined)[] = [];
   if (body) {
-    for (const node of unwrapSdt(body.children)) {
+    for (const node of unwrapContainers(body.children)) {
       if (node.name === 'w:p') {
         const sp = child(child(node, 'w:pPr'), 'w:sectPr');
         if (sp) sectPrList.push(sp);

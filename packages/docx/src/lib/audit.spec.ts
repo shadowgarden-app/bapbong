@@ -115,6 +115,29 @@ describe('xml audit (import)', () => {
     expect(unknown).not.toContain('w:pgMar @w:top');
   });
 
+  it('counts a smart tag handled once its runs are unwrapped', async () => {
+    audit.setEnabled(true);
+    const body =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p>` +
+      `<w:smartTag w:uri="urn:schemas-microsoft-com:office:smarttags" w:element="place">` +
+      `<w:smartTagPr><w:attr w:name="ProductID" w:val="x"/></w:smartTagPr>` +
+      `<w:r><w:t>Nam</w:t></w:r></w:smartTag>` +
+      `</w:p><w:sectPr/></w:body></w:document>`;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { doc } = await importDocx(await makeDocx(body));
+    log.mockRestore();
+
+    expect(doc.child(0).textContent).toBe('Nam');
+    const unknown = keys(audit.lastReport?.unknown ?? []);
+    const ignored = keys(audit.lastReport?.ignored ?? []);
+    // The wrapper is consumed, and its property bag with it.
+    expect(unknown).not.toContain('w:smartTag');
+    expect(unknown).not.toContain('w:smartTagPr');
+    // Which recogniser claimed the text is metadata, not content.
+    expect(ignored).toContain('w:smartTag @w:element');
+    expect(ignored).toContain('w:smartTag @w:uri');
+  });
+
   it('demotes unread no-op values to inert, keeps real values UNKNOWN', async () => {
     audit.setEnabled(true);
     // A textbox carrying the schema-default set Word stamps on every shape,

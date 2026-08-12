@@ -1175,6 +1175,46 @@ describe('importDocx', () => {
     expect(doc.child(0).textContent).toBe('Keep inserted tail');
   });
 
+  it('keeps text wrapped in w:smartTag / w:customXml', async () => {
+    // CT_SmartTagRun is a transparent wrapper: Word writes it when it
+    // recognises a place or a date, and everything inside is ordinary text.
+    // Real case from bc_rieng: "Việt Nam" with "Nam" inside nested tags.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p>
+        <w:r><w:t xml:space="preserve">Việt </w:t></w:r>
+        <w:smartTag w:uri="urn:schemas-microsoft-com:office:smarttags" w:element="place">
+          <w:smartTagPr><w:attr w:name="ProductID" w:val="x"/></w:smartTagPr>
+          <w:smartTag w:uri="urn:schemas-microsoft-com:office:smarttags" w:element="country-region">
+            <w:r><w:t>Nam</w:t></w:r>
+          </w:smartTag>
+        </w:smartTag>
+        <w:r><w:t>, tail</w:t></w:r>
+      </w:p>
+      <w:p>
+        <w:hyperlink w:anchor="here">
+          <w:smartTag w:element="place"><w:r><w:t>linked place</w:t></w:r></w:smartTag>
+        </w:hyperlink>
+      </w:p>
+      <w:customXml w:element="block">
+        <w:customXmlPr/>
+        <w:p><w:r><w:t>block inside customXml</w:t></w:r></w:p>
+      </w:customXml>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    // Nested smart tags unwrap all the way down.
+    expect(doc.child(0).textContent).toBe('Việt Nam, tail');
+    // A link's runs reach the same unwrapper, and keep the link mark.
+    expect(doc.child(1).textContent).toBe('linked place');
+    expect(
+      doc
+        .child(1)
+        .child(0)
+        .marks.map((m) => m.type.name),
+    ).toContain('link');
+    // Block-level w:customXml unwraps to its paragraphs.
+    expect(doc.child(2).textContent).toBe('block inside customXml');
+  });
+
   it('parses per-cell borders (w:tcBorders) and w:sym symbols', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:sym w:font="Wingdings" w:char="F0B7"/><w:t> item</w:t></w:r></w:p>

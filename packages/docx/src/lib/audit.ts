@@ -107,6 +107,9 @@ const IGNORED_TAGS = new Set([
   'w:clrSchemeMapping',
   'w:embedTrueTypeFonts',
   'w:proofState',
+  // The document's list of smart-tag recognisers. Same subject as the
+  // w:smartTag attrs below: the tags themselves unwrap to their runs.
+  'w:smartTagType',
   // Drawing chrome around pictures (ids, stretch/crop boilerplate) — the
   // content (blip, extent, wrap, alt text) is read where it matters.
   'pic:nvPicPr',
@@ -225,6 +228,11 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'w:style' && name === 'w:customStyle') ||
     // Word's visited-link tracking flag — UI state, not content.
     (tag === 'w:hyperlink' && name === 'w:history') ||
+    // Which recogniser claimed the text ("place", "country-region", and the
+    // namespace it came from). The tag is unwrapped to its runs and never
+    // re-emitted, so the recogniser's identity has nothing to act on.
+    (tag === 'w:smartTag' && (name === 'w:element' || name === 'w:uri')) ||
+    (tag === 'w:customXml' && (name === 'w:element' || name === 'w:uri')) ||
     // A bookmark's numeric id pairs start/end within the part; the NAME is
     // what links point at, and the exporter renumbers on the way out.
     (tag === 'w:bookmarkStart' &&
