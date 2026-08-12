@@ -1217,6 +1217,79 @@ describe('layoutBlocks', () => {
     expect(lc.y).toBe(84);
   });
 
+  it('collapses adjacent paragraph spacing to the larger of the two', () => {
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    const para = (
+      text: string,
+      spacing?: FlowParagraph['spacing'],
+    ): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text, font: font() }],
+      ...(spacing ? { spacing } : {}),
+    });
+    // OOXML: the net gap is the MAXIMUM of the first paragraph's space-after
+    // and the second's space-before — they do not add.
+    const wide = layoutBlocks(
+      [para('a', { after: 20 }), para('b', { before: 8 })],
+      cfg,
+    );
+    // a: y=20, line 16 → 36. Gap = max(20, 8) = 20 → b at 56, NOT 64.
+    expect(wide.pages[0].lines[1].y).toBe(56);
+
+    const narrow = layoutBlocks(
+      [para('a', { after: 6 }), para('b', { before: 14 })],
+      cfg,
+    );
+    // Gap = max(6, 14) = 14 → 36 + 14 = 50, NOT 56.
+    expect(narrow.pages[0].lines[1].y).toBe(50);
+  });
+
+  it('does not collapse a paragraph gap across a table', () => {
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    const blocks: FlowBlock[] = [
+      {
+        type: 'paragraph',
+        runs: [{ text: 'a', font: font() }],
+        spacing: { after: 10 },
+      },
+      {
+        type: 'table',
+        rows: [
+          {
+            cells: [
+              {
+                colspan: 1,
+                rowspan: 1,
+                colwidth: null,
+                content: [
+                  { type: 'paragraph', runs: [{ text: 'c', font: font() }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'paragraph',
+        runs: [{ text: 'b', font: font() }],
+        spacing: { before: 8 },
+      },
+    ];
+    const { pages } = layoutBlocks(blocks, cfg);
+    const t = pages[0].tables?.[0];
+    expect(t).toBeTruthy();
+    // A table declares no space-after, so the paragraph below owes its own
+    // space-before in full — there is nothing to collapse against.
+    const last = pages[0].lines[pages[0].lines.length - 1];
+    expect(last.y).toBe((t?.y ?? 0) + (t?.height ?? 0) + 8);
+  });
+
   it('forces a new line at a hard break', () => {
     const block: FlowBlock = {
       type: 'paragraph',

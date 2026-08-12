@@ -1235,6 +1235,9 @@ function layoutFlow(
   const tables: ResolvedTable[] = [];
   const floats: ResolvedFloat[] = [];
   let y = 0;
+  // Space-after already added by the previous block, so the next block's
+  // space-before collapses against it (see collapsedBefore).
+  let pendingAfter = 0;
   for (const block of blocks) {
     if (block.type === 'paragraph') {
       // w:spacing before/after applies inside cells exactly as in the body
@@ -1242,7 +1245,7 @@ function layoutFlow(
       // so a styled heading lost its breathing room the moment it sat in a
       // table. The float anchor moves with it: the paragraph's top IS below
       // the gap.
-      y += block.spacing?.before ?? 0;
+      y += collapsedBefore(block.spacing?.before, pendingAfter);
       // ONE keeps object per paragraph, shared by its lines — the reference
       // identity is what lets the row splitter regroup a paragraph's lines
       // and judge split legality per fragment.
@@ -1277,11 +1280,13 @@ function layoutFlow(
         y += d.height;
       }
       y += block.spacing?.after ?? 0;
+      pendingAfter = block.spacing?.after ?? 0;
     } else {
       const table = layoutTable(block, contentLeft, contentRight, ctx);
       offsetTable(table, y);
       tables.push(table);
       y += table.height;
+      pendingAfter = 0; // a table contributes no space-after to collapse into
     }
   }
   return { lines, tables, floats, height: y };
@@ -1667,6 +1672,29 @@ type BlockItem = ({ para: ParaItem } | { table: ResolvedTable }) & {
   nodeOffset?: number;
 };
 
+/**
+ * The gap owed ABOVE a block, given the space-after the block before it
+ * already contributed.
+ *
+ * OOXML does not add the two: "a consumer shall use the maximum of the
+ * inter-line spacing in each paragraph, the spacing after the first paragraph
+ * and the spacing before the second paragraph to determine the net spacing
+ * between the paragraphs." The previous block's `after` is already on the
+ * page, so only whatever `before` asks for BEYOND it is still owed —
+ * `after + max(0, before - after)` is exactly `max(after, before)`.
+ *
+ * The spec's third term, each paragraph's inter-line spacing, is deliberately
+ * left out: w:line is already baked into our line boxes, so counting it here
+ * would apply it twice. If a document ever spaces wider than Word by exactly
+ * one line, this is the omission to revisit.
+ */
+function collapsedBefore(
+  before: number | undefined,
+  pendingAfter: number,
+): number {
+  return Math.max(0, (before ?? 0) - pendingAfter);
+}
+
 /** Estimated laid-out height of a block item (drafts + spacing, or table). */
 function blockItemHeight(item: BlockItem): number {
   if ('para' in item) {
@@ -1680,12 +1708,22 @@ function blockItemHeight(item: BlockItem): number {
  *  the placer can balance columns on the section's final page. */
 function assignSectionHeights(items: BlockItem[]): void {
   let current: SectionMarker | null = null;
+  // Heights are summed the way they are placed: adjacent spacing collapses,
+  // so subtract the overlap rather than counting both sides.
+  let pendingAfter = 0;
   for (const item of items) {
     if (item.section) {
       current = item.section;
       current.height = 0;
+      pendingAfter = 0;
     }
-    if (current) current.height = (current.height ?? 0) + blockItemHeight(item);
+    const overlap =
+      'para' in item
+        ? Math.min(pendingAfter, item.para.before ?? 0)
+        : pendingAfter;
+    if (current)
+      current.height = (current.height ?? 0) + blockItemHeight(item) - overlap;
+    pendingAfter = 'para' in item ? (item.para.after ?? 0) : 0;
   }
 }
 
@@ -2610,6 +2648,10 @@ function placeBlocks(
   let bandTop = top;
   let sectionMaxY = top;
   let colDirty = false; // current column holds content (a break would progress)
+  // Space-after the previous block already put on the page. The next block's
+  // space-before collapses against it (collapsedBefore) — OOXML takes the
+  // MAXIMUM of the two, not their sum.
+  let pendingAfter = 0;
   const xShift = () => colIndex * (colWidth + colGap);
   const colX0 = () => contentLeft + xShift();
   const colX1 = () => colX0() + colWidth;
@@ -2933,6 +2975,7 @@ function placeBlocks(
     bandTop = top;
     sectionMaxY = top;
     colDirty = false;
+    pendingAfter = 0; // nothing above to collapse against at a fresh band
     y = top;
     rebalance();
     resumeTable = cp.midTable && materializeRemainder(cp.midTable);
@@ -3026,13 +3069,13 @@ function placeBlocks(
    *  keepNext blocks in full, then the minimum legal slice of the block that
    *  ends the chain. Tables and un-drafted paragraphs approximate as one
    *  line. */
-  const keepAheadH = (idx: number): number => {
+  const keepAheadH = (idx: number, prevAfter = 0): number => {
     let need = 0;
     for (let j = idx + 1; j < items.length; j++) {
       const it = items[j];
       if (it.section) break; // a section boundary ends the chain
       if ('para' in it) {
-        need += it.para.before ?? 0;
+        need += collapsedBefore(it.para.before, prevAfter);
         if (it.para.keepNext && it.para.drafts && j + 1 < items.length) {
           need += draftsTotal(it.para.drafts) + (it.para.after ?? 0);
           continue;
@@ -3465,6 +3508,7 @@ function placeBlocks(
             y += item.para.after;
             sectionRemaining -= item.para.after;
           }
+          pendingAfter = item.para.after ?? 0;
           continue;
         }
         // A replayed page opening mid-paragraph: its pre-steps (page break,
@@ -3486,6 +3530,7 @@ function placeBlocks(
             y += item.para.after;
             sectionRemaining -= item.para.after;
           }
+          pendingAfter = item.para.after ?? 0;
           continue;
         }
         if (item.para.pageBreakBefore && pageHasContent()) {
@@ -3496,23 +3541,34 @@ function placeBlocks(
         // (keepLines) — or this paragraph plus the head of what must follow
         // it (keepNext) — cannot finish here but WOULD fit a fresh band.
         // A chain taller than a whole band gives up, as Word does.
+        // What space-before actually costs here, after collapsing against the
+        // previous block's space-after. Used by BOTH the keep math and the
+        // placement below, so a keep decision can never be made against a gap
+        // the placer will not add.
+        const effBefore = colDirty
+          ? collapsedBefore(item.para.before, pendingAfter)
+          : 0;
         if (colDirty && item.para.drafts) {
-          const selfH = (item.para.before ?? 0) + draftsTotal(item.para.drafts);
+          const selfH = effBefore + draftsTotal(item.para.drafts);
           const bandH = colBottom() - bandTop;
           const avail = colBottom() - y;
           const needKL = item.para.keepLines && selfH > avail && selfH <= bandH;
           const needKN =
             item.para.keepNext &&
             (() => {
-              const need = selfH + (item.para.after ?? 0) + keepAheadH(idx);
+              const need =
+                selfH +
+                (item.para.after ?? 0) +
+                keepAheadH(idx, item.para.after ?? 0);
               return need > avail && need <= bandH;
             })();
           if (needKL || needKN) breakBand();
         }
-        // Space-before: a gap above the paragraph (collapsed away at a band top).
-        if (item.para.before && colDirty) {
-          y += item.para.before;
-          sectionRemaining -= item.para.before;
+        // Space-before: a gap above the paragraph (collapsed away at a band
+        // top, and against the previous block's space-after otherwise).
+        if (effBefore) {
+          y += effBefore;
+          sectionRemaining -= effBefore;
         }
         if (item.para.borders) {
           activePBdr = {
@@ -3539,7 +3595,11 @@ function placeBlocks(
           y += item.para.after; // space-after gap
           sectionRemaining -= item.para.after;
         }
+        pendingAfter = item.para.after ?? 0;
       } else {
+        // A table carries no space-after, so nothing collapses into the next
+        // paragraph's space-before.
+        pendingAfter = 0;
         // Tables flow across columns/pages: split at row boundaries when
         // possible, and mid-row when a single row is taller than a whole band.
         // Header rows (w:tblHeader) repeat at the top of every fragment. Tables
