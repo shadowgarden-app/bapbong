@@ -511,6 +511,9 @@ export class CanvasPainter {
         if (el?.complete && el.naturalWidth > 0) {
           this.drawBitmap(el, f.crop, f.x, yOffset + f.y, f.width, f.height);
         }
+        // Word's picture border sits ON the box edge, over the bitmap.
+        if (f.outline)
+          this.strokeBox(f.outline, f.x, yOffset + f.y, f.width, f.height);
       }
       if (f.lines && f.lines.length > 0) {
         const ctx = this.ctx;
@@ -634,6 +637,14 @@ export class CanvasPainter {
               img.width,
               img.height,
             );
+            if (img.outline)
+              this.strokeBox(
+                img.outline,
+                img.x,
+                baselineY - img.height,
+                img.width,
+                img.height,
+              );
           }
         },
       );
@@ -904,6 +915,21 @@ export class CanvasPainter {
       for (const f of cell.floats ?? [])
         if (!f.behind) this.paintFloat(f, yOffset, o, pageInfo);
     }
+  }
+
+  /** Four edges of a box in one border style — a picture's own outline. */
+  private strokeBox(
+    side: BorderSide,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
+    this.strokeBorder(side, x, y, x + w, y);
+    this.strokeBorder(side, x, y + h, x + w, y + h);
+    this.strokeBorder(side, x, y, x, y + h);
+    this.strokeBorder(side, x + w, y, x + w, y + h);
+    this.ctx.setLineDash([]);
   }
 
   /** Draw a bitmap into a box, honouring an `a:srcRect` crop.

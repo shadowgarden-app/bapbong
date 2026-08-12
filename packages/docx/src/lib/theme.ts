@@ -345,6 +345,40 @@ export function drawingColor(
   return rgbToHex(out);
 }
 
+/**
+ * Resolve an `a:lnRef` to the theme line style it points at.
+ *
+ * The twin of {@link ThemeFillResolver}, and the same indexing rule: `@idx`
+ * is one-based into the format scheme's `a:lnStyleLst`. It hands back the
+ * `a:ln` ELEMENT rather than parsed properties, because the caller already
+ * knows how to read one — width, dash, cap and the rest come out of the same
+ * code that reads a shape's own outline, so the two cannot drift apart.
+ *
+ * The colour is NOT resolved here: a shape's stroke colour already comes from
+ * the ref itself (drawingColor over a:lnRef), which is the placeholder the
+ * scheme entry would have substituted anyway.
+ */
+export type ThemeLineResolver = (
+  lnRef: OoxmlNode | undefined,
+) => OoxmlNode | undefined;
+
+export function buildThemeLineResolver(
+  themeRoot: OoxmlNode | undefined,
+): ThemeLineResolver {
+  const list = findDescendant(themeRoot, 'a:lnStyleLst');
+  return (lnRef) => {
+    if (!lnRef || !list) return undefined;
+    const idx = Number(attrOf(lnRef, 'idx') ?? '0');
+    if (!Number.isFinite(idx) || idx < 1) return undefined;
+    // Indexed directly rather than through `children()`, which would mark the
+    // whole list. Only the entry a document actually names is read, so the
+    // ones nothing points at keep showing up in the coverage audit — which is
+    // right: the day a file names entry 3 and we cannot paint what is in it,
+    // that has to be visible.
+    return list.children[idx - 1];
+  };
+}
+
 /** Resolve an `a:fillRef` — a shape saying "fill me the way the theme's
  *  format scheme entry N does, using this colour as the placeholder". */
 export type ThemeFillResolver = (
@@ -361,9 +395,12 @@ export function buildThemeFillResolver(
   return (fillRef) => {
     if (!fillRef) return undefined;
     const idx = Number(attrOf(fillRef, 'idx') ?? '0');
-    if (!Number.isFinite(idx) || idx === 0) return undefined; // idx 0 = no fill
-    // The ref carries the placeholder colour the scheme entry fills in.
+    // The ref carries the placeholder colour the scheme entry fills in. Read
+    // BEFORE the idx test, not after: returning early past it leaves the
+    // child colour untouched, and the coverage audit cannot tell an untouched
+    // node from an unsupported one.
     const phClr = drawingColor(fillRef, resolveTheme);
+    if (!Number.isFinite(idx) || idx === 0) return undefined; // idx 0 = no fill
     const entry =
       idx >= 1000
         ? bgList?.children[idx - 1000]

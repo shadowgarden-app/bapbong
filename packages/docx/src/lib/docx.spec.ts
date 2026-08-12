@@ -1122,6 +1122,82 @@ describe('importDocx', () => {
     expect(doc.child(2).child(0).attrs.width).toBe(100);
   });
 
+  it('reads a picture border (a:ln on pic:spPr)', async () => {
+    // Word's "picture border". Shape outlines have always been read; a
+    // framed photo lost its frame because nothing looked at the picture's
+    // own spPr.
+    const pic = (rid: string, spPr: string) =>
+      `<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/>
+        <a:graphic><a:graphicData><pic:pic>
+          <pic:blipFill><a:blip r:embed="${rid}"/></pic:blipFill>
+          <pic:spPr>${spPr}</pic:spPr>
+        </pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r></w:p>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
+      ${pic('rId7', '<a:ln w="9525"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln>')}
+      ${pic('rId7', '<a:ln><a:noFill/></a:ln>')}
+      ${pic('rId7', '')}
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.png': PNG_1x1,
+      }),
+    );
+    // 9525 EMU = 1px.
+    expect(doc.child(0).child(0).attrs.outline).toEqual({
+      width: 1,
+      style: 'solid',
+      color: '#FF0000',
+    });
+    // The spec's explicit "no outline" stays no outline, and so does silence.
+    expect(doc.child(1).child(0).attrs.outline).toBeNull();
+    expect(doc.child(2).child(0).attrs.outline).toBeNull();
+  });
+
+  it('takes a shape outline width from the theme line style its lnRef names', async () => {
+    // a:lnRef @idx is one-based into the theme's a:lnStyleLst. A gallery
+    // shape carries only the ref, so without resolving it every such shape
+    // drew at the 1px fallback whatever the theme said.
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:clrScheme name="Office"><a:accent1><a:srgbClr val="4472C4"/></a:accent1></a:clrScheme>
+      <a:fmtScheme><a:lnStyleLst>
+        <a:ln w="9525"><a:prstDash val="solid"/></a:ln>
+        <a:ln w="28575"><a:prstDash val="dash"/></a:ln>
+      </a:lnStyleLst></a:fmtScheme>
+    </a:themeElements></a:theme>`;
+    const shape = (idx: string, ln: string) =>
+      `<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/>
+        <a:graphic><a:graphicData><wps:wsp>
+          <wps:spPr><a:prstGeom prst="rect"/>${ln}</wps:spPr>
+          <wps:style><a:lnRef idx="${idx}"><a:schemeClr val="accent1"/></a:lnRef></wps:style>
+        </wps:wsp></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r></w:p>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:wps="${WPS_NS_G}"><w:body>
+      ${shape('2', '')}
+      ${shape('2', '<a:ln w="9525"/>')}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    const shapeOf = (i: number) =>
+      doc.child(i).child(0).attrs.shape as Record<string, unknown>;
+    // Entry 2 of the list: 28575 EMU = 3px, dashed.
+    expect(shapeOf(0).strokeWidth).toBe(3);
+    expect(shapeOf(0).dash).toBeDefined();
+    // The shape's own a:ln overrides the width it states; the theme's dash,
+    // which the shape says nothing about, survives.
+    expect(shapeOf(1).strokeWidth).toBe(1);
+    expect(shapeOf(1).dash).toBeDefined();
+  });
+
   it('imports wp:anchor drawings as floating images', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
       <w:p><w:r><w:drawing><wp:anchor distL="114300" distR="114300" distT="0" distB="0">
@@ -1850,7 +1926,7 @@ describe('importDocx', () => {
       <wp:positionH relativeFrom="column"><wp:posOffset>3041015</wp:posOffset></wp:positionH>
       <wp:positionV relativeFrom="paragraph"><wp:posOffset>-67945</wp:posOffset></wp:positionV>
       <wp:extent cx="170815" cy="150495"/><wp:wrapThrough wrapText="bothSides"/><wp:docPr id="5" name="Rectangle 5"/>
-      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS}"><wps:cNvSpPr/>
+      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS_G}"><wps:cNvSpPr/>
         <wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="170815" cy="150495"/></a:xfrm>
           <a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln w="19050"/></wps:spPr>
         <wps:style><a:lnRef idx="2"><a:schemeClr val="accent1"/></a:lnRef></wps:style>
@@ -1858,7 +1934,7 @@ describe('importDocx', () => {
     </wp:anchor></w:drawing></mc:Choice><mc:Fallback><w:pict/></mc:Fallback></mc:AlternateContent>`;
     // Horizontal-rule style straight connector with a direct outline color.
     const line = `<w:drawing><wp:inline><wp:extent cx="952500" cy="0"/><wp:docPr id="6" name="Straight Connector 6"/>
-      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS}">
+      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS_G}">
         <wps:spPr><a:xfrm flipV="1"/><a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom>
           <a:ln w="9525"><a:solidFill><a:srgbClr val="C45911"/></a:solidFill></a:ln></wps:spPr>
       </wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing>`;
@@ -1966,7 +2042,7 @@ describe('importDocx', () => {
       <wp:positionH relativeFrom="column"><wp:posOffset>62865</wp:posOffset></wp:positionH>
       <wp:positionV relativeFrom="paragraph"><wp:posOffset>137453</wp:posOffset></wp:positionV>
       <wp:extent cx="6124575" cy="2607310"/><wp:wrapNone/><wp:docPr id="65" name="Text Box 65"/>
-      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS}"><wps:cNvSpPr txBox="1"/>
+      <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp xmlns:wps="${WPS_NS_G}"><wps:cNvSpPr txBox="1"/>
         <wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="6124575" cy="2607310"/></a:xfrm>
           <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
           <a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>

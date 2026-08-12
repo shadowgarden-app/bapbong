@@ -49,6 +49,7 @@ function pastedImageAttrs(el: unknown) {
     width: dim(e.getAttribute('width')),
     height: dim(e.getAttribute('height')),
     crop: dataJson(el, 'data-crop'),
+    outline: dataJson(el, 'data-outline'),
   };
 }
 
@@ -259,6 +260,8 @@ export const schema = new Schema({
         // edge, or null for the whole image. Negative values outset. The box
         // keeps its size; the selected region scales to fill it.
         crop: { default: null },
+        // a:ln on pic:spPr — Word's picture border, as a BorderSide, or null.
+        outline: { default: null },
       },
       parseDOM: [{ tag: 'img[src]', getAttrs: pastedImageAttrs }],
       toDOM(node) {
@@ -270,6 +273,7 @@ export const schema = new Schema({
         if (a['width'] != null) attrs['width'] = String(a['width']);
         if (a['height'] != null) attrs['height'] = String(a['height']);
         if (a['crop']) attrs['data-crop'] = JSON.stringify(a['crop']);
+        if (a['outline']) attrs['data-outline'] = JSON.stringify(a['outline']);
         return ['img', attrs];
       },
     },

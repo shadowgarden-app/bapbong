@@ -70,10 +70,12 @@ import { buildRels, Relationship } from './rels.js';
 import {
   buildThemeFillResolver,
   buildThemeFontResolver,
+  buildThemeLineResolver,
   buildThemeResolver,
   drawingColor,
   ThemeFillResolver,
   ThemeFontResolver,
+  ThemeLineResolver,
   ThemeResolver,
 } from './theme.js';
 
@@ -202,6 +204,8 @@ interface Ctx {
   resolveFont: ThemeFontResolver;
   /** Shape fill from an `a:fillRef` (theme format scheme + placeholder). */
   resolveThemeFill: ThemeFillResolver;
+  /** The theme line style an `a:lnRef` names (width, dash, cap). */
+  resolveThemeLine: ThemeLineResolver;
   notes: NotesRegistry;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
@@ -744,6 +748,24 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const docPr = findDescendant(drawing, 'wp:docPr');
   const float = parseAnchorFloat(drawing);
   const crop = parseSrcRect(findDescendant(drawing, 'a:srcRect'));
+  // Word's "picture border": an a:ln on the picture's own spPr. Shapes have
+  // always had their outline read; pictures never did, so a framed photo lost
+  // its frame. Reuses the border reader the tables use, so width/style/colour
+  // are interpreted one way across the converter. Not modelled: @cmpd
+  // (single / double / thickThin …), which is a second line rather than a
+  // property of this one.
+  const picLn = child(findDescendant(drawing, 'pic:spPr'), 'a:ln');
+  // Both attributes are asked for whether or not the outline paints. Word
+  // writes `<a:ln w="9525"><a:noFill/>…</a:ln>` on plenty of pictures — an
+  // explicit "no border" that still states a width — and reading the element
+  // without reading them would report that boilerplate as a gap. Same move
+  // parseBorderSide makes for a hidden side.
+  const picW = picLn ? attrOf(picLn, 'w') : undefined;
+  if (picLn) attrOf(picLn, 'cmpd');
+  const outline =
+    picLn && !child(picLn, 'a:noFill')
+      ? pictureOutline(picLn, picW, ctx)
+      : null;
   return ctx.schema.nodes['image'].create({
     src,
     width: emuToPx(attrOf(extent, 'cx')),
@@ -751,8 +773,27 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
     float,
     ...(crop && { crop }),
+    ...(outline && { outline }),
     rotation: xfrmRotation(drawing),
   });
+}
+
+/** A picture's outline as a {@link BorderSide}. DrawingML states the width in
+ *  EMU and the colour as a fill, where a table border states eighths of a
+ *  point and a hex — same shape, different units, so the conversion happens
+ *  here and the painter treats both alike. */
+function pictureOutline(
+  ln: OoxmlNode,
+  w: string | undefined,
+  ctx: Ctx,
+): BorderSide {
+  const width = w ? Math.max(0.75, Number(w) / 9525) : 1;
+  const prstDash = attrOf(child(ln, 'a:prstDash'), 'val');
+  return {
+    width,
+    style: prstDash && prstDash !== 'solid' ? 'dashed' : 'solid',
+    color: solidFillColor(ln, ctx) ?? '#000000',
+  };
 }
 
 /**
@@ -909,48 +950,26 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const style = child(wsp, 'wps:style');
   const ln = child(spPr, 'a:ln');
   if (!child(ln, 'a:noFill')) {
-    const w = attrOf(ln, 'w'); // outline width in EMU
-    shape['strokeWidth'] = w ? Math.max(1, Math.round(Number(w) / 9525)) : 1;
-    // Dash: a:custDash states the pattern exactly (d/sp are ST_Percentage
-    // "relative to the line width", 100000 = 100% = one stroke width — the
-    // same unit the model uses), so it converts without loss. A named
-    // a:prstDash only says WHICH preset, and the spec doesn't publish their
-    // lengths, so it keeps the generic pattern rather than an invented one.
-    const custDash = child(ln, 'a:custDash');
-    const stops = custDash ? children(custDash, 'a:ds') : [];
-    if (stops.length > 0) {
-      const pattern: number[] = [];
-      for (const ds of stops) {
-        pattern.push(pctToRatio(attrOf(ds, 'd')), pctToRatio(attrOf(ds, 'sp')));
-      }
-      shape['dash'] = pattern;
-    } else {
-      const prstDash = attrOf(child(ln, 'a:prstDash'), 'val');
-      if (prstDash && prstDash !== 'solid') shape['dash'] = DML_NAMED_DASH;
-    }
-    // cap: honored only when stated. ECMA says an omitted cap means `square`,
-    // but every Word-authored theme in the wild writes cap="flat" on its line
-    // styles, and shapes inherit that — so assuming square for a bare a:ln
-    // would lengthen the ends of every existing line by half a stroke.
-    // `flat` is the model's absent case, so it is not stored — that keeps one
-    // canonical shape for a value with one meaning, and makes the round-trip
-    // symmetric (no cap → cap="flat" on write → no cap on read).
-    const cap = attrOf(ln, 'cap');
-    if (cap === 'rnd') shape['cap'] = 'round';
-    else if (cap === 'sq') shape['cap'] = 'square';
-    // Arrowheads (ST_LineEndType: none|triangle|stealth|diamond|oval|arrow).
-    // The model records only their presence, so any head that isn't `none`
-    // counts — the painter draws one triangle either way.
-    const headEnd = attrOf(child(ln, 'a:headEnd'), 'type');
-    const tailEnd = attrOf(child(ln, 'a:tailEnd'), 'type');
-    if (headEnd && headEnd !== 'none') shape['arrowStart'] = true;
-    if (tailEnd && tailEnd !== 'none') shape['arrowEnd'] = true;
+    shape['strokeWidth'] = 1;
+    // A shape's outline starts from the theme line style its a:lnRef names
+    // and then takes whatever its own a:ln states on top — so a shape from
+    // the gallery, which carries only the ref, still gets the theme's width.
+    // Both passes go through the same reader, so the two sources cannot
+    // drift apart in how they are interpreted.
+    applyLineProps(ctx.resolveThemeLine(child(style, 'a:lnRef')), shape);
+    applyLineProps(ln, shape);
     // Direct outline color, else the style's line reference (how Word themes
-    // shape outlines), else black.
-    shape['stroke'] =
-      solidFillColor(ln, ctx) ??
-      drawingColor(findDescendant(style, 'a:lnRef'), ctx.resolveTheme) ??
-      '#000000';
+    // shape outlines), else black. BOTH are read before either is chosen: a
+    // `??` chain would leave the loser untouched, and to the coverage audit
+    // an untouched node is indistinguishable from an unsupported one. This is
+    // the third time that has bitten (v:imagedata @o:title, wp:docPr
+    // descr/title), so it is worth spelling out rather than shortening.
+    const directStroke = solidFillColor(ln, ctx);
+    const themedStroke = drawingColor(
+      findDescendant(style, 'a:lnRef'),
+      ctx.resolveTheme,
+    );
+    shape['stroke'] = directStroke ?? themedStroke ?? '#000000';
   }
   // Fill: an explicit a:noFill wins, then a direct a:solidFill, then the
   // shape style's a:fillRef resolved through the theme's format scheme —
@@ -980,6 +999,59 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     textbox,
     rotation: xfrmRotation(spPr),
   });
+}
+
+/**
+ * Everything an `a:ln` says about how a line looks, folded onto a ShapeSpec.
+ *
+ * Called twice per shape — once for the theme line style the shape's
+ * `a:lnRef` names, then once for the shape's own outline — so a property
+ * states itself or inherits, with the direct one winning. Only what the node
+ * actually states is written, which is what makes the second call an override
+ * rather than a reset. The colour is not here: it comes from the ref or the
+ * outline's own fill, resolved at the call site.
+ */
+function applyLineProps(
+  ln: OoxmlNode | undefined,
+  shape: Record<string, unknown>,
+): void {
+  if (!ln) return;
+  const w = attrOf(ln, 'w'); // outline width in EMU
+  if (w) shape['strokeWidth'] = Math.max(1, Math.round(Number(w) / 9525));
+  // Dash: a:custDash states the pattern exactly (d/sp are ST_Percentage
+  // "relative to the line width", 100000 = 100% = one stroke width — the
+  // same unit the model uses), so it converts without loss. A named
+  // a:prstDash only says WHICH preset, and the spec doesn't publish their
+  // lengths, so it keeps the generic pattern rather than an invented one.
+  const custDash = child(ln, 'a:custDash');
+  const stops = custDash ? children(custDash, 'a:ds') : [];
+  if (stops.length > 0) {
+    const pattern: number[] = [];
+    for (const ds of stops) {
+      pattern.push(pctToRatio(attrOf(ds, 'd')), pctToRatio(attrOf(ds, 'sp')));
+    }
+    shape['dash'] = pattern;
+  } else {
+    const prstDash = attrOf(child(ln, 'a:prstDash'), 'val');
+    if (prstDash && prstDash !== 'solid') shape['dash'] = DML_NAMED_DASH;
+  }
+  // cap: honored only when stated. ECMA says an omitted cap means `square`,
+  // but every Word-authored theme in the wild writes cap="flat" on its line
+  // styles, and shapes inherit that — so assuming square for a bare a:ln
+  // would lengthen the ends of every existing line by half a stroke.
+  // `flat` is the model's absent case, so it is not stored — that keeps one
+  // canonical shape for a value with one meaning, and makes the round-trip
+  // symmetric (no cap → cap="flat" on write → no cap on read).
+  const cap = attrOf(ln, 'cap');
+  if (cap === 'rnd') shape['cap'] = 'round';
+  else if (cap === 'sq') shape['cap'] = 'square';
+  // Arrowheads (ST_LineEndType: none|triangle|stealth|diamond|oval|arrow).
+  // The model records only their presence, so any head that isn't `none`
+  // counts — the painter draws one triangle either way.
+  const headEnd = attrOf(child(ln, 'a:headEnd'), 'type');
+  const tailEnd = attrOf(child(ln, 'a:tailEnd'), 'type');
+  if (headEnd && headEnd !== 'none') shape['arrowStart'] = true;
+  if (tailEnd && tailEnd !== 'none') shape['arrowEnd'] = true;
 }
 
 /** Textbox content of a wps shape (wps:txbx/w:txbxContent), as paragraph node
@@ -3289,6 +3361,7 @@ async function importDocxImpl(
   const resolveTheme = buildThemeResolver(themeRoot);
   const resolveFont = buildThemeFontResolver(themeRoot);
   const resolveThemeFill = buildThemeFillResolver(themeRoot, resolveTheme);
+  const resolveThemeLine = buildThemeLineResolver(themeRoot);
   const styles = buildStyleRegistry(
     stylesXml ? parsePart('word/styles.xml', stylesXml) : undefined,
     resolveTheme,
@@ -3322,6 +3395,7 @@ async function importDocxImpl(
     resolveTheme,
     resolveFont,
     resolveThemeFill,
+    resolveThemeLine,
     notes,
     comments,
     schema: opts?.schema ?? schema,

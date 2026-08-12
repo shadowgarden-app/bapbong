@@ -7,6 +7,7 @@ import {
 } from '@shadow-garden/bapbong-model';
 import type {
   Align,
+  BorderSide,
   CellDiagonals,
   CellPadding,
   ImageCrop,
@@ -208,6 +209,7 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
     link: link ? String(link.attrs['href']) : undefined,
     ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
     ...(a['crop'] ? { crop: a['crop'] as ImageCrop } : {}),
+    ...(a['outline'] ? { outline: a['outline'] as BorderSide } : {}),
     ...(Number(a['rotation']) ? { rotation: Number(a['rotation']) } : {}),
     pos,
   };
@@ -262,6 +264,9 @@ function paragraphToFlow(
             : {}),
           ...(child.attrs['crop']
             ? { crop: child.attrs['crop'] as ImageCrop }
+            : {}),
+          ...(child.attrs['outline']
+            ? { outline: child.attrs['outline'] as BorderSide }
             : {}),
           ...(Number(child.attrs['rotation'])
             ? { rotation: Number(child.attrs['rotation']) }
@@ -883,6 +888,7 @@ function wrapParagraph(
           link: t.link,
           ...(t.image.shape ? { shape: t.image.shape } : {}),
           ...(t.image.crop ? { crop: t.image.crop } : {}),
+          ...(t.image.outline ? { outline: t.image.outline } : {}),
           ...(t.image.rotation ? { rotation: t.image.rotation } : {}),
           pos: t.pos,
         });
@@ -1230,6 +1236,7 @@ function resolveFloat(
   if (f.pos != null) rf.pos = f.pos;
   if (f.rotation) rf.rotation = f.rotation;
   if (f.crop) rf.crop = f.crop;
+  if (f.outline) rf.outline = f.outline;
   if (f.shape) rf.shape = f.shape;
   if (f.behind) rf.behind = true;
   if (f.content && f.content.length > 0) {
