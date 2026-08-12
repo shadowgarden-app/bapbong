@@ -632,9 +632,9 @@ describe('layoutBlocks', () => {
     const side = { width: 1, style: 'solid' as const, color: '#CCCCCC' };
     const bordered: FlowBlock = { ...para('one two'), borders: { top: side } };
     const { pages } = layoutBlocks([para('lead'), bordered], config());
-    const boxes = pages[0].paraBorders ?? [];
+    const boxes = pages[0].paraBoxes ?? [];
     expect(boxes).toHaveLength(1);
-    expect(boxes[0].borders.top).toEqual(side);
+    expect(boxes[0].borders?.top).toEqual(side);
     expect(boxes[0].drawTop).toBe(true);
     expect(boxes[0].drawBottom).toBe(true);
     expect(boxes[0].x).toBe(20); // content left
@@ -655,10 +655,29 @@ describe('layoutBlocks', () => {
     const cfg = config({ height: 80 });
     const { pages } = layoutBlocks([bordered], cfg);
     expect(pages.length).toBeGreaterThan(1);
-    const first = pages[0].paraBorders?.[0];
-    const last = pages[pages.length - 1].paraBorders?.[0];
+    const first = pages[0].paraBoxes?.[0];
+    const last = pages[pages.length - 1].paraBoxes?.[0];
     expect(first).toMatchObject({ drawTop: true, drawBottom: false });
     expect(last).toMatchObject({ drawTop: false, drawBottom: true });
+  });
+
+  it('emits a box for a shaded paragraph with no borders, on every fragment', () => {
+    // w:shd alone must open a box — the fill is what paints, and unlike the
+    // horizontal rules it covers each fragment of a split paragraph.
+    const shaded: FlowBlock = {
+      ...para(
+        'aaaa bbbb cccc dddd eeee gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq',
+      ),
+      shading: '#FFFF00',
+    };
+    const { pages } = layoutBlocks([shaded], config({ height: 80 }));
+    expect(pages.length).toBeGreaterThan(1);
+    for (const p of pages) {
+      const box = p.paraBoxes?.[0];
+      expect(box?.shading).toBe('#FFFF00');
+      expect(box?.borders).toBeUndefined();
+      expect(box?.height).toBeGreaterThan(0);
+    }
   });
 
   it('measures same-font adjacent tokens cumulatively (cross-run kerning)', () => {

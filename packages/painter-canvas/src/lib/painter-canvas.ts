@@ -404,23 +404,25 @@ export class CanvasPainter {
       }
     }
 
-    // Paragraph borders (w:pBdr) under the text, over backgrounds.
-    for (const b of page.paraBorders ?? []) {
+    // Paragraph boxes (w:shd fill, then w:pBdr sides) under the text, over
+    // backgrounds. The fill covers every fragment of a split paragraph; the
+    // horizontal rules only close the box at its real top and bottom.
+    for (const b of page.paraBoxes ?? []) {
       const y0 = yOffset + b.y;
       const y1 = yOffset + b.y + b.height;
-      if (b.drawTop && b.borders.top)
-        this.strokeBorder(b.borders.top, b.x, y0, b.x + b.width, y0);
-      if (b.drawBottom && b.borders.bottom)
-        this.strokeBorder(b.borders.bottom, b.x, y1, b.x + b.width, y1);
-      if (b.borders.left) this.strokeBorder(b.borders.left, b.x, y0, b.x, y1);
-      if (b.borders.right)
-        this.strokeBorder(
-          b.borders.right,
-          b.x + b.width,
-          y0,
-          b.x + b.width,
-          y1,
-        );
+      if (b.shading) {
+        ctx.fillStyle = b.shading;
+        ctx.fillRect(b.x, y0, b.width, b.height);
+      }
+      const bd = b.borders;
+      if (!bd) continue;
+      if (b.drawTop && bd.top)
+        this.strokeBorder(bd.top, b.x, y0, b.x + b.width, y0);
+      if (b.drawBottom && bd.bottom)
+        this.strokeBorder(bd.bottom, b.x, y1, b.x + b.width, y1);
+      if (bd.left) this.strokeBorder(bd.left, b.x, y0, b.x, y1);
+      if (bd.right)
+        this.strokeBorder(bd.right, b.x + b.width, y0, b.x + b.width, y1);
     }
 
     for (const line of page.lines) this.paintLine(line, yOffset, o, pageInfo);

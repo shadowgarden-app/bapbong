@@ -173,6 +173,10 @@ export const schema = new Schema({
         // w:pBdr — { top?, bottom?, left?, right? } of BorderSide, or null.
         // Importer-set; painted as a box around the paragraph's lines.
         borders: { default: null },
+        // w:shd at the paragraph layer, resolved to a fill "#RRGGBB" (or
+        // null). Painted behind the paragraph's lines, in the same box the
+        // borders use.
+        shading: { default: null },
         // Carry-through fidelity (docx round-trip): OOXML paragraph
         // properties the model does NOT represent, preserved verbatim so a
         // customer's save never drops them. { pPr?: string, markRPr?: string }
@@ -198,6 +202,8 @@ export const schema = new Schema({
         if (attrs.styleId) dom['data-style'] = attrs.styleId;
         if (node.attrs['borders'])
           dom['data-borders'] = JSON.stringify(node.attrs['borders']);
+        if (node.attrs['shading'])
+          dom['data-shading'] = String(node.attrs['shading']);
         // Round-trip fidelity survives in-app copy/paste (PM's clipboard is
         // DOM-serialized); external HTML paste simply has no such attribute.
         if (node.attrs['carry'])

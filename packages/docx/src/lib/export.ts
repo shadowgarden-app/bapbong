@@ -3,6 +3,7 @@ import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { perf } from '@shadow-garden/bapbong-contracts';
 import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
+  BorderSide,
   BorderStyle,
   CommentNode,
   PageConfig,
@@ -531,6 +532,14 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
     const box = bordersXml('w:pBdr', pBdr, CELL_SIDES);
     if (box) out.push(box);
   }
+  // w:shd follows w:pBdr in the CT_PPr sequence. The model keeps only the
+  // RESOLVED fill, so a themed or patterned shd comes back as its flat
+  // colour — the same trade the run and cell paths already make.
+  const shading = a['shading'] as string | null;
+  if (shading)
+    out.push(
+      `<w:shd w:val="clear" w:color="auto" w:fill="${esc(shading.replace(/^#/, ''))}"/>`,
+    );
   // w:tabs sits between pBdr and spacing in the pPr sequence. The importer
   // resolves these through the style cascade into px; they go back as twips.
   const tabs = a['tabs'] as
@@ -627,6 +636,8 @@ const TABLE_SIDES = [
   'insideV',
 ] as const;
 const CELL_SIDES = ['top', 'bottom', 'left', 'right'] as const;
+/** The corner rules that ride inside w:tcBorders beside the four sides. */
+const DIAGONAL_SIDES = ['tl2br', 'br2tl'] as const;
 
 const BORDER_STYLE_OUT: Record<BorderStyle, string> = {
   solid: 'single',
@@ -671,8 +682,21 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
   // carries it as `rowspan`, but OOXML expresses it as a `w:vMerge` on the
   // first cell plus a real `w:tc` in every covered row.
   if ((a['rowspan'] as number) > 1) pr.push('<w:vMerge w:val="restart"/>');
+  // The four sides and the two corner-to-corner rules share one w:tcBorders,
+  // so they are emitted together — bordersXml takes the diagonals as extra
+  // "sides" because their attributes are the same CT_Border.
   const borders = a['borders'] as TableBorders | null;
-  if (borders) pr.push(bordersXml('w:tcBorders', borders, CELL_SIDES));
+  const diagonals = a['diagonals'] as Record<string, BorderSide> | null;
+  if (borders || diagonals)
+    pr.push(
+      bordersXml(
+        'w:tcBorders',
+        { ...(borders ?? {}), ...(diagonals ?? {}) } as TableBorders,
+        diagonals
+          ? [...CELL_SIDES, ...DIAGONAL_SIDES.filter((d) => d in diagonals)]
+          : CELL_SIDES,
+      ),
+    );
   const bg = a['background'] as string | null;
   if (bg)
     pr.push(

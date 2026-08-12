@@ -624,6 +624,27 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     });
   });
 
+  it('round-trips paragraph shading (w:shd) and the cell diagonals', async () => {
+    // 1.5px survives the px → eighths-of-a-point → px trip exactly; thinner
+    // rules quantise up to the painter's 0.75px hairline floor.
+    const rule = { width: 1.5, style: 'solid' as const, color: '#000000' };
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', { shading: '#FFFF00' }, [schema.text('lit')]),
+      schema.node('table', null, [
+        schema.node('table_row', null, [
+          schema.node('table_cell', { diagonals: { tl2br: rule } }, [
+            schema.node('paragraph', null, [schema.text('struck')]),
+          ]),
+        ]),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).attrs['shading']).toBe('#FFFF00');
+    expect(back.child(1).child(0).child(0).attrs['diagonals']).toEqual({
+      tl2br: rule,
+    });
+  });
+
   it('round-trips w:cantSplit on table rows', async () => {
     const doc = schema.node('doc', null, [
       schema.node('table', null, [

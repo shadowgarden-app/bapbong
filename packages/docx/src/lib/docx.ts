@@ -1310,6 +1310,7 @@ const CONSUMED_PPR = new Set([
   'w:spacing',
   'w:tabs',
   'w:pBdr',
+  'w:shd',
   'w:pageBreakBefore',
   'w:keepNext',
   'w:keepLines',
@@ -1832,6 +1833,17 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       if (s) paraBorders[side] = s;
     }
   }
+  // w:shd at the PARAGRAPH layer: "the shading applied to the contents of the
+  // paragraph … the background color behind the paragraph, then the pattern
+  // color using the mask supplied by the pattern over that background"
+  // (ECMA-376). Runs and cells have had this since the start via shdFill; the
+  // paragraph layer was simply never read. Only the fill is honoured — the
+  // pattern masks (pct*, diagStripe, …) are not painted, so a shd carrying
+  // ONLY a pattern colour resolves to nothing and stays out of the model.
+  const shdLayer = lastWith(pPrChain, 'w:shd');
+  const shading = shdLayer
+    ? (shdFill(child(shdLayer, 'w:shd'), ctx.resolveTheme) ?? null)
+    : null;
 
   const attrs: {
     list?: ListInfo;
@@ -1849,6 +1861,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     heading?: number;
     styleId?: string;
     borders?: Record<string, BorderSide>;
+    shading?: string;
     carry?: { pPr?: string; markRPr?: string };
   } = {};
   // Carry-through: unmodelled INLINE pPr children + the paragraph mark's
@@ -1886,6 +1899,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (keepLines) attrs.keepLines = true;
   if (!widowControl) attrs.widowControl = false;
   if (Object.keys(paraBorders).length > 0) attrs.borders = paraBorders;
+  if (shading) attrs.shading = shading;
   return ctx.schema.nodes['paragraph'].create(attrs, inline);
 }
 

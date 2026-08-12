@@ -513,6 +513,30 @@ describe('importDocx', () => {
     expect(row.child(1).attrs.colwidth).toEqual([421]); // 70% of 602
   });
 
+  it('reads w:shd at the paragraph layer, through the style cascade', async () => {
+    // "The background color behind the paragraph, then the pattern color
+    // using the mask supplied by the pattern over that background"
+    // (ECMA-376). We paint the background; a shd that carries ONLY a pattern
+    // colour has no fill to resolve and stays out of the model.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:styleId="Boxed">
+        <w:pPr><w:shd w:val="clear" w:color="auto" w:fill="FFFF00"/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Boxed"/></w:pPr><w:r><w:t>from the style</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Boxed"/><w:shd w:val="clear" w:color="auto" w:fill="00FF00"/></w:pPr><w:r><w:t>inline wins</w:t></w:r></w:p>
+      <w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="auto"/></w:pPr><w:r><w:t>auto is no fill</w:t></w:r></w:p>
+      <w:p><w:pPr><w:shd w:val="pct25" w:color="FF0000"/></w:pPr><w:r><w:t>pattern only</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    expect(doc.child(0).attrs.shading).toBe('#FFFF00');
+    // The cascade resolves like every other pPr property: most derived wins.
+    expect(doc.child(1).attrs.shading).toBe('#00FF00');
+    expect(doc.child(2).attrs.shading).toBeNull();
+    expect(doc.child(3).attrs.shading).toBeNull();
+  });
+
   it('imports w:pBdr paragraph borders and w:tcMar cell margins', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

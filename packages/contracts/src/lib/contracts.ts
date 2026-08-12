@@ -403,6 +403,8 @@ export interface FlowParagraph {
   tabs?: TabStop[];
   /** Paragraph box borders (w:pBdr) — the four outer sides. */
   borders?: ParagraphBorders;
+  /** w:shd fill "#RRGGBB" painted behind the paragraph's lines. */
+  shading?: string;
 }
 
 /** Paragraph box borders (w:pBdr). Only visible sides are present; the
@@ -711,8 +713,9 @@ export interface ResolvedPage {
   /** Footnote bodies whose references fall on this page, laid out at the
    *  bottom above the footer. Absent when the page has no footnotes. */
   footnotes?: ResolvedFootnotes;
-  /** Paragraph border boxes (w:pBdr) on this page, painted under the text. */
-  paraBorders?: ParagraphBorderBox[];
+  /** Paragraph boxes (w:pBdr borders and/or w:shd fill) on this page, painted
+   *  under the text. */
+  paraBoxes?: ParagraphBox[];
   /** Index into ResolvedLayout.chromeSets for this page's header/footer —
    *  the section in effect where the page starts. Absent → the flat
    *  document-level chrome. */
@@ -722,15 +725,20 @@ export interface ResolvedPage {
   sectionFirst?: boolean;
 }
 
-/** One paragraph's border box on a page (page-local px). A paragraph split
- *  across pages emits one box per fragment: `drawTop` only on the first,
- *  `drawBottom` only on the last. */
-export interface ParagraphBorderBox {
+/** One paragraph's box on a page (page-local px), carrying whatever paints
+ *  behind and around its lines: the w:pBdr border sides, the w:shd fill, or
+ *  both. A paragraph split across pages emits one box per fragment —
+ *  `drawTop` only on the first, `drawBottom` only on the last, while the fill
+ *  covers every fragment. */
+export interface ParagraphBox {
   x: number;
   y: number;
   width: number;
   height: number;
-  borders: ParagraphBorders;
+  /** w:pBdr sides; absent when the paragraph is shaded but unbordered. */
+  borders?: ParagraphBorders;
+  /** w:shd fill "#RRGGBB", painted under the borders and the text. */
+  shading?: string;
   drawTop: boolean;
   drawBottom: boolean;
 }

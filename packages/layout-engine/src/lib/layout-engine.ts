@@ -30,7 +30,7 @@ import type {
   MeasureMetrics,
   MeasureText,
   PageConfig,
-  ParagraphBorderBox,
+  ParagraphBox,
   ResolvedChromeSet,
   ParagraphBorders,
   ParagraphIndent,
@@ -1660,6 +1660,8 @@ type ParaItem = {
   widowControl?: boolean;
   /** w:pBdr — a border box painted around the paragraph's lines. */
   borders?: ParagraphBorders;
+  /** w:shd — a fill painted behind them, in that same box. */
+  shading?: string;
 };
 type SectionMarker = ColumnConfig & {
   newPage: boolean;
@@ -2363,7 +2365,8 @@ interface PageCheckpoint {
   balancing: boolean;
   sectionRemaining: number;
   activePBdr: {
-    borders: ParagraphBorders;
+    borders?: ParagraphBorders;
+    shading?: string;
     startedEarlier: boolean;
     frag: { x0: number; x1: number; y0: number; y1: number } | null;
   } | null;
@@ -2644,21 +2647,23 @@ function placeBlocks(
   // w:pBdr tracking: while a bordered paragraph places its lines, a fragment
   // accumulates; a column/page break flushes it as a box (top edge only on
   // the first fragment, bottom only on the last).
-  let paraBorderBoxes: ParagraphBorderBox[] = [];
+  let paraBoxes: ParagraphBox[] = [];
   let activePBdr: {
-    borders: ParagraphBorders;
+    borders?: ParagraphBorders;
+    shading?: string;
     startedEarlier: boolean;
     frag: { x0: number; x1: number; y0: number; y1: number } | null;
   } | null = null;
   const flushPBdrFrag = (isLast: boolean) => {
     const a = activePBdr;
     if (!a?.frag) return;
-    paraBorderBoxes.push({
+    paraBoxes.push({
       x: a.frag.x0,
       y: a.frag.y0,
       width: a.frag.x1 - a.frag.x0,
       height: a.frag.y1 - a.frag.y0,
-      borders: a.borders,
+      ...(a.borders && { borders: a.borders }),
+      ...(a.shading && { shading: a.shading }),
       drawTop: !a.startedEarlier,
       drawBottom: isLast,
     });
@@ -2861,7 +2866,7 @@ function placeBlocks(
     if (pageFloats.length > 0) resolved.floats = pageFloats;
     if (pageFnNums.length > 0)
       resolved.footnotes = buildFootnoteArea(pageFnNums);
-    if (paraBorderBoxes.length > 0) resolved.paraBorders = paraBorderBoxes;
+    if (paraBoxes.length > 0) resolved.paraBoxes = paraBoxes;
     if (pageChromeIndex != null) {
       resolved.chromeIndex = pageChromeIndex;
       resolved.sectionFirst = pageSectionFirst;
@@ -2886,7 +2891,7 @@ function placeBlocks(
     pageSectionFirst = sectionFirstPending;
     sectionFirstPending = false;
     ({ top, bottom } = bandOf(curPage));
-    paraBorderBoxes = [];
+    paraBoxes = [];
     pages.push(resolved);
     lines = [];
     tables = [];
@@ -2997,7 +3002,7 @@ function placeBlocks(
     lines = [];
     tables = [];
     pageFloats = [];
-    paraBorderBoxes = [];
+    paraBoxes = [];
     pageFnNums = [];
     pageFnSet.clear();
     registeredKeys.clear();
@@ -3601,9 +3606,12 @@ function placeBlocks(
           y += effBefore;
           sectionRemaining -= effBefore;
         }
-        if (item.para.borders) {
+        // One box carries both what surrounds the paragraph and what fills
+        // behind it, so either alone is enough to open a fragment.
+        if (item.para.borders || item.para.shading) {
           activePBdr = {
-            borders: item.para.borders,
+            ...(item.para.borders && { borders: item.para.borders }),
+            ...(item.para.shading && { shading: item.para.shading }),
             startedEarlier: false,
             frag: null,
           };
@@ -4031,6 +4039,7 @@ export function layoutBlocks(
               keepLines: block.keepLines,
               widowControl: block.widowControl,
               borders: block.borders,
+              shading: block.shading,
             },
           }
         : { table: layoutTable(block, left, colRight, ctx, cols.count > 1) };
@@ -4627,6 +4636,7 @@ export function layout(
         widowControl: node.attrs['widowControl'] !== false,
         borders:
           (node.attrs['borders'] as ParagraphBorders | null) ?? undefined,
+        shading: (node.attrs['shading'] as string | null) ?? undefined,
       });
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land).
