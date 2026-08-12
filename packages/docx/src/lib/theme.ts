@@ -375,7 +375,25 @@ export function buildThemeLineResolver(
     // ones nothing points at keep showing up in the coverage audit — which is
     // right: the day a file names entry 3 and we cannot paint what is in it,
     // that has to be visible.
-    return list.children[idx - 1];
+    const entry = list.children[idx - 1];
+    if (!entry) return undefined;
+    // Marked explicitly: the caller reads this element through attrOf, and
+    // attrOf records the ATTRIBUTE without marking the element. Reached any
+    // other way (child/children/findDescendant) the accessor would have done
+    // it; reached by index, nothing does, and the entry we consumed would
+    // report as untouched.
+    audit.mark(entry);
+    // Two attributes of a theme line we knowingly do not use: @algn places
+    // the stroke inside the path rather than centred on it, and @cmpd asks
+    // for a compound (double, thick-thin …) line — a second stroke, not a
+    // property of this one. Asked for so they read as decisions.
+    attrOf(entry, 'algn');
+    attrOf(entry, 'cmpd');
+    // The entry's own fill is the `phClr` placeholder, and the colour that
+    // fills it comes from the reference itself, which the caller resolves.
+    // Reading it here would resolve the same colour twice.
+    audit.markSubtree(child(entry, 'a:solidFill'));
+    return entry;
   };
 }
 

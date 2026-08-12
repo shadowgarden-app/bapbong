@@ -2260,7 +2260,16 @@ function parseList(
 ): (ListInfo & { explicitLevel: boolean }) | null {
   const numPr = child(pPr, 'w:numPr');
   const numId = attrOf(child(numPr, 'w:numId'), 'w:val');
-  if (numId === undefined || numId === '0') return null; // 0 cancels numbering
+  if (numId === undefined || numId === '0') {
+    // "A value of 0 shall never be used to point to a numbering definition
+    // instance, and shall instead only be used to designate the removal of
+    // numbering properties" (ECMA-376). The level that rides along with it is
+    // therefore meaningless — but it is asked for, because leaving it unread
+    // makes the coverage audit report a level we deliberately ignored as one
+    // we failed to handle. Eight paragraphs in large_sample are this shape.
+    attrOf(child(numPr, 'w:ilvl'), 'w:val');
+    return null;
+  }
   const ilvlAttr = attrOf(child(numPr, 'w:ilvl'), 'w:val');
   const ilvl = Number(ilvlAttr ?? '0');
   return {
