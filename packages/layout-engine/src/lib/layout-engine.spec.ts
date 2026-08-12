@@ -1472,7 +1472,11 @@ describe('toFlowBlocks', () => {
         },
       },
     },
-    marks: { strong: {}, fontSize: { attrs: { size: {} } } },
+    marks: {
+      strong: {},
+      fontSize: { attrs: { size: {} } },
+      kern: { attrs: { halfPoints: {} } },
+    },
   });
 
   it('resolves marks into run fonts', () => {
@@ -1490,6 +1494,29 @@ describe('toFlowBlocks', () => {
     expect('text' in r0).toBe(true);
     if ('text' in r0) expect(r0.font.bold).toBe(true);
     if ('text' in r1) expect(r1.font.sizePt).toBe(20);
+  });
+
+  it('turns kerning off only for runs below the w:kern threshold', () => {
+    // 32 half-points = 16pt. The base run is 10pt (below → no kerning); the
+    // second carries a fontSize mark of 20pt (at or above → kerned). The
+    // comparison has to happen HERE, where the size is finally settled: at
+    // import both runs carry the same declared threshold.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.text('small', [schema.mark('kern', { halfPoints: 32 })]),
+        schema.text('big', [
+          schema.mark('kern', { halfPoints: 32 }),
+          schema.mark('fontSize', { size: 20 }),
+        ]),
+      ]),
+    ]);
+    const block = toFlowBlocks(doc, { sizePt: 10 })[0];
+    if (block.type !== 'paragraph') return;
+    const [r0, r1] = block.runs;
+    if ('text' in r0) expect(r0.font.kerning).toBe(false);
+    // Above the threshold the field stays absent — the platform default is
+    // kerned, and writing `true` would split runs that render identically.
+    if ('text' in r1) expect(r1.font.kerning).toBeUndefined();
   });
 
   it('emits an inline image from an image node', () => {

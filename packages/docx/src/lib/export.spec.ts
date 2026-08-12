@@ -90,8 +90,10 @@ describe('exportDocx (round-trip)', () => {
 
   it('carry-through: unmodelled rPr/pPr props survive import → export', async () => {
     // A source docx with properties the model does NOT represent: run-level
-    // w:rtl/w:kern/w:szCs, paragraph-level w:contextualSpacing/w:keepNext and
-    // a paragraph-mark w:rPr. Saving must not drop any of them.
+    // w:rtl/w:szCs, paragraph-level w:contextualSpacing/w:keepNext and a
+    // paragraph-mark w:rPr. Saving must not drop any of them. (w:kern is in
+    // the fixture too, but it is MODELLED now — it leaves the carry and comes
+    // back from the kern mark, which the assertions below check.)
     const zip = new JSZip();
     zip.file(
       '[Content_Types].xml',
@@ -122,9 +124,12 @@ describe('exportDocx (round-trip)', () => {
     const { doc, raw } = await importDocx(source);
     const run = doc.child(0).child(0);
     const carryMark = run.marks.find((m) => m.type.name === 'carryRPr');
-    expect(carryMark?.attrs['xml']).toBe(
-      '<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>',
-    );
+    expect(carryMark?.attrs['xml']).toBe('<w:rtl/><w:szCs w:val="30"/>');
+    // The threshold rides its own mark now, so it survives as a property
+    // rather than as opaque carried XML.
+    expect(
+      run.marks.find((m) => m.type.name === 'kern')?.attrs['halfPoints'],
+    ).toBe(28);
     // keepNext and contextualSpacing are both MODELLED now (attrs, re-emitted
     // by the exporter), so only the paragraph mark's rPr still rides carry.
     expect(doc.child(0).attrs['keepNext']).toBe(true);
@@ -140,7 +145,8 @@ describe('exportDocx (round-trip)', () => {
     const outZip = await JSZip.loadAsync(outBytes);
     const xml = (await outZip.file('word/document.xml')?.async('string')) ?? '';
     // Run: modelled bold once, carried extras present, foreign ns dropped.
-    expect(xml).toContain('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
+    expect(xml).toContain('<w:kern w:val="28"/>');
+    expect(xml).toContain('<w:rtl/><w:szCs w:val="30"/>');
     expect(xml.match(/<w:b\/>/g)?.length).toBe(2); // run rPr + mark rPr — no dupes
     expect(xml).not.toContain('w14:glow');
     // Paragraph: modelled keepNext + contextualSpacing re-emitted (each in its
@@ -156,7 +162,10 @@ describe('exportDocx (round-trip)', () => {
     const run2 = doc2.child(0).child(0);
     expect(
       run2.marks.find((m) => m.type.name === 'carryRPr')?.attrs['xml'],
-    ).toBe('<w:rtl/><w:kern w:val="28"/><w:szCs w:val="30"/>');
+    ).toBe('<w:rtl/><w:szCs w:val="30"/>');
+    expect(
+      run2.marks.find((m) => m.type.name === 'kern')?.attrs['halfPoints'],
+    ).toBe(28);
     expect(doc2.child(0).attrs['carry']).toEqual(doc.child(0).attrs['carry']);
   });
 

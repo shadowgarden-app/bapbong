@@ -1624,6 +1624,39 @@ describe('importDocx', () => {
     expect(track(2)).toBeUndefined();
   });
 
+  it('imports w:kern as a threshold, resolved against the run size', async () => {
+    // "The smallest font size which shall have its kerning automatically
+    // adjusted; if the font size is smaller than this value, then no font
+    // kerning shall be performed." Both in half-points. The style declares
+    // the threshold, each run declares its own size — so the same threshold
+    // bites one run and not the next.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:rPr><w:kern w:val="32"/><w:sz w:val="26"/></w:rPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>13pt body, below the threshold</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:sz w:val="36"/></w:rPr><w:t>18pt, above it</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // The model keeps the DECLARED threshold on both runs — it is the layout
+    // that compares, because only there is the run's size finally settled.
+    const kern = (i: number) =>
+      doc
+        .child(i)
+        .child(0)
+        .marks.find((m) => m.type.name === 'kern')?.attrs['halfPoints'];
+    expect(kern(0)).toBe(32);
+    expect(kern(1)).toBe(32);
+    expect(
+      doc
+        .child(1)
+        .child(0)
+        .marks.find((m) => m.type.name === 'fontSize')?.attrs['size'],
+    ).toBe(18);
+  });
+
   it('imports w:w as a character scale, bare or percent-suffixed', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

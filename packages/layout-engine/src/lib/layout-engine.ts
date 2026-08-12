@@ -140,6 +140,17 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
     if (!Number.isNaN(tw) && tw !== 0)
       font.letterSpacing = (tw / 20) * (96 / 72);
   }
+  const kern = findMark(marks, 'kern');
+  if (kern) {
+    // "The smallest font size which shall have its kerning automatically
+    // adjusted; if the font size is smaller than this value, then no font
+    // kerning shall be performed." Both sides in half-points. The comparison
+    // belongs here, not at import: this is where the run's size is finally
+    // settled, after the fontSize mark has had its say over the base.
+    const threshold = Number(kern.attrs['halfPoints']);
+    if (Number.isFinite(threshold) && threshold > font.sizePt * 2)
+      font.kerning = false;
+  }
   const scaled = findMark(marks, 'charScale');
   if (scaled) {
     // Percent → factor. 100 is Word's default; the mark still exists at that

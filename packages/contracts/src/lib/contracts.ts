@@ -147,6 +147,12 @@ export interface GlyphAdjust {
   /** w:w — horizontal glyph scale, 1 = normal. Scales the glyphs and their
    *  advances only; the tracking above rides on top at its absolute value. */
   scaleX?: number;
+  /** w:kern — whether pair kerning applies. The OOXML value is a THRESHOLD in
+   *  half-points ("kern at this size and above"), resolved against the run's
+   *  own size at import, so what reaches here is the yes/no answer. Absent
+   *  leaves the platform default (kerned); only an explicit `false` turns it
+   *  off. */
+  kerning?: boolean;
 }
 
 /** A resolved font used for both measuring and painting. */

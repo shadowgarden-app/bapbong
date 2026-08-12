@@ -517,6 +517,29 @@ export const schema = new Schema({
         0,
       ],
     },
+    // w:kern — the smallest font size (HALF-POINTS) that gets pair kerning.
+    // A threshold, not a switch: whether it bites depends on the run's own
+    // size, so the declared number is what the model keeps and the layout
+    // compares. No DOM representation — CSS font-kerning cannot express a
+    // size threshold, so an external paste simply has no opinion.
+    kern: {
+      attrs: { halfPoints: {} },
+      parseDOM: [
+        {
+          tag: 'span[data-kern]',
+          getAttrs: (el) => {
+            const raw = (el as DomEl).getAttribute('data-kern');
+            const n = Number(raw);
+            return Number.isFinite(n) ? { halfPoints: n } : false;
+          },
+        },
+      ],
+      toDOM: (mark) => [
+        'span',
+        { 'data-kern': String(mark.attrs['halfPoints']) },
+        0,
+      ],
+    },
     // w:w — horizontal glyph scale as a PERCENT (100 = normal). Squeezes the
     // glyphs and their advances; independent of letterSpacing, which rides on
     // top at its absolute value.

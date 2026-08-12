@@ -15,7 +15,11 @@ const font = (over: Partial<FontSpec> = {}): FontSpec => ({
   ...over,
 });
 
-const fakeCtx = (): GlyphContext => ({ font: '', letterSpacing: '' });
+const fakeCtx = (): GlyphContext => ({
+  font: '',
+  letterSpacing: '',
+  fontKerning: '',
+});
 
 describe('applyGlyphSpec', () => {
   it('writes the shorthand and the tracking', () => {
@@ -32,6 +36,16 @@ describe('applyGlyphSpec', () => {
     applyGlyphSpec(ctx, font({ letterSpacing: 4 }));
     applyGlyphSpec(ctx, font());
     expect(ctx.letterSpacing).toBe('0px');
+  });
+
+  it('turns kerning off only when the spec says so, and always says which', () => {
+    // Same reuse hazard as the tracking above: a context left at 'none' would
+    // silently widen every later run.
+    const ctx = fakeCtx();
+    applyGlyphSpec(ctx, font({ kerning: false }));
+    expect(ctx.fontKerning).toBe('none');
+    applyGlyphSpec(ctx, font());
+    expect(ctx.fontKerning).toBe('normal');
   });
 
   it('configures measurer and painter identically — the whole point', () => {

@@ -136,6 +136,7 @@ const KNOWN_MARKS = new Set([
   'position',
   'letterSpacing',
   'charScale',
+  'kern',
   'link',
   'comment',
   'footnote',
@@ -183,8 +184,13 @@ function runProps(marks: readonly Mark[]): string {
   if (track != null) out.push(`<w:spacing w:val="${Math.round(track)}"/>`);
   const scale = byName.get('charScale')?.attrs['percent'] as number | undefined;
   if (scale != null) out.push(`<w:w w:val="${Math.round(scale)}"/>`);
+  // w:kern keeps its declared THRESHOLD, not the yes/no the layout derived
+  // from it, so a file that only kerns its headings still says so on the way
+  // out.
+  const kern = byName.get('kern')?.attrs['halfPoints'] as number | undefined;
+  if (kern != null) out.push(`<w:kern w:val="${Math.round(kern)}"/>`);
   // Carry-through fidelity: unmodelled rPr children preserved by the importer
-  // (w:rtl, w:kern, w:szCs, …), already escaped/filtered there. Appended after
+  // (w:rtl, w:szCs, …), already escaped/filtered there. Appended after
   // the modelled props — Word tolerates rPr child order; revisit with a full
   // CT_RPr order table if a strict consumer ever complains.
   const carry = byName.get('carryRPr')?.attrs['xml'] as string | undefined;

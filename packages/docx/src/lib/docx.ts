@@ -283,6 +283,8 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
     );
   if (p.charScale !== undefined && ctx.schema.marks['charScale'])
     marks.push(ctx.schema.marks['charScale'].create({ percent: p.charScale }));
+  if (p.kern !== undefined && ctx.schema.marks['kern'])
+    marks.push(ctx.schema.marks['kern'].create({ halfPoints: p.kern }));
   return marks;
 }
 
@@ -1307,6 +1309,7 @@ const CONSUMED_RPR = new Set([
   // two elements share a name and nothing else.
   'w:spacing',
   'w:w',
+  'w:kern',
   'w:highlight',
   'w:shd',
   // w:rStyle: resolved into the cascade. NOT carried on purpose — re-emitting

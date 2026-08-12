@@ -74,7 +74,7 @@ describe('LibreOffice glyph-scale fixture', () => {
     // the whole measured width by 0.8, so the tracking handed to the context
     // has to be pre-divided to survive at its absolute value. Scaling the
     // tracking too would leave letterSpacing at 1.7333px here.
-    const ctx: GlyphContext = { font: '', letterSpacing: '' };
+    const ctx: GlyphContext = { font: '', letterSpacing: '', fontKerning: '' };
     const px = (26 / 20) * (96 / 72);
     const scale = applyGlyphSpec(ctx, {
       family: 'Arial',

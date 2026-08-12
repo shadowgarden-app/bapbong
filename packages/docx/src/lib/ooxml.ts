@@ -193,6 +193,10 @@ export interface RunProps {
   letterSpacing?: number;
   /** w:w — horizontal glyph scale as a PERCENT (100 = normal). */
   charScale?: number;
+  /** w:kern — the smallest font size, in HALF-POINTS, that gets pair
+   *  kerning. Kept as declared: whether it applies depends on the run's own
+   *  size, which is only final after the whole cascade has merged. */
+  kern?: number;
 }
 
 /** Word's 16 named highlight colors → hex. */
@@ -349,6 +353,16 @@ export function parseRunProps(
   if (track !== undefined) {
     const tw = Number(track);
     if (!Number.isNaN(tw)) props.letterSpacing = tw;
+  }
+
+  // w:kern is a THRESHOLD, not a switch: "the smallest font size which shall
+  // have its kerning automatically adjusted" (half-points). Comparing it with
+  // the run's size has to wait until the cascade has settled, so only the
+  // number is kept here.
+  const kern = attrOf(child(rPr, 'w:kern'), 'w:val');
+  if (kern !== undefined) {
+    const hp = Number(kern);
+    if (Number.isFinite(hp)) props.kern = hp;
   }
 
   // w:w is a percentage; the schema allows a bare number or a "%" suffix.
