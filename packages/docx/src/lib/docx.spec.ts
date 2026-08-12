@@ -1013,6 +1013,33 @@ describe('importDocx', () => {
     expect(p.attrs.tabs).toEqual([{ pos: 600, val: 'right', leader: 'dot' }]); // bar/clear dropped
   });
 
+  it('anchors a body-level w:bookmarkStart to the block that follows', async () => {
+    // EG_BlockLevelElts admits bookmarkStart, so this is ordinary markup —
+    // Word writes it for TOC anchors ahead of a content control, which is
+    // exactly the shape large_sample has. parseParagraph only saw the ones
+    // inside a w:p, so a link to these resolved to nothing.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:bookmarkStart w:id="0" w:name="_Toc1" w:displacedByCustomXml="next"/>
+      <w:bookmarkStart w:id="1" w:name="_Toc2"/>
+      <w:bookmarkStart w:id="2" w:name="_GoBack"/>
+      <w:p><w:pPr/><w:bookmarkStart w:id="3" w:name="own"/><w:r><w:t>first</w:t></w:r></w:p>
+      <w:bookmarkStart w:id="4" w:name="beforeTable"/>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:p><w:r><w:t>after</w:t></w:r></w:p>
+      <w:bookmarkStart w:id="5" w:name="trailing"/>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    // Both land on the next paragraph, ahead of its own name, in document
+    // order. Word's cursor bookmark stays noise.
+    expect(doc.child(0).attrs.bookmarks).toEqual(['_Toc1', '_Toc2', 'own']);
+    // A table carries no bookmarks attr, so one before it waits for the
+    // paragraph after it.
+    expect(doc.child(2).attrs.bookmarks).toEqual(['beforeTable', 'trailing']);
+  });
+
   it('accumulates tab stops across the cascade; w:val=clear removes one', async () => {
     // Word's footers are the everyday case: the Footer style sets a centre
     // stop and a right stop, and a paragraph clears one of them.

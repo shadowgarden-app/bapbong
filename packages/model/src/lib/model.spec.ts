@@ -74,11 +74,23 @@ describe('schema', () => {
 
     it('accepts only http(s)/mailto/#anchor link hrefs', () => {
       const a = rules(schema.marks.link.spec as never).get('a[href]')!;
+      // Pasted HTML carries no w:tgtFrame equivalent unless it came from us.
       expect(a(el({ href: 'https://x.vn/a' }))).toEqual({
         href: 'https://x.vn/a',
+        targetFrame: null,
       });
-      expect(a(el({ href: 'mailto:x@y.z' }))).toEqual({ href: 'mailto:x@y.z' });
-      expect(a(el({ href: '#s1' }))).toEqual({ href: '#s1' });
+      expect(a(el({ href: 'mailto:x@y.z' }))).toEqual({
+        href: 'mailto:x@y.z',
+        targetFrame: null,
+      });
+      expect(a(el({ href: '#s1' }))).toEqual({
+        href: '#s1',
+        targetFrame: null,
+      });
+      expect(a(el({ href: '#s1', 'data-target-frame': '_blank' }))).toEqual({
+        href: '#s1',
+        targetFrame: '_blank',
+      });
       // eslint-disable-next-line no-script-url
       expect(a(el({ href: 'javascript:alert(1)' }))).toBe(false);
       expect(a(el({ href: 'data:text/html,x' }))).toBe(false);

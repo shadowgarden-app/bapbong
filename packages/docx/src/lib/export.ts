@@ -423,13 +423,19 @@ function inlineUnit(node: PMNode, ctx: ExportCtx): string {
   const inner = inlineXml(node, ctx);
   const href = linkHref(node);
   if (!href || !inner) return inner;
+  // The frame the link asked for. Nothing here navigates, so this is
+  // preservation, not behaviour.
+  const frame = node.marks.find((m) => m.type.name === 'link')?.attrs[
+    'targetFrame'
+  ] as string | null | undefined;
+  const tgt = frame ? ` w:tgtFrame="${esc(frame)}"` : '';
   if (href.startsWith('#'))
-    return `<w:hyperlink w:anchor="${esc(href.slice(1))}">${inner}</w:hyperlink>`;
+    return `<w:hyperlink w:anchor="${esc(href.slice(1))}"${tgt}>${inner}</w:hyperlink>`;
   const n = ctx.nextId++;
   ctx.rels.push(
     `<Relationship Id="rId${n}" Type="${R_NS}/hyperlink" Target="${esc(href)}" TargetMode="External"/>`,
   );
-  return `<w:hyperlink r:id="rId${n}">${inner}</w:hyperlink>`;
+  return `<w:hyperlink r:id="rId${n}"${tgt}>${inner}</w:hyperlink>`;
 }
 
 /** Inline content with comment-range markers (w:commentRangeStart/End +
@@ -784,9 +790,17 @@ function rowXml(
       `<w:trHeight w:val="${pxToTwips(h.value)}" w:hRule="${h.exact ? 'exact' : 'atLeast'}"/>`,
     );
   // Carried trPr extras (gridBefore/wBefore, cnfStyle, …).
-  const rowCarry = row.attrs['carry'] as { trPr?: string } | null;
+  const rowCarry = row.attrs['carry'] as {
+    trPr?: string;
+    tblPrEx?: string;
+  } | null;
   if (rowCarry?.trPr) pr.push(rowCarry.trPr);
   const trPr = pr.length ? `<w:trPr>${pr.join('')}</w:trPr>` : '';
+  // CT_Row puts w:tblPrEx BEFORE w:trPr. Its w:tblBorders is not here — the
+  // importer resolved that into the cells, which emit it as w:tcBorders.
+  const tblPrEx = rowCarry?.tblPrEx
+    ? `<w:tblPrEx>${rowCarry.tblPrEx}</w:tblPrEx>`
+    : '';
 
   const nodes: PMNode[] = [];
   row.forEach((c) => nodes.push(c));
@@ -826,7 +840,7 @@ function rowXml(
     if (next === undefined) break;
     col = next;
   }
-  return `<w:tr>${trPr}${cells}</w:tr>`;
+  return `<w:tr>${tblPrEx}${trPr}${cells}</w:tr>`;
 }
 
 function tableXml(node: PMNode, ctx: ExportCtx): string {

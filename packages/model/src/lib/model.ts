@@ -55,8 +55,11 @@ function pastedImageAttrs(el: unknown) {
 /** Pasted <a href>: allow web/mail/anchor protocols only (blocks javascript:
  *  and friends). A rejected rule drops the mark but keeps the text. */
 function pastedLinkAttrs(el: unknown) {
-  const href = ((el as DomEl).getAttribute('href') ?? '').trim();
-  return /^(https?:|mailto:|#)/i.test(href) ? { href } : (false as const);
+  const e = el as DomEl;
+  const href = (e.getAttribute('href') ?? '').trim();
+  return /^(https?:|mailto:|#)/i.test(href)
+    ? { href, targetFrame: e.getAttribute('data-target-frame') }
+    : (false as const);
 }
 
 /** getAttrs for <td>/<th>: spans from standard attributes, the rich cell
@@ -630,7 +633,11 @@ export const schema = new Schema({
     },
     // w:hyperlink — external URL or "#anchor"
     link: {
-      attrs: { href: {} },
+      // w:hyperlink @w:tgtFrame — the frame the link was meant to open in
+      // ("_blank", "_top", or a frame name), from the HTML-frames era. There
+      // is no frame here to obey it and nothing acts on it; it is modelled so
+      // that saving the file gives the attribute back instead of dropping it.
+      attrs: { href: {}, targetFrame: { default: null } },
       inclusive: false,
       parseDOM: [{ tag: 'a[href]', getAttrs: pastedLinkAttrs }],
       toDOM(mark) {
@@ -640,6 +647,9 @@ export const schema = new Schema({
             href: mark.attrs['href'] as string,
             rel: 'noopener',
             target: '_blank',
+            ...(mark.attrs['targetFrame']
+              ? { 'data-target-frame': String(mark.attrs['targetFrame']) }
+              : {}),
           },
           0,
         ];

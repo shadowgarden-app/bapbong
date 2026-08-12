@@ -690,6 +690,66 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     });
   });
 
+  it('round-trips a row w:tblPrEx and a link target frame', async () => {
+    // The importer resolves tblPrEx's w:tblBorders into the row's cells, so
+    // only what the model has nowhere else to put rides the carry: w:jc and
+    // w:tblLook. Writing the borders back here too would emit them twice.
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/_rels/document.xml.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://x.vn/" TargetMode="External"/></Relationships>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>
+        <w:p><w:hyperlink r:id="rId9" w:tgtFrame="_blank"><w:r><w:t>link</w:t></w:r></w:hyperlink></w:p>
+        <w:tbl>
+          <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+          <w:tr>
+            <w:tblPrEx>
+              <w:jc w:val="center"/>
+              <w:tblBorders><w:top w:val="single" w:sz="4" w:color="000000"/></w:tblBorders>
+              <w:tblLook w:val="0400" w:firstRow="0" w:noVBand="1"/>
+            </w:tblPrEx>
+            <w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc>
+          </w:tr>
+        </w:tbl>
+      </w:body></w:document>`,
+    );
+    const source = await zip.generateAsync({ type: 'uint8array' });
+
+    const { doc, raw } = await importDocx(source);
+    const outBytes = await exportDocx(doc, { carry: raw });
+    const outZip = await JSZip.loadAsync(outBytes);
+    const xml = (await outZip.file('word/document.xml')?.async('string')) ?? '';
+
+    expect(xml).toContain('w:tgtFrame="_blank"');
+    expect(xml).toContain('<w:jc w:val="center"/>');
+    expect(xml).toContain('<w:tblLook');
+    // tblPrEx precedes trPr, and its borders are NOT duplicated there — they
+    // come back as the cell's own w:tcBorders.
+    expect(xml).toMatch(/<w:tr><w:tblPrEx>/);
+    expect(xml.match(/<w:tblBorders>/g)).toBeNull();
+    expect(xml).toContain('<w:tcBorders>');
+
+    // Second trip: the same carry survives again.
+    const { doc: doc2 } = await importDocx(outBytes);
+    expect(
+      doc2
+        .child(0)
+        .child(0)
+        .marks.find((m) => m.type.name === 'link')?.attrs['targetFrame'],
+    ).toBe('_blank');
+  });
+
   it('round-trips w:cantSplit on table rows', async () => {
     const doc = schema.node('doc', null, [
       schema.node('table', null, [

@@ -1443,6 +1443,7 @@ function runMarks(
   paraBase: RunProps,
   ctx: Ctx,
   href: string | null,
+  tgtFrame: string | null = null,
 ) {
   const rPr = child(run, 'w:rPr');
   // No w:rStyle still means the default character style ("Default Paragraph
@@ -1462,7 +1463,13 @@ function runMarks(
   if (carryXml && ctx.schema.marks['carryRPr']) {
     marks.push(ctx.schema.marks['carryRPr'].create({ xml: carryXml }));
   }
-  if (href) marks.push(ctx.schema.marks['link'].create({ href }));
+  if (href)
+    marks.push(
+      ctx.schema.marks['link'].create({
+        href,
+        ...(tgtFrame ? { targetFrame: tgtFrame } : {}),
+      }),
+    );
   // Comments active over this run (w:commentRangeStart/End) become a comment
   // mark — only when the schema in use actually has it (the comment plugin
   // contributed it; otherwise comment ranges are silently skipped).
@@ -1479,8 +1486,9 @@ function runToInline(
   paraBase: RunProps,
   ctx: Ctx,
   href: string | null,
+  tgtFrame: string | null = null,
 ): PMNode[] {
-  const marks = runMarks(run, paraBase, ctx, href);
+  const marks = runMarks(run, paraBase, ctx, href, tgtFrame);
   const nodes = runInlineNodes(run, marks, ctx);
   // A linked image keeps its link mark; image nodes carry no marks otherwise.
   return href
@@ -1714,16 +1722,24 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // past its separate mark, the paragraph otherwise.
   const sink = (): PMNode[] =>
     field && field.phase === 'result' ? field.result : inline;
-  const emitRun = (run: OoxmlNode, href: string | null): void => {
+  const emitRun = (
+    run: OoxmlNode,
+    href: string | null,
+    tgtFrame: string | null = null,
+  ): void => {
     if (field && field.phase === 'result' && !field.firstResultRun)
       field.firstResultRun = run;
-    sink().push(...runToInline(run, paraBase, ctx, href));
+    sink().push(...runToInline(run, paraBase, ctx, href, tgtFrame));
   };
 
   // One run through the field state machine. `href` marks runs living inside
   // a w:hyperlink wrapper — TOC entries put whole PAGEREF fields there, so
   // the machine must run for them too (they used to bypass it entirely).
-  const handleRun = (node: OoxmlNode, href: string | null): void => {
+  const handleRun = (
+    node: OoxmlNode,
+    href: string | null,
+    tgtFrame: string | null = null,
+  ): void => {
     if (hasPageBreak(node)) pageBreak = true;
     const fldChars = children(node, 'w:fldChar');
     if (fldChars.length === 0) {
@@ -1736,7 +1752,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
         audit.markSubtree(node);
         return;
       }
-      emitRun(node, href);
+      emitRun(node, href, tgtFrame);
       return;
     }
     // The run carries fldChar(s). Some producers (Google Docs) pack
@@ -1821,13 +1837,16 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
         : undefined;
       const anchor = attrOf(node, 'w:anchor');
       const href = rel?.target ?? (anchor ? `#${anchor}` : null);
+      // Which frame the link was meant to open in. Kept so a save gives it
+      // back; nothing here navigates, so nothing obeys it.
+      const tgtFrame = attrOf(node, 'w:tgtFrame') ?? null;
       // Through the same wrappers as the paragraph loop: a link's runs can sit
       // inside w:ins or a smart tag. Non-run content a link may legally hold
       // (a nested field, math) still falls through — a separate gap.
       for (const c of effectiveChildren(node.children)) {
         if (c.name !== 'w:r') continue;
         audit.mark(c); // children() marked these before the loop changed
-        handleRun(c, href);
+        handleRun(c, href, tgtFrame);
       }
     } else if (node.name === 'm:oMath' || node.name === 'm:oMathPara') {
       // OMML equations, flattened to a plain-text run (v1: content over
@@ -2559,7 +2578,18 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
         : null;
     const cantSplit = isToggleOn(child(trPr, 'w:cantSplit'));
     const carry = collectCarry(trPr, CONSUMED_TRPR);
-    return { header, height, cantSplit, carry };
+    // w:tblPrEx rides along verbatim MINUS its w:tblBorders, which is already
+    // resolved into this row's cells (see applyRowException) and would be
+    // written twice if it came back here as well. What survives is what the
+    // model has nowhere else to put: w:jc, the per-row table alignment, and
+    // w:tblLook, whose flags select conditional formats defined by a table
+    // style's w:tblStylePr — a feature this converter does not implement, so
+    // preserving the flags is the honest thing to do with them.
+    const exCarry = collectCarry(
+      child(tr, 'w:tblPrEx'),
+      new Set(['w:tblBorders']),
+    );
+    return { header, height, cantSplit, carry, exCarry };
   });
 
   const colIndex = logicalRows.map(
@@ -2600,7 +2630,11 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     if (rp.header) rowAttrs['header'] = true;
     if (rp.height) rowAttrs['height'] = rp.height;
     if (rp.cantSplit) rowAttrs['cantSplit'] = true;
-    if (rp.carry) rowAttrs['carry'] = { trPr: rp.carry };
+    if (rp.carry || rp.exCarry)
+      rowAttrs['carry'] = {
+        ...(rp.carry && { trPr: rp.carry }),
+        ...(rp.exCarry && { tblPrEx: rp.exCarry }),
+      };
     return ctx.schema.nodes['table_row'].create(
       Object.keys(rowAttrs).length > 0 ? rowAttrs : null,
       emitted.length > 0 ? emitted : [emptyCell(ctx)],
@@ -2627,19 +2661,81 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 }
 
 /** Walk an element's children in document order, mapping w:p / w:tbl to blocks. */
+/**
+ * A `w:bookmarkStart` sitting BETWEEN blocks rather than inside a paragraph.
+ *
+ * The element belongs to EG_RangeMarkupElements, which EG_BlockLevelElts
+ * includes, so this is ordinary valid markup — Word writes it for TOC anchors
+ * ahead of a content control. parseParagraph only ever saw the ones inside a
+ * w:p, so a link to one of these resolved to nothing.
+ *
+ * Returns true when it consumed the node, so the caller can skip it.
+ */
+function takeBlockBookmark(node: OoxmlNode, pending: string[]): boolean {
+  if (node.name !== 'w:bookmarkStart') return false;
+  audit.mark(node);
+  const name = attrOf(node, 'w:name');
+  // colFirst/colLast narrow a bookmark to a span of table columns. We anchor
+  // to a block, so they are asked for and dropped rather than left to read as
+  // an unsupported gap.
+  attrOf(node, 'w:colFirst');
+  attrOf(node, 'w:colLast');
+  // Word's own cursor bookmark is noise, same as in parseParagraph.
+  if (name && name !== '_GoBack') pending.push(name);
+  return true;
+}
+
+/** Fold the bookmarks collected before a block onto it. They go to the NEXT
+ *  paragraph — that is where a reader following the link wants to land — and
+ *  ahead of the paragraph's own names, matching document order. Tables carry
+ *  no bookmarks attr, so a bookmark before one waits for the paragraph after
+ *  it; `pending` is emptied in place. */
+function withBookmarks(block: PMNode, pending: string[]): PMNode {
+  if (pending.length === 0 || block.type.name !== 'paragraph') return block;
+  const own = (block.attrs['bookmarks'] as string[] | null) ?? [];
+  const merged = [...pending, ...own];
+  pending.length = 0;
+  return block.type.create(
+    { ...block.attrs, bookmarks: merged },
+    block.content,
+    block.marks,
+  );
+}
+
+/** Bookmarks left over at the end of a container (nothing follows them) go to
+ *  the last paragraph instead — the nearest thing a link can reach. */
+function attachTrailingBookmarks(blocks: PMNode[], pending: string[]): void {
+  if (pending.length === 0) return;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].type.name === 'paragraph') {
+      const own = (blocks[i].attrs['bookmarks'] as string[] | null) ?? [];
+      blocks[i] = blocks[i].type.create(
+        { ...blocks[i].attrs, bookmarks: [...own, ...pending] },
+        blocks[i].content,
+        blocks[i].marks,
+      );
+      break;
+    }
+  }
+  pending.length = 0;
+}
+
 function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   const blocks: PMNode[] = [];
   const styleKeys: (string | null)[] = [];
+  const pending: string[] = [];
   for (const node of unwrapContainers(parent.children)) {
+    if (takeBlockBookmark(node, pending)) continue;
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
-      blocks.push(parseParagraph(node, ctx));
+      blocks.push(withBookmarks(parseParagraph(node, ctx), pending));
       styleKeys.push(paraStyleKey(node, ctx));
     } else if (node.name === 'w:tbl') {
       blocks.push(parseTable(node, ctx));
       styleKeys.push(null);
     }
   }
+  attachTrailingBookmarks(blocks, pending);
   // Contextual spacing is resolved per container: a cell's first paragraph
   // has no predecessor to collapse against, exactly as Word treats it.
   return resolveContextualSpacing(blocks, styleKeys);
@@ -2761,10 +2857,12 @@ function parseBodyBlocks(
   const styleKeys: (string | null)[] = [];
   const sections: SectionConfig[] = [];
   let start = 0;
+  const pendingBookmarks: string[] = [];
   for (const node of unwrapContainers(body.children)) {
+    if (takeBlockBookmark(node, pendingBookmarks)) continue;
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
-      blocks.push(parseParagraph(node, ctx));
+      blocks.push(withBookmarks(parseParagraph(node, ctx), pendingBookmarks));
       styleKeys.push(paraStyleKey(node, ctx));
       const sectPr = child(child(node, 'w:pPr'), 'w:sectPr');
       if (sectPr) {
@@ -2787,6 +2885,7 @@ function parseBodyBlocks(
       styleKeys.push(null);
     }
   }
+  attachTrailingBookmarks(blocks, pendingBookmarks);
   // The trailing body sectPr closes the last (or only) section.
   const bodySectPr = child(body, 'w:sectPr');
   if (blocks.length > start || sections.length === 0) {
