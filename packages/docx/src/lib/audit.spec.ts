@@ -179,6 +179,32 @@ describe('xml audit (import)', () => {
     expect(unknown).toContain('wps:bodyPr @compatLnSpc');
   });
 
+  it('demotes settings/OLE chrome and the no-op shapes of shared elements', async () => {
+    audit.setEnabled(true);
+    const body =
+      `<?xml version="1.0"?><w:document ${NS}><w:body><w:p><w:r>` +
+      // Two shapes of the same key. Word writes the first on every document;
+      // the second configures note numbering and must stay a gap.
+      `<w:footnotePr><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>` +
+      `<w:endnotePr><w:numFmt w:val="lowerRoman"/></w:endnotePr>` +
+      // Same for a content control's chrome: ids and gallery metadata say
+      // nothing, an rPr might.
+      `<w:sdtPr><w:id w:val="1"/><w:docPartObj/></w:sdtPr>` +
+      `<w:sdtEndPr><w:rPr><w:b/></w:rPr></w:sdtEndPr>` +
+      `</w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await importDocx(await makeDocx(body));
+    log.mockRestore();
+
+    const unknown = keys(audit.lastReport?.unknown ?? []);
+    const inert = keys(audit.lastReport?.inert ?? []);
+    expect(inert).toContain('w:footnotePr');
+    expect(inert).toContain('w:sdtPr');
+    // The other shape of the very same key is still a gap.
+    expect(unknown).toContain('w:endnotePr');
+    expect(unknown).toContain('w:sdtEndPr');
+  });
+
   it('demotes by value, not by name: the same key can be both', async () => {
     audit.setEnabled(true);
     const body =

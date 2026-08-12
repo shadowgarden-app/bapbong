@@ -1021,6 +1021,40 @@ describe('importDocx', () => {
     });
   });
 
+  it('takes the mc:Choice it understands, else the Fallback', async () => {
+    // ISO/IEC 29500-3: walk the Choice branches in order and take the first
+    // whose @Requires namespaces the consumer understands; otherwise the
+    // Fallback. khbd's inked pages are the case that made this matter — the
+    // "aink" Choice hands over a w:drawing whose graphicData holds a pen
+    // stroke we cannot draw, while the Fallback holds it as a picture.
+    const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+    const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:mc="${MC_NS}" xmlns:w14="${W14_NS}"><w:body>
+      <w:p><w:r><mc:AlternateContent>
+        <mc:Choice Requires="aink"><w:drawing><wp:inline>
+          <wp:extent cx="360" cy="360"/><wp:docPr descr="the stroke itself"/>
+          <a:graphic><a:graphicData><w14:contentPart r:id="rId8"/></a:graphicData></a:graphic>
+        </wp:inline></w:drawing></mc:Choice>
+        <mc:Fallback><w:drawing><wp:inline>
+          <wp:extent cx="952500" cy="476250"/><wp:docPr descr="rasterised ink"/>
+          <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+        </wp:inline></w:drawing></mc:Fallback>
+      </mc:AlternateContent></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.png': PNG_1x1,
+      }),
+    );
+    const img = doc.child(0).child(0);
+    // Before the MCE rule this paragraph rendered nothing at all: the Choice
+    // won on "has a w:drawing", then the ink was dropped.
+    expect(img.type.name).toBe('image');
+    expect(img.attrs.alt).toBe('rasterised ink');
+    expect(img.attrs.width).toBe(100); // the Fallback's extent, not 360 EMU
+  });
+
   it('parses table border visibility (direct w:tblBorders and via table style)', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:style w:styleId="TableGrid"><w:tblPr><w:tblBorders>

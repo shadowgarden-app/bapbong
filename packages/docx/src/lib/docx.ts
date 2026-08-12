@@ -601,18 +601,53 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
   return float;
 }
 
-/** The run's w:drawing, looking through mc:AlternateContent — Word wraps
- *  shapes and some images in Choice/Fallback pairs (`Requires="wps"` etc.);
- *  the Choice branch carries the richer DrawingML, so it wins over Fallback. */
+/** Namespace prefixes an `mc:Choice` may require and still be renderable
+ *  here: the 2010 shape/group extensions, plus the drawing extras that only
+ *  add sizing hints. Anything else — `aink` (pen strokes), `am3d`, future
+ *  namespaces — means the Choice holds markup we would silently drop, so the
+ *  Fallback is the better branch. Being conservative is safe by design: a
+ *  Fallback is, by definition, what an older consumer can render. */
+const MC_UNDERSTOOD = new Set(['wps', 'wpg', 'wp14', 'w14', 'pic', 'v', 'o']);
+
+/** The run's w:drawing, resolving `mc:AlternateContent` the way ISO/IEC
+ *  29500-3 says to: walk the `mc:Choice` branches in order, take the first
+ *  whose `@Requires` namespaces are ALL understood, else fall back to
+ *  `mc:Fallback`.
+ *
+ *  This used to take whichever branch simply had a w:drawing, which is not
+ *  the same thing. khbd's inked pages are the counter-example: five
+ *  `Requires="aink"` Choices hand us a w:drawing whose graphicData holds
+ *  `w14:contentPart` (a pen stroke we cannot draw), so the drawing was found,
+ *  then abandoned — while the Fallback right beside it holds the same stroke
+ *  rasterised as an ordinary picture.
+ *
+ *  Only w:drawing goes through here. A `w:pict` inside a Fallback is the
+ *  legacy twin of a Choice we already took, so the VML paths keep reading the
+ *  run's own child; a document whose ONLY representation is Choice(unknown)
+ *  + Fallback(w:pict) would still render nothing. No file in the corpus has
+ *  that shape. */
 function runDrawing(run: OoxmlNode): OoxmlNode | undefined {
   const direct = child(run, 'w:drawing');
   if (direct) return direct;
   const alt = child(run, 'mc:AlternateContent');
   if (!alt) return undefined;
-  for (const branch of ['mc:Choice', 'mc:Fallback']) {
-    for (const b of children(alt, branch)) {
-      const d = child(b, 'w:drawing');
-      if (d) return d;
+  const skipped: OoxmlNode[] = [];
+  for (const c of children(alt, 'mc:Choice')) {
+    const requires = (attrOf(c, 'Requires') ?? '').split(/\s+/).filter(Boolean);
+    if (!requires.every((ns) => MC_UNDERSTOOD.has(ns))) {
+      skipped.push(c);
+      continue;
+    }
+    const hit = child(c, 'w:drawing');
+    if (hit) return hit;
+  }
+  for (const b of children(alt, 'mc:Fallback')) {
+    const hit = child(b, 'w:drawing');
+    // Passing over a Choice is a decision, not a miss — but only once we
+    // have somewhere else to go, so the subtrees are written off here.
+    if (hit) {
+      for (const s of skipped) audit.markSubtree(s);
+      return hit;
     }
   }
   return undefined;

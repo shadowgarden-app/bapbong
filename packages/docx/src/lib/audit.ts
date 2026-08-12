@@ -158,6 +158,21 @@ const IGNORED_TAGS = new Set([
   'w:hideGrammaticalErrors',
   'w:displayBackgroundShape',
   'w:formProt',
+  // Same family: the alignment grid Word draws in its own window, whether it
+  // recompresses images on save, whether subdocuments count towards the word
+  // count, and a legacy-interop toggle. None of them reaches the page.
+  'w:drawingGridHorizontalSpacing',
+  'w:drawingGridVerticalSpacing',
+  'w:displayHorizontalDrawingGridEvery',
+  'w:displayVerticalDrawingGridEvery',
+  'w:doNotAutoCompressPictures',
+  'w:doNotIncludeSubdocsInStats',
+  'w:uiCompat97To2003',
+  // An embedded object's link to its editor: ProgID, the OLE stream, the
+  // shape it belongs to. What the reader SEES is the v:imagedata preview
+  // beside it, which is read and rendered. Editing the embedded object is
+  // not something this program does, so the link has nothing to drive.
+  'o:OLEObject',
   // Hyphenation is out of layout scope by decision.
   'w:autoHyphenation',
   'w:hyphenationZone',
@@ -223,6 +238,15 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'w:lvl' && (name === 'w:tplc' || name === 'w:tentative')) ||
     // Rels are resolved by Id; the relationship Type is package plumbing.
     (tag === 'Relationship' && name === 'Type') ||
+    // The printer's paper code (ST_DecimalNumber naming a tray/form). Page
+    // geometry comes from @w:w/@w:h/@w:orient, which are read; this one
+    // addresses a print driver we do not talk to.
+    (tag === 'w:pgSz' && name === 'w:code') ||
+    // The OLE siblings of o:OLEObject above: the flag marking a VML shape as
+    // an embedded object, and the object's ORIGINAL size — the shape's own
+    // style width/height is what Word displays and what we read.
+    (tag.startsWith('v:') && name === 'o:ole') ||
+    (tag === 'w:object' && (name === 'w:dxaOrig' || name === 'w:dyaOrig')) ||
     // Whether a style came from Word's built-in gallery or the user made it:
     // drives the Styles pane and built-in name mapping, never rendering.
     (tag === 'w:style' && name === 'w:customStyle') ||
@@ -251,9 +275,6 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'a:graphicData' && name === 'uri') ||
     // Theme scheme names ("Office", …) — gallery labels, not content.
     (tag.startsWith('a:') && name === 'name') ||
-    // AlternateContent is dispatched by CHILD content (pic/wps), not by the
-    // Requires namespace list.
-    (tag.startsWith('mc:') && name === 'Requires') ||
     // Drawing object ids/names and paint hints; export regenerates them.
     (tag === 'pic:cNvPr' && (name === 'id' || name === 'name')) ||
     (tag.endsWith(':spPr') && name === 'bwMode') ||
@@ -300,8 +321,11 @@ const FALSE_VALUES = new Set(['0', 'false', 'off']);
 const isFalse = (v: string) => FALSE_VALUES.has(v);
 const isNum = (n: number) => (v: string) => Number(v) === n;
 
-/** `tag @attr` → predicate on the raw value: true = this value is a no-op. */
-const INERT_ATTRS: Record<string, (v: string) => boolean> = {
+/** `tag @attr` → predicate on the raw value AND the element it sits on: true
+ *  = this value is a no-op. The node is there for the handful of attributes
+ *  whose effect depends on a sibling attribute (`@upright` only matters to a
+ *  rotated shape); most predicates ignore it. */
+const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // CT_TextBodyProperties. Word stamps the whole default set onto every
   // textbox it writes. NOT listed: @compatLnSpc, whose default is false — a
   // written "1" really does change line spacing inside the shape.
@@ -318,6 +342,13 @@ const INERT_ATTRS: Record<string, (v: string) => boolean> = {
   'wps:bodyPr @anchor': (v) => v === 't',
   'wps:bodyPr @anchorCtr': isFalse,
   'wps:bodyPr @forceAA': isFalse,
+  // "Keep the text upright while the shape is rotated" — nothing to keep
+  // upright when the shape is not rotated. @rot sits on this same element.
+  'wps:bodyPr @upright': (_v, n) => Number(n.attrs['rot'] ?? '0') === 0,
+  // ST_WrapText defaults to bothSides: text flows down both sides of the
+  // float, which is what our square-wrap already does. left/right/largest
+  // pick ONE side and stay UNKNOWN.
+  'wp:wrapSquare @wrapText': (v) => v === 'bothSides',
 };
 
 /** Elements that are no-ops in a particular shape. The predicate reads
@@ -345,14 +376,34 @@ const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
     const t = n.attrs['w:type'];
     return t === undefined || t === 'default';
   },
+  // settings.xml's footnote/endnote block. Word writes it on every document
+  // just to point at the two special notes that hold the separator rule and
+  // its continuation (w:id="-1" and "0"). In that shape it configures
+  // nothing: the properties that would — w:numFmt, w:pos, w:numRestart,
+  // w:numStart — are absent, and any of them present drops it back to
+  // UNKNOWN.
+  'w:footnotePr': (n) => n.children.every((c) => c.name === 'w:footnote'),
+  'w:endnotePr': (n) => n.children.every((c) => c.name === 'w:endnote'),
+  // A content control's chrome. The control itself is unwrapped to its
+  // content, and Word copies the control's rPr onto the runs inside it — so
+  // an sdtPr holding only ids and gallery metadata has nothing left to say.
+  // One carrying its OWN w:rPr might (we would be dropping formatting), so
+  // that shape stays UNKNOWN.
+  'w:sdtPr': (n) => !n.children.some((c) => c.name === 'w:rPr'),
+  'w:sdtEndPr': (n) => !n.children.some((c) => c.name === 'w:rPr'),
 };
 
 function attrCount(n: OoxmlNode): number {
   return Object.keys(n.attrs).filter((a) => !a.startsWith('xmlns')).length;
 }
 
-function isInertAttr(tag: string, name: string, value: string): boolean {
-  return INERT_ATTRS[`${tag} @${name}`]?.(value) ?? false;
+function isInertAttr(
+  tag: string,
+  name: string,
+  value: string,
+  node: OoxmlNode,
+): boolean {
+  return INERT_ATTRS[`${tag} @${name}`]?.(value, node) ?? false;
 }
 
 function isInertTag(node: OoxmlNode): boolean {
@@ -493,7 +544,7 @@ function collectPart(
           // xmlns declarations aren't content — not worth an "ignored" line.
           if (a.startsWith('xmlns')) continue;
           if (!asked?.has(a))
-            bump(`${c.name} @${a}`, isInertAttr(c.name, a, c.attrs[a]));
+            bump(`${c.name} @${a}`, isInertAttr(c.name, a, c.attrs[a], c));
         }
       } else if (parentVisited) {
         bump(c.name, isInertTag(c));
