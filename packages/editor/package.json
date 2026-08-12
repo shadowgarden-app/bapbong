@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-editor",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "bapbong — canvas-rendered DOCX editor for the browser (work in progress)",
   "license": "MIT",
   "repository": {
