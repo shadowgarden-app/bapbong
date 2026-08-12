@@ -743,14 +743,43 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const extent = findDescendant(drawing, 'wp:extent');
   const docPr = findDescendant(drawing, 'wp:docPr');
   const float = parseAnchorFloat(drawing);
+  const crop = parseSrcRect(findDescendant(drawing, 'a:srcRect'));
   return ctx.schema.nodes['image'].create({
     src,
     width: emuToPx(attrOf(extent, 'cx')),
     height: emuToPx(attrOf(extent, 'cy')),
     alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
     float,
+    ...(crop && { crop }),
     rotation: xfrmRotation(drawing),
   });
+}
+
+/**
+ * `a:srcRect` — which part of the bitmap the picture shows.
+ *
+ * CT_RelativeRect: four ST_Percentage offsets measured from the matching edge
+ * of the bounding box, each defaulting to 0. Positive is an INSET (crop in),
+ * negative an OUTSET (the source rectangle reaches past the bitmap, and the
+ * overhang shows as nothing). The selected rectangle is then scaled to fill
+ * the picture's box, so a crop changes what you see, never how big the box is.
+ *
+ * Returns null for the all-zero case — which is most of them: Word stamps an
+ * empty `<a:srcRect/>` on nearly every picture it writes (18 of khbd's 21),
+ * and the audit already classifies that shape as inert. Reading the four
+ * attributes here and then declining to store anything keeps that verdict
+ * intact instead of trading 18 inert elements for 72 unread attributes.
+ */
+function parseSrcRect(
+  el: OoxmlNode | undefined,
+): { l: number; t: number; r: number; b: number } | null {
+  if (!el) return null;
+  const side = (name: string) => signedPct(attrOf(el, name));
+  const l = side('l'),
+    t = side('t'),
+    r = side('r'),
+    b = side('b');
+  return l || t || r || b ? { l, t, r, b } : null;
 }
 
 /** Legacy VML image (w:object / w:pict holding v:shape + v:imagedata) — how
@@ -1122,10 +1151,18 @@ const VML_NAMED_DASH = [4, 3];
 const DML_NAMED_DASH = VML_NAMED_DASH;
 
 /** ST_Percentage → ratio. The type is thousandths of a percent (100000 =
- *  100%), so a dash stop's `d="100000"` is one stroke width. */
+ *  100%), so a dash stop's `d="100000"` is one stroke width. Clamped at zero:
+ *  a negative dash length has no meaning. Where a negative IS meaningful —
+ *  a:srcRect, where it outsets — use {@link signedPct}. */
 function pctToRatio(v: string | undefined): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.max(0, n / 100000) : 0;
+}
+
+/** ST_Percentage → ratio, sign kept. */
+function signedPct(v: string | undefined): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n / 100000 : 0;
 }
 
 /** `v:stroke @dashstyle` → dash pattern in multiples of the stroke width.

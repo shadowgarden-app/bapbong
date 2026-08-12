@@ -5,6 +5,7 @@ import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderSide,
   BorderStyle,
+  ImageCrop,
   CommentNode,
   PageConfig,
   SectionChromeOverrides,
@@ -363,10 +364,18 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   // still renders, so nothing looks wrong; only screen readers lose it.
   const alt = (node.attrs['alt'] as string | null) ?? '';
   const descr = alt ? ` descr="${esc(alt)}"` : '';
+  // a:srcRect precedes a:stretch in CT_BlipFillProperties. Ratios go back as
+  // ST_Percentage (thousandths of a percent), sign intact — a negative is
+  // Word's outset, not an error.
+  const crop = node.attrs['crop'] as ImageCrop | null;
+  const pct = (v: number) => Math.round(v * 100000);
+  const srcRect = crop
+    ? `<a:srcRect l="${pct(crop.l)}" t="${pct(crop.t)}" r="${pct(crop.r)}" b="${pct(crop.b)}"/>`
+    : '';
   const graphic =
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
     `<pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
-    `<pic:blipFill>${blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:blipFill>${blip}${srcRect}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
     `<pic:spPr><a:xfrm${rotAttr(node)}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
     `</pic:pic></a:graphicData></a:graphic>`;

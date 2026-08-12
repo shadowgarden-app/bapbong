@@ -560,6 +560,83 @@ describe('CanvasPainter', () => {
     expect(widthSets).toBe(1);
   });
 
+  it('draws a cropped picture from the bitmap sub-rectangle', async () => {
+    class FakeImage {
+      onload: (() => void) | null = null;
+      complete = false;
+      naturalWidth = 0;
+      naturalHeight = 0;
+      set src(_v: string) {
+        queueMicrotask(() => {
+          this.complete = true;
+          this.naturalWidth = 200;
+          this.naturalHeight = 100;
+          this.onload?.();
+        });
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+    try {
+      const { painter, container } = setup();
+      painter.paint(
+        {
+          pages: [
+            {
+              ...page([]),
+              floats: [
+                {
+                  x: 10,
+                  y: 20,
+                  width: 80,
+                  height: 40,
+                  src: 'f',
+                  // Half off the right, a tenth off the top; the box stays
+                  // 80x40 and the remaining region stretches to fill it.
+                  crop: { l: 0, t: 0.1, r: 0.5, b: 0 },
+                },
+                // An outset: the source rectangle starts left of the bitmap.
+                // No clamping here — the canvas clips it and shrinks the
+                // destination in the same proportion.
+                {
+                  x: 10,
+                  y: 80,
+                  width: 80,
+                  height: 40,
+                  src: 'f',
+                  crop: { l: -0.25, t: 0, r: 0, b: 0 },
+                },
+                // Nothing left to show: l + r >= 1 would ask for a
+                // non-positive source width, which throws.
+                {
+                  x: 10,
+                  y: 140,
+                  width: 80,
+                  height: 40,
+                  src: 'f',
+                  crop: { l: 0.6, t: 0, r: 0.5, b: 0 },
+                },
+              ],
+            },
+          ],
+        },
+        { devicePixelRatio: 1 },
+      );
+      await new Promise((r) => setTimeout(r, 0));
+      const draws = ctxAt(container, 0).of('drawImage');
+      // sx=0, sy=10 (0.1 x 100); sw=100 (200 - 0.5 x 200), sh=90 (100 - 0.1
+      // x 100) → stretched into the unchanged 80x40 box.
+      expect(draws[0].args.slice(1)).toEqual([0, 10, 100, 90, 10, 20, 80, 40]);
+      // sx=-50, sw=250: wider than the bitmap, on purpose.
+      expect(draws[1].args.slice(1)).toEqual([
+        -50, 0, 250, 100, 10, 80, 80, 40,
+      ]);
+      // The empty crop drew nothing at all.
+      expect(draws).toHaveLength(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('paints floats in Word z-order: default over the text, behindDoc under', async () => {
     class FakeImage {
       onload: (() => void) | null = null;

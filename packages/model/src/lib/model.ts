@@ -48,6 +48,7 @@ function pastedImageAttrs(el: unknown) {
     alt: e.getAttribute('alt') ?? '',
     width: dim(e.getAttribute('width')),
     height: dim(e.getAttribute('height')),
+    crop: dataJson(el, 'data-crop'),
   };
 }
 
@@ -251,6 +252,10 @@ export const schema = new Schema({
         // Clockwise rotation in degrees around the box center (a:xfrm@rot).
         // Paint-only: the layout box stays axis-aligned.
         rotation: { default: 0 },
+        // a:srcRect — { l, t, r, b } ratios of the BITMAP, inward from each
+        // edge, or null for the whole image. Negative values outset. The box
+        // keeps its size; the selected region scales to fill it.
+        crop: { default: null },
       },
       parseDOM: [{ tag: 'img[src]', getAttrs: pastedImageAttrs }],
       toDOM(node) {
@@ -261,6 +266,7 @@ export const schema = new Schema({
         };
         if (a['width'] != null) attrs['width'] = String(a['width']);
         if (a['height'] != null) attrs['height'] = String(a['height']);
+        if (a['crop']) attrs['data-crop'] = JSON.stringify(a['crop']);
         return ['img', attrs];
       },
     },

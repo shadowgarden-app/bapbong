@@ -654,6 +654,42 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     });
   });
 
+  it('round-trips a picture crop (a:srcRect), outsets included', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: 'data:image/png;base64,iVBORw0KGgo=',
+          width: 100,
+          height: 50,
+          crop: { l: 0.52083, t: 0.36813, r: 0.10126, b: 0.19557 },
+        }),
+      ]),
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: 'data:image/png;base64,iVBORw0KGgo=',
+          width: 100,
+          height: 50,
+          crop: { l: -0.25, t: 0, r: 0, b: 0 },
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).child(0).attrs['crop']).toEqual({
+      l: 0.52083,
+      t: 0.36813,
+      r: 0.10126,
+      b: 0.19557,
+    });
+    // The outset survives as an outset — a round trip that clamped it would
+    // quietly turn padding into a crop.
+    expect(back.child(1).child(0).attrs['crop']).toEqual({
+      l: -0.25,
+      t: 0,
+      r: 0,
+      b: 0,
+    });
+  });
+
   it('round-trips w:cantSplit on table rows', async () => {
     const doc = schema.node('doc', null, [
       schema.node('table', null, [

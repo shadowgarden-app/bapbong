@@ -256,11 +256,25 @@ export interface ShapeSpec {
   cornerRatio?: number;
 }
 
+/** `a:srcRect` — the part of the bitmap the box shows, as ratios of the
+ *  bitmap's own size measured inward from each edge. Positive crops in;
+ *  NEGATIVE outsets, reaching past the bitmap so the overhang renders as
+ *  nothing. The selected region scales to fill the box, so a crop changes
+ *  what is visible, never the box. */
+export interface ImageCrop {
+  l: number;
+  t: number;
+  r: number;
+  b: number;
+}
+
 /** An atomic inline image laid out inline with text. Dimensions are CSS px. */
 export interface InlineImage {
   src: string;
   width: number;
   height: number;
+  /** Visible sub-rectangle of the bitmap (a:srcRect). */
+  crop?: ImageCrop;
   link?: string;
   /** Present when this box is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
@@ -297,6 +311,8 @@ export interface FlowFloat {
   src: string;
   width: number;
   height: number;
+  /** Visible sub-rectangle of the bitmap (a:srcRect). */
+  crop?: ImageCrop;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
   wrap: 'square' | 'topAndBottom' | 'none';
@@ -582,6 +598,8 @@ export interface LayoutImageSegment {
   link?: string;
   /** Present when this box is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** Visible sub-rectangle of the bitmap (a:srcRect). */
+  crop?: ImageCrop;
   /** Clockwise degrees around the box center (paint-only). */
   rotation?: number;
   /** Absolute PM position of the image node (occupies 1 position). */
@@ -683,6 +701,8 @@ export interface ResolvedFloat {
   width: number;
   height: number;
   src: string;
+  /** Visible sub-rectangle of the bitmap (a:srcRect). */
+  crop?: ImageCrop;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
   /** Textbox text laid out inside the shape, in BOX-LOCAL coordinates

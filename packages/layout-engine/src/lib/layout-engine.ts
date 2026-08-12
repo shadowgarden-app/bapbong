@@ -9,6 +9,7 @@ import type {
   Align,
   CellDiagonals,
   CellPadding,
+  ImageCrop,
   ColumnConfig,
   FlowBlock,
   FlowFloat,
@@ -206,6 +207,7 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
     height: Number(a['height']) || fallback,
     link: link ? String(link.attrs['href']) : undefined,
     ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
+    ...(a['crop'] ? { crop: a['crop'] as ImageCrop } : {}),
     ...(Number(a['rotation']) ? { rotation: Number(a['rotation']) } : {}),
     pos,
   };
@@ -257,6 +259,9 @@ function paragraphToFlow(
           pos: contentStart + offset,
           ...(child.attrs['shape']
             ? { shape: child.attrs['shape'] as FlowFloat['shape'] }
+            : {}),
+          ...(child.attrs['crop']
+            ? { crop: child.attrs['crop'] as ImageCrop }
             : {}),
           ...(Number(child.attrs['rotation'])
             ? { rotation: Number(child.attrs['rotation']) }
@@ -877,6 +882,7 @@ function wrapParagraph(
           height: t.image.height,
           link: t.link,
           ...(t.image.shape ? { shape: t.image.shape } : {}),
+          ...(t.image.crop ? { crop: t.image.crop } : {}),
           ...(t.image.rotation ? { rotation: t.image.rotation } : {}),
           pos: t.pos,
         });
@@ -1223,6 +1229,7 @@ function resolveFloat(
   };
   if (f.pos != null) rf.pos = f.pos;
   if (f.rotation) rf.rotation = f.rotation;
+  if (f.crop) rf.crop = f.crop;
   if (f.shape) rf.shape = f.shape;
   if (f.behind) rf.behind = true;
   if (f.content && f.content.length > 0) {

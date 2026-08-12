@@ -1058,6 +1058,43 @@ describe('importDocx', () => {
     ]);
   });
 
+  it('reads a:srcRect as a crop, keeping outsets and ignoring the empty one', async () => {
+    // ST_Percentage in thousandths of a percent. Positive insets, negative
+    // outsets (the source rectangle reaches past the bitmap). The empty
+    // <a:srcRect/> Word stamps on nearly every picture must stay a no-op —
+    // the audit classifies that shape as inert and it has to remain so.
+    const pic = (rid: string, srcRect: string) =>
+      `<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/>
+        <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="${rid}"/>${srcRect}</pic:blipFill></pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r></w:p>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
+      ${pic('rId7', '<a:srcRect/>')}
+      ${pic('rId7', '<a:srcRect r="18507"/>')}
+      ${pic('rId7', '<a:srcRect l="52083" t="36813" r="10126" b="19557"/>')}
+      ${pic('rId7', '<a:srcRect l="-25000"/>')}
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.png': PNG_1x1,
+      }),
+    );
+    const crop = (i: number) => doc.child(i).child(0).attrs.crop;
+    expect(crop(0)).toBeNull();
+    expect(crop(1)).toEqual({ l: 0, t: 0, r: 0.18507, b: 0 });
+    expect(crop(2)).toEqual({
+      l: 0.52083,
+      t: 0.36813,
+      r: 0.10126,
+      b: 0.19557,
+    });
+    // An outset stays negative — clamping it to 0 would silently crop
+    // padding away.
+    expect(crop(3)).toEqual({ l: -0.25, t: 0, r: 0, b: 0 });
+    // The box is untouched: a crop changes what shows, not how big it is.
+    expect(doc.child(2).child(0).attrs.width).toBe(100);
+  });
+
   it('imports wp:anchor drawings as floating images', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
       <w:p><w:r><w:drawing><wp:anchor distL="114300" distR="114300" distT="0" distB="0">

@@ -100,6 +100,9 @@ describe('schema', () => {
         alt: '',
         width: 120,
         height: 81,
+        // No data-crop on pasted HTML — an external <img> has no opinion on
+        // which part of the bitmap shows.
+        crop: null,
       });
       expect(
         img(el({ src: 'data:image/jpeg;base64,BB', alt: 'chart' })),
@@ -108,6 +111,7 @@ describe('schema', () => {
         alt: 'chart',
         width: null,
         height: null,
+        crop: null,
       });
       expect(img(el({ src: 'https://cdn.x/pic.png' }))).toBe(false); // remote: CORS/export unsafe
       expect(img(el({ src: 'data:text/html,x' }))).toBe(false);

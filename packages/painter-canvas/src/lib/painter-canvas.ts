@@ -2,6 +2,7 @@ import { applyGlyphSpec } from '@shadow-garden/bapbong-contracts';
 import type {
   BorderSide,
   CaretRect,
+  ImageCrop,
   LayoutLine,
   PagePoint,
   PaintDecoration,
@@ -508,7 +509,7 @@ export class CanvasPainter {
       } else {
         const el = this.requestImage(f.src);
         if (el?.complete && el.naturalWidth > 0) {
-          this.ctx.drawImage(el, f.x, yOffset + f.y, f.width, f.height);
+          this.drawBitmap(el, f.crop, f.x, yOffset + f.y, f.width, f.height);
         }
       }
       if (f.lines && f.lines.length > 0) {
@@ -625,8 +626,9 @@ export class CanvasPainter {
           const el = this.requestImage(img.src);
           if (el?.complete && el.naturalWidth > 0) {
             // The image's bottom edge sits on the baseline (matches the layout).
-            ctx.drawImage(
+            this.drawBitmap(
               el,
+              img.crop,
               img.x,
               baselineY - img.height,
               img.width,
@@ -902,6 +904,42 @@ export class CanvasPainter {
       for (const f of cell.floats ?? [])
         if (!f.behind) this.paintFloat(f, yOffset, o, pageInfo);
     }
+  }
+
+  /** Draw a bitmap into a box, honouring an `a:srcRect` crop.
+   *
+   *  Uncropped goes through the 5-argument form, which is what every image
+   *  used before this existed. Cropped picks the sub-rectangle out of the
+   *  BITMAP's own pixels and lets it scale to fill the same box — the box
+   *  never changes size, only what is inside it.
+   *
+   *  Negative offsets (Word's outset) make the source rectangle reach past
+   *  the bitmap. That needs no special case: the canvas spec clips such a
+   *  rectangle to the image and shrinks the destination by the same ratio, so
+   *  the overhang lands as empty space rather than stretched pixels. */
+  private drawBitmap(
+    el: CanvasImageSource & { naturalWidth: number; naturalHeight: number },
+    crop: ImageCrop | undefined,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
+    if (!crop) {
+      this.ctx.drawImage(el, x, y, w, h);
+      return;
+    }
+    const iw = el.naturalWidth;
+    const ih = el.naturalHeight;
+    const sx = crop.l * iw;
+    const sy = crop.t * ih;
+    const sw = iw - (crop.l + crop.r) * iw;
+    const sh = ih - (crop.t + crop.b) * ih;
+    // A crop that leaves nothing (l + r >= 1) would ask for a zero or
+    // negative source width, which throws. Word shows nothing in that case
+    // and so do we.
+    if (sw <= 0 || sh <= 0) return;
+    this.ctx.drawImage(el, sx, sy, sw, sh, x, y, w, h);
   }
 
   /** Stroke one border edge with its width / style / colour. Edges are
