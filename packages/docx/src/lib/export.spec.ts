@@ -71,6 +71,36 @@ describe('exportDocx (round-trip)', () => {
     expect(italicRun?.marks.map((m) => m.type.name)).toContain('em');
   });
 
+  it('round-trips the auto paragraph spacing flags', async () => {
+    // The flags are the instruction; the numbers next to them are only a
+    // fallback for consumers that do not implement auto spacing. Dropping them
+    // on save would freeze "let Word decide" into a fixed gap, which is the
+    // "read but not kept" failure this suite exists to catch.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:spacing w:before="100" w:beforeAutospacing="1"
+        w:after="100" w:afterAutospacing="1"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:r><w:t>b</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file('word/document.xml', documentXml);
+    const source = await zip.generateAsync({ type: 'uint8array' });
+    const { doc } = await importDocx(source);
+    const outZip = await JSZip.loadAsync(await exportDocx(doc));
+    const xml = (await outZip.file('word/document.xml')?.async('string')) ?? '';
+    expect(xml).toContain('w:beforeAutospacing="1"');
+    expect(xml).toContain('w:afterAutospacing="1"');
+    // The second paragraph never had them and must not gain them.
+    expect(xml.match(/w:beforeAutospacing/g)?.length).toBe(1);
+  });
+
   it('round-trips smallCaps and dstrike marks', async () => {
     const doc = makeDoc([
       [

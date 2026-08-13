@@ -1626,6 +1626,123 @@ describe('importDocx', () => {
     expect(bold(3)).toBe(false); // direct formatting is absolute
   });
 
+  it('computes auto paragraph spacing the way Word does', async () => {
+    // "If this attribute is specified, then any value in the before or
+    // beforeLines attributes is ignored" — the 100 twips Word writes beside the
+    // flag is its own cached guess, not an instruction. What replaces it is
+    // 14pt, and only at a boundary between two paragraphs: nothing before the
+    // first paragraph of a container, nothing after the last, nothing between
+    // items of the same list.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="paragraph" w:styleId="NormalWeb">
+        <w:pPr><w:spacing w:before="100" w:beforeAutospacing="1"
+                          w:after="100" w:afterAutospacing="1"/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const web = (inner = '', extra = '') =>
+      `<w:p><w:pPr><w:pStyle w:val="NormalWeb"/>${extra}</w:pPr>` +
+      `<w:r><w:t>${inner || 'x'}</w:t></w:r></w:p>`;
+    const listed = (numId: string) =>
+      web(
+        '',
+        `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr>`,
+      );
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${web('first')}
+      ${web('middle')}
+      ${listed('1')}
+      ${listed('1')}
+      ${web('after the list')}
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid>
+        <w:tr>
+          <w:tc>${web('alone in its cell')}</w:tc>
+          <w:tc>${web('cell top')}${web('cell bottom')}</w:tc>
+        </w:tr>
+      </w:tbl>
+      ${web('last')}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const sp = (n: { attrs: Record<string, unknown> }) =>
+      n.attrs['spacing'] as {
+        before?: number;
+        after?: number;
+        beforeAuto?: boolean;
+        afterAuto?: boolean;
+      } | null;
+    const AUTO = 19; // 14pt = 280 twips
+
+    // First body paragraph: no predecessor, so no space before; the next
+    // paragraph earns the space after. The literal 100tw (≈7px) is gone.
+    expect(sp(doc.child(0))).toMatchObject({ before: 0, after: AUTO });
+    // …and the flags survive for the exporter.
+    expect(sp(doc.child(0))).toMatchObject({
+      beforeAuto: true,
+      afterAuto: true,
+    });
+    expect(sp(doc.child(1))).toMatchObject({ before: AUTO, after: AUTO });
+    // Two items of one list: nothing BETWEEN them, but the boundaries with the
+    // paragraphs around the list are ordinary ones — "spacing is added only
+    // after the last item in the list".
+    expect(sp(doc.child(2))).toMatchObject({ before: AUTO, after: 0 });
+    expect(sp(doc.child(3))).toMatchObject({ before: 0, after: AUTO });
+    // A table is not a paragraph, so the paragraph before it gets no after.
+    expect(sp(doc.child(4))).toMatchObject({ before: AUTO, after: 0 });
+
+    // In a cell the container is the cell: alone means no neighbour on either
+    // side, and a pair only meets in the middle.
+    const cell = (c: number) => doc.child(5).child(0).child(c);
+    expect(sp(cell(0).child(0))).toMatchObject({ before: 0, after: 0 });
+    expect(sp(cell(1).child(0))).toMatchObject({ before: 0, after: AUTO });
+    expect(sp(cell(1).child(1))).toMatchObject({ before: AUTO, after: 0 });
+  });
+
+  it('honours w:doNotUseHTMLParagraphAutoSpacing and an inline "off"', async () => {
+    // The compat setting swaps the HTML emulation for a fixed pair: "5 points
+    // of spacing before and 10 points of spacing after". No file in the repo
+    // sets it, so this test is the only thing holding the branch up.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="paragraph" w:styleId="NormalWeb">
+        <w:pPr><w:spacing w:before="100" w:beforeAutospacing="1"
+                          w:after="100" w:afterAutospacing="1"/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="NormalWeb"/></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="NormalWeb"/>
+        <w:spacing w:before="240" w:beforeAutospacing="0" w:after="240" w:afterAutospacing="0"/>
+      </w:pPr><w:r><w:t>b</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        stylesXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/settings.xml':
+            `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}">` +
+            `<w:doNotUseHTMLParagraphAutoSpacing/></w:settings>`,
+        },
+      ),
+    );
+    const sp = (i: number) =>
+      doc.child(i).attrs['spacing'] as {
+        before?: number;
+        after?: number;
+      } | null;
+    // 5pt → 7px, 10pt → 13px, and the neighbour rules do not apply: these are
+    // ordinary fixed values once the compat flag is on.
+    expect(sp(0)).toMatchObject({ before: 7, after: 13 });
+    // An inline "0" turns the flag off, so this paragraph's own 240tw applies.
+    expect(sp(1)).toMatchObject({ before: 16, after: 16 });
+  });
+
   it("applies a table style's w:pPr to the paragraphs inside the table", async () => {
     // "The global default paragraph properties · The table style paragraph
     // properties · The paragraph properties applied directly to a paragraph"

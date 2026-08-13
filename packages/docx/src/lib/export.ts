@@ -582,11 +582,19 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
     after?: number;
     line?: number;
     lineRule?: string;
+    beforeAuto?: boolean;
+    afterAuto?: boolean;
   } | null;
   if (sp) {
     const at: string[] = [];
     if (sp.before != null) at.push(`w:before="${pxToTwips(sp.before)}"`);
+    // The flag goes back out next to the resolved number, which is what Word
+    // itself writes: a consumer that implements auto spacing recomputes it and
+    // ignores w:before, one that does not still has a usable gap. Dropping the
+    // flag instead would silently turn "let Word decide" into a fixed value.
+    if (sp.beforeAuto) at.push('w:beforeAutospacing="1"');
     if (sp.after != null) at.push(`w:after="${pxToTwips(sp.after)}"`);
+    if (sp.afterAuto) at.push('w:afterAutospacing="1"');
     if (sp.line != null) {
       const auto = sp.lineRule === 'auto' || sp.lineRule == null;
       at.push(

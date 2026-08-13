@@ -230,6 +230,12 @@ interface Ctx {
   /** Page content-box width in px (page minus side margins) — what
    *  percentage-based table widths (w:tblW/w:tcW type="pct") resolve against. */
   contentWidth: number;
+  /**
+   * False when the document sets `w:doNotUseHTMLParagraphAutoSpacing`: auto
+   * paragraph spacing is then the fixed 5pt/10pt pair instead of Word's HTML
+   * emulation. Default true — the compat flag is opt-in.
+   */
+  htmlAutoSpacing: boolean;
   /** VML shapetype registry (`v:shapetype` id → o:spt), filled as picts are
    *  parsed in document order — Word always defines a type before its first
    *  `type="#id"` reference. Lazily created by parseVmlShape. */
@@ -1821,7 +1827,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   }
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
-  const spacing = resolveSpacing(pPrChain, list !== null);
+  const spacing = resolveSpacing(pPrChain);
   const tabs = resolveTabs(pPrChain);
   const heading = headingLevel(pStyleId, pPrChain);
 
@@ -2257,14 +2263,23 @@ function resolveIndent(chain: (OoxmlNode | undefined)[]): Indent | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** Resolve w:spacing through the cascade: the last layer with each attribute
- *  wins. before/after are twips→px; line is 240ths of a line for lineRule
- *  'auto' (→ multiplier), else twips→px for 'exact'/'atLeast'. */
-function resolveSpacing(
-  chain: (OoxmlNode | undefined)[],
-  isList = false,
-): Spacing | null {
+/**
+ * Resolve w:spacing through the cascade: the last layer with each attribute
+ * wins. before/after are twips→px; line is 240ths of a line for lineRule
+ * 'auto' (→ multiplier), else twips→px for 'exact'/'atLeast'.
+ *
+ * `w:beforeAutospacing` / `w:afterAutospacing` merge per attribute like the
+ * rest, and when one is on the literal value on THAT SIDE is dropped: "if this
+ * attribute is specified, then any value in the before or beforeLines
+ * attributes is ignored" (ECMA-376 §17.3.1.33). The number Word leaves in the
+ * file next to the flag is its own cached guess, not an instruction. What the
+ * gap actually becomes depends on the paragraph's neighbours, so that is
+ * settled later by resolveAutoSpacing.
+ */
+function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
   const out: Spacing = {};
+  let beforeAuto: boolean | undefined;
+  let afterAuto: boolean | undefined;
   for (const pPr of chain) {
     const sp = child(pPr, 'w:spacing');
     if (!sp) continue;
@@ -2272,24 +2287,28 @@ function resolveSpacing(
     const after = attrOf(sp, 'w:after');
     const line = attrOf(sp, 'w:line');
     const rule = attrOf(sp, 'w:lineRule');
-    // HTML-era auto spacing: the literal value is Word's own cached auto
-    // amount, so it stands — except list items, which drop auto spacing.
-    const onFlag = (name: string): boolean => {
+    const flag = (name: string): boolean | undefined => {
       const v = attrOf(sp, name);
-      return v !== undefined && v !== '0' && v.toLowerCase() !== 'false';
+      return v === undefined ? undefined : isOn(v) || v === 'on';
     };
-    const beforeAuto = onFlag('w:beforeAutospacing');
-    const afterAuto = onFlag('w:afterAutospacing');
-    if (before !== undefined || beforeAuto)
-      out.before = beforeAuto && isList ? 0 : twipsToPx(Number(before ?? '0'));
-    if (after !== undefined || afterAuto)
-      out.after = afterAuto && isList ? 0 : twipsToPx(Number(after ?? '0'));
+    beforeAuto = flag('w:beforeAutospacing') ?? beforeAuto;
+    afterAuto = flag('w:afterAutospacing') ?? afterAuto;
+    if (before !== undefined) out.before = twipsToPx(Number(before));
+    if (after !== undefined) out.after = twipsToPx(Number(after));
     if (line !== undefined) {
       const lineRule = rule === 'exact' || rule === 'atLeast' ? rule : 'auto';
       out.lineRule = lineRule;
       out.line =
         lineRule === 'auto' ? Number(line) / 240 : twipsToPx(Number(line));
     }
+  }
+  if (beforeAuto) {
+    out.beforeAuto = true;
+    delete out.before;
+  }
+  if (afterAuto) {
+    out.afterAuto = true;
+    delete out.after;
   }
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -3313,7 +3332,7 @@ function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   attachTrailingBookmarks(blocks, pending);
   // Contextual spacing is resolved per container: a cell's first paragraph
   // has no predecessor to collapse against, exactly as Word treats it.
-  return resolveContextualSpacing(blocks, styleKeys);
+  return resolveAutoSpacing(resolveContextualSpacing(blocks, styleKeys), ctx);
 }
 
 interface SectionConfig {
@@ -3368,6 +3387,89 @@ function sectionStartsNewPage(sectPr: OoxmlNode | undefined): boolean {
 /** Parse the body into blocks while recording section boundaries. A w:p whose
  *  w:pPr carries a w:sectPr ends a section (with that sectPr's columns); the
  *  trailing w:body/w:sectPr ends the final section. */
+/**
+ * Word's HTML auto spacing, in px per side.
+ *
+ * The amount is 14pt: *"When you set paragraph Space Before and Space After to
+ * Auto, Microsoft Word adds 14 points spacing between paragraphs
+ * automatically"* (Aspose.Words, ParagraphFormat.SpaceAfterAuto — an engine
+ * built to reproduce Word's layout), which matches Word's own help ("a standard
+ * amount of spacing… usually about 14 points for a 12-point font size, similar
+ * to browsers"). A third Microsoft source — an answer on MS Q&A — describes
+ * Word 2013+ as 0em before and 1em after instead, i.e. scaled to the font. Our
+ * corpus cannot separate the two: every paragraph that ends up with auto
+ * spacing on is the only paragraph in its table cell, where both suppression
+ * rules below cut it to 0. 14pt is the number two of the three sources state
+ * outright, and it lives here as one constant if that ever has to change.
+ */
+const AUTO_SPACING_PX = twipsToPx(280);
+
+/** `w:doNotUseHTMLParagraphAutoSpacing`: "5 points of spacing before and 10
+ *  points after", fixed, instead of the HTML emulation. No document in the
+ *  repo sets the flag, so this path has unit tests and nothing else. */
+const AUTO_SPACING_FIXED = { before: twipsToPx(100), after: twipsToPx(200) };
+
+/**
+ * Turn `beforeAuto`/`afterAuto` into actual gaps, which needs the paragraph's
+ * neighbours — the same reason resolveContextualSpacing runs here.
+ *
+ * Auto spacing exists only at a boundary between two paragraphs. Word's own
+ * documentation lists the cases as "no spacing before the first paragraph in a
+ * document", "…in a table cell", "no spacing after the last paragraph in a
+ * table cell", and none between list items of the same list; Aspose states the
+ * same set the other way round ("auto spacing is only applied between two
+ * neighboring paragraphs… spacing is added only after the last item in the
+ * list"). One rule covers all of them: a side gets the spacing only if a
+ * paragraph of this same container sits on that side, and that neighbour is not
+ * an item of the same list.
+ *
+ * Two things this deliberately does not model: a paragraph next to a TABLE
+ * rather than a paragraph gets 0 (Aspose says Word does add spacing after a
+ * table, but our model has nowhere to hang a table's own spacing), and the
+ * nested-list nuance — "in a nested bulleted or numbered list spacing is not
+ * added" — is only honoured where the neighbour shares the numbering.
+ */
+function resolveAutoSpacing(blocks: PMNode[], ctx: Ctx): PMNode[] {
+  const auto = (n: PMNode) => {
+    const sp = n.attrs['spacing'] as Spacing | null;
+    return sp && (sp.beforeAuto || sp.afterAuto) ? sp : null;
+  };
+  if (!blocks.some((b) => b.type.name === 'paragraph' && auto(b)))
+    return blocks;
+  const listOf = (n: PMNode | undefined) =>
+    n?.type.name === 'paragraph'
+      ? ((n.attrs['list'] as { numId: string } | null)?.numId ?? null)
+      : undefined;
+  return blocks.map((node, i) => {
+    const sp = node.type.name === 'paragraph' ? auto(node) : null;
+    if (!sp) return node;
+    const mine = listOf(node);
+    // undefined = no paragraph on that side at all; null = not a list item.
+    const neighbour = (at: number) => {
+      const side = listOf(blocks[at]);
+      if (side === undefined) return 0;
+      if (mine !== null && mine !== undefined && side === mine) return 0;
+      return null; // spacing applies
+    };
+    const amount = (side: 'before' | 'after', at: number) =>
+      ctx.htmlAutoSpacing
+        ? (neighbour(at) ?? AUTO_SPACING_PX)
+        : AUTO_SPACING_FIXED[side];
+    return node.type.create(
+      {
+        ...node.attrs,
+        spacing: {
+          ...sp,
+          ...(sp.beforeAuto ? { before: amount('before', i - 1) } : {}),
+          ...(sp.afterAuto ? { after: amount('after', i + 1) } : {}),
+        },
+      },
+      node.content,
+      node.marks,
+    );
+  });
+}
+
 /**
  * Resolve `w:contextualSpacing` against neighbours: *"any space specified
  * before or after this paragraph … should not be applied when the preceding
@@ -3473,7 +3575,13 @@ function parseBodyBlocks(
     if (pageNumbers) section.pageNumbers = pageNumbers;
     sections.push(section);
   }
-  return { blocks: resolveContextualSpacing(blocks, styleKeys), sections };
+  return {
+    blocks: resolveAutoSpacing(
+      resolveContextualSpacing(blocks, styleKeys),
+      ctx,
+    ),
+    sections,
+  };
 }
 
 async function readPart(zip: JSZip, path: string): Promise<string | undefined> {
@@ -3890,7 +3998,18 @@ async function importDocxImpl(
   // Stateless — markers are recounted by the layout engine, so one resolver
   // serves every story (and its audit usage-tracking sees them all).
   const numbering = buildNumbering(numberingRoot, resolveTheme, resolveFont);
+  // Read here rather than with the other settings below: auto paragraph
+  // spacing is resolved while the body is parsed, so the flag has to be known
+  // before makeCtx runs.
+  const settingsPart = await readPart(zip, 'word/settings.xml');
+  const settingsEl = settingsPart
+    ? child(parsePart('word/settings.xml', settingsPart), 'w:settings')
+    : undefined;
+  const htmlAutoSpacing = !isToggleOn(
+    child(settingsEl, 'w:doNotUseHTMLParagraphAutoSpacing'),
+  );
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
+    htmlAutoSpacing,
     styles,
     numbering,
     rels,
@@ -4048,10 +4167,7 @@ async function importDocxImpl(
   // w:titlePg (section) → page 1 uses the "first" chrome; w:evenAndOddHeaders
   // (document settings) → even pages use the "even" chrome.
   const titlePg = lastChrome.titlePg;
-  const settingsXml = await readPart(zip, 'word/settings.xml');
-  const settings = settingsXml
-    ? child(parsePart('word/settings.xml', settingsXml), 'w:settings')
-    : undefined;
+  const settings = settingsEl;
   const evenAndOdd = settings
     ? isToggleOn(child(settings, 'w:evenAndOddHeaders'))
     : false;

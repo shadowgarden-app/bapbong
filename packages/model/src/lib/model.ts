@@ -150,7 +150,9 @@ export const schema = new Schema({
         // w:tabs — [{ pos, val: 'left'|'right'|'center'|'decimal', leader? }]
         // in px from the paragraph's content left edge, or null. Importer-set.
         tabs: { default: null },
-        // w:spacing — { before?, after?, line?, lineRule? }, or null.
+        // w:spacing — { before?, after?, line?, lineRule?, beforeAuto?,
+        // afterAuto? }, or null. The two *Auto flags record that Word computes
+        // the gap itself; before/after hold what it works out to here.
         spacing: { default: null },
         // w:bookmarkStart names anchored in this paragraph (["_Toc89595219"]),
         // or null. Link hrefs of the form "#name" resolve against these —
@@ -793,6 +795,12 @@ export interface Spacing {
   after?: number;
   line?: number;
   lineRule?: 'auto' | 'exact' | 'atLeast';
+  /** w:beforeAutospacing / w:afterAutospacing — "determine the spacing
+   *  automatically, matching an HTML document". `before`/`after` then hold the
+   *  amount the importer resolved for this paragraph's position (0 where Word
+   *  suppresses it), and these flags are what the exporter writes back. */
+  beforeAuto?: boolean;
+  afterAuto?: boolean;
 }
 
 export interface ParagraphAttrs {
