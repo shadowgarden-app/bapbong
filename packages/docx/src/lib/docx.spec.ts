@@ -1264,6 +1264,65 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100); // the Fallback's extent, not 360 EMU
   });
 
+  it("applies a table style's w:rPr to the runs inside, minus the toggles", async () => {
+    // Same slot as the paragraph layer: docDefaults → table style → paragraph
+    // style → character style → direct. The toggle properties are the
+    // exception: OOXML flips them between style layers rather than
+    // overriding, which mergeRunProps cannot express, so the table layer
+    // does not contribute them at all.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:docDefaults><w:rPrDefault><w:rPr>
+        <w:sz w:val="20"/><w:color w:val="111111"/>
+      </w:rPr></w:rPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="table" w:styleId="Grid">
+        <w:rPr>
+          <w:sz w:val="28"/><w:color w:val="FF0000"/>
+          <w:b/><w:i/><w:smallCaps/><w:strike/>
+          <w:u w:val="single"/>
+        </w:rPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="Big"><w:rPr><w:sz w:val="40"/></w:rPr></w:style>
+    </w:styles>`;
+    const row = (inner: string) => `<w:tr><w:tc>${inner}</w:tc></w:tr>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>outside</w:t></w:r></w:p>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Grid"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        ${row('<w:p><w:r><w:t>plain</w:t></w:r></w:p>')}
+        ${row('<w:p><w:pPr><w:pStyle w:val="Big"/></w:pPr><w:r><w:t>styled</w:t></w:r></w:p>')}
+        ${row('<w:p><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>direct</w:t></w:r></w:p>')}
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // row → cell → paragraph → run, inside the table at block 1.
+    const cellRun = (r: number) =>
+      doc.child(1).child(r).child(0).child(0).child(0);
+    const markOf = (node: { marks: readonly Mark[] }, name: string) =>
+      node.marks.find((m) => m.type.name === name);
+
+    // Outside: docDefaults only.
+    expect(markOf(doc.child(0).child(0), 'fontSize')?.attrs['size']).toBe(10);
+
+    // Inside: the table style beats docDefaults, for size and colour.
+    expect(markOf(cellRun(0), 'fontSize')?.attrs['size']).toBe(14);
+    expect(markOf(cellRun(0), 'textColor')?.attrs['color']).toBe('#FF0000');
+    // Non-toggle character formatting from a table style does apply.
+    expect(markOf(cellRun(0), 'underline')).toBeDefined();
+    // The four toggles the model represents do NOT come from a table style —
+    // getting them right needs per-layer provenance, so they are left out
+    // rather than applied the wrong way round.
+    expect(markOf(cellRun(0), 'strong')).toBeUndefined();
+    expect(markOf(cellRun(0), 'em')).toBeUndefined();
+    expect(markOf(cellRun(0), 'smallCaps')).toBeUndefined();
+    expect(markOf(cellRun(0), 'strike')).toBeUndefined();
+    // A paragraph style beats the table style; direct beats everything.
+    expect(markOf(cellRun(1), 'fontSize')?.attrs['size']).toBe(20);
+    expect(markOf(cellRun(2), 'fontSize')?.attrs['size']).toBe(9);
+  });
+
   it("applies a table style's w:pPr to the paragraphs inside the table", async () => {
     // "The global default paragraph properties · The table style paragraph
     // properties · The paragraph properties applied directly to a paragraph"

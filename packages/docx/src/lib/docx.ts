@@ -1633,6 +1633,35 @@ interface FieldState {
   parent: FieldState | null;
 }
 
+/**
+ * A table style's run properties with the TOGGLE properties dropped.
+ *
+ * Toggle properties do not simply override between style layers — they flip:
+ *
+ *   "Toggle properties only have their toggle behavior when associated with
+ *    table styles, paragraph styles, and character styles. If a run has been
+ *    made bold per the table style, and the user applies a paragraph style
+ *    that also has the w:b element, the net result is that original bolded
+ *    text is now made NOT bold."  — Eric White, assembling cell properties
+ *
+ * mergeRunProps is a flat overwrite and cannot see which layer a property came
+ * from, so honouring that rule needs provenance tracked through the whole run
+ * cascade. Rather than half-implement it — bold that is wrong in a different
+ * way — the table layer simply does not contribute the toggles at all: a table
+ * style asking for bold is ignored, which is what happened before this layer
+ * existed, so no document renders worse than it did.
+ *
+ * OOXML lists twelve toggle properties (b, bCs, caps, emboss, i, iCs,
+ * imprint, outline, shadow, smallCaps, strike, vanish). RunProps models four
+ * of them; the other eight have no field to drop. Note w:u and w:dstrike are
+ * NOT toggles and stay.
+ */
+function withoutToggles(rPr: RunProps): RunProps {
+  // The four names exist only to be omitted from `rest`.
+  const { bold, italic, smallCaps, strike, ...rest } = rPr;
+  return rest;
+}
+
 /** Heading level (1–6) for a paragraph, from `w:outlineLvl` in the pPr cascade
  *  or, failing that, from a style id spelled "Heading1"…; undefined for body.
  *
@@ -1755,13 +1784,16 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // paragraph that names its own style does not fall back to Normal — the
   // style's basedOn chain decides what it inherits, as in Word.
   const styleId = pStyleId ?? ctx.styles.defaultStyleIdFor('paragraph');
-  // Base for every run: docDefaults → paragraph style's run properties.
-  const paraBase = mergeRunProps(
-    ctx.styles.docDefaults,
-    ctx.styles.resolveStyle(styleId),
-  );
   // The table this paragraph sits in, if any — innermost only (see Ctx).
   const tableLayer = ctx.tableStyles[ctx.tableStyles.length - 1];
+  // Base for every run: docDefaults → TABLE style → paragraph style. Same
+  // order as the paragraph cascade below, and the same reason: a table
+  // style's w:rPr is a default for the runs inside that table.
+  const paraBase = [
+    ctx.styles.docDefaults,
+    ...(tableLayer ? [withoutToggles(tableLayer.rPr)] : []),
+    ctx.styles.resolveStyle(styleId),
+  ].reduce(mergeRunProps, {} as RunProps);
   // Paragraph-property cascade, base-most first; later layers win:
   // docDefaults pPrDefault → TABLE style (for content inside a table)
   // → style chain (w:basedOn ancestors → style) → numbering lvl pPr (the
