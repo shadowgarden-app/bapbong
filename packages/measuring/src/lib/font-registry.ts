@@ -128,9 +128,29 @@ export function createFontRegistryMeasurer(
   };
 }
 
+/** OS/2 fsSelection bit 7, USE_TYPO_METRICS. */
+const USE_TYPO_METRICS = 0x80;
+
 /**
- * A {@link MeasureMetrics} reading a registered face's hhea ascent/descent
- * (scaled to px), deferring to `fallback` for unknown families.
+ * A {@link MeasureMetrics} reading a registered face's own tables, the way
+ * Word does, deferring to `fallback` for unknown families.
+ *
+ * Word's line spacing follows the GDI model, whose mapping onto OpenType is
+ * spelled out in [Recommendations for OpenType Fonts]:
+ *
+ *   tmAscent/tmDescent  = usWinAscent / usWinDescent
+ *   tmExternalLeading   = MAX(0, (hhea.ascender − hhea.descender + hhea.lineGap)
+ *                              − (usWinAscent + usWinDescent))
+ *
+ * and "the cell height plus the external leading is equal to the line spacing"
+ * (TEXTMETRIC). When the font sets USE_TYPO_METRICS, the OS/2 spec says
+ * "conforming applications use the Typographic values to determine default line
+ * spacing", so the sTypo trio replaces all three numbers.
+ *
+ * Both branches are load-bearing for the faces this repo bundles: Tinos leaves
+ * the flag clear and its win/hhea numbers reproduce Times New Roman exactly,
+ * while Arimo SETS it — reading its usWin values instead would make every Arial
+ * line 25% too tall.
  */
 export function createFontRegistryMetrics(
   registry: FontRegistry,
@@ -140,9 +160,39 @@ export function createFontRegistryMetrics(
     const face = registry.primary(font);
     if (!face) return fallback(font);
     const scale = (font.sizePt * PT_TO_PX) / face.unitsPerEm;
+    // opentype.js exposes the raw tables through an index signature;
+    // `face.ascender`/`descender` are the hhea pair already.
+    const tables = face.tables as {
+      hhea?: { lineGap?: number };
+      os2?: {
+        fsSelection?: number;
+        usWinAscent?: number;
+        usWinDescent?: number;
+        sTypoAscender?: number;
+        sTypoDescender?: number;
+        sTypoLineGap?: number;
+      };
+    };
+    const os2 = tables.os2;
+    const hheaTotal =
+      face.ascender - face.descender + (tables.hhea?.lineGap ?? 0);
+    if (os2 && (os2.fsSelection ?? 0) & USE_TYPO_METRICS) {
+      const asc = os2.sTypoAscender ?? face.ascender;
+      const desc = os2.sTypoDescender ?? face.descender;
+      return {
+        ascent: asc * scale,
+        descent: Math.abs(desc) * scale,
+        leading: (os2.sTypoLineGap ?? 0) * scale,
+      };
+    }
+    // No OS/2 (or no win values): fall back to hhea for the cell, which is what
+    // this function did before it knew about any of this.
+    const winAsc = os2?.usWinAscent ?? face.ascender;
+    const winDesc = os2?.usWinDescent ?? Math.abs(face.descender);
     return {
-      ascent: face.ascender * scale,
-      descent: Math.abs(face.descender) * scale,
+      ascent: winAsc * scale,
+      descent: winDesc * scale,
+      leading: Math.max(0, hheaTotal - (winAsc + winDesc)) * scale,
     };
   };
 }

@@ -1519,6 +1519,59 @@ describe('toFlowBlocks', () => {
     if ('text' in r1) expect(r1.font.kerning).toBe(true);
   });
 
+  it("puts the font's external leading into the line box", () => {
+    // Word's line = cell + external leading; the leading sits below the
+    // baseline, which stays at the ascent. Without it a Times New Roman line
+    // is 4% short and the error compounds down the page.
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 3, leading: 2 }),
+    };
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x', font: font() }],
+    };
+    const [line] = layoutBlocks([block], cfg).pages[0].lines;
+    expect(line.height).toBe(17); // 12 + 3 + 2
+    expect(line.baseline).toBe(12); // unchanged by the leading
+  });
+
+  it('multiplies the whole line, leading included, for an auto rule', () => {
+    // w:line is "240ths of a single line height", and a single line height
+    // includes the leading — so 1.5 × (12+3+2), not 1.5 × (12+3) + 2.
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 3, leading: 2 }),
+    };
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x', font: font() }],
+      spacing: { line: 1.5, lineRule: 'auto' },
+    };
+    const [line] = layoutBlocks([block], cfg).pages[0].lines;
+    expect(line.height).toBeCloseTo(25.5); // 17 × 1.5
+  });
+
+  it('measures atLeast against the line including its leading', () => {
+    const cfg: LayoutConfig = {
+      ...config(),
+      measureMetrics: () => ({ ascent: 12, descent: 3, leading: 2 }),
+    };
+    const under: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x', font: font() }],
+      spacing: { line: 16, lineRule: 'atLeast' },
+    };
+    const over: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'y', font: font() }],
+      spacing: { line: 24, lineRule: 'atLeast' },
+    };
+    const [a, b] = layoutBlocks([under, over], cfg).pages[0].lines;
+    expect(a.height).toBe(17); // natural line already clears the 16 floor
+    expect(b.height).toBe(24); // floor wins
+  });
+
   it('leaves kerning off for a run with no w:kern at all', () => {
     // The whole point of the flip: Word does not kern unless asked, and the
     // Font > Advanced checkbox ships unchecked.

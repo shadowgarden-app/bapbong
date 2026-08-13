@@ -167,6 +167,19 @@ export interface FontMetrics {
   ascent: number;
   /** Distance from the baseline down to the bottom of the line box. */
   descent: number;
+  /**
+   * External leading: the font's own gap BETWEEN consecutive lines, on top of
+   * the ascent+descent cell. Word includes it in a line's height — GDI's
+   * `tmExternalLeading`, which OpenType defines as
+   * `MAX(0, (hhea.ascender − hhea.descender + hhea.lineGap) − (usWinAscent +
+   * usWinDescent))`, and "the cell height plus the external leading is equal to
+   * the line spacing" (TEXTMETRIC). It is 4.2% of the em for Times New Roman
+   * and 3.3% for Arial, and 0 for Verdana, Tahoma, Georgia and Courier New.
+   *
+   * Optional because only a metrics source that can read the font tables knows
+   * it: a canvas 2D context does not expose it at all.
+   */
+  leading?: number;
 }
 
 /** Provides vertical metrics for a face. Injected so the engine stays pure.

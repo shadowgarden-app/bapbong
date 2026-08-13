@@ -708,7 +708,7 @@ function wrapParagraph(
   // a sensible height too).
   const baseMetrics = metrics ? metrics(base) : null;
   const nominalH = baseMetrics
-    ? baseMetrics.ascent + baseMetrics.descent
+    ? baseMetrics.ascent + baseMetrics.descent + (baseMetrics.leading ?? 0)
     : sizePx(base) * LINE_HEIGHT_FACTOR;
 
   // Bounds for the line currently being assembled.
@@ -769,11 +769,16 @@ function wrapParagraph(
   let maxImagePx = 0; // tallest inline image on the line
   let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
   let maxDescent = baseMetrics?.descent ?? 0;
+  // The font's own gap between lines. Tracked as its own maximum rather than
+  // folded into the descent so `exact`/`atLeast` can reason about the cell and
+  // the gap separately, and so the baseline stays at the ascent.
+  let maxLeading = baseMetrics?.leading ?? 0;
   // Text-only ascent/descent, excluding image contributions: the w:line
   // 'auto' multiple scales the TEXT box, never an image (Word semantics) —
   // so the spacing code needs the text height by itself.
   let textAscent = baseMetrics?.ascent ?? 0;
   let textDescent = baseMetrics?.descent ?? 0;
+  let textLeading = baseMetrics?.leading ?? 0;
 
   const lineStart = () => (firstLine ? firstLineStart : contStart);
 
@@ -945,8 +950,17 @@ function wrapParagraph(
     let height: number;
     let baseline: number;
     if (metrics) {
-      // Real metrics: line box is ascent + descent; baseline sits at ascent.
-      height = maxAscent + maxDescent;
+      // Real metrics: the line box is the font's cell PLUS its external
+      // leading, which is what Word means by one line — "the cell height plus
+      // the external leading is equal to the line spacing" (GDI TEXTMETRIC),
+      // and the value LibreOffice's AddExternalLeading compatibility flag adds
+      // for the same reason. Without it every line is short by the font's gap:
+      // 4.2% of the em in Times New Roman, and the error compounds down a page.
+      //
+      // The gap sits BELOW the baseline (baseline stays at the ascent) because
+      // that is what "space between rows" means. Unverified against Word:
+      // measurement pins the line PITCH, not where the baseline sits inside it.
+      height = maxAscent + maxDescent + maxLeading;
       baseline = maxAscent;
     } else {
       // Fallback: line box grows to the tallest image, else a font-size factor.
@@ -964,8 +978,14 @@ function wrapParagraph(
     // the multiple only wins when the scaled text is taller.
     const sp = block.spacing;
     if (sp?.line) {
+      // "One line" for the auto multiple is the whole line spacing, leading
+      // included: w:line is "240ths of a single line height", so 360 = 1.5 of
+      // THIS. Measured against a document that positions floating shapes off
+      // paragraph tops, a 13pt Times line at 1.5 has to come to 22.40pt, and
+      // (ascent + descent + leading) × 1.5 gives 22.42 where the cell alone
+      // gives 21.59.
       const textH = metrics
-        ? textAscent + textDescent
+        ? textAscent + textDescent + textLeading
         : maxFontPx * LINE_HEIGHT_FACTOR;
       const target =
         sp.lineRule === 'exact'
@@ -999,8 +1019,10 @@ function wrapParagraph(
     maxImagePx = 0;
     maxAscent = baseMetrics?.ascent ?? 0;
     maxDescent = baseMetrics?.descent ?? 0;
+    maxLeading = baseMetrics?.leading ?? 0;
     textAscent = baseMetrics?.ascent ?? 0;
     textDescent = baseMetrics?.descent ?? 0;
+    textLeading = baseMetrics?.leading ?? 0;
     firstLine = false;
 
     // The next line may sit beside (or past) a float — fetch its band.
@@ -1153,8 +1175,10 @@ function wrapParagraph(
         const m = metrics(token.font);
         maxAscent = Math.max(maxAscent, m.ascent);
         maxDescent = Math.max(maxDescent, m.descent);
+        maxLeading = Math.max(maxLeading, m.leading ?? 0);
         textAscent = Math.max(textAscent, m.ascent);
         textDescent = Math.max(textDescent, m.descent);
+        textLeading = Math.max(textLeading, m.leading ?? 0);
       }
     }
   }

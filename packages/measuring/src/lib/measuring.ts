@@ -61,12 +61,21 @@ export function createCanvasMetrics(): MeasureMetrics {
     const m = ctx.measureText('Mg');
     const ascent = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent;
     const descent = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent;
+    // No `leading`: a 2D context exposes the font's box but not its external
+    // leading, so a line measured this way is short by whatever gap the font
+    // declares — 4.2% of the em for Times New Roman, 3.3% for Arial, 0 for
+    // Verdana/Tahoma/Georgia/Courier New. Two further reasons this path is the
+    // fallback and not the goal: the values come back rounded to whole pixels
+    // (Times New Roman at 13pt measures 15+4 where the font says 15.15+3.68),
+    // and they describe the face the ENGINE picked, which need not be the one
+    // Word used. createFontRegistryMetrics reads the tables instead.
     return { ascent, descent };
   };
 }
 
 /**
- * Headless approximate metrics (no DOM): ascent ≈ 0.8·em, descent ≈ 0.2·em.
+ * Headless approximate metrics (no DOM): ascent ≈ 0.8·em, descent ≈ 0.2·em,
+ * and no external leading — the shape has no font to read one from.
  * For SSR/tests, or before web fonts load.
  */
 export function createApproxMetrics(): MeasureMetrics {
