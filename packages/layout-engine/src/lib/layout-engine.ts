@@ -673,8 +673,22 @@ function draftToLine(d: LineDraft, y: number, dx = 0): LayoutLine {
  *  image will overflow. Callers with a fixed band (table cells) ignore it. */
 type BandFn = (
   estHeight: number,
+  /** The paragraph's indents. They apply to the COLUMN — "indentation … on both
+   *  the left and the right side of the text margins" (ECMA-376 §17.3.1.12) —
+   *  so the band is cut from the indented box, not the other way round. Passing
+   *  them in (rather than subtracting from the returned band) is what makes a
+   *  float OUTSIDE the box leave it alone, and picks the gap that actually
+   *  serves this paragraph when the float is inside it. */
+  indents: { left: number; right: number },
   minWidth?: number,
-) => { left: number; right: number };
+) => {
+  left: number;
+  right: number;
+  /** The text column the band was cut from, indents NOT applied. Tab stops are
+   *  measured from here. Returned with the band so the two cannot desync — the
+   *  banded flow can switch columns in the middle of a paragraph. */
+  column: { left: number; right: number };
+};
 
 /** Wrap one paragraph, emitting one LineDraft per line. The band may differ
  *  per line; indents, the list marker and tab stops apply within each band. */
@@ -712,9 +726,18 @@ function wrapParagraph(
     : sizePx(base) * LINE_HEIGHT_FACTOR;
 
   // Bounds for the line currently being assembled.
-  let band = bandFn(nominalH);
-  let lineLeft = band.left + indentLeft;
-  let lineRight = band.right - indentRight;
+  //
+  // The paragraph's own box comes from the COLUMN — "indentation … on both the
+  // left and the right side of the text margins" (ECMA-376 §17.3.1.12). A
+  // float's band then CLIPS that box; it must not be the thing the indents are
+  // measured from, or a paragraph with a right indent beside a float has the
+  // indent subtracted twice. One factsheet in the corpus lands exactly there:
+  // column 785px, indents 21 + 402, float band [9, 409] — Word draws a 362px
+  // line, subtracting twice gives −23px and one character per line.
+  const indents = { left: indentLeft, right: indentRight };
+  let band = bandFn(nominalH, indents);
+  let lineLeft = band.left;
+  let lineRight = band.right;
 
   // List marker hangs at the first line's start; text follows after it, and
   // wrapped lines align under that text (hanging indent). The label draws
@@ -1026,9 +1049,9 @@ function wrapParagraph(
     firstLine = false;
 
     // The next line may sit beside (or past) a float — fetch its band.
-    band = bandFn(nominalH);
-    lineLeft = band.left + indentLeft;
-    lineRight = band.right - indentRight;
+    band = bandFn(nominalH, indents);
+    lineLeft = band.left;
+    lineRight = band.right;
     contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
   };
 
@@ -1109,10 +1132,13 @@ function wrapParagraph(
       // to the new band, so the relation carries over.
       band = bandFn(
         nominalH,
-        lineStart() - band.left + token.width + indentRight,
+        indents,
+        // The band already has the indents taken out, so the width to ask for
+        // is what sits left of the content start plus the image itself.
+        lineStart() - band.left + token.width,
       );
-      lineLeft = band.left + indentLeft;
-      lineRight = band.right - indentRight;
+      lineLeft = band.left;
+      lineRight = band.right;
       placeMarker();
       firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
       contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
@@ -1211,7 +1237,11 @@ function layoutParagraph(
   wrapParagraph(
     block,
     ctx,
-    () => ({ left: contentLeft, right: contentRight }),
+    (_h, ind) => ({
+      left: contentLeft + ind.left,
+      right: contentRight - ind.right,
+      column: { left: contentLeft, right: contentRight },
+    }),
     (d) => drafts.push(d),
   );
   return drafts;
@@ -3333,9 +3363,10 @@ function placeBlocks(
   const bandAt = (
     yy: number,
     h: number,
+    indents: { left: number; right: number },
   ): { left: number; right: number } | null => {
-    let L = colX0();
-    let R = colX1();
+    let L = colX0() + indents.left;
+    let R = colX1() - indents.right;
     for (const ex of exclusions) {
       if (ex.bottom <= yy || ex.top >= yy + h) continue;
       const leftGap = Math.min(R, ex.left) - L;
@@ -3381,7 +3412,9 @@ function placeBlocks(
           breakBand();
           continue;
         }
-        if (bandAt(y, estH)) break;
+        // Only asking "is there any room at y" — the paragraph's own indents
+        // do not decide where its FLOATS may sit.
+        if (bandAt(y, estH, { left: 0, right: 0 })) break;
         const blockers = exclusions.filter(
           (ex) => ex.top < y + estH && ex.bottom > y,
         );
@@ -3393,13 +3426,13 @@ function placeBlocks(
     wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine);
   };
 
-  const bandedBandFn: BandFn = (estH, minWidth) => {
+  const bandedBandFn: BandFn = (estH, indents, minWidth) => {
     for (;;) {
       if (y + estH > colBottom() && colDirty) {
         breakBand(); // next column/page: exclusions are gone
         continue;
       }
-      const b = bandAt(y, estH);
+      const b = bandAt(y, estH, indents);
       const blockers = exclusions.filter(
         (ex) => ex.top < y + estH && ex.bottom > y,
       );
@@ -3408,14 +3441,20 @@ function placeBlocks(
       // narrowed it, keep walking down past the floats — same move as a
       // null band. With no blockers left the band is the full column;
       // return it even if the item is wider (it overflows, as before).
+      const column = { left: colX0(), right: colX1() };
       if (
         b &&
         (minWidth === undefined ||
           b.right - b.left >= minWidth ||
           blockers.length === 0)
       )
-        return b;
-      if (blockers.length === 0) return { left: colX0(), right: colX1() };
+        return { ...b, column };
+      if (blockers.length === 0)
+        return {
+          left: column.left + indents.left,
+          right: column.right - indents.right,
+          column,
+        };
       y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
     }
   };

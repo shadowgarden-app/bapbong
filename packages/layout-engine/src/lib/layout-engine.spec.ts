@@ -1519,6 +1519,81 @@ describe('toFlowBlocks', () => {
     if ('text' in r1) expect(r1.font.kerning).toBe(true);
   });
 
+  it('measures indents from the column, letting a float only clip', () => {
+    // ECMA-376 §17.3.1.12: indentation sits "on both the left and the right
+    // side of the text margins". A float narrows the line; it must not become
+    // the thing the indents are measured from, or a right indent beside a
+    // float is subtracted twice. A factsheet in the corpus lands exactly
+    // there: 785px column, indents 21 + 402, a picture whose band is [9, 409]
+    // — Word draws a 362px line, double subtraction gives −23px.
+    const cfg: LayoutConfig = {
+      ...config({
+        width: 794,
+        margin: { top: 0, right: 0, bottom: 0, left: 9 },
+      }),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x', font: font() }],
+      indent: { left: 21, right: 402 },
+      floats: [
+        {
+          kind: 'image',
+          src: 'u',
+          width: 360,
+          height: 240,
+          wrap: 'square',
+          hOffset: 412,
+          vOffset: 0,
+          distL: 12,
+          distR: 12,
+        },
+      ],
+    } as unknown as FlowBlock;
+    const [line] = layoutBlocks([block], cfg).pages[0].lines;
+    // 9 + 21 = 30, and 794 − 402 = 392: the float sits entirely right of that
+    // box, so it takes nothing away.
+    expect(Math.round(line.x)).toBe(30);
+    expect(Math.round(line.width)).toBe(362);
+  });
+
+  it('clips the line where a float genuinely overlaps the indented box', () => {
+    // Same paragraph box [30, 392], but now the picture sits inside it. hOffset
+    // is column-relative, so the float lands at 9 + 200 = 209 and its wrap
+    // distance pulls the exclusion back to 197; the wider gap is the left one,
+    // so the line runs 30 → 197. This is also what proves the test above is
+    // not passing by accident: the float IS in play there.
+    const cfg: LayoutConfig = {
+      ...config({
+        width: 794,
+        margin: { top: 0, right: 0, bottom: 0, left: 9 },
+      }),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x', font: font() }],
+      indent: { left: 21, right: 402 },
+      floats: [
+        {
+          kind: 'image',
+          src: 'u',
+          width: 100,
+          height: 240,
+          wrap: 'square',
+          hOffset: 200,
+          vOffset: 0,
+          distL: 12,
+          distR: 12,
+        },
+      ],
+    } as unknown as FlowBlock;
+    const [line] = layoutBlocks([block], cfg).pages[0].lines;
+    expect(Math.round(line.x)).toBe(30);
+    expect(Math.round(line.width)).toBe(167); // 197 − 30
+  });
+
   it("puts the font's external leading into the line box", () => {
     // Word's line = cell + external leading; the leading sits below the
     // baseline, which stays at the ascent. Without it a Times New Roman line
