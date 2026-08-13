@@ -1519,6 +1519,31 @@ describe('toFlowBlocks', () => {
     if ('text' in r1) expect(r1.font.kerning).toBe(true);
   });
 
+  it('measures tab stops from the column, not from the indent', () => {
+    // A stop at pos=P in a paragraph indented by L lands at column + P, not
+    // column + L + P. Proven by a factsheet in the corpus where a tab stop and
+    // the next paragraph's first-line indent are both authored at 1761tw from
+    // the margin and Word renders them flush; adding the indent moved the tab
+    // 21px right of the line below it.
+    const cfg: LayoutConfig = {
+      ...config({
+        width: 400,
+        margin: { top: 0, right: 0, bottom: 0, left: 20 },
+      }),
+      measureMetrics: () => ({ ascent: 12, descent: 4 }),
+    };
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a\tb', font: font() }],
+      indent: { left: 30 },
+      tabs: [{ pos: 100, val: 'left' }],
+    } as unknown as FlowBlock;
+    const [line] = layoutBlocks([block], cfg).pages[0].lines;
+    const after = line.segments[line.segments.length - 1];
+    // column left 20 + stop 100 = 120. Indent-relative would be 150.
+    expect(Math.round(after.x)).toBe(120);
+  });
+
   it('measures indents from the column, letting a float only clip', () => {
     // ECMA-376 §17.3.1.12: indentation sits "on both the left and the right
     // side of the text margins". A float narrows the line; it must not become

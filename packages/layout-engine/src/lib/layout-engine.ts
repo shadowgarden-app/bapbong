@@ -805,10 +805,18 @@ function wrapParagraph(
 
   const lineStart = () => (firstLine ? firstLineStart : contStart);
 
-  /** Distance from `x` to the next tab stop (every tabWidth from the band left). */
+  /**
+   * Distance from `x` to the next default tab stop.
+   *
+   * The grid runs from the COLUMN, not from the line's left edge: a tab stop
+   * is a position on the ruler, and the ruler starts at the text margin. The
+   * paragraph's own indent must not shift it, and neither may a float that
+   * narrowed this line. See `resolveTab` for the evidence.
+   */
   const tabAdvance = (x: number) => {
-    const k = Math.floor((x - lineLeft) / tabWidth) + 1;
-    return lineLeft + k * tabWidth - x;
+    const origin = band.column.left;
+    const k = Math.floor((x - origin) / tabWidth) + 1;
+    return origin + k * tabWidth - x;
   };
 
   // ── Custom tab stops (w:tabs) ─────────────────────────────────────
@@ -842,22 +850,33 @@ function wrapParagraph(
     return { width, decimalPrefix };
   };
 
-  /** Resolve a tab token at `x`: jump to the next custom stop (aligning the
-   *  following group for right/center/decimal, synthesizing the leader fill),
-   *  or fall back to the default grid past the last stop. */
+  /**
+   * Resolve a tab token at `x`: jump to the next custom stop (aligning the
+   * following group for right/center/decimal, synthesizing the leader fill),
+   * or fall back to the default grid past the last stop.
+   *
+   * `w:tab/@w:pos` is measured from the text margin, NOT from the paragraph's
+   * indent. A hotel factsheet in the corpus proves it: one paragraph sets
+   * `ind left=321tw` with a stop at `pos=1761tw`, and the continuation
+   * paragraph below it sets `left=321 + firstLine=1440` — also 1761tw from
+   * the margin. Word renders the two flush with each other, which only holds
+   * if the stop ignores the 321. Adding the indent (as this did) pushed the
+   * second column 21px right of the line beneath it.
+   */
   const resolveTab = (token: Token, x: number, ti: number) => {
     // Re-resolves (after a wrap) must start from a pristine tab token.
     token.origPos ??= token.pos;
     token.pos = token.origPos;
     token.text = '\t';
 
-    const stop = tabStops.find((s) => lineLeft + s.pos > x + 0.5);
+    const origin = band.column.left;
+    const stop = tabStops.find((s) => origin + s.pos > x + 0.5);
     if (!stop) {
       token.width = tabAdvance(x);
       return;
     }
     // A stop past the line end clamps to it (Word: TOC stops at the margin).
-    const stopX = Math.min(lineLeft + stop.pos, lineRight);
+    const stopX = Math.min(origin + stop.pos, lineRight);
     if (stopX <= x + 0.5) {
       token.width = tabAdvance(x);
       return;
