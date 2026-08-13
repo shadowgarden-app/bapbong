@@ -1264,6 +1264,159 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100); // the Fallback's extent, not 360 EMU
   });
 
+  // ── conditional table formatting (w:tblStylePr) ───────────────────
+  // One style carrying every branch, each with a DIFFERENT left indent, so a
+  // cell's indent names the branch that won. twipsToPx divides by 15.
+  const CONDITIONAL_STYLES = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+    <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+    <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+    <w:style w:type="table" w:styleId="Grid">
+      <w:pPr><w:ind w:left="150"/></w:pPr>
+      <w:tblPr>
+        <w:tblStyleRowBandSize w:val="1"/><w:tblStyleColBandSize w:val="1"/>
+      </w:tblPr>
+      <w:tblStylePr w:type="wholeTable"><w:pPr><w:ind w:left="3000"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="band1Horz"><w:pPr><w:ind w:left="300"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="band2Horz"><w:pPr><w:ind w:left="450"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="band1Vert"><w:pPr><w:ind w:left="600"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="band2Vert"><w:pPr><w:ind w:left="750"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="firstCol"><w:pPr><w:ind w:left="900"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="lastCol"><w:pPr><w:ind w:left="1050"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="firstRow"><w:pPr><w:ind w:left="1200"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="lastRow"><w:pPr><w:ind w:left="1350"/></w:pPr></w:tblStylePr>
+      <w:tblStylePr w:type="nwCell"><w:pPr><w:ind w:left="1500"/></w:pPr></w:tblStylePr>
+    </w:style>
+    <w:style w:type="table" w:styleId="NoBands">
+      <w:pPr><w:ind w:left="150"/></w:pPr>
+      <w:tblStylePr w:type="band1Horz"><w:pPr><w:ind w:left="300"/></w:pPr></w:tblStylePr>
+    </w:style>
+  </w:styles>`;
+
+  /** A table of `rows` × `cols` cells, each holding one empty paragraph. */
+  const condTable = (
+    styleId: string,
+    look: string,
+    rows: number,
+    cols: number,
+    trPrOf: (r: number) => string = () => '',
+  ) =>
+    `<w:tbl><w:tblPr><w:tblStyle w:val="${styleId}"/>${look}</w:tblPr>` +
+    `<w:tblGrid>${'<w:gridCol w:w="1000"/>'.repeat(cols)}</w:tblGrid>` +
+    Array.from({ length: rows }, (_, r) => {
+      const cells = Array.from(
+        { length: cols },
+        (_, c) => `<w:tc><w:p><w:r><w:t>r${r}c${c}</w:t></w:r></w:p></w:tc>`,
+      ).join('');
+      return `<w:tr>${trPrOf(r)}${cells}</w:tr>`;
+    }).join('') +
+    `</w:tbl>`;
+
+  it("applies w:tblStylePr branches in Word's order, gated by w:tblLook", async () => {
+    // 0x01E0 = firstRow|lastRow|firstColumn|lastColumn, neither noHBand nor
+    // noVBand — table 0 adds noVBand (0x0400 → 0x05E0) to isolate ROW banding,
+    // table 1 adds noHBand (0x0200 → 0x03E0) to isolate COLUMN banding.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${condTable('Grid', '<w:tblLook w:val="05E0"/>', 4, 3)}
+      ${condTable('Grid', '<w:tblLook w:val="03E0"/>', 3, 4)}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, CONDITIONAL_STYLES),
+    );
+    const at = (t: number, r: number, c: number) =>
+      (
+        doc.child(t).child(r).child(c).child(0).attrs['indent'] as {
+          left?: number;
+        } | null
+      )?.left ?? 0;
+
+    // Row banding, and the order between branches.
+    expect(at(0, 0, 1)).toBe(80); // firstRow, and NOT banded
+    expect(at(0, 0, 0)).toBe(100); // firstRow+firstCol → nwCell last
+    expect(at(0, 0, 2)).toBe(80); // lastCol then firstRow → firstRow wins
+    expect(at(0, 1, 1)).toBe(20); // first BODY row → band1Horz
+    expect(at(0, 2, 1)).toBe(30); // second body row → band2Horz
+    expect(at(0, 1, 0)).toBe(60); // band1Horz then firstCol → firstCol wins
+    expect(at(0, 3, 1)).toBe(90); // lastRow, and NOT banded
+    expect(at(0, 3, 0)).toBe(90); // firstCol then lastRow → lastRow wins
+
+    // Column banding: the first column drops out of the count, so the column
+    // beside it is band1, the next band2.
+    expect(at(1, 1, 1)).toBe(40);
+    expect(at(1, 1, 2)).toBe(50);
+    expect(at(1, 1, 0)).toBe(60); // firstCol
+    expect(at(1, 1, 3)).toBe(70); // lastCol
+
+    // "Word does not apply and discards on save any properties within the
+    // tblStylePr element when the type attribute has a value of wholeTable"
+    // (MS-OI29500 §17.18.89(a)) — 200px must appear nowhere.
+    for (let t = 0; t < 2; t++)
+      for (let r = 0; r < 3; r++)
+        for (let c = 0; c < 3; c++) expect(at(t, r, c)).not.toBe(200);
+  });
+
+  it('reads a missing w:tblLook as 0x04A0, and lets attributes beat w:val', async () => {
+    // "In Word, when the tblLook element is omitted, the bitmask … is assumed
+    // to be 0x04A0" — firstRow + firstColumn + no vertical banding, with
+    // horizontal banding ALLOWED. Table 1 says 0x0000 in w:val but sets the
+    // attributes, which Word reads instead ("Word reads the val attribute … if,
+    // and only if, none of the attributes … are present").
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${condTable('Grid', '', 3, 2)}
+      ${condTable('Grid', '<w:tblLook w:val="0000" w:firstRow="1" w:noHBand="1" w:noVBand="1"/>', 3, 2)}
+      ${condTable('NoBands', '<w:tblLook w:val="01E0"/>', 3, 2)}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, CONDITIONAL_STYLES),
+    );
+    const at = (t: number, r: number, c: number) =>
+      (
+        doc.child(t).child(r).child(c).child(0).attrs['indent'] as {
+          left?: number;
+        } | null
+      )?.left ?? 0;
+
+    expect(at(0, 0, 0)).toBe(100); // firstRow+firstColumn → nwCell
+    expect(at(0, 1, 1)).toBe(20); // banding is on: first body row
+    // lastRow is OFF in 0x04A0, so the last row is still a banded body row —
+    // the rule Word's own w:cnfStyle confirmed on a 39-row Light Grid table.
+    expect(at(0, 2, 1)).toBe(30);
+
+    // Attributes present ⇒ w:val ignored: firstRow applies, banding does not.
+    // Both no*Band flags have to be spelled out — an ABSENT noVBand means
+    // vertical banding is allowed, which is the schema default, not "off".
+    expect(at(1, 0, 1)).toBe(80);
+    expect(at(1, 1, 1)).toBe(10); // no branch → the table style's own pPr
+    expect(at(1, 1, 0)).toBe(10); // firstColumn absent from the attributes
+
+    // "Word uses 0 as the default for tblStyleRowBandSize [and] does not apply
+    // any banded row conditional formatting" (MS-OI29500 §2.1.251) — NoBands
+    // declares band1Horz but no band size, so it never fires.
+    expect(at(2, 1, 1)).toBe(10);
+  });
+
+  it('gives a w:tblHeader row the firstRow branch', async () => {
+    // "In addition, if the cell is in a row with the w:tblHeader element, then
+    // add the run style property from w:tblStylePr[@w:type = 'firstRow']"
+    // — Eric White. Such a row is also out of the banding count.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${condTable('Grid', '<w:tblLook w:val="05E0"/>', 4, 3, (r) =>
+        r === 1 ? '<w:trPr><w:tblHeader/></w:trPr>' : '',
+      )}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, CONDITIONAL_STYLES),
+    );
+    const at = (r: number, c: number) =>
+      (
+        doc.child(0).child(r).child(c).child(0).attrs['indent'] as {
+          left?: number;
+        } | null
+      )?.left ?? 0;
+    expect(at(0, 1)).toBe(80); // the real first row
+    expect(at(1, 1)).toBe(80); // repeated heading row, not band1Horz
+    expect(at(2, 1)).toBe(30); // body index 1 → band2Horz, unshifted by row 1
+  });
+
   it("applies a table style's w:rPr to the runs inside, minus the toggles", async () => {
     // Same slot as the paragraph layer: docDefaults → table style → paragraph
     // style → character style → direct. The toggle properties are the

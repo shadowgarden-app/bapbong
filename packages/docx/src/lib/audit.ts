@@ -391,6 +391,22 @@ const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
   // that shape stays UNKNOWN.
   'w:sdtPr': (n) => !n.children.some((c) => c.name === 'w:rPr'),
   'w:sdtEndPr': (n) => !n.children.some((c) => c.name === 'w:rPr'),
+  // A conditional table format Word itself throws away: "Word does not apply
+  // and discards on save any properties within the tblStylePr element when
+  // the type attribute has a value of wholeTable" (MS-OI29500 §17.18.89(a)).
+  // Every other @w:type IS read (styles.ts resolveCond), so this stays a
+  // value-based demotion — a firstRow branch we failed to handle would still
+  // be reported. Whole-table formatting reaches content through the style's
+  // own w:pPr/w:rPr/w:tblPr instead.
+  'w:tblStylePr': (n) => n.attrs['w:type'] === 'wholeTable',
+  // An element with no children and no attributes says nothing. Word writes
+  // `<w:tblPr/>` inside most conditional branches of its built-in table
+  // styles, and it would have little to say even if it were filled: "Word does
+  // not allow [bidiVisual, tblLayout, tblLook, tblOverlap, tblpPr, tblStyle,
+  // tblStyleColBandSize, tblStyleRowBandSize, tblW] to be child elements of
+  // the tblPr element" there (MS-OI29500 §17.7.6.3). A non-empty one still
+  // reports.
+  'w:tblPr': (n) => n.children.length === 0 && attrCount(n) === 0,
 };
 
 function attrCount(n: OoxmlNode): number {

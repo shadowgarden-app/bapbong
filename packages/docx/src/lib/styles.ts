@@ -16,10 +16,31 @@ import {
  *  kind has to be read at all, not just glanced at for the paragraph case. */
 export type StyleType = 'paragraph' | 'character' | 'table' | 'numbering';
 
+/**
+ * One `w:tblStylePr` branch of a table style, rolled up through the basedOn
+ * chain: the paragraph/run/cell defaults it contributes to the region it names
+ * (first row, a banded column, the top-left cell…).
+ *
+ * `pPr`/`tcPr` stay as node LISTS (base-most first) because their children
+ * merge per-property — the same shape `resolveStylePPr` returns; `rPr` is
+ * already merged since RunProps is a flat record.
+ */
+export interface CondLayer {
+  pPr: OoxmlNode[];
+  rPr: RunProps;
+  tcPr: OoxmlNode[];
+}
+
 interface StyleDef {
   basedOn?: string;
   rPr: RunProps;
   pPr?: OoxmlNode;
+  /** `w:tblStylePr` branches, document order. Collected WITHOUT the audit
+   *  accessors: a wholeTable branch must stay unread (see resolveCond). */
+  cond: OoxmlNode[];
+  /** w:tblPr/w:tblStyleRowBandSize and …ColBandSize, unparsed. */
+  bandRow?: string;
+  bandCol?: string;
   /** w:tblPr/w:tblBorders of a table style, if any. */
   tblBorders?: OoxmlNode;
   /** w:tblPr/w:tblCellMar of a table style (Word's defaults carry the
@@ -73,6 +94,31 @@ export interface StyleRegistry {
    */
   resolveTableStylePPr(styleId: string | undefined): OoxmlNode[];
   resolveTableStyleRPr(styleId: string | undefined): RunProps;
+  /**
+   * The table style's CONDITIONAL branches (`w:tblStylePr`), keyed by
+   * `@w:type` — "firstRow", "band1Horz", "seCell"… Which of them reach a given
+   * cell is decided per cell from its position and the table's `w:tblLook`;
+   * this only rolls the definitions up through the basedOn chain.
+   *
+   * `wholeTable` is deliberately absent: *"Word does not apply and discards on
+   * save any properties within the tblStylePr element when the type attribute
+   * has a value of wholeTable"* (MS-OI29500 §17.18.89(a)). Whole-table
+   * formatting lives at the style's own w:pPr/w:rPr/w:tblPr, which the
+   * resolveTableStylePPr / resolveTableStyleRPr / resolveTableBorders /
+   * resolveTableCellMar resolvers already read.
+   */
+  resolveTableStyleCond(styleId: string | undefined): Map<string, CondLayer>;
+  /**
+   * `w:tblStyleRowBandSize` / `w:tblStyleColBandSize` — how many rows/columns
+   * make one band. **Word's default is 0, not the standard's 1**, and *"if
+   * tblStyleRowBandSize is set to 0, Word does not apply any banded row
+   * conditional formatting"* (MS-OI29500 §2.1.251) — so a style that declares
+   * neither gets no banding at all.
+   */
+  resolveTableBandSizes(styleId: string | undefined): {
+    row: number;
+    col: number;
+  };
   /** The most-derived w:tblBorders a table style (chain) contributes, if any.
    *  A table naming no `w:tblStyle` resolves through the default table style,
    *  exactly as Word does. */
@@ -126,6 +172,18 @@ export function buildStyleRegistry(
       pPr: child(style, 'w:pPr'),
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
+      // Filtered off node.children, not via children(): the accessor would
+      // mark every branch as read, including the wholeTable one the audit is
+      // supposed to keep reporting.
+      cond: style.children.filter((c) => c.name === 'w:tblStylePr'),
+      bandRow: attrOf(
+        child(child(style, 'w:tblPr'), 'w:tblStyleRowBandSize'),
+        'w:val',
+      ),
+      bandCol: attrOf(
+        child(child(style, 'w:tblPr'), 'w:tblStyleColBandSize'),
+        'w:val',
+      ),
       el: style,
       isDefault,
     });
@@ -182,6 +240,62 @@ export function buildStyleRegistry(
     return def.tblCellMar ?? resolveTblCellMar(def.basedOn, seen);
   }
 
+  /** Roll the conditional branches up the chain: a derived style's branch of
+   *  the same type layers ON TOP of the base's, per-property, so a style that
+   *  only overrides firstRow's shading keeps the base's firstRow fonts. */
+  function resolveCond(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): Map<string, CondLayer> {
+    if (!styleId || seen.has(styleId)) return new Map();
+    const def = defs.get(styleId);
+    if (!def) return new Map();
+    seen.add(styleId);
+    usedIds.add(styleId);
+    const out = def.basedOn ? resolveCond(def.basedOn, seen) : new Map();
+    for (const branch of def.cond) {
+      // attrOf records the ATTRIBUTE without marking the element, so a
+      // wholeTable branch leaves this loop entirely unread — which is the
+      // point: the audit keeps reporting it (as inert, see audit.ts) instead
+      // of us claiming to honour something Word itself discards.
+      const type = attrOf(branch, 'w:type');
+      if (type === undefined || type === 'wholeTable') continue;
+      audit.mark(branch);
+      const base = out.get(type);
+      const pPr = child(branch, 'w:pPr');
+      const tcPr = child(branch, 'w:tcPr');
+      out.set(type, {
+        pPr: pPr ? [...(base?.pPr ?? []), pPr] : (base?.pPr ?? []),
+        rPr: mergeRunProps(
+          base?.rPr ?? EMPTY,
+          parseRunProps(child(branch, 'w:rPr'), resolveTheme, resolveFont),
+        ),
+        tcPr: tcPr ? [...(base?.tcPr ?? []), tcPr] : (base?.tcPr ?? []),
+      });
+    }
+    return out;
+  }
+
+  function resolveBands(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): { row: number; col: number } {
+    if (!styleId || seen.has(styleId)) return { row: 0, col: 0 };
+    const def = defs.get(styleId);
+    if (!def) return { row: 0, col: 0 };
+    seen.add(styleId);
+    usedIds.add(styleId);
+    const base = resolveBands(def.basedOn, seen);
+    const num = (v: string | undefined, dflt: number) => {
+      const n = Number(v);
+      return v === undefined || Number.isNaN(n) ? dflt : n;
+    };
+    return {
+      row: num(def.bandRow, base.row),
+      col: num(def.bandCol, base.col),
+    };
+  }
+
   const defaultStyleIdFor = (type: StyleType) => defaultIds.get(type);
   // A table with no w:tblStyle still inherits the default table style, the
   // same way an unstyled paragraph inherits Normal.
@@ -198,6 +312,10 @@ export function buildStyleRegistry(
       resolvePPr(tableStyle(styleId), new Set<string>()),
     resolveTableStyleRPr: (styleId) =>
       resolve(tableStyle(styleId), new Set<string>()),
+    resolveTableStyleCond: (styleId) =>
+      resolveCond(tableStyle(styleId), new Set<string>()),
+    resolveTableBandSizes: (styleId) =>
+      resolveBands(tableStyle(styleId), new Set<string>()),
     resolveTableBorders: (styleId) =>
       resolveTblBorders(tableStyle(styleId), new Set<string>()),
     resolveTableCellMar: (styleId) =>

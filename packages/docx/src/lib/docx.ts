@@ -64,7 +64,7 @@ import type {
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
-import { buildStyleRegistry, StyleRegistry } from './styles.js';
+import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
@@ -2628,6 +2628,206 @@ function tableColumnWidths(tbl: OoxmlNode, grid: number[], ctx: Ctx): number[] {
   return px;
 }
 
+/** Which conditional formats a table lets through — `w:tblLook`. */
+interface TblLook {
+  firstRow: boolean;
+  lastRow: boolean;
+  firstCol: boolean;
+  lastCol: boolean;
+  hBand: boolean;
+  vBand: boolean;
+}
+
+/** ECMA-376 1st edition had only the `w:val` bitmask; the six booleans came
+ *  later. Both are still written (in agreement) by every producer in our
+ *  corpus, but three files carry the bitmask alone. */
+const TBL_LOOK_BITS: [keyof TblLook, number, boolean][] = [
+  ['firstRow', 0x0020, true],
+  ['lastRow', 0x0040, true],
+  ['firstCol', 0x0080, true],
+  ['lastCol', 0x0100, true],
+  // noHBand/noVBand are NEGATIVE: the bit set means "do not band".
+  ['hBand', 0x0200, false],
+  ['vBand', 0x0400, false],
+];
+
+/** Attribute name per flag, for the modern (2nd edition) spelling. Note the
+ *  spelling shift: `w:tblLook` says firstColumn, `w:tblStylePr` says firstCol. */
+const TBL_LOOK_ATTRS: [keyof TblLook, string, boolean][] = [
+  ['firstRow', 'w:firstRow', true],
+  ['lastRow', 'w:lastRow', true],
+  ['firstCol', 'w:firstColumn', true],
+  ['lastCol', 'w:lastColumn', true],
+  ['hBand', 'w:noHBand', false],
+  ['vBand', 'w:noVBand', false],
+];
+
+/**
+ * The table's conditional-formatting gates.
+ *
+ * Two Word behaviours the standard does not describe, both from
+ * [MS-OI29500] §17.4.55:
+ *
+ *   - *"In Word, when the tblLook element is omitted, the bitmask of table
+ *     style options on the current table is assumed to be **0x04A0**"* — first
+ *     row + first column + no vertical banding, NOT the standard's 0x0000.
+ *   - *"Word reads the val attribute … **if, and only if, none of the
+ *     attributes** specified in this subsection are present"* — so the modern
+ *     booleans win outright, and the legacy bitmask is the fallback.
+ */
+function tblLookFlags(tblPr: OoxmlNode | undefined): TblLook {
+  const el = child(tblPr, 'w:tblLook');
+  const flags: TblLook = {
+    firstRow: false,
+    lastRow: false,
+    firstCol: false,
+    lastCol: false,
+    hBand: false,
+    vBand: false,
+  };
+  const fromBits = (bits: number) => {
+    for (const [key, mask, positive] of TBL_LOOK_BITS)
+      flags[key] = (bits & mask) !== 0 ? positive : !positive;
+  };
+  if (!el) {
+    fromBits(0x04a0);
+    return flags;
+  }
+  // Read every attribute unconditionally — the audit must see the whole
+  // element, not just the branch we ended up using.
+  const attrs = TBL_LOOK_ATTRS.map(
+    ([, name]) => [name, attrOf(el, name)] as const,
+  );
+  const val = attrOf(el, 'w:val');
+  if (attrs.some(([, v]) => v !== undefined)) {
+    for (const [key, name, positive] of TBL_LOOK_ATTRS) {
+      const on = isOn(attrs.find(([n]) => n === name)?.[1]);
+      flags[key] = on ? positive : !positive;
+    }
+    return flags;
+  }
+  // A present element with neither form says nothing; the schema defaults are
+  // all "off", which for the two no*Band flags means banding IS allowed.
+  fromBits(val === undefined ? 0x0000 : Number.parseInt(val, 16) || 0);
+  return flags;
+}
+
+/** ST_OnOff, for attributes rather than elements ("1"/"true"/"on" = on). */
+function isOn(v: string | undefined): boolean {
+  return v === '1' || v === 'true' || v === 'on';
+}
+
+/** Where a cell sits in its table — everything the conditional formats ask. */
+interface CellPos {
+  row: number;
+  rowCount: number;
+  /** Leading grid column, and how many columns the cell spans. */
+  col: number;
+  colspan: number;
+  colCount: number;
+  /** The row carries `w:tblHeader` (a repeated heading row). */
+  header: boolean;
+}
+
+/**
+ * The `w:tblStylePr` types that apply to one cell, base-most FIRST so a plain
+ * left-to-right merge reproduces Word's precedence:
+ *
+ *   *"When specified, Office applies conditional formats in the following
+ *    order (therefore subsequent formats override properties on previous
+ *    formats): Odd row banding, even row banding · Odd column banding, even
+ *    column banding · First column, last column · First row, last row · Top
+ *    left, top right, bottom left, bottom right"* — [MS-OI29500] §2.1.250.
+ *
+ * ISO 29500 §17.7.6.6 orders it differently (columns before rows, first row
+ * before first column); we follow Word.
+ *
+ * Two rules that are not in the standard's prose:
+ *   - A row carrying `w:tblHeader` also takes firstRow formatting (Eric White,
+ *     "Assembling Paragraph and Run Properties for Cells").
+ *   - Banding counts the BODY only: the first row drops out when firstRow
+ *     formatting is on, the last when lastRow is. Verified against Word's own
+ *     `w:cnfStyle` output on a 39-row Light Grid table — row 0 is firstRow
+ *     alone, row 1 is band1Horz, and the last row keeps its band because that
+ *     table's tblLook has lastRow off. Same expression for columns, which no
+ *     file in the corpus exercises (every one of them sets noVBand).
+ *   - Corner cells need BOTH gates: *"Top left cell – when Header Row and
+ *     First Column are used"* ([MS-OI29500] §17.4.55(b)).
+ */
+function condTypesFor(
+  pos: CellPos,
+  look: TblLook,
+  bands: { row: number; col: number },
+): string[] {
+  const firstRow = look.firstRow && (pos.row === 0 || pos.header);
+  const lastRow = look.lastRow && pos.row === pos.rowCount - 1;
+  const firstCol = look.firstCol && pos.col === 0;
+  const lastCol = look.lastCol && pos.col + pos.colspan >= pos.colCount;
+  const types: string[] = [];
+  if (look.hBand && bands.row > 0 && !firstRow && !lastRow) {
+    const body = pos.row - (look.firstRow ? 1 : 0);
+    types.push(
+      Math.floor(body / bands.row) % 2 === 0 ? 'band1Horz' : 'band2Horz',
+    );
+  }
+  if (look.vBand && bands.col > 0 && !firstCol && !lastCol) {
+    const body = pos.col - (look.firstCol ? 1 : 0);
+    types.push(
+      Math.floor(body / bands.col) % 2 === 0 ? 'band1Vert' : 'band2Vert',
+    );
+  }
+  if (firstCol) types.push('firstCol');
+  if (lastCol) types.push('lastCol');
+  if (firstRow) types.push('firstRow');
+  if (lastRow) types.push('lastRow');
+  if (firstRow && firstCol) types.push('nwCell');
+  if (firstRow && lastCol) types.push('neCell');
+  if (lastRow && firstCol) types.push('swCell');
+  if (lastRow && lastCol) types.push('seCell');
+  return types;
+}
+
+/** The paragraph/run defaults a table (or one cell of it) hands its content. */
+type TableLayer = Ctx['tableStyles'][number];
+
+/**
+ * The table layer as one cell sees it: the table style's own w:pPr/w:rPr with
+ * the conditional branches that reach this cell merged on top, in Word's
+ * order. Cells that take no branch get the table's layer back BY IDENTITY, so
+ * `withTableLayer` can skip the push entirely.
+ */
+function cellCondLayer(
+  tblCond: TableCond,
+  pos: CellPos,
+  base: TableLayer | undefined,
+): TableLayer | undefined {
+  if (!base || tblCond.cond.size === 0) return base;
+  const layers = condTypesFor(pos, tblCond.look, tblCond.bands)
+    .map((t) => tblCond.cond.get(t))
+    .filter((l): l is CondLayer => l !== undefined);
+  if (layers.length === 0) return base;
+  return {
+    pPr: [...base.pPr, ...layers.flatMap((l) => l.pPr)],
+    rPr: layers.reduce((acc, l) => mergeRunProps(acc, l.rPr), base.rPr),
+  };
+}
+
+/** Run `fn` with `layer` as the innermost table layer. */
+function withTableLayer<T>(
+  ctx: Ctx,
+  layer: TableLayer | undefined,
+  fn: () => T,
+): T {
+  if (!layer || layer === ctx.tableStyles[ctx.tableStyles.length - 1])
+    return fn();
+  ctx.tableStyles.push(layer);
+  try {
+    return fn();
+  } finally {
+    ctx.tableStyles.pop();
+  }
+}
+
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   // The table style's paragraph/run defaults are rolled up ONCE here and left
   // on the stack for every paragraph in every cell to read. try/finally
@@ -2639,13 +2839,25 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
     rPr: ctx.styles.resolveTableStyleRPr(styleId),
   });
   try {
-    return parseTableRows(tbl, ctx);
+    return parseTableRows(tbl, ctx, {
+      cond: ctx.styles.resolveTableStyleCond(styleId),
+      look: tblLookFlags(child(tbl, 'w:tblPr')),
+      bands: ctx.styles.resolveTableBandSizes(styleId),
+    });
   } finally {
     ctx.tableStyles.pop();
   }
 }
 
-function parseTableRows(tbl: OoxmlNode, ctx: Ctx): PMNode {
+/** A table's conditional formatting, resolved once for the whole table: the
+ *  branch definitions, the gates that select them, and the band sizes. */
+interface TableCond {
+  cond: Map<string, CondLayer>;
+  look: TblLook;
+  bands: { row: number; col: number };
+}
+
+function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
   const grid = children(child(tbl, 'w:tblGrid'), 'w:gridCol').map((c) =>
     Number(attrOf(c, 'w:w') ?? '0'),
   );
@@ -2654,6 +2866,21 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx): PMNode {
   // Phase 1: logical grid — every w:tc (incl. vMerge-continue placeholders),
   // tracking each cell's starting grid column.
   const rowEls = children(tbl, 'w:tr');
+  const spanTotals = rowEls.map((tr) =>
+    children(tr, 'w:tc').reduce(
+      (n, tc) =>
+        n +
+        (Number(
+          attrOf(child(child(tc, 'w:tcPr'), 'w:gridSpan'), 'w:val') ?? '1',
+        ) || 1),
+      0,
+    ),
+  );
+  // "Last column" for conditional formatting is the TABLE's right edge, not
+  // the row's — a row whose cells are merged into one still has its last cell
+  // sitting at the table edge.
+  const colCount = Math.max(grid.length, ...spanTotals, 0);
+  const tableLayer = ctx.tableStyles[ctx.tableStyles.length - 1];
   const logicalRows: LogicalCell[][] = rowEls.map((tr, rowIdx) => {
     const cells: LogicalCell[] = [];
     let col = 0;
@@ -2668,14 +2895,8 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx): PMNode {
       TABLE_SIDES,
       ctx.resolveTheme,
     );
-    const rowCols = children(tr, 'w:tc').reduce(
-      (n, tc) =>
-        n +
-        (Number(
-          attrOf(child(child(tc, 'w:tcPr'), 'w:gridSpan'), 'w:val') ?? '1',
-        ) || 1),
-      0,
-    );
+    const rowCols = spanTotals[rowIdx];
+    const rowHeader = isToggleOn(child(child(tr, 'w:trPr'), 'w:tblHeader'));
     for (const tc of children(tr, 'w:tc')) {
       const tcPr = child(tc, 'w:tcPr');
       const colspan =
@@ -2711,7 +2932,25 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx): PMNode {
       );
       const padding = parseMarginsEl(child(tcPr, 'w:tcMar'));
       const carry = collectCarry(tcPr, CONSUMED_TCPR);
-      const content = parseBlocks(tc, ctx);
+      // Conditional formatting is a per-CELL layer: which branches reach this
+      // cell depends on where it sits. Cells that take none reuse the table's
+      // own layer object — identity, no re-merge — so a document like khbd
+      // (275 tables, 4704 paragraphs, zero tblStylePr) pays nothing for this.
+      const condLayer = cellCondLayer(
+        tblCond,
+        {
+          row: rowIdx,
+          rowCount: rowEls.length,
+          col,
+          colspan,
+          colCount,
+          header: rowHeader,
+        },
+        tableLayer,
+      );
+      const content = withTableLayer(ctx, condLayer, () =>
+        parseBlocks(tc, ctx),
+      );
       if (content.length === 0)
         content.push(ctx.schema.nodes['paragraph'].create());
       cells.push({
