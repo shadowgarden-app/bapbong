@@ -34,6 +34,26 @@
             "glob": "carlito-vietnamese*.woff",
             "input": "node_modules/@fontsource/carlito/files",
             "output": "fonts/carlito"
+          },
+          {
+            "glob": "tinos-latin*.woff",
+            "input": "node_modules/@fontsource/tinos/files",
+            "output": "fonts/tinos"
+          },
+          {
+            "glob": "tinos-vietnamese*.woff",
+            "input": "node_modules/@fontsource/tinos/files",
+            "output": "fonts/tinos"
+          },
+          {
+            "glob": "arimo-latin*.woff",
+            "input": "node_modules/@fontsource/arimo/files",
+            "output": "fonts/arimo"
+          },
+          {
+            "glob": "arimo-vietnamese*.woff",
+            "input": "node_modules/@fontsource/arimo/files",
+            "output": "fonts/arimo"
           }
         ],
         "styles": ["apps/playground/src/styles.css"]

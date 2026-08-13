@@ -1,6 +1,20 @@
-import { Component, ElementRef, OnDestroy, inject, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  OnDestroy,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { BapbongView } from '@shadow-garden/bapbong-view';
+import {
+  createCanvasMeasurer,
+  createCanvasMetrics,
+  createFontRegistryMeasurer,
+  createFontRegistryMetrics,
+} from '@shadow-garden/bapbong-measuring';
+import { loadBundledFonts } from './fonts';
 
 type PreviewState = 'idle' | 'loading' | 'rendered' | 'error';
 
@@ -33,6 +47,10 @@ export class Preview implements OnDestroy {
   protected readonly source = signal<string | null>(null);
 
   private view: BapbongView | null = null;
+  /** Same bundled metrics the editor route uses — without them the viewer
+   *  measures from canvas, which reports no external leading and rounds to
+   *  whole pixels, so the two routes would paginate the same file differently. */
+  private readonly fontsReady = loadBundledFonts();
 
   constructor() {
     const link = this.route.snapshot.queryParamMap.get('link');
@@ -62,8 +80,11 @@ export class Preview implements OnDestroy {
       const bytes = await res.arrayBuffer();
       await this.validateAndRender(bytes, name);
     } catch (e) {
-      this.fail(name, `Couldn't load the document from this link (${(e as Error).message}). ` +
-        `The server may block cross-origin requests, or the link may be wrong.`);
+      this.fail(
+        name,
+        `Couldn't load the document from this link (${(e as Error).message}). ` +
+          `The server may block cross-origin requests, or the link may be wrong.`,
+      );
     }
   }
 
@@ -128,7 +149,10 @@ export class Preview implements OnDestroy {
 
   // ── Validate + render ───────────────────────────────────────────────
 
-  private async validateAndRender(bytes: ArrayBuffer, name: string): Promise<void> {
+  private async validateAndRender(
+    bytes: ArrayBuffer,
+    name: string,
+  ): Promise<void> {
     const reason = whyNotDocx(bytes, name);
     if (reason) {
       this.fail(name, reason);
@@ -142,12 +166,23 @@ export class Preview implements OnDestroy {
     const host = this.host()?.nativeElement;
     if (!host) return;
     try {
-      if (!this.view) this.view = new BapbongView(host, { viewport: host, a11yLabel: name });
+      if (!this.view) {
+        const reg = await this.fontsReady;
+        this.view = new BapbongView(host, {
+          viewport: host,
+          a11yLabel: name,
+          measureText: createFontRegistryMeasurer(reg, createCanvasMeasurer()),
+          measureMetrics: createFontRegistryMetrics(reg, createCanvasMetrics()),
+        });
+      }
       await this.view.loadDocx(bytes);
       this.pageCount.set(this.view.pageCount);
       this.zoomPct.set(Math.round(this.view.getZoom() * 100));
     } catch (e) {
-      this.fail(name, `This file looks like a .docx but couldn't be read (${(e as Error).message}).`);
+      this.fail(
+        name,
+        `This file looks like a .docx but couldn't be read (${(e as Error).message}).`,
+      );
     }
   }
 
@@ -184,7 +219,9 @@ function nextFrame(): Promise<void> {
 function fileNameFromUrl(url: string): string {
   try {
     const path = new URL(url, location.href).pathname;
-    const last = decodeURIComponent(path.split('/').filter(Boolean).pop() ?? '');
+    const last = decodeURIComponent(
+      path.split('/').filter(Boolean).pop() ?? '',
+    );
     return last || 'document.docx';
   } catch {
     return 'document.docx';
@@ -199,7 +236,10 @@ function whyNotDocx(bytes: ArrayBuffer, name: string): string | null {
     return `Only .docx files can be previewed (this is ${ext}).`;
   }
   const b = new Uint8Array(bytes);
-  const isZip = b[0] === 0x50 && b[1] === 0x4b && (b[2] === 0x03 || b[2] === 0x05 || b[2] === 0x07);
+  const isZip =
+    b[0] === 0x50 &&
+    b[1] === 0x4b &&
+    (b[2] === 0x03 || b[2] === 0x05 || b[2] === 0x07);
   if (!isZip) return 'This file is not a valid .docx (Word) document.';
   return null;
 }

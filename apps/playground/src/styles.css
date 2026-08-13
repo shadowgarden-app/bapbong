@@ -1,13 +1,26 @@
 /* You can add global styles to this file, and also import other style files */
 
-/* Bundled metric-compatible fonts (canvas rendering). Carlito ↔ Calibri.
-   Only the Latin + Vietnamese subsets are imported (cyrillic/greek dropped —
-   they are never used and just bloat the bundle). Each subset file carries the
-   400 + 700 weights; italics are separate files. The matching layout metrics
-   come from FontRegistry (see app/fonts.ts). */
+/* Bundled metric-compatible fonts (canvas rendering). Carlito ↔ Calibri,
+   Tinos ↔ Times New Roman, Arimo ↔ Arial — the three families Word documents
+   in this corpus actually ask for. Only the Latin + Vietnamese subsets are
+   imported (cyrillic/greek dropped — they are never used and just bloat the
+   bundle). Each subset file carries the 400 + 700 weights; italics are separate
+   files. The matching layout metrics come from FontRegistry (app/fonts.ts). */
 @import '@fontsource/carlito/latin.css';
 @import '@fontsource/carlito/latin-italic.css';
 @import '@fontsource/carlito/latin-ext.css';
 @import '@fontsource/carlito/latin-ext-italic.css';
 @import '@fontsource/carlito/vietnamese.css';
 @import '@fontsource/carlito/vietnamese-italic.css';
+@import '@fontsource/tinos/latin.css';
+@import '@fontsource/tinos/latin-italic.css';
+@import '@fontsource/tinos/latin-ext.css';
+@import '@fontsource/tinos/latin-ext-italic.css';
+@import '@fontsource/tinos/vietnamese.css';
+@import '@fontsource/tinos/vietnamese-italic.css';
+@import '@fontsource/arimo/latin.css';
+@import '@fontsource/arimo/latin-italic.css';
+@import '@fontsource/arimo/latin-ext.css';
+@import '@fontsource/arimo/latin-ext-italic.css';
+@import '@fontsource/arimo/vietnamese.css';
+@import '@fontsource/arimo/vietnamese-italic.css';

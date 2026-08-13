@@ -44,11 +44,13 @@ export class BapbongView {
     stack.style.position = 'relative';
     host.appendChild(stack);
     this.stack = stack;
+    // Spread the caller's options rather than copying four of them: this used
+    // to name each field, which silently dropped measureText/measureMetrics —
+    // an embedder that supplied real font metrics still got canvas ones, and
+    // the same document paginated differently in the viewer and the editor.
     this.core = new RenderCore(stack, {
+      ...opts,
       viewport: opts.viewport ?? host,
-      zoom: opts.zoom,
-      a11y: opts.a11y,
-      a11yLabel: opts.a11yLabel,
     });
     this.offFonts = this.core.onFontsReloaded(() => this.emit());
     this.selection =
