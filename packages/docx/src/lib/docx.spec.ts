@@ -1451,6 +1451,65 @@ describe('importDocx', () => {
     expect(cellAt(2, 0).attrs['background']).toBe('#EEEEEE');
   });
 
+  it("maps a branch's insideH/insideV to its own region, not the table", async () => {
+    // Inside a w:tblStylePr branch, insideH/insideV mean the edges BETWEEN
+    // cells OF THAT REGION. For a firstRow branch the region is one row: every
+    // cell is on its top and bottom edge, so top/bottom come from the branch's
+    // own w:top/w:bottom while the vertical edges between the row's cells come
+    // from insideV — except the row's outer left/right, which take w:left and
+    // w:right. A firstCol branch is the same rectangle turned 90°.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="table" w:styleId="Edges">
+        <w:tblStylePr w:type="firstRow"><w:tcPr><w:tcBorders>
+          <w:top w:val="single" w:sz="24" w:space="0" w:color="FF0000"/>
+          <w:bottom w:val="single" w:sz="16" w:space="0" w:color="00FF00"/>
+          <w:left w:val="single" w:sz="8" w:space="0" w:color="0000FF"/>
+          <w:right w:val="single" w:sz="8" w:space="0" w:color="0000FF"/>
+          <w:insideV w:val="single" w:sz="4" w:space="0" w:color="FFFF00"/>
+          <w:insideH w:val="none"/>
+        </w:tcBorders></w:tcPr></w:tblStylePr>
+        <w:tblStylePr w:type="firstCol"><w:tcPr><w:tcBorders>
+          <w:insideH w:val="single" w:sz="4" w:space="0" w:color="00FFFF"/>
+        </w:tcBorders></w:tcPr></w:tblStylePr>
+      </w:style>
+    </w:styles>`;
+    const cell = '<w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>';
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Edges"/><w:tblLook w:val="06A0"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="900"/><w:gridCol w:w="900"/><w:gridCol w:w="900"/></w:tblGrid>
+        <w:tr>${cell.repeat(3)}</w:tr>
+        <w:tr>${cell.repeat(3)}</w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const borders = (r: number, c: number) =>
+      doc.child(0).child(r).child(c).attrs['borders'] as Record<
+        string,
+        { color?: string } | false
+      > | null;
+
+    // First row, middle cell: the region's top and bottom edges are this
+    // cell's own, and both vertical edges are interior → insideV.
+    expect(borders(0, 1)?.['top']).toMatchObject({ color: '#FF0000' });
+    expect(borders(0, 1)?.['bottom']).toMatchObject({ color: '#00FF00' });
+    expect(borders(0, 1)?.['left']).toMatchObject({ color: '#FFFF00' });
+    expect(borders(0, 1)?.['right']).toMatchObject({ color: '#FFFF00' });
+    // First row, first cell: its left edge is the region's left edge.
+    expect(borders(0, 0)?.['left']).toMatchObject({ color: '#0000FF' });
+    expect(borders(0, 2)?.['right']).toMatchObject({ color: '#0000FF' });
+
+    // The firstCol branch's region is a column, so ITS insideH lands on the
+    // horizontal edge between the two rows of column 0 — the bottom of (0,0)
+    // is the firstRow branch's (applied later, hence winning) and the top of
+    // (1,0) is the column branch's.
+    expect(borders(1, 0)?.['top']).toMatchObject({ color: '#00FFFF' });
+    // Nothing reaches row 1's other cells.
+    expect(borders(1, 1)).toBe(null);
+  });
+
   it('gives a w:tblHeader row the firstRow branch', async () => {
     // "In addition, if the cell is in a row with the w:tblHeader element, then
     // add the run style property from w:tblStylePr[@w:type = 'firstRow']"

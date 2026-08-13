@@ -2779,12 +2779,126 @@ function condTypesFor(
 /** The paragraph/run defaults a table (or one cell of it) hands its content. */
 type TableLayer = Ctx['tableStyles'][number];
 
+/** A conditional branch that reaches a cell, with the @w:type it came from —
+ *  the type names the REGION its insideH/insideV edges belong to. */
+interface CellBranch {
+  type: string;
+  layer: CondLayer;
+}
+
 /** The conditional branches that reach one cell, in application order. */
-function cellBranches(tblCond: TableCond, pos: CellPos): CondLayer[] {
+function cellBranches(tblCond: TableCond, pos: CellPos): CellBranch[] {
   if (tblCond.cond.size === 0) return [];
-  return condTypesFor(pos, tblCond.look, tblCond.bands)
-    .map((t) => tblCond.cond.get(t))
-    .filter((l): l is CondLayer => l !== undefined);
+  return condTypesFor(pos, tblCond.look, tblCond.bands).flatMap((type) => {
+    const layer = tblCond.cond.get(type);
+    return layer ? [{ type, layer }] : [];
+  });
+}
+
+/**
+ * The rectangle of grid cells a branch styles. It decides what `insideH` and
+ * `insideV` mean inside that branch: they are the edges BETWEEN cells of the
+ * region, so a cell on the region's boundary takes top/bottom/left/right there
+ * and an interior one takes the inside pair — the same question
+ * `applyRowException` answers for a row's tblPrEx, one region smaller.
+ */
+interface BranchRegion {
+  rowStart: number;
+  rowEnd: number;
+  colStart: number;
+  colEnd: number;
+}
+
+function branchRegion(
+  type: string,
+  pos: CellPos,
+  look: TblLook,
+  bands: { row: number; col: number },
+): BranchRegion {
+  const lastRow = pos.rowCount - 1;
+  const lastCol = pos.colCount - 1;
+  // Banding counts the body only, so a band's bounds are measured from there.
+  const bodyTop = look.firstRow ? 1 : 0;
+  const bodyBottom = lastRow - (look.lastRow ? 1 : 0);
+  const bodyLeft = look.firstCol ? 1 : 0;
+  const bodyRight = lastCol - (look.lastCol ? 1 : 0);
+  const wholeRows = { rowStart: 0, rowEnd: lastRow };
+  const wholeCols = { colStart: 0, colEnd: lastCol };
+  const band = (v: number, from: number, to: number, size: number) => {
+    const start = from + Math.floor((v - from) / size) * size;
+    return { start, end: Math.min(start + size - 1, to) };
+  };
+  switch (type) {
+    case 'firstRow':
+      return { rowStart: 0, rowEnd: 0, ...wholeCols };
+    case 'lastRow':
+      return { rowStart: lastRow, rowEnd: lastRow, ...wholeCols };
+    case 'firstCol':
+      return { ...wholeRows, colStart: 0, colEnd: 0 };
+    case 'lastCol':
+      return { ...wholeRows, colStart: lastCol, colEnd: lastCol };
+    case 'band1Horz':
+    case 'band2Horz': {
+      const b = band(pos.row, bodyTop, bodyBottom, Math.max(1, bands.row));
+      return { rowStart: b.start, rowEnd: b.end, ...wholeCols };
+    }
+    case 'band1Vert':
+    case 'band2Vert': {
+      const b = band(pos.col, bodyLeft, bodyRight, Math.max(1, bands.col));
+      return { ...wholeRows, colStart: b.start, colEnd: b.end };
+    }
+    // The four corner branches style exactly one cell.
+    default:
+      return {
+        rowStart: pos.row,
+        rowEnd: pos.row,
+        colStart: pos.col,
+        colEnd: pos.col + pos.colspan - 1,
+      };
+  }
+}
+
+/**
+ * The cell borders the conditional branches contribute, later branch winning.
+ * Sits BELOW the row's tblPrEx and the cell's own w:tcBorders: a table style
+ * cannot overrule what the document says about this particular cell.
+ */
+function branchBorders(
+  branches: CellBranch[],
+  pos: CellPos,
+  look: TblLook,
+  bands: { row: number; col: number },
+  ctx: Ctx,
+): TableBorders | null {
+  const out: TableBorders = {};
+  for (const { type, layer } of branches) {
+    const region = branchRegion(type, pos, look, bands);
+    const at = {
+      top: pos.row === region.rowStart,
+      bottom: pos.row === region.rowEnd,
+      left: pos.col === region.colStart,
+      right: pos.col + pos.colspan - 1 >= region.colEnd,
+    };
+    for (const tcPr of layer.tcPr) {
+      const set = parseBordersEl(
+        child(tcPr, 'w:tcBorders'),
+        TABLE_SIDES,
+        ctx.resolveTheme,
+      );
+      if (!set) continue;
+      const put = (
+        side: 'top' | 'bottom' | 'left' | 'right',
+        from: BorderSide | false | undefined,
+      ) => {
+        if (from !== undefined) out[side] = from;
+      };
+      put('top', at.top ? set.top : set.insideH);
+      put('bottom', at.bottom ? set.bottom : set.insideH);
+      put('left', at.left ? set.left : set.insideV);
+      put('right', at.right ? set.right : set.insideV);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /**
@@ -2795,12 +2909,12 @@ function cellBranches(tblCond: TableCond, pos: CellPos): CondLayer[] {
  */
 function layerWithBranches(
   base: TableLayer | undefined,
-  branches: CondLayer[],
+  branches: CellBranch[],
 ): TableLayer | undefined {
   if (!base || branches.length === 0) return base;
   return {
-    pPr: [...base.pPr, ...branches.flatMap((l) => l.pPr)],
-    rPr: branches.reduce((acc, l) => mergeRunProps(acc, l.rPr), base.rPr),
+    pPr: [...base.pPr, ...branches.flatMap((b) => b.layer.pPr)],
+    rPr: branches.reduce((acc, b) => mergeRunProps(acc, b.layer.rPr), base.rPr),
   };
 }
 
@@ -2949,18 +3063,19 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
           ? 'restart'
           : 'continue'; // omitted w:val defaults to continue
       const widths = colPx.length ? colPx.slice(col, col + colspan) : [];
-      const branches = cellBranches(tblCond, {
+      const pos: CellPos = {
         row: rowIdx,
         rowCount: rowEls.length,
         col,
         colspan,
         colCount,
         header: rowHeader,
-      });
+      };
+      const branches = cellBranches(tblCond, pos);
       const { background, vAlign, padding } = resolveCellProps(
         [
           ...tblCond.styleTcPr,
-          ...branches.flatMap((b) => b.tcPr),
+          ...branches.flatMap((b) => b.layer.tcPr),
           ...(tcPr ? [tcPr] : []),
         ],
         ctx,
@@ -2970,7 +3085,7 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
         CELL_SIDES,
         ctx.resolveTheme,
       );
-      const borders = rowEx
+      const withEx = rowEx
         ? applyRowException(ownBorders, rowEx, {
             firstRow: rowIdx === 0,
             lastRow: rowIdx === rowEls.length - 1,
@@ -2978,6 +3093,16 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
             lastCol: col + colspan >= rowCols,
           })
         : ownBorders;
+      // The table style's conditional borders are the lowest layer: they fill
+      // the sides nothing else claimed.
+      const fromStyle = branchBorders(
+        branches,
+        pos,
+        tblCond.look,
+        tblCond.bands,
+        ctx,
+      );
+      const borders = fromStyle ? { ...fromStyle, ...(withEx ?? {}) } : withEx;
       const diagonals = parseDiagonals(
         child(tcPr, 'w:tcBorders'),
         ctx.resolveTheme,
