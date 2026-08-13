@@ -1394,6 +1394,63 @@ describe('importDocx', () => {
     expect(at(2, 1, 1)).toBe(10);
   });
 
+  it("layers a table style's w:tcPr under the conditional branches", async () => {
+    // Cell properties stack the same way the paragraph ones do: the style's
+    // own w:tcPr → the branches that reach the cell → the cell's own w:tcPr.
+    // A later layer's w:shd with fill="auto" means NO shading and clears an
+    // inherited fill; w:tcMar merges per side.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="table" w:styleId="Banded">
+        <w:tblPr><w:tblStyleRowBandSize w:val="1"/></w:tblPr>
+        <w:tcPr>
+          <w:shd w:val="clear" w:color="auto" w:fill="EEEEEE"/>
+          <w:vAlign w:val="center"/>
+          <w:tcMar><w:left w:w="150" w:type="dxa"/><w:top w:w="300" w:type="dxa"/></w:tcMar>
+        </w:tcPr>
+        <w:tblStylePr w:type="firstRow">
+          <w:tcPr>
+            <w:shd w:val="clear" w:color="auto" w:fill="336699"/>
+            <w:vAlign w:val="bottom"/>
+            <w:tcMar><w:left w:w="450" w:type="dxa"/></w:tcMar>
+          </w:tcPr>
+        </w:tblStylePr>
+        <w:tblStylePr w:type="band1Horz">
+          <w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="auto"/></w:tcPr>
+        </w:tblStylePr>
+      </w:style>
+    </w:styles>`;
+    const cell = (inner = '') =>
+      `<w:tc><w:tcPr>${inner}</w:tcPr><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Banded"/><w:tblLook w:val="0420"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/></w:tblGrid>
+        <w:tr>${cell()}${cell('<w:shd w:val="clear" w:color="auto" w:fill="FF0000"/>')}</w:tr>
+        <w:tr>${cell()}${cell()}</w:tr>
+        <w:tr>${cell()}${cell()}</w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const cellAt = (r: number, c: number) => doc.child(0).child(r).child(c);
+
+    // Row 0 is firstRow: its branch beats the style's own w:tcPr…
+    expect(cellAt(0, 0).attrs['background']).toBe('#336699');
+    expect(cellAt(0, 0).attrs['vAlign']).toBe('bottom');
+    // …and w:tcMar merges: left comes from the branch, top from the style.
+    expect(cellAt(0, 0).attrs['padding']).toMatchObject({ left: 30, top: 20 });
+    // …while the cell's own w:shd still beats the branch.
+    expect(cellAt(0, 1).attrs['background']).toBe('#FF0000');
+
+    // Row 1 is the first body row → band1Horz, whose fill="auto" CLEARS the
+    // style's EEEEEE rather than leaving it in place.
+    expect(cellAt(1, 0).attrs['background']).toBe(null);
+    expect(cellAt(1, 0).attrs['vAlign']).toBe('center'); // still the style's
+    // Row 2 is band2Horz, which this style does not declare → style's own fill.
+    expect(cellAt(2, 0).attrs['background']).toBe('#EEEEEE');
+  });
+
   it('gives a w:tblHeader row the firstRow branch', async () => {
     // "In addition, if the cell is in a row with the w:tblHeader element, then
     // add the run style property from w:tblStylePr[@w:type = 'firstRow']"

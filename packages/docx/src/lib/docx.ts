@@ -2779,26 +2779,73 @@ function condTypesFor(
 /** The paragraph/run defaults a table (or one cell of it) hands its content. */
 type TableLayer = Ctx['tableStyles'][number];
 
-/**
- * The table layer as one cell sees it: the table style's own w:pPr/w:rPr with
- * the conditional branches that reach this cell merged on top, in Word's
- * order. Cells that take no branch get the table's layer back BY IDENTITY, so
- * `withTableLayer` can skip the push entirely.
- */
-function cellCondLayer(
-  tblCond: TableCond,
-  pos: CellPos,
-  base: TableLayer | undefined,
-): TableLayer | undefined {
-  if (!base || tblCond.cond.size === 0) return base;
-  const layers = condTypesFor(pos, tblCond.look, tblCond.bands)
+/** The conditional branches that reach one cell, in application order. */
+function cellBranches(tblCond: TableCond, pos: CellPos): CondLayer[] {
+  if (tblCond.cond.size === 0) return [];
+  return condTypesFor(pos, tblCond.look, tblCond.bands)
     .map((t) => tblCond.cond.get(t))
     .filter((l): l is CondLayer => l !== undefined);
-  if (layers.length === 0) return base;
+}
+
+/**
+ * The table layer as one cell sees it: the table style's own w:pPr/w:rPr with
+ * the branches that reach this cell merged on top. A cell that takes no branch
+ * gets the table's layer back BY IDENTITY, so `withTableLayer` can skip the
+ * push entirely.
+ */
+function layerWithBranches(
+  base: TableLayer | undefined,
+  branches: CondLayer[],
+): TableLayer | undefined {
+  if (!base || branches.length === 0) return base;
   return {
-    pPr: [...base.pPr, ...layers.flatMap((l) => l.pPr)],
-    rPr: layers.reduce((acc, l) => mergeRunProps(acc, l.rPr), base.rPr),
+    pPr: [...base.pPr, ...branches.flatMap((l) => l.pPr)],
+    rPr: branches.reduce((acc, l) => mergeRunProps(acc, l.rPr), base.rPr),
   };
+}
+
+/** Cell padding, in px per side. */
+type CellPadding = {
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
+};
+
+/**
+ * Resolve one cell's `w:tcPr`-borne properties down the layers Word stacks:
+ * the table style's own w:tcPr, the conditional branches, then the cell's own.
+ *
+ * Later layers win per property, and an explicit no-shading (`w:fill="auto"`,
+ * which shdFill reads as "no colour") CLEARS an inherited fill rather than
+ * being skipped. w:tcMar merges per SIDE, the way cell margins do everywhere
+ * else, so a branch that only widens the left inset keeps the rest.
+ */
+function resolveCellProps(
+  layers: OoxmlNode[],
+  ctx: Ctx,
+): {
+  background: string | null;
+  vAlign: 'center' | 'bottom' | null;
+  padding: CellPadding | null;
+} {
+  let background: string | null = null;
+  let vAlign: 'center' | 'bottom' | null = null;
+  let padding: CellPadding | null = null;
+  for (const layer of layers) {
+    const shd = child(layer, 'w:shd');
+    if (shd) background = shdFill(shd, ctx.resolveTheme) ?? null;
+    const vAlignEl = child(layer, 'w:vAlign');
+    if (vAlignEl) {
+      const v = attrOf(vAlignEl, 'w:val');
+      // ST_VerticalJc also has "both" (vertically justified), which renders as
+      // top for the single-paragraph cells it ever appears on.
+      vAlign = v === 'center' || v === 'bottom' ? v : null;
+    }
+    const mar = parseMarginsEl(child(layer, 'w:tcMar'));
+    if (mar) padding = { ...(padding ?? {}), ...mar };
+  }
+  return { background, vAlign, padding };
 }
 
 /** Run `fn` with `layer` as the innermost table layer. */
@@ -2832,6 +2879,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
       cond: ctx.styles.resolveTableStyleCond(styleId),
       look: tblLookFlags(child(tbl, 'w:tblPr')),
       bands: ctx.styles.resolveTableBandSizes(styleId),
+      styleTcPr: ctx.styles.resolveTableStyleTcPr(styleId),
     });
   } finally {
     ctx.tableStyles.pop();
@@ -2844,6 +2892,10 @@ interface TableCond {
   cond: Map<string, CondLayer>;
   look: TblLook;
   bands: { row: number; col: number };
+  /** The table style's OWN w:tcPr chain (basedOn ancestors → style), the
+   *  base-most cell layer — below the conditional branches and the cell's own
+   *  w:tcPr. */
+  styleTcPr: OoxmlNode[];
 }
 
 function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
@@ -2897,11 +2949,22 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
           ? 'restart'
           : 'continue'; // omitted w:val defaults to continue
       const widths = colPx.length ? colPx.slice(col, col + colspan) : [];
-      const background =
-        shdFill(child(tcPr, 'w:shd'), ctx.resolveTheme) ?? null;
-      const vAlignVal = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
-      const vAlign =
-        vAlignVal === 'center' || vAlignVal === 'bottom' ? vAlignVal : null;
+      const branches = cellBranches(tblCond, {
+        row: rowIdx,
+        rowCount: rowEls.length,
+        col,
+        colspan,
+        colCount,
+        header: rowHeader,
+      });
+      const { background, vAlign, padding } = resolveCellProps(
+        [
+          ...tblCond.styleTcPr,
+          ...branches.flatMap((b) => b.tcPr),
+          ...(tcPr ? [tcPr] : []),
+        ],
+        ctx,
+      );
       const ownBorders = parseBordersEl(
         child(tcPr, 'w:tcBorders'),
         CELL_SIDES,
@@ -2919,26 +2982,15 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
         child(tcPr, 'w:tcBorders'),
         ctx.resolveTheme,
       );
-      const padding = parseMarginsEl(child(tcPr, 'w:tcMar'));
       const carry = collectCarry(tcPr, CONSUMED_TCPR);
       // Conditional formatting is a per-CELL layer: which branches reach this
       // cell depends on where it sits. Cells that take none reuse the table's
       // own layer object — identity, no re-merge — so a document like khbd
       // (275 tables, 4704 paragraphs, zero tblStylePr) pays nothing for this.
-      const condLayer = cellCondLayer(
-        tblCond,
-        {
-          row: rowIdx,
-          rowCount: rowEls.length,
-          col,
-          colspan,
-          colCount,
-          header: rowHeader,
-        },
-        tableLayer,
-      );
-      const content = withTableLayer(ctx, condLayer, () =>
-        parseBlocks(tc, ctx),
+      const content = withTableLayer(
+        ctx,
+        layerWithBranches(tableLayer, branches),
+        () => parseBlocks(tc, ctx),
       );
       if (content.length === 0)
         content.push(ctx.schema.nodes['paragraph'].create());

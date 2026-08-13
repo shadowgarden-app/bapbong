@@ -41,6 +41,8 @@ interface StyleDef {
   /** w:tblPr/w:tblStyleRowBandSize and …ColBandSize, unparsed. */
   bandRow?: string;
   bandCol?: string;
+  /** w:style/w:tcPr of a table style — cell defaults for the whole table. */
+  tcPr?: OoxmlNode;
   /** w:tblPr/w:tblBorders of a table style, if any. */
   tblBorders?: OoxmlNode;
   /** w:tblPr/w:tblCellMar of a table style (Word's defaults carry the
@@ -78,6 +80,10 @@ export interface StyleRegistry {
   /** The styleId's w:pPr nodes, base-most first (basedOn ancestors → style).
    *  Callers append the inline pPr and resolve "later wins" per property. */
   resolveStylePPr(styleId: string | undefined): OoxmlNode[];
+  /** A TABLE style's own `w:tcPr` nodes, base-most first — the cell defaults
+   *  it gives every cell of the table, under the conditional branches and the
+   *  cell's own w:tcPr. Same default-table-style fallback as the others. */
+  resolveTableStyleTcPr(styleId: string | undefined): OoxmlNode[];
   /**
    * A TABLE style's w:pPr / w:rPr — the defaults it gives the paragraphs and
    * runs INSIDE the table (CT_Style: "Style Paragraph Properties — formats
@@ -170,6 +176,7 @@ export function buildStyleRegistry(
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
       rPr: parseRunProps(child(style, 'w:rPr'), resolveTheme, resolveFont),
       pPr: child(style, 'w:pPr'),
+      tcPr: child(style, 'w:tcPr'),
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
       // Filtered off node.children, not via children(): the accessor would
@@ -214,6 +221,19 @@ export function buildStyleRegistry(
     usedIds.add(styleId);
     const base = def.basedOn ? resolvePPr(def.basedOn, seen) : [];
     return def.pPr ? [...base, def.pPr] : base;
+  }
+
+  function resolveTcPr(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): OoxmlNode[] {
+    if (!styleId || seen.has(styleId)) return [];
+    const def = defs.get(styleId);
+    if (!def) return [];
+    seen.add(styleId);
+    usedIds.add(styleId);
+    const base = def.basedOn ? resolveTcPr(def.basedOn, seen) : [];
+    return def.tcPr ? [...base, def.tcPr] : base;
   }
 
   function resolveTblBorders(
@@ -312,6 +332,8 @@ export function buildStyleRegistry(
       resolvePPr(tableStyle(styleId), new Set<string>()),
     resolveTableStyleRPr: (styleId) =>
       resolve(tableStyle(styleId), new Set<string>()),
+    resolveTableStyleTcPr: (styleId) =>
+      resolveTcPr(tableStyle(styleId), new Set<string>()),
     resolveTableStyleCond: (styleId) =>
       resolveCond(tableStyle(styleId), new Set<string>()),
     resolveTableBandSizes: (styleId) =>
