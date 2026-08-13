@@ -1394,6 +1394,37 @@ describe('importDocx', () => {
     expect(at(2, 1, 1)).toBe(10);
   });
 
+  it("takes a table's alignment from its style when the table declares none", async () => {
+    // Same fallback shape as w:tblBorders and w:tblCellMar: the table's own
+    // w:jc wins, the style's applies otherwise, and ST_JcTable's "end" maps to
+    // right. Row-level w:jc is NOT read — see the note at the call site.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="table" w:styleId="Base"><w:tblPr><w:jc w:val="center"/></w:tblPr></w:style>
+      <w:style w:type="table" w:styleId="Derived"><w:basedOn w:val="Base"/></w:style>
+      <w:style w:type="table" w:styleId="Ends"><w:tblPr><w:jc w:val="end"/></w:tblPr></w:style>
+    </w:styles>`;
+    const tbl = (pr: string) =>
+      `<w:tbl><w:tblPr>${pr}</w:tblPr><w:tblGrid><w:gridCol w:w="1000"/></w:tblGrid>` +
+      `<w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr></w:tbl>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${tbl('<w:tblStyle w:val="Base"/>')}
+      ${tbl('<w:tblStyle w:val="Derived"/>')}
+      ${tbl('<w:tblStyle w:val="Ends"/>')}
+      ${tbl('<w:tblStyle w:val="Base"/><w:jc w:val="left"/>')}
+      ${tbl('')}
+      <w:p><w:r><w:t>tail</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const align = (i: number) => doc.child(i).attrs['align'];
+    expect(align(0)).toBe('center'); // straight from the style
+    expect(align(1)).toBe('center'); // …and through basedOn
+    expect(align(2)).toBe('right'); // ST_JcTable "end"
+    expect(align(3)).toBe(null); // the table's own w:jc wins
+    expect(align(4)).toBe(null); // no style alignment, no table alignment
+  });
+
   it("layers a table style's w:tcPr under the conditional branches", async () => {
     // Cell properties stack the same way the paragraph ones do: the style's
     // own w:tcPr → the branches that reach the cell → the cell's own w:tcPr.

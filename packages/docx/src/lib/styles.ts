@@ -48,6 +48,8 @@ interface StyleDef {
   /** w:tblPr/w:tblCellMar of a table style (Word's defaults carry the
    *  108-twip side margins here), if any. */
   tblCellMar?: OoxmlNode;
+  /** w:tblPr/w:jc of a table style — the alignment it gives the whole table. */
+  tblJc?: string;
   /** The w:style element itself — for the audit's unused-style sweep. */
   el: OoxmlNode;
   /** w:style/@w:type. Optional in the schema; absent reads as "paragraph". */
@@ -132,6 +134,10 @@ export interface StyleRegistry {
   /** The most-derived w:tblCellMar a table style (chain) contributes, if any.
    *  Same default-style fallback as resolveTableBorders. */
   resolveTableCellMar(styleId: string | undefined): OoxmlNode | undefined;
+  /** The most-derived `w:tblPr/w:jc` a table style (chain) contributes — the
+   *  table's alignment when the table itself declares none. Raw ST_JcTable
+   *  value ("center", "end", …); the caller maps it. */
+  resolveTableJc(styleId: string | undefined): string | undefined;
   /** XML-audit hook, call once after every story is parsed: styles NOTHING
    *  referenced (directly, via basedOn, or as a w:default) are marked as
    *  consumed subtrees — an unused style can't lose this document's data
@@ -179,6 +185,7 @@ export function buildStyleRegistry(
       tcPr: child(style, 'w:tcPr'),
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
+      tblJc: attrOf(child(child(style, 'w:tblPr'), 'w:jc'), 'w:val'),
       // Filtered off node.children, not via children(): the accessor would
       // mark every branch as read, including the wholeTable one the audit is
       // supposed to keep reporting.
@@ -246,6 +253,18 @@ export function buildStyleRegistry(
     seen.add(styleId);
     usedIds.add(styleId);
     return def.tblBorders ?? resolveTblBorders(def.basedOn, seen);
+  }
+
+  function resolveTblJc(
+    styleId: string | undefined,
+    seen: Set<string>,
+  ): string | undefined {
+    if (!styleId || seen.has(styleId)) return undefined;
+    const def = defs.get(styleId);
+    if (!def) return undefined;
+    seen.add(styleId);
+    usedIds.add(styleId);
+    return def.tblJc ?? resolveTblJc(def.basedOn, seen);
   }
 
   function resolveTblCellMar(
@@ -342,6 +361,8 @@ export function buildStyleRegistry(
       resolveTblBorders(tableStyle(styleId), new Set<string>()),
     resolveTableCellMar: (styleId) =>
       resolveTblCellMar(tableStyle(styleId), new Set<string>()),
+    resolveTableJc: (styleId) =>
+      resolveTblJc(tableStyle(styleId), new Set<string>()),
     auditMarkUnusedStyles: () => {
       if (!audit.enabled) return;
       for (const [id, def] of defs) {

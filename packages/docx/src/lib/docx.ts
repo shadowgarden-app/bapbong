@@ -3009,6 +3009,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   });
   try {
     return parseTableRows(tbl, ctx, {
+      styleId,
       cond: ctx.styles.resolveTableStyleCond(styleId),
       look: tblLookFlags(child(tbl, 'w:tblPr')),
       bands: ctx.styles.resolveTableBandSizes(styleId),
@@ -3022,6 +3023,8 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 /** A table's conditional formatting, resolved once for the whole table: the
  *  branch definitions, the gates that select them, and the band sizes. */
 interface TableCond {
+  /** w:tblPr/w:tblStyle of this table, for the resolvers that need it again. */
+  styleId: string | undefined;
   cond: Map<string, CondLayer>;
   look: TblLook;
   bands: { row: number; col: number };
@@ -3237,7 +3240,21 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
 
   const cellPadding = parseCellMargins(tbl, ctx);
   const borders = parseTableBorders(tbl, ctx);
-  const jc = attrOf(child(child(tbl, 'w:tblPr'), 'w:jc'), 'w:val');
+  // Alignment: the table's own w:jc, else the table style's — the same
+  // fallback parseTableBorders and parseCellMargins already use.
+  //
+  // Not implemented, and measured rather than assumed: PER-ROW alignment
+  // (w:trPr/w:jc, w:tblPrEx/w:jc), which ECMA-376 defines as "the alignment of
+  // a single row in the parent table with respect to the text margins".
+  // Honouring it means shifting one row's cells independently of the grid,
+  // through the cell drafts, the borders, hit-testing and the painter. Across
+  // all 18 documents in the repo exactly ONE table would look different: 22
+  // tables carry row-level jc, 21 of them declare the same value the table
+  // itself does, and the odd one out is a 13-row table in a lesson plan where
+  // 5 rows say center and the table says nothing.
+  const jc =
+    attrOf(child(child(tbl, 'w:tblPr'), 'w:jc'), 'w:val') ??
+    ctx.styles.resolveTableJc(tblCond.styleId);
   const attrs: Record<string, unknown> = {};
   if (cellPadding) attrs['cellPadding'] = cellPadding;
   if (borders) attrs['borders'] = borders;
