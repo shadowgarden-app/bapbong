@@ -206,6 +206,22 @@ interface Ctx {
   resolveThemeFill: ThemeFillResolver;
   /** The theme line style an `a:lnRef` names (width, dash, cap). */
   resolveThemeLine: ThemeLineResolver;
+  /**
+   * Table styles of the tables currently being parsed, innermost LAST.
+   *
+   * A table style's w:pPr/w:rPr are defaults for the content inside that
+   * table, so a paragraph needs to know which table encloses it. The stack
+   * holds layers already resolved — one roll-up per TABLE, not per paragraph:
+   * the registry memoises nothing and khbd has 275 tables holding 4704
+   * paragraphs between them.
+   *
+   * Only the innermost entry applies. A nested table is a different table
+   * with a style of its own, and Word does not cascade the outer one into it.
+   * Stories that merely sit inside a cell — a textbox's w:txbxContent — are
+   * not "content of the table" either, so the parser CLEARS this while
+   * reading one (see txbxParagraphs).
+   */
+  tableStyles: { pPr: OoxmlNode[]; rPr: RunProps }[];
   notes: NotesRegistry;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
@@ -1104,10 +1120,19 @@ function txbxParagraphs(
   ctx: Ctx,
 ): unknown[] | null {
   if (!content) return null;
-  const paragraphs = children(content, 'w:p').map((p) =>
-    parseParagraph(p, ctx).toJSON(),
-  );
-  return paragraphs.length > 0 ? paragraphs : null;
+  // A textbox anchored in a table cell is still its own story: the text in it
+  // is not "content of the table", so the enclosing table's style must not
+  // reach it. The stack is emptied for the duration and put back after —
+  // parseTextbox runs mid-run, deep inside parseTable.
+  const enclosing = ctx.tableStyles.splice(0, ctx.tableStyles.length);
+  try {
+    const paragraphs = children(content, 'w:p').map((p) =>
+      parseParagraph(p, ctx).toJSON(),
+    );
+    return paragraphs.length > 0 ? paragraphs : null;
+  } finally {
+    ctx.tableStyles.push(...enclosing);
+  }
 }
 
 // ── legacy VML shapes ───────────────────────────────────────────────
@@ -1735,11 +1760,26 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     ctx.styles.docDefaults,
     ctx.styles.resolveStyle(styleId),
   );
+  // The table this paragraph sits in, if any — innermost only (see Ctx).
+  const tableLayer = ctx.tableStyles[ctx.tableStyles.length - 1];
   // Paragraph-property cascade, base-most first; later layers win:
-  // docDefaults pPrDefault → style chain (w:basedOn ancestors → style)
-  // → numbering lvl pPr (the per-level list indent) → inline.
+  // docDefaults pPrDefault → TABLE style (for content inside a table)
+  // → style chain (w:basedOn ancestors → style) → numbering lvl pPr (the
+  // per-level list indent) → inline.
+  //
+  // The table layer's slot is the spec's: "the global default paragraph
+  // properties · the table style paragraph properties · the paragraph
+  // properties applied directly to a paragraph". A paragraph style therefore
+  // overrides a table style, which is why a table style's formatting appears
+  // to do nothing in documents whose paragraphs carry a style that sets the
+  // same property.
+  //
+  // The numbering layer sitting AFTER the style chain rather than before it is
+  // a pre-existing, deliberate deviation (Word's list indents win); untouched
+  // here.
   const pPrChain: (OoxmlNode | undefined)[] = [
     ctx.styles.docDefaultsPPr,
+    ...(tableLayer?.pPr ?? []),
     ...ctx.styles.resolveStylePPr(styleId),
     pPr,
   ];
@@ -2557,6 +2597,23 @@ function tableColumnWidths(tbl: OoxmlNode, grid: number[], ctx: Ctx): number[] {
 }
 
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
+  // The table style's paragraph/run defaults are rolled up ONCE here and left
+  // on the stack for every paragraph in every cell to read. try/finally
+  // because the pop has to happen even if a malformed table throws — a leaked
+  // entry would style the paragraphs that follow the table.
+  const styleId = attrOf(child(child(tbl, 'w:tblPr'), 'w:tblStyle'), 'w:val');
+  ctx.tableStyles.push({
+    pPr: ctx.styles.resolveTableStylePPr(styleId),
+    rPr: ctx.styles.resolveTableStyleRPr(styleId),
+  });
+  try {
+    return parseTableRows(tbl, ctx);
+  } finally {
+    ctx.tableStyles.pop();
+  }
+}
+
+function parseTableRows(tbl: OoxmlNode, ctx: Ctx): PMNode {
   const grid = children(child(tbl, 'w:tblGrid'), 'w:gridCol').map((c) =>
     Number(attrOf(c, 'w:w') ?? '0'),
   );
@@ -3405,6 +3462,7 @@ async function importDocxImpl(
     resolveFont,
     resolveThemeFill,
     resolveThemeLine,
+    tableStyles: [],
     notes,
     comments,
     schema: opts?.schema ?? schema,

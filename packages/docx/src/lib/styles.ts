@@ -57,6 +57,22 @@ export interface StyleRegistry {
   /** The styleId's w:pPr nodes, base-most first (basedOn ancestors → style).
    *  Callers append the inline pPr and resolve "later wins" per property. */
   resolveStylePPr(styleId: string | undefined): OoxmlNode[];
+  /**
+   * A TABLE style's w:pPr / w:rPr — the defaults it gives the paragraphs and
+   * runs INSIDE the table (CT_Style: "Style Paragraph Properties — formats
+   * paragraphs within the table").
+   *
+   * Same shape as resolveStylePPr/resolveStyle, and deliberately the same two
+   * functions underneath: rolling up a basedOn chain does not care what type
+   * of style it is walking. What differs is only where the caller puts the
+   * result — a table style sits between the document defaults and the
+   * paragraph style, not after it.
+   *
+   * A table naming no `w:tblStyle` resolves through the default table style,
+   * exactly as Word does.
+   */
+  resolveTableStylePPr(styleId: string | undefined): OoxmlNode[];
+  resolveTableStyleRPr(styleId: string | undefined): RunProps;
   /** The most-derived w:tblBorders a table style (chain) contributes, if any.
    *  A table naming no `w:tblStyle` resolves through the default table style,
    *  exactly as Word does. */
@@ -178,6 +194,10 @@ export function buildStyleRegistry(
     defaultStyleIdFor,
     resolveStyle: (styleId) => resolve(styleId, new Set<string>()),
     resolveStylePPr: (styleId) => resolvePPr(styleId, new Set<string>()),
+    resolveTableStylePPr: (styleId) =>
+      resolvePPr(tableStyle(styleId), new Set<string>()),
+    resolveTableStyleRPr: (styleId) =>
+      resolve(tableStyle(styleId), new Set<string>()),
     resolveTableBorders: (styleId) =>
       resolveTblBorders(tableStyle(styleId), new Set<string>()),
     resolveTableCellMar: (styleId) =>

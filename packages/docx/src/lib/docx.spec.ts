@@ -1264,6 +1264,117 @@ describe('importDocx', () => {
     expect(img.attrs.width).toBe(100); // the Fallback's extent, not 360 EMU
   });
 
+  it("applies a table style's w:pPr to the paragraphs inside the table", async () => {
+    // "The global default paragraph properties · The table style paragraph
+    // properties · The paragraph properties applied directly to a paragraph"
+    // — so a table style beats docDefaults and loses to a paragraph style,
+    // and w:spacing merges per ATTRIBUTE across those layers.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:docDefaults><w:pPrDefault><w:pPr>
+        <w:spacing w:before="240" w:after="240" w:line="360" w:lineRule="auto"/>
+        <w:jc w:val="both"/>
+      </w:pPr></w:pPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal">
+        <w:pPr><w:jc w:val="right"/></w:pPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="Grid">
+        <w:basedOn w:val="TableNormal"/>
+        <w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="left"/></w:pPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="Loud">
+        <w:pPr><w:jc w:val="center"/></w:pPr>
+      </w:style>
+    </w:styles>`;
+    const cell = (inner: string) => `<w:tr><w:tc>${inner}</w:tc></w:tr>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>outside</w:t></w:r></w:p>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Grid"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        ${cell('<w:p><w:r><w:t>plain</w:t></w:r></w:p>')}
+        ${cell('<w:p><w:pPr><w:pStyle w:val="Loud"/></w:pPr><w:r><w:t>styled</w:t></w:r></w:p>')}
+        ${cell('<w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r><w:t>direct</w:t></w:r></w:p>')}
+      </w:tbl>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        ${cell('<w:p><w:r><w:t>no tblStyle</w:t></w:r></w:p>')}
+      </w:tbl>
+      <w:p><w:r><w:t>after</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // block → row → cell → paragraph
+    const para = (b: number, r: number) =>
+      doc.child(b).child(r).child(0).child(0);
+
+    // Outside any table: docDefaults only.
+    expect(doc.child(0).attrs.align).toBe('justify');
+    expect(doc.child(0).attrs.spacing).toMatchObject({ after: 16, line: 1.5 });
+
+    // Inside: the table style wins over docDefaults. `before` survives from
+    // docDefaults because the table style's w:spacing names only after/line —
+    // per-attribute merging, not wholesale replacement.
+    expect(para(1, 0).attrs.align).toBe('left');
+    expect(para(1, 0).attrs.spacing).toMatchObject({
+      before: 16,
+      after: 0,
+      line: 1,
+    });
+    // A paragraph style beats the table style.
+    expect(para(1, 1).attrs.align).toBe('center');
+    // Direct formatting beats everything.
+    expect(para(1, 2).attrs.align).toBe('right');
+    // No w:tblStyle → the DEFAULT table style still applies (jc=right).
+    expect(para(2, 0).attrs.align).toBe('right');
+    // The stack is popped: the paragraph after the table is unaffected.
+    expect(doc.child(3).attrs.align).toBe('justify');
+  });
+
+  it('takes the innermost table style, and never leaks into a textbox', async () => {
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="table" w:styleId="Outer"><w:pPr><w:jc w:val="right"/></w:pPr></w:style>
+      <w:style w:type="table" w:styleId="Inner"><w:pPr><w:jc w:val="center"/></w:pPr></w:style>
+    </w:styles>`;
+    const textbox =
+      `<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/>` +
+      `<a:graphic><a:graphicData><wps:wsp>` +
+      `<wps:spPr><a:prstGeom prst="rect"/></wps:spPr>` +
+      `<wps:txbx><w:txbxContent><w:p><w:r><w:t>boxed</w:t></w:r></w:p></w:txbxContent></wps:txbx>` +
+      `</wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:wps="${WPS_NS_G}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Outer"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid>
+        <w:tr><w:tc>
+          <w:p><w:r><w:t>outer cell</w:t></w:r></w:p>
+          <w:tbl>
+            <w:tblPr><w:tblStyle w:val="Inner"/></w:tblPr>
+            <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+            <w:tr><w:tc><w:p><w:r><w:t>inner cell</w:t></w:r></w:p></w:tc></w:tr>
+          </w:tbl>
+          <w:p><w:r><w:t>after inner</w:t></w:r></w:p>
+          <w:p>${textbox}</w:p>
+        </w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const outerCell = doc.child(0).child(0).child(0);
+    expect(outerCell.child(0).attrs.align).toBe('right'); // Outer
+    // Nested table: its own style, not the enclosing one.
+    expect(outerCell.child(1).child(0).child(0).child(0).attrs.align).toBe(
+      'center',
+    );
+    // Back to Outer once the nested table closes.
+    expect(outerCell.child(2).attrs.align).toBe('right');
+    // A textbox is its own story: the table style must not reach its text.
+    const box = outerCell.child(3).child(0).attrs.textbox as {
+      paragraphs: { attrs: { align: string | null } }[];
+    };
+    expect(box.paragraphs[0].attrs.align).toBeNull();
+  });
+
   it('parses table border visibility (direct w:tblBorders and via table style)', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:style w:styleId="TableGrid"><w:tblPr><w:tblBorders>
