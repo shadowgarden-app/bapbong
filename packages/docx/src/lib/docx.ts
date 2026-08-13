@@ -3390,23 +3390,42 @@ function sectionStartsNewPage(sectPr: OoxmlNode | undefined): boolean {
 /**
  * Word's HTML auto spacing, in px per side.
  *
- * The amount is 14pt: *"When you set paragraph Space Before and Space After to
- * Auto, Microsoft Word adds 14 points spacing between paragraphs
- * automatically"* (Aspose.Words, ParagraphFormat.SpaceAfterAuto — an engine
- * built to reproduce Word's layout), which matches Word's own help ("a standard
- * amount of spacing… usually about 14 points for a 12-point font size, similar
- * to browsers"). A third Microsoft source — an answer on MS Q&A — describes
- * Word 2013+ as 0em before and 1em after instead, i.e. scaled to the font. Our
- * corpus cannot separate the two: every paragraph that ends up with auto
- * spacing on is the only paragraph in its table cell, where both suppression
- * rules below cut it to 0. 14pt is the number two of the three sources state
- * outright, and it lives here as one constant if that ever has to change.
+ * The amount is 14pt, and three independent implementations say so:
+ *
+ *   - *"When you set paragraph Space Before and Space After to Auto, Microsoft
+ *     Word adds 14 points spacing between paragraphs automatically"* —
+ *     Aspose.Words, ParagraphFormat.SpaceAfterAuto (an engine built to
+ *     reproduce Word's layout).
+ *   - Word's own help: *"a standard amount of spacing… usually about 14 points
+ *     for a 12-point font size, similar to browsers"*.
+ *   - LibreOffice's .docx importer, writerfilter/DomainMapper.cxx, which picks
+ *     the number outright:
+ *
+ *       // See SwWW8ImplReader::GetParagraphAutoSpace() on why these are 100 and 280
+ *       default_spacing = 100;
+ *       if (!GetSettingsTable()->GetDoNotUseHTMLParagraphAutoSpacing()) {
+ *           if (GetView() == ST_View_web) default_spacing = 49;
+ *           else                          default_spacing = 280;   // ← 14pt
+ *       }
+ *
+ * The dissenting source is one answer on MS Q&A describing Word 2013+ as 0em
+ * before and 1em after (scaled to the font size) — one voice against three,
+ * and our corpus cannot referee it: every paragraph that ends up with auto
+ * spacing on is alone in a table cell, where the suppression rules below cut
+ * the gap to 0 under either reading. Still one constant, if it ever has to
+ * change.
+ *
+ * LibreOffice's 49-twip "web view" branch has no counterpart here — we have no
+ * web layout mode, and its own comment calls 49 a leftover to be removed.
  */
 const AUTO_SPACING_PX = twipsToPx(280);
 
 /** `w:doNotUseHTMLParagraphAutoSpacing`: "5 points of spacing before and 10
- *  points after", fixed, instead of the HTML emulation. No document in the
- *  repo sets the flag, so this path has unit tests and nothing else. */
+ *  points after", fixed, instead of the HTML emulation. The asymmetry is the
+ *  standard's; LibreOffice uses 100 twips on BOTH sides for this case, which
+ *  is 5pt/5pt. We follow the standard, since that is the normative text and
+ *  nothing here can test either: no document in the repo sets the flag, so
+ *  this path has unit tests and nothing else. */
 const AUTO_SPACING_FIXED = { before: twipsToPx(100), after: twipsToPx(200) };
 
 /**
