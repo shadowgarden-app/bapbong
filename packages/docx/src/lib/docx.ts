@@ -1633,35 +1633,6 @@ interface FieldState {
   parent: FieldState | null;
 }
 
-/**
- * A table style's run properties with the TOGGLE properties dropped.
- *
- * Toggle properties do not simply override between style layers — they flip:
- *
- *   "Toggle properties only have their toggle behavior when associated with
- *    table styles, paragraph styles, and character styles. If a run has been
- *    made bold per the table style, and the user applies a paragraph style
- *    that also has the w:b element, the net result is that original bolded
- *    text is now made NOT bold."  — Eric White, assembling cell properties
- *
- * mergeRunProps is a flat overwrite and cannot see which layer a property came
- * from, so honouring that rule needs provenance tracked through the whole run
- * cascade. Rather than half-implement it — bold that is wrong in a different
- * way — the table layer simply does not contribute the toggles at all: a table
- * style asking for bold is ignored, which is what happened before this layer
- * existed, so no document renders worse than it did.
- *
- * OOXML lists twelve toggle properties (b, bCs, caps, emboss, i, iCs,
- * imprint, outline, shadow, smallCaps, strike, vanish). RunProps models four
- * of them; the other eight have no field to drop. Note w:u and w:dstrike are
- * NOT toggles and stay.
- */
-function withoutToggles(rPr: RunProps): RunProps {
-  // The four names exist only to be omitted from `rest`.
-  const { bold, italic, smallCaps, strike, ...rest } = rPr;
-  return rest;
-}
-
 /** Heading level (1–6) for a paragraph, from `w:outlineLvl` in the pPr cascade
  *  or, failing that, from a style id spelled "Heading1"…; undefined for body.
  *
@@ -1789,9 +1760,27 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // Base for every run: docDefaults → TABLE style → paragraph style. Same
   // order as the paragraph cascade below, and the same reason: a table
   // style's w:rPr is a default for the runs inside that table.
+  //
+  // The toggle properties (b, i, smallCaps, strike and the eight RunProps does
+  // not model) come through here as ordinary values. ISO 29500 says a style
+  // that sets one TOGGLES it — "setting this property shall toggle the current
+  // state of the property as specified up to this point in the hierarchy" —
+  // but Word does not implement that: "Word resets the value of the toggle
+  // property to the value specified by the paragraph style if a value is
+  // present; for example, a value of 1 resets the property's state to True
+  // instead of toggling it" (MS-OI29500 §2.1.258). A flat overwrite IS Word's
+  // behaviour, so a table style asking for bold gets bold, and a paragraph
+  // style that also asks for bold stays bold rather than cancelling it.
+  //
+  // The one place Word keeps a toggle rule is §17.7.3(a): when the document
+  // DEFAULTS set the property true and it reappears down the style hierarchy,
+  // Word counts levels ("true if and only if its effective value is false for
+  // an even number of levels"). Not implemented, deliberately: no docDefaults
+  // in any of the 18 documents in this repo turns a toggle on, so there is
+  // nothing to test it against and a guess would be worse than the omission.
   const paraBase = [
     ctx.styles.docDefaults,
-    ...(tableLayer ? [withoutToggles(tableLayer.rPr)] : []),
+    ...(tableLayer ? [tableLayer.rPr] : []),
     ctx.styles.resolveStyle(styleId),
   ].reduce(mergeRunProps, {} as RunProps);
   // Paragraph-property cascade, base-most first; later layers win:

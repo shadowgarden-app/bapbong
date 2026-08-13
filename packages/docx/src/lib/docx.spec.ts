@@ -1417,12 +1417,12 @@ describe('importDocx', () => {
     expect(at(2, 1)).toBe(30); // body index 1 → band2Horz, unshifted by row 1
   });
 
-  it("applies a table style's w:rPr to the runs inside, minus the toggles", async () => {
+  it("applies a table style's w:rPr to the runs inside, toggles included", async () => {
     // Same slot as the paragraph layer: docDefaults → table style → paragraph
-    // style → character style → direct. The toggle properties are the
-    // exception: OOXML flips them between style layers rather than
-    // overriding, which mergeRunProps cannot express, so the table layer
-    // does not contribute them at all.
+    // style → character style → direct. The toggle properties come through
+    // as plain values, because Word "resets the value of the toggle property
+    // to the value specified by the paragraph style if a value is present"
+    // (MS-OI29500 §2.1.258) instead of flipping it.
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:docDefaults><w:rPrDefault><w:rPr>
         <w:sz w:val="20"/><w:color w:val="111111"/>
@@ -1464,16 +1464,50 @@ describe('importDocx', () => {
     expect(markOf(cellRun(0), 'textColor')?.attrs['color']).toBe('#FF0000');
     // Non-toggle character formatting from a table style does apply.
     expect(markOf(cellRun(0), 'underline')).toBeDefined();
-    // The four toggles the model represents do NOT come from a table style —
-    // getting them right needs per-layer provenance, so they are left out
-    // rather than applied the wrong way round.
-    expect(markOf(cellRun(0), 'strong')).toBeUndefined();
-    expect(markOf(cellRun(0), 'em')).toBeUndefined();
-    expect(markOf(cellRun(0), 'smallCaps')).toBeUndefined();
-    expect(markOf(cellRun(0), 'strike')).toBeUndefined();
+    // …and so do the toggles.
+    expect(markOf(cellRun(0), 'strong')).toBeDefined();
+    expect(markOf(cellRun(0), 'em')).toBeDefined();
+    expect(markOf(cellRun(0), 'smallCaps')).toBeDefined();
+    expect(markOf(cellRun(0), 'strike')).toBeDefined();
     // A paragraph style beats the table style; direct beats everything.
     expect(markOf(cellRun(1), 'fontSize')?.attrs['size']).toBe(20);
     expect(markOf(cellRun(2), 'fontSize')?.attrs['size']).toBe(9);
+  });
+
+  it('does not cancel bold when two style layers both set it', async () => {
+    // ISO 29500 makes w:b a toggle property: a style setting it flips whatever
+    // the hierarchy had. Word does not — §2.1.258 says it RESETS to the value
+    // given. So a paragraph style and a character style that both say w:b
+    // leave the run bold, and w:val="0" turns bold off rather than being the
+    // spec's no-op ("setting it to false … shall result in the current setting
+    // remaining unchanged"). 259 runs in one 249-page lesson plan sit on this
+    // exact shape, and Word shows them bold.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="paragraph" w:styleId="BoldPara"><w:rPr><w:b/></w:rPr></w:style>
+      <w:style w:type="character" w:styleId="BoldChar"><w:rPr><w:b/></w:rPr></w:style>
+      <w:style w:type="character" w:styleId="UnboldChar"><w:rPr><w:b w:val="0"/></w:rPr></w:style>
+    </w:styles>`;
+    const p = (rStyle: string) =>
+      `<w:p><w:pPr><w:pStyle w:val="BoldPara"/></w:pPr><w:r>` +
+      `<w:rPr>${rStyle}</w:rPr><w:t>x</w:t></w:r></w:p>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${p('')}
+      ${p('<w:rStyle w:val="BoldChar"/>')}
+      ${p('<w:rStyle w:val="UnboldChar"/>')}
+      ${p('<w:b w:val="0"/>')}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const bold = (i: number) =>
+      doc
+        .child(i)
+        .child(0)
+        .marks.some((m) => m.type.name === 'strong');
+    expect(bold(0)).toBe(true); // paragraph style alone
+    expect(bold(1)).toBe(true); // + character style: still bold, NOT flipped
+    expect(bold(2)).toBe(false); // a style's w:val="0" turns it off
+    expect(bold(3)).toBe(false); // direct formatting is absolute
   });
 
   it("applies a table style's w:pPr to the paragraphs inside the table", async () => {
