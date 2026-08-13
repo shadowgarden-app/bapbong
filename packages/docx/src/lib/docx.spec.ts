@@ -2387,6 +2387,37 @@ describe('importDocx', () => {
     ).toBe(18);
   });
 
+  it('reads w:kern from docDefaults, a style and the run alike', async () => {
+    // Word's default is NOT to kern, so the threshold has to survive every
+    // layer it can be declared at — otherwise flipping the default would
+    // silently un-kern documents that asked for kerning in styles.xml.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:docDefaults><w:rPrDefault><w:rPr>
+        <w:sz w:val="24"/><w:kern w:val="2"/>
+      </w:rPr></w:rPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+      <w:style w:type="paragraph" w:styleId="Big">
+        <w:rPr><w:kern w:val="32"/></w:rPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>from docDefaults</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Big"/></w:pPr><w:r><w:t>from a style</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:kern w:val="24"/></w:rPr><w:t>from the run</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial"/></w:rPr><w:t>inherits 2</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const halfPoints = (i: number) =>
+      doc
+        .child(i)
+        .child(0)
+        .marks.find((m) => m.type.name === 'kern')?.attrs['halfPoints'];
+    expect(halfPoints(0)).toBe(2);
+    expect(halfPoints(1)).toBe(32); // the style's threshold beats docDefaults
+    expect(halfPoints(2)).toBe(24); // the run's beats both
+    expect(halfPoints(3)).toBe(2); // still inherited when the run says nothing
+  });
+
   it('imports w:w as a character scale, bare or percent-suffixed', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>

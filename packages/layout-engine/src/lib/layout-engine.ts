@@ -149,9 +149,20 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
     // kerning shall be performed." Both sides in half-points. The comparison
     // belongs here, not at import: this is where the run's size is finally
     // settled, after the fontSize mark has had its say over the base.
+    //
+    // Set BOTH ways round, because the absence of this mark now means "no
+    // kerning" (Word's default) rather than "kerning": a run only opts in by
+    // carrying a threshold its size clears.
+    //
+    // A threshold of 0 therefore kerns at every size, which is the literal
+    // reading of "the smallest font size". Word 16 does write w:kern w:val="0"
+    // — the built-in Normal (Web) style in one of our fixtures carries it
+    // under a docDefaults of 2 — and it MAY be meant as "off"; nothing in the
+    // spec or in Microsoft's docs says which. Following the letter of the spec
+    // affects 3 paragraphs and 4 runs across the corpus, all Vietnamese, where
+    // kerning measures 0px either way, so no document can tell the difference.
     const threshold = Number(kern.attrs['halfPoints']);
-    if (Number.isFinite(threshold) && threshold > font.sizePt * 2)
-      font.kerning = false;
+    if (Number.isFinite(threshold)) font.kerning = threshold <= font.sizePt * 2;
   }
   const scaled = findMark(marks, 'charScale');
   if (scaled) {

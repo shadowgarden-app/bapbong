@@ -38,14 +38,19 @@ describe('applyGlyphSpec', () => {
     expect(ctx.letterSpacing).toBe('0px');
   });
 
-  it('turns kerning off only when the spec says so, and always says which', () => {
-    // Same reuse hazard as the tracking above: a context left at 'none' would
-    // silently widen every later run.
+  it('kerns only when a run opted in, and always says which', () => {
+    // Word's default is NO kerning ("if this element is never applied in the
+    // style hierarchy, then font kerning shall not be applied"), so a spec
+    // that says nothing must come out 'none'. Written both ways round for the
+    // reuse hazard: a context left at 'normal' from a previous run would
+    // silently narrow the next one.
     const ctx = fakeCtx();
+    applyGlyphSpec(ctx, font());
+    expect(ctx.fontKerning).toBe('none');
+    applyGlyphSpec(ctx, font({ kerning: true }));
+    expect(ctx.fontKerning).toBe('normal');
     applyGlyphSpec(ctx, font({ kerning: false }));
     expect(ctx.fontKerning).toBe('none');
-    applyGlyphSpec(ctx, font());
-    expect(ctx.fontKerning).toBe('normal');
   });
 
   it('configures measurer and painter identically — the whole point', () => {

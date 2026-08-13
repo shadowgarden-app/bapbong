@@ -1496,7 +1496,7 @@ describe('toFlowBlocks', () => {
     if ('text' in r1) expect(r1.font.sizePt).toBe(20);
   });
 
-  it('turns kerning off only for runs below the w:kern threshold', () => {
+  it('kerns a run only when its size clears the w:kern threshold', () => {
     // 32 half-points = 16pt. The base run is 10pt (below → no kerning); the
     // second carries a fontSize mark of 20pt (at or above → kerned). The
     // comparison has to happen HERE, where the size is finally settled: at
@@ -1514,9 +1514,21 @@ describe('toFlowBlocks', () => {
     if (block.type !== 'paragraph') return;
     const [r0, r1] = block.runs;
     if ('text' in r0) expect(r0.font.kerning).toBe(false);
-    // Above the threshold the field stays absent — the platform default is
-    // kerned, and writing `true` would split runs that render identically.
-    if ('text' in r1) expect(r1.font.kerning).toBeUndefined();
+    // Written both ways round now: absent means NOT kerned (Word's default),
+    // so a run that clears the threshold has to say `true` to opt in.
+    if ('text' in r1) expect(r1.font.kerning).toBe(true);
+  });
+
+  it('leaves kerning off for a run with no w:kern at all', () => {
+    // The whole point of the flip: Word does not kern unless asked, and the
+    // Font > Advanced checkbox ships unchecked.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text('plain')]),
+    ]);
+    const block = toFlowBlocks(doc, { sizePt: 12 })[0];
+    if (block.type !== 'paragraph') return;
+    const r = block.runs[0];
+    if ('text' in r) expect(r.font.kerning).toBeUndefined();
   });
 
   it('emits an inline image from an image node', () => {
