@@ -2304,6 +2304,40 @@ describe('importDocx', () => {
     expect(doc.child(1).attrs.cellPadding).toBeNull(); // no override → defaults
   });
 
+  it('merges tblCellMar per side with the style, not element-wholesale', async () => {
+    // A table that names only its own left inset used to drop the style's
+    // other three. Cell margins combine per side everywhere else in this
+    // importer — resolveCellProps does exactly that for w:tcMar one layer
+    // down — and a factsheet's textbox tables, which declare left and right
+    // only, were reaching the layout with no top or bottom at all.
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:styleId="Grid"><w:name w:val="Grid"/>
+        <w:tblPr><w:tblCellMar>
+          <w:top w:w="60" w:type="dxa"/>
+          <w:left w:w="300" w:type="dxa"/>
+          <w:bottom w:w="60" w:type="dxa"/>
+          <w:right w:w="300" w:type="dxa"/>
+        </w:tblCellMar></w:tblPr>
+      </w:style></w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Grid"/><w:tblCellMar>
+          <w:left w:w="150" w:type="dxa"/>
+        </w:tblCellMar></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, styles));
+    // left from the table (150tw = 10px); the rest from the style.
+    expect(doc.child(0).attrs.cellPadding).toEqual({
+      left: 10,
+      right: 20,
+      top: 4,
+      bottom: 4,
+    });
+  });
+
   it('a table naming no w:tblStyle still inherits the default table style', async () => {
     // Word applies w:default="1" per style TYPE, not just to paragraphs. Stock
     // documents park the 108-twip cell margins and any table borders on

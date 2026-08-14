@@ -2561,19 +2561,33 @@ function parseMarginsEl(
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** w:tblPr/w:tblCellMar overrides (px), or null for Word defaults. */
+/**
+ * w:tblPr/w:tblCellMar overrides (px), or null for Word defaults.
+ *
+ * The style's margins come first and the table's own element lands on top
+ * SIDE BY SIDE, which is how cell margins combine everywhere else in this
+ * importer — `resolveCellProps` merges `w:tcMar` per side one layer down, and
+ * a table declaring only its left and right insets has no business dropping
+ * the style's top and bottom. The spec talks about the whole element
+ * ("if this element is omitted, then it shall inherit … from the associated
+ * table style") but says nothing about the partial case, and its own fallback
+ * sentence is per margin: "each margin shall use its default margin size".
+ *
+ * `resolveTableCellMar(undefined)` resolves the w:default table style, which
+ * is where Word keeps the 108-twip side margins every unstyled table gets —
+ * so consulting it unconditionally is also what makes those margins reach a
+ * table that declares some of its own.
+ */
 function parseCellMargins(
   tbl: OoxmlNode,
   ctx: Ctx,
 ): { left?: number; right?: number; top?: number; bottom?: number } | null {
   const tblPr = child(tbl, 'w:tblPr');
-  const inline = parseMarginsEl(child(tblPr, 'w:tblCellMar'));
-  if (inline) return inline;
-  // No inline margins: the table STYLE's w:tblCellMar applies (Word default
-  // styles carry 108-twip side margins there — dropping them cramped text
-  // against the cell borders).
   const styleId = attrOf(child(tblPr, 'w:tblStyle'), 'w:val');
-  return parseMarginsEl(ctx.styles.resolveTableCellMar(styleId));
+  const fromStyle = parseMarginsEl(ctx.styles.resolveTableCellMar(styleId));
+  const inline = parseMarginsEl(child(tblPr, 'w:tblCellMar'));
+  if (!fromStyle && !inline) return null;
+  return { ...(fromStyle ?? {}), ...(inline ?? {}) };
 }
 
 /** OOXML w:val border styles → our {@link BorderStyle} (unknowns → solid). */
