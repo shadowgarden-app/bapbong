@@ -2084,10 +2084,13 @@ describe('importDocx', () => {
     const { doc } = await importDocx(await makeDocx(documentXml));
     const paras: import('prosemirror-model').Node[] = [];
     doc.forEach((n) => paras.push(n));
-    expect(paras[1].attrs['columnBreakBefore']).toBe(true);
-    // It used to fall through to the generic w:br handler and show up as a
-    // stray blank line at the head of the paragraph.
-    expect(paras[1].childCount).toBe(1);
+    // Inline, in run order — NOT a paragraph flag. A flag moves the whole
+    // paragraph, floats included, and a factsheet in the corpus anchors a
+    // floating table in the run BEFORE its break: that table belongs to the
+    // column being left behind.
+    const kids: string[] = [];
+    paras[1].forEach((c) => kids.push(c.type.name));
+    expect(kids).toEqual(['column_break', 'text']);
     expect(paras[1].textContent).toBe('second');
 
     // A column break has no pPr flag to save it — it has to go back out as

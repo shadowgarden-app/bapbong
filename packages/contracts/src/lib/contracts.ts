@@ -329,9 +329,24 @@ export interface InlineBreak {
   pos?: number;
 }
 
+/** A column break (w:br w:type="column"): the rest of the paragraph resumes
+ *  in the next text column, or on the next page when there is none. Inline
+ *  because the break cuts where it sits — content before it, floats included,
+ *  stays in the column being left. */
+export interface InlineColumnBreak {
+  columnBreak: true;
+  pos?: number;
+}
+
 /** One piece of a paragraph's inline content. Distinguish with `'src' in x`
- *  (image) / `'field' in x` (field) / `'break' in x` / otherwise text run. */
-export type FlowInline = InlineRun | InlineImage | InlineField | InlineBreak;
+ *  (image) / `'field' in x` (field) / `'break' in x` / `'columnBreak' in x` /
+ *  otherwise text run. */
+export type FlowInline =
+  | InlineRun
+  | InlineImage
+  | InlineField
+  | InlineBreak
+  | InlineColumnBreak;
 
 /** A floating image (wp:anchor) anchored to a paragraph. Text flows around
  *  its rectangle ('square'), skips below it ('topAndBottom'), or ignores it
@@ -443,9 +458,6 @@ export interface FlowParagraph {
   /** Force this paragraph to start a new page (w:pageBreakBefore / a page
    *  break run at its head). */
   pageBreakBefore?: boolean;
-  /** Force it to start in the next text column (w:br w:type="column"). With
-   *  one column that IS a page break, which is what Word does. */
-  columnBreakBefore?: boolean;
   /** w:keepNext — stay on the same page as the next block's first line. */
   keepNext?: boolean;
   /** w:keepLines — never split this paragraph across pages when it fits a

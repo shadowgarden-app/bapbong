@@ -412,21 +412,6 @@ function hasPageBreak(run: OoxmlNode): boolean {
   );
 }
 
-/**
- * Whether a run carries a column break (w:br w:type="column").
- *
- * ST_BrType `column` makes "the next character in the document … restarted on
- * the next line in a new text column", so strictly it cuts mid-paragraph. It
- * is recorded on the whole paragraph instead — the same approximation
- * {@link hasPageBreak} has always made, and an exact one for every column
- * break in the corpus, which all sit at their paragraph's head.
- */
-function hasColumnBreak(run: OoxmlNode): boolean {
-  return run.children.some(
-    (n) => n.name === 'w:br' && attrOf(n, 'w:type') === 'column',
-  );
-}
-
 /** The wrappers' own property bags — the markup's name/uri metadata, never
  *  content. Dropped whole so the audit counts them handled, not missed. */
 const WRAPPER_PROPS = new Set(['w:smartTagPr', 'w:customXmlPr']);
@@ -584,13 +569,20 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
           refMarks.push(ctx.schema.marks['footnote'].create({ num }));
         out.push(ctx.schema.text(String(num), refMarks));
       }
-    } else if (
-      node.name === 'w:br' &&
-      attrOf(node, 'w:type') !== 'page' &&
-      attrOf(node, 'w:type') !== 'column'
-    ) {
-      flush();
-      out.push(ctx.schema.nodes['hard_break'].create());
+    } else if (node.name === 'w:br') {
+      // A page break is a paragraph-level property (hasPageBreak reads it);
+      // a COLUMN break is inline, because ST_BrType `column` restarts "the
+      // next character" — everything before it, floats included, belongs to
+      // the column being left behind. Everything else is a line break.
+      const type = attrOf(node, 'w:type');
+      if (type !== 'page') {
+        flush();
+        out.push(
+          ctx.schema.nodes[
+            type === 'column' ? 'column_break' : 'hard_break'
+          ].create(),
+        );
+      }
     }
   }
   flush();
@@ -1934,9 +1926,6 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   let pageBreak = pbLayer
     ? isToggleOn(child(pbLayer, 'w:pageBreakBefore'))
     : false;
-  // A column break has no pPr counterpart — it only ever arrives as a run's
-  // w:br, so it starts off and the run walk turns it on.
-  let columnBreak = false;
   // Pagination keeps, same toggle semantics. widowControl defaults ON in
   // Word — only an explicit off is worth an attr.
   const toggleLayer = (name: string, dflt: boolean): boolean => {
@@ -1974,7 +1963,6 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     tgtFrame: string | null = null,
   ): void => {
     if (hasPageBreak(node)) pageBreak = true;
-    if (hasColumnBreak(node)) columnBreak = true;
     const fldChars = children(node, 'w:fldChar');
     if (fldChars.length === 0) {
       if (field && field.phase === 'instr') {
@@ -2161,7 +2149,6 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     bookmarks?: string[];
     field?: FieldInfo;
     pageBreakBefore?: boolean;
-    columnBreakBefore?: boolean;
     contextualSpacing?: { before: boolean; after: boolean };
     keepNext?: boolean;
     keepLines?: boolean;
@@ -2199,7 +2186,6 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   const fieldForPara = fieldAtStart ?? ctx.openFields[0] ?? null;
   if (fieldForPara) attrs.field = fieldForPara;
   if (pageBreak) attrs.pageBreakBefore = true;
-  if (columnBreak) attrs.columnBreakBefore = true;
   // Both sides start false: whether a side actually collapses depends on the
   // neighbouring paragraph, which only the block walk can see.
   if (contextualSpacing)

@@ -165,9 +165,6 @@ export const schema = new Schema({
         field: { default: null },
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
-        // A w:br w:type="column" at this paragraph's head — start it in the
-        // next text column (in a single-column section, on the next page).
-        columnBreakBefore: { default: false },
         // w:contextualSpacing — "ignore spacing above and below when using
         // identical styles". Present ⇒ the flag is on; the two booleans say
         // which side actually borders a paragraph of the SAME style, which is
@@ -232,6 +229,19 @@ export const schema = new Schema({
       selectable: false,
       parseDOM: [{ tag: 'br' }],
       toDOM: () => ['br'],
+    },
+
+    // A column break (w:br w:type="column"). Inline, not a paragraph flag:
+    // ST_BrType `column` restarts "the next character in the document … in a
+    // new text column", so it cuts WHERE IT SITS. A factsheet in the corpus
+    // proves the difference — its break has a floating table anchored in the
+    // run BEFORE it, which belongs to the column being left behind.
+    column_break: {
+      inline: true,
+      group: 'inline',
+      selectable: false,
+      parseDOM: [{ tag: 'br.column-break' }],
+      toDOM: () => ['br', { class: 'column-break' }],
     },
 
     // Inline image. `src` is typically a data URL (the importer inlines the

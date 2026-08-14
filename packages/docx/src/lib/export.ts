@@ -76,6 +76,7 @@ const isInlineLeaf = (node: PMNode): boolean =>
   node.isText ||
   node.type.name === 'image' ||
   node.type.name === 'hard_break' ||
+  node.type.name === 'column_break' ||
   // Without this, inlineContent skips page_field entirely and PAGE/NUMPAGES
   // vanish from the body on export. Both the comment-range precompute and the
   // writer use this predicate, so they stay in step.
@@ -396,6 +397,10 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
 /** One inline node → its run XML (excluding the link wrapper). */
 function inlineXml(node: PMNode, ctx: ExportCtx): string {
   if (node.type.name === 'hard_break') return '<w:r><w:br/></w:r>';
+  // Back out where it sits, not at the paragraph's head: the run order is
+  // what decides which column the content before it stays in.
+  if (node.type.name === 'column_break')
+    return '<w:r><w:br w:type="column"/></w:r>';
   if (node.type.name === 'image') return imageXml(node, ctx);
   // w:fldSimple, not the three-part w:fldChar dance: it is the form the
   // importer already reads back, and Word recomputes the result on open — the
@@ -653,14 +658,7 @@ function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
     open += `<w:bookmarkStart w:id="${id}" w:name="${esc(name)}"/>`;
     close += `<w:bookmarkEnd w:id="${id}"/>`;
   }
-  // A column break has no pPr flag to write — it only exists as a run's
-  // w:br, so it goes back the way it came in: at the paragraph's head, ahead
-  // of its content. Without this the break would vanish on the first save and
-  // the section's text would reflow into one column.
-  const colBreak = node.attrs['columnBreakBefore']
-    ? '<w:r><w:br w:type="column"/></w:r>'
-    : '';
-  return `<w:p>${pPr}${open}${colBreak}${inlineContent(node, ctx)}${close}</w:p>`;
+  return `<w:p>${pPr}${open}${inlineContent(node, ctx)}${close}</w:p>`;
 }
 
 // ── tables ──────────────────────────────────────────────────────────

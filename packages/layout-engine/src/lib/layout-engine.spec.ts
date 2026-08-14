@@ -2657,13 +2657,15 @@ describe('multi-column layout', () => {
     expect([...widths].sort((a, b) => a - b)).toEqual([60, 120]);
   });
 
+  /** A paragraph opening with an inline column break (w:br w:type="column"). */
+  const colBreakPara = (text: string): FlowBlock => ({
+    type: 'paragraph',
+    runs: [{ columnBreak: true }, { text, font: font() }],
+  });
+
   it('starts a paragraph with a column break in the next column', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
-    const blocks = [
-      para('a'),
-      { ...para('b'), columnBreakBefore: true } as FlowBlock,
-      para('c'),
-    ];
+    const blocks = [para('a'), colBreakPara('b'), para('c')];
     const r = layoutBlocks(blocks, cfg);
     expect(r.pages).toHaveLength(1);
     expect(r.pages[0].lines.map((l) => l.x)).toEqual([20, 130, 130]);
@@ -2673,14 +2675,43 @@ describe('multi-column layout', () => {
     expect(r.pages[0].lines[1].y).toBe(20); // column 1 restarts at the top
   });
 
+  it('leaves a float anchored before the break in the column being left', () => {
+    // The factsheet's bug: [pict][column break][text] in ONE paragraph. A
+    // paragraph-level flag moved the float too, lifting a floating table 96px
+    // up into the previous column's text. Word cuts at the break, so the
+    // float stays where its run is.
+    const cfg = { ...config({ height: 300 }), columns: { count: 2, gap: 20 } };
+    const withFloat: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ columnBreak: true }, { text: 'b', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 40,
+          height: 30,
+          wrap: 'none',
+          hOffset: 0,
+          vOffset: 10,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    const r = layoutBlocks([para('a'), withFloat], cfg);
+    const line = r.pages[0].lines.find((l) =>
+      l.segments.some((s) => s.text === 'b'),
+    );
+    expect(line?.x).toBe(130); // the text went to column 1
+    const f = r.pages[0].floats?.[0];
+    expect(f?.x).toBe(20); // …the float stayed in column 0
+    // …at the flow position it was anchored to, not at the new column's top.
+    expect(f?.y).toBe(20 + 16 + 10); // band top + line 'a' + vOffset
+  });
+
   it('a column break in the last column starts a new page', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
     const r = layoutBlocks(
-      [
-        para('a'),
-        { ...para('b'), columnBreakBefore: true } as FlowBlock,
-        { ...para('c'), columnBreakBefore: true } as FlowBlock,
-      ],
+      [para('a'), colBreakPara('b'), colBreakPara('c')],
       cfg,
     );
     expect(r.pages).toHaveLength(2);
@@ -2689,10 +2720,7 @@ describe('multi-column layout', () => {
 
   it('a column break with one column is a page break, as Word has it', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 1, gap: 20 } };
-    const r = layoutBlocks(
-      [para('a'), { ...para('b'), columnBreakBefore: true } as FlowBlock],
-      cfg,
-    );
+    const r = layoutBlocks([para('a'), colBreakPara('b')], cfg);
     expect(r.pages).toHaveLength(2);
   });
 

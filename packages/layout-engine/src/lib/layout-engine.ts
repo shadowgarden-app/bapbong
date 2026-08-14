@@ -308,6 +308,8 @@ function paragraphToFlow(
       runs.push(resolveField(child, runBase, contentStart + offset));
     else if (child.type.name === 'hard_break')
       runs.push({ break: true, pos: contentStart + offset });
+    else if (child.type.name === 'column_break')
+      runs.push({ columnBreak: true, pos: contentStart + offset });
   });
   const list = node.attrs['list'] as { marker?: string } | null;
   const align = node.attrs['align'] as Align | null | undefined;
@@ -334,7 +336,6 @@ function paragraphToFlow(
   );
   if (spacing) flow.spacing = spacing;
   if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
-  if (node.attrs['columnBreakBefore'] === true) flow.columnBreakBefore = true;
   if (node.attrs['keepNext'] === true) flow.keepNext = true;
   if (node.attrs['keepLines'] === true) flow.keepLines = true;
   if (node.attrs['widowControl'] === false) flow.widowControl = false;
@@ -403,6 +404,17 @@ function nodeToBlock(
   if (node.type.name === 'table')
     return tableToFlow(node, base, nodePos, counter);
   return null;
+}
+
+/** Does this paragraph node carry an inline column break? Checked on the NODE
+ *  rather than the flattened flow so a cached paragraph never has to be
+ *  re-flattened just to answer it. */
+function paragraphHasColumnBreak(node: PMNode): boolean {
+  let found = false;
+  node.forEach((child) => {
+    if (child.type.name === 'column_break') found = true;
+  });
+  return found;
 }
 
 /** Flatten a table node (table → table_row → table_cell → block+). */
@@ -506,6 +518,9 @@ interface Token {
   isTab?: boolean;
   /** A forced line break (w:br): flushes the current line. */
   isBreak?: boolean;
+  /** A column break (w:br w:type="column"): flushes the line AND ends the
+   *  column. Unlike a line break it adds no empty line of its own. */
+  isColumnBreak?: boolean;
   /** Original PM position of a tab token (pos is stripped when it becomes a
    *  leader decoration, and must be restorable on a re-resolve after a wrap). */
   origPos?: number;
@@ -552,6 +567,18 @@ function expandSmallCaps(run: InlineRun): InlineRun[] {
 /** Tokenize one inline item: words / spaces / tabs for text, a single atom for
  *  images. Tab widths are placeholders, resolved against tab stops at layout. */
 function tokenizeInline(inline: FlowInline, ctx: Ctx): Token[] {
+  if ('columnBreak' in inline) {
+    return [
+      {
+        isColumnBreak: true,
+        font: ctx.base,
+        width: 0,
+        isSpace: false,
+        pos: inline.pos,
+        size: 1,
+      },
+    ];
+  }
   if ('break' in inline) {
     return [
       {
@@ -705,6 +732,13 @@ function wrapParagraph(
   // CONTINUATION — no marker, no first-line indent. This is what makes a
   // page that opens mid-way through a float-anchoring paragraph replayable.
   resumeFrom?: number,
+  /** Called when a `w:br w:type="column"` is reached: the placer ends the
+   *  current column. The next `bandFn` call then answers for the NEW column,
+   *  which is why the break has to be handed over here rather than flagged on
+   *  a line — by the time a line is emitted its band is already baked in.
+   *  Absent where columns cannot exist (table cells), where Word's own
+   *  behaviour is to ignore the break. */
+  onColumnBreak?: () => void,
 ): void {
   const { base, measure, metrics, tabWidth } = ctx;
   const indent = block.indent;
@@ -791,6 +825,7 @@ function wrapParagraph(
   let lineWidth = 0; // running width of the current line's tokens
   let firstLine = resumeFrom === undefined; // a resumed line is a continuation
   let prevTo: number | undefined; // caret slot after the previous line's content
+
   let maxFontPx = sizePx(base); // tallest text (fallback line-height mode)
   let maxImagePx = 0; // tallest inline image on the line
   let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
@@ -1046,7 +1081,7 @@ function wrapParagraph(
       height = target;
     }
     const painted = firstLine && marker ? [marker, ...segments] : segments;
-    emit({
+    const draft: LineDraft = {
       x: startX,
       width: lineRight - startX,
       height,
@@ -1055,7 +1090,8 @@ function wrapParagraph(
       images,
       from,
       to,
-    });
+    };
+    emit(draft);
     prevTo = to;
 
     lineTokens = [];
@@ -1100,6 +1136,26 @@ function wrapParagraph(
 
   for (let ti = 0; ti < tokens.length; ti++) {
     const token = tokens[ti];
+    // A column break ends the line WITHOUT adding one of its own — unlike a
+    // line break, which leaves an empty line behind when it opens a
+    // paragraph. What follows resumes in the next column.
+    if (token.isColumnBreak) {
+      if (token.pos != null) prevTo = token.pos + 1;
+      if (lineTokens.length > 0) flushLine(false);
+      resetCluster();
+      softWrapped = false;
+      onColumnBreak?.();
+      // Re-ask for the band: it is the new column's now. Both line starts
+      // have to follow — a break before the paragraph's first line leaves
+      // `firstLine` true, and that reads firstLineStart, not contStart.
+      band = bandFn(nominalH, indents);
+      lineLeft = band.left;
+      lineRight = band.right;
+      placeMarker();
+      firstLineStart = marker ? markerTextX : lineLeft + firstLineDelta;
+      contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
+      continue;
+    }
     // A forced break (w:br) ends the current line; its PM position is the slot
     // after the line so the caret can sit on it.
     if (token.isBreak) {
@@ -1777,7 +1833,11 @@ type ParaItem = {
   before?: number;
   after?: number;
   pageBreakBefore?: boolean;
-  columnBreakBefore?: boolean;
+  /** The paragraph contains a column break somewhere in its runs. Kept as a
+   *  flag so the placer can route it to the placement-time wrap (a mid-
+   *  paragraph column switch has no pre-wrapped form) and so a section that
+   *  holds one is left unbalanced, without flattening the flow to find out. */
+  columnBreak?: boolean;
   /** Pagination keeps (w:keepNext / w:keepLines / w:widowControl off). */
   keepNext?: boolean;
   keepLines?: boolean;
@@ -1879,7 +1939,7 @@ function assignSectionHeights(items: BlockItem[]): void {
       current.hasColumnBreak = false;
       pendingAfter = 0;
     }
-    if (current && 'para' in item && item.para.columnBreakBefore)
+    if (current && 'para' in item && item.para.columnBreak)
       current.hasColumnBreak = true;
     const overlap =
       'para' in item
@@ -3482,7 +3542,9 @@ function placeBlocks(
       }
     }
     registerFloats(flow, y);
-    wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine);
+    wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, undefined, () => {
+      if (colDirty) breakBand();
+    });
   };
 
   const bandedBandFn: BandFn = (estH, indents, minWidth) => {
@@ -3535,7 +3597,9 @@ function placeBlocks(
   const resumeParaBanded = (flow: FlowParagraph, fromPos: number) => {
     inBandedPara = true;
     try {
-      wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, fromPos);
+      wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, fromPos, () => {
+        if (colDirty) breakBand();
+      });
     } finally {
       inBandedPara = false;
       midBandedFrom = null;
@@ -3740,12 +3804,6 @@ function placeBlocks(
           finalizePage();
           rebalance();
         }
-        // w:br w:type="column": resume in the next text column. breakBand
-        // finalizes the page instead when this is the last column — which is
-        // also what makes a column break in a single-column section behave as
-        // a page break, as Word does. An empty column swallows it: there is
-        // nothing to push away from.
-        else if (item.para.columnBreakBefore && colDirty) breakBand();
         // Pagination keeps: break the band early when this paragraph
         // (keepLines) — or this paragraph plus the head of what must follow
         // it (keepNext) — cannot finish here but WOULD fit a fresh band.
@@ -4209,13 +4267,15 @@ export function layoutBlocks(
             para: {
               getFlow: () => block,
               drafts:
-                block.floats?.length || unevenCols
+                block.floats?.length ||
+                unevenCols ||
+                block.runs.some((r) => 'columnBreak' in r)
                   ? null
                   : layoutParagraph(block, left, colRight, ctx),
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
-              columnBreakBefore: block.columnBreakBefore,
+              columnBreak: block.runs.some((r) => 'columnBreak' in r),
               keepNext: block.keepNext,
               keepLines: block.keepLines,
               widowControl: block.widowControl,
@@ -4866,7 +4926,7 @@ export function layout(
         before: sp?.before,
         after: sp?.after,
         pageBreakBefore: node.attrs['pageBreakBefore'] === true,
-        columnBreakBefore: node.attrs['columnBreakBefore'] === true,
+        columnBreak: paragraphHasColumnBreak(node),
         keepNext: node.attrs['keepNext'] === true,
         keepLines: node.attrs['keepLines'] === true,
         widowControl: node.attrs['widowControl'] !== false,
@@ -4876,7 +4936,9 @@ export function layout(
       });
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land).
-      if (hasFloats || unevenCols) {
+      // A column break splits the paragraph across two columns, which a
+      // single pre-wrapped run of lines cannot express.
+      if (hasFloats || unevenCols || paragraphHasColumnBreak(node)) {
         items.push(tag({ para: mkItem(null) }));
         return;
       }
