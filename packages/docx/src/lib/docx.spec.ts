@@ -3798,6 +3798,58 @@ describe('legacy VML shapes', () => {
     ).toMatchObject({ hRel: 'page' });
   });
 
+  it('wraps text the way w10:wrap/@type says, with Word’s gaps', async () => {
+    const floatOf = async (wrap: string, style = '') => {
+      const bytes = await makeDocx(
+        vmlDoc(`<w:p><w:r><w:pict>
+          <v:rect style="position:absolute;margin-left:24pt;margin-top:5pt;width:60pt;height:30pt${style}">
+            ${wrap}
+          </v:rect>
+        </w:pict></w:r></w:p>`),
+      );
+      const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+      let img: import('prosemirror-model').Node | null = null;
+      doc.descendants((n) => {
+        if (n.type.name === 'image') img = n;
+        return true;
+      });
+      return img!.attrs['float'] as Record<string, unknown>;
+    };
+
+    // tight and through wrap around a polygon the model has no room for, so
+    // they fold into square — as the DrawingML path already does, and as
+    // LibreOffice does outside its contour flag.
+    for (const t of ['square', 'tight', 'through'])
+      expect((await floatOf(`<w10:wrap type="${t}"/>`)).wrap).toBe('square');
+    expect((await floatOf('<w10:wrap type="topAndBottom"/>')).wrap).toBe(
+      'topAndBottom',
+    );
+    // An omitted ELEMENT is "no text wrapping shall be performed"
+    // (ISO/IEC 29500-4 §19.3.2.6); an omitted @type has no documented default
+    // at all, and LibreOffice leaves such a shape flowing through. Both here
+    // mean the text is left alone.
+    expect((await floatOf('')).wrap).toBe('none');
+    expect((await floatOf('<w10:wrap anchorx="page"/>')).wrap).toBe('none');
+
+    // Word's gap when the shape does not state one: 9pt to each side, nothing
+    // above or below.
+    expect(await floatOf('<w10:wrap type="square"/>')).toMatchObject({
+      distL: 12,
+      distR: 12,
+      distT: 0,
+      distB: 0,
+    });
+    expect(
+      await floatOf(
+        '<w10:wrap type="square"/>',
+        ';mso-wrap-distance-left:18pt;mso-wrap-distance-top:3pt',
+      ),
+    ).toMatchObject({ distL: 24, distR: 12, distT: 4, distB: 0 });
+    // A float the text runs through keeps no distance: the gaps would
+    // describe nothing.
+    expect(await floatOf('')).not.toHaveProperty('distL');
+  });
+
   it('reads arcsize in each encoding, halving it against the shorter side', async () => {
     const ratioOf = async (attr: string) => {
       const bytes = await makeDocx(

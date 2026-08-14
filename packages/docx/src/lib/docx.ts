@@ -1208,6 +1208,9 @@ function parseVmlStyle(style: string): {
   hRelRaw?: string;
   /** mso-position-vertical-relative (margin | page | text | line). */
   vRelRaw?: string;
+  /** mso-wrap-distance-left/right/top/bottom — the gaps wrapped text keeps
+   *  from the shape's box (px). Absent entries take Word's defaults. */
+  wrapDist?: { l?: number; r?: number; t?: number; b?: number };
 } {
   const out: ReturnType<typeof parseVmlStyle> = { absolute: false };
   for (const part of style.split(';')) {
@@ -1224,6 +1227,17 @@ function parseVmlStyle(style: string): {
     else if (k === 'flip') out.flipV = v.includes('y');
     else if (k === 'mso-position-horizontal-relative') out.hRelRaw = v;
     else if (k === 'mso-position-vertical-relative') out.vRelRaw = v;
+    else if (k.startsWith('mso-wrap-distance-')) {
+      const px = cssLenToPx(v);
+      if (px !== undefined) {
+        const side = k.slice('mso-wrap-distance-'.length);
+        out.wrapDist ??= {};
+        if (side === 'left') out.wrapDist.l = px;
+        else if (side === 'right') out.wrapDist.r = px;
+        else if (side === 'top') out.wrapDist.t = px;
+        else if (side === 'bottom') out.wrapDist.b = px;
+      }
+    }
   }
   return out;
 }
@@ -1367,6 +1381,39 @@ function vmlHRel(
   return 'margin';
 }
 
+/**
+ * How text flows around a VML float, from `w10:wrap/@type`.
+ *
+ * An ABSENT `w10:wrap` element means no wrapping at all: "If this element is
+ * omitted, then no text wrapping shall be performed (i.e. the object shall be
+ * presented in line with text)" (ISO/IEC 29500-4 §19.3.2.6). An absent @type
+ * on a PRESENT element has no documented default in either 29500 or
+ * MS-OI29500; LibreOffice — which had to match Word — leaves such a shape at
+ * `WrapTextMode_THROUGH`, i.e. text flows through it, and only the four named
+ * values change that. Both cases land on 'none' here.
+ *
+ * `tight` and `through` wrap around a polygon (`wrapcoords`) that the model
+ * has no room for, so they fold into 'square' — the same approximation the
+ * DrawingML path already makes for wp:wrapTight / wp:wrapThrough, and the
+ * same one LibreOffice makes outside its contour flag.
+ */
+function vmlWrap(
+  wrap: OoxmlNode | undefined,
+): 'square' | 'topAndBottom' | 'none' {
+  const type = attrOf(wrap, 'type');
+  if (type === 'square' || type === 'tight' || type === 'through')
+    return 'square';
+  if (type === 'topAndBottom') return 'topAndBottom';
+  return 'none';
+}
+
+/** Word's wrap gap when the shape does not state one: 114300 EMU = 9pt to the
+ *  left and right, nothing above or below. The VML spec says zero, "but Word
+ *  implements a non-zero value" — the figure is [MS-ODRAW] §2.3.4.9, by way of
+ *  LibreOffice, and every shape in the corpus that spells it out writes
+ *  exactly this. */
+const VML_WRAP_DIST = { l: 12, r: 12, t: 0, b: 0 };
+
 /** The vertical twin of {@link vmlHRel}, from `w10:wrap/@anchory` or
  *  `mso-position-vertical-relative` (margin | page | text | line). No source
  *  found states a default for `anchory`, so an absent value keeps the
@@ -1478,11 +1525,21 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   let float: Record<string, unknown> | null = null;
   if (st.absolute) {
     const wrapEl = child(el, 'w10:wrap');
+    const wrap = vmlWrap(wrapEl);
     float = {
-      wrap: 'none',
+      wrap,
       hRel: vmlHRel(wrapEl, st.hRelRaw),
       vRel: vmlVRel(wrapEl, st.vRelRaw),
     };
+    // Only a wrapping shape keeps text at a distance; on a float the text
+    // runs through, the gaps would describe nothing.
+    if (wrap !== 'none') {
+      const d = st.wrapDist ?? {};
+      float['distL'] = Math.round(d.l ?? VML_WRAP_DIST.l);
+      float['distR'] = Math.round(d.r ?? VML_WRAP_DIST.r);
+      float['distT'] = Math.round(d.t ?? VML_WRAP_DIST.t);
+      float['distB'] = Math.round(d.b ?? VML_WRAP_DIST.b);
+    }
     if (st.left !== undefined) float['hOffset'] = Math.round(st.left + dx);
     if (st.top !== undefined) float['vOffset'] = Math.round(st.top + dy);
     if ((st.zIndex ?? 0) < 0) float['behind'] = true;
