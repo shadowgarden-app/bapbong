@@ -318,6 +318,8 @@ function isIgnoredAttr(tag: string, name: string): boolean {
  * a file writes `anchor="ctr"` the audit says so.
  */
 const FALSE_VALUES = new Set(['0', 'false', 'off']);
+/** A wrap polygon's coordinate space: 0..21600 of the shape's own extent. */
+const WRAP_POLY_FULL = 21600;
 const isFalse = (v: string) => FALSE_VALUES.has(v);
 const isNum = (n: number) => (v: string) => Number(v) === n;
 
@@ -349,6 +351,10 @@ const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // float, which is what our square-wrap already does. left/right/largest
   // pick ONE side and stay UNKNOWN.
   'wp:wrapSquare @wrapText': (v) => v === 'bothSides',
+  // The same attribute on the same terms — tight and through wrap import as
+  // square, so which sides they use is decided the same way.
+  'wp:wrapTight @wrapText': (v) => v === 'bothSides',
+  'wp:wrapThrough @wrapText': (v) => v === 'bothSides',
 };
 
 /** Elements that are no-ops in a particular shape. The predicate reads
@@ -369,6 +375,37 @@ const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
   'w:effect': (n) => n.attrs['w:val'] === 'none',
   // CT_TblWidth @w:w defaults to 0 = the table sits at the margin.
   'w:tblInd': (n) => Number(n.attrs['w:w'] ?? '0') === 0,
+  // Automatic spacing between East-Asian and Latin/numeric text, turned OFF.
+  // We never insert that spacing, so "off" asks for exactly what we do. ON —
+  // including the absent-means-on default — stays UNKNOWN: it is a real
+  // feature we do not have, and a file that wants it must say so in the
+  // report.
+  'w:autoSpaceDE': (n) => isFalse(String(n.attrs['w:val'] ?? '')),
+  'w:autoSpaceDN': (n) => isFalse(String(n.attrs['w:val'] ?? '')),
+  // A wrap polygon that IS the shape's box: Word writes one on every
+  // tight/through-wrapped picture whose outline it never traced. The
+  // coordinate space is 0..21600 of the extent, and Word rounds the far edge
+  // a few thousandths short (21435 of 21600 in the factsheet), so the corners
+  // are compared with a tolerance. Anything that actually carves a shape —
+  // more than four corners, or a rectangle inset from the box, which would
+  // let text closer than our rectangle does — stays UNKNOWN, because wrapping
+  // to a contour is a feature we do not have.
+  'wp:wrapPolygon': (n) => {
+    const pts = n.children
+      .filter((c) => c.name === 'wp:start' || c.name === 'wp:lineTo')
+      .map((c) => [Number(c.attrs['x']), Number(c.attrs['y'])] as const);
+    if (pts.length < 4 || pts.some(([x, y]) => !isFinite(x) || !isFinite(y)))
+      return false;
+    const spansBox = (vals: number[]) => {
+      const uniq = [...new Set(vals)];
+      return (
+        uniq.length === 2 &&
+        Math.min(...uniq) === 0 &&
+        Math.max(...uniq) >= WRAP_POLY_FULL * 0.98
+      );
+    };
+    return spansBox(pts.map((p) => p[0])) && spansBox(pts.map((p) => p[1]));
+  },
   // ST_DocGrid @w:type defaults to "default", which snaps nothing — and that
   // makes the linePitch/charSpace it carries moot. Only lines/linesAndChars
   // actually grid the page, and those stay UNKNOWN.

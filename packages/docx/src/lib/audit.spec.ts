@@ -115,6 +115,98 @@ describe('xml audit (import)', () => {
     expect(unknown).not.toContain('w:pgMar @w:top');
   });
 
+  it('demotes a value that asks for nothing — and only that value', async () => {
+    audit.setEnabled(true);
+    const anchored = (wrap: string) =>
+      `<?xml version="1.0"?><w:document ${NS}><w:body><w:p><w:r><w:drawing>` +
+      `<wp:anchor><wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH>` +
+      `<wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>` +
+      `<wp:extent cx="914400" cy="914400"/>${wrap}` +
+      `<a:graphic><a:graphicData><wps:wsp><wps:spPr><a:prstGeom prst="rect"/></wps:spPr></wps:wsp></a:graphicData></a:graphic>` +
+      `</wp:anchor></w:drawing></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const box = (x2: number, y2: number, extra = '') =>
+      `<wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="0" y="${y2}"/>` +
+      `<wp:lineTo x="${x2}" y="${y2}"/>${extra}<wp:lineTo x="${x2}" y="0"/>` +
+      `<wp:lineTo x="0" y="0"/></wp:wrapPolygon>`;
+    const run = async (xml: string) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      await importDocx(await makeDocx(xml));
+      log.mockRestore();
+      return {
+        unknown: keys(audit.lastReport?.unknown ?? []),
+        inert: keys(audit.lastReport?.inert ?? []),
+      };
+    };
+
+    // bothSides is the default and is what our square wrap does; a polygon
+    // that IS the box (Word rounds its far edge a few thousandths short of
+    // 21600) is the rectangle we already exclude.
+    const plain = await run(
+      anchored(
+        `<wp:wrapThrough wrapText="bothSides">${box(21435, 21236)}</wp:wrapThrough>`,
+      ),
+    );
+    expect(plain.inert).toContain('wp:wrapThrough @wrapText');
+    expect(plain.inert).toContain('wp:wrapPolygon');
+    expect(plain.unknown).not.toContain('wp:wrapPolygon');
+
+    // One side only is a real gap.
+    const side = await run(
+      anchored(
+        `<wp:wrapThrough wrapText="left">${box(21435, 21236)}</wp:wrapThrough>`,
+      ),
+    );
+    expect(side.unknown).toContain('wp:wrapThrough @wrapText');
+
+    // A rectangle INSET from the box would let text closer than we allow…
+    const inset = await run(
+      anchored(
+        `<wp:wrapThrough wrapText="bothSides">${box(15000, 21236)}</wp:wrapThrough>`,
+      ),
+    );
+    expect(inset.unknown).toContain('wp:wrapPolygon');
+
+    // …and a polygon with a fifth corner carves a shape we cannot follow.
+    const carved = await run(
+      anchored(
+        `<wp:wrapThrough wrapText="bothSides">${box(21435, 21236, '<wp:lineTo x="10000" y="9000"/>')}</wp:wrapThrough>`,
+      ),
+    );
+    expect(carved.unknown).toContain('wp:wrapPolygon');
+  });
+
+  it('demotes autoSpace only when it is switched OFF', async () => {
+    audit.setEnabled(true);
+    // In a paragraph's own pPr these would be CARRIED (preserved verbatim on
+    // export) and so count as consumed; a style is where they show up
+    // unhandled, which is where the corpus has them.
+    const styles = (attrs: string) =>
+      `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">` +
+      `<w:style w:type="paragraph" w:styleId="Body"><w:name w:val="Body"/>` +
+      `<w:pPr><w:autoSpaceDE ${attrs}/><w:autoSpaceDN ${attrs}/></w:pPr>` +
+      `</w:style></w:styles>`;
+    const body =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p>` +
+      `<w:pPr><w:pStyle w:val="Body"/></w:pPr><w:r><w:t>x</w:t></w:r>` +
+      `</w:p><w:sectPr/></w:body></w:document>`;
+    const run = async (attrs: string) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      await importDocx(await makeDocx(body, styles(attrs)));
+      log.mockRestore();
+      return {
+        unknown: keys(audit.lastReport?.unknown ?? []),
+        inert: keys(audit.lastReport?.inert ?? []),
+      };
+    };
+    // Off asks for exactly what we do — we never insert East-Asian spacing.
+    const off = await run('w:val="0"');
+    expect(off.inert).toContain('w:autoSpaceDE');
+    expect(off.unknown).not.toContain('w:autoSpaceDE');
+    // On (including the absent-means-on default) is a feature we lack.
+    expect((await run('')).unknown).toContain('w:autoSpaceDE');
+    expect((await run('w:val="1"')).unknown).toContain('w:autoSpaceDN');
+  });
+
   it('counts a smart tag handled once its runs are unwrapped', async () => {
     audit.setEnabled(true);
     const body =
