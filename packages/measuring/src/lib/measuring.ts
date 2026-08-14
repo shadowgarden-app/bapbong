@@ -54,6 +54,7 @@ export function createCanvasMetrics(): MeasureMetrics {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('bapbong-measuring: 2D canvas context unavailable');
+  const leadingOf = canvasLeading(ctx);
   return (font) => {
     // Plain shorthand on purpose: vertical metrics take a FontFace, so there
     // is no glyph adjustment here to apply — and none could move a baseline.
@@ -61,15 +62,74 @@ export function createCanvasMetrics(): MeasureMetrics {
     const m = ctx.measureText('Mg');
     const ascent = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent;
     const descent = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent;
-    // No `leading`: a 2D context exposes the font's box but not its external
-    // leading, so a line measured this way is short by whatever gap the font
-    // declares — 4.2% of the em for Times New Roman, 3.3% for Arial, 0 for
-    // Verdana/Tahoma/Georgia/Courier New. Two further reasons this path is the
-    // fallback and not the goal: the values come back rounded to whole pixels
-    // (Times New Roman at 13pt measures 15+4 where the font says 15.15+3.68),
-    // and they describe the face the ENGINE picked, which need not be the one
-    // Word used. createFontRegistryMetrics reads the tables instead.
-    return { ascent, descent };
+    // Two reasons this path is the fallback and not the goal: the values come
+    // back rounded to whole pixels (Times New Roman at 13pt measures 15+4
+    // where the font says 15.15+3.68), and they describe the face the ENGINE
+    // picked, which need not be the one Word used. createFontRegistryMetrics
+    // reads the tables instead.
+    return { ascent, descent, leading: leadingOf(font, ascent + descent) };
+  };
+}
+
+/** Reference size for the leading probe: big enough that the browser's
+ *  sub-pixel rounding is noise once the result is scaled back down. */
+const LEADING_PROBE_PX = 400;
+
+/**
+ * The external leading of a font, asked of the browser rather than guessed.
+ *
+ * A 2D context exposes the font's box but not its line gap, so a line measured
+ * from canvas alone is short by whatever gap the font declares — 4.2% of the em
+ * for Times New Roman, 22% for Calibri, 0 for Verdana and Georgia. Over a long
+ * document that is pages: a teaching plan whose font we could not read
+ * paginated 31 pages short of Word, and the missing gap was most of it.
+ *
+ * But the browser DOES know the gap: `line-height: normal` is defined to be the
+ * font's own line height, cell plus gap. So one hidden element per face answers
+ * it exactly, and the answer is the same number Word calls single spacing.
+ *
+ * Measured once per family+weight+slant at a large size and scaled, because the
+ * gap is a fraction of the em; without a DOM (SSR) it reports none rather than
+ * inventing one.
+ */
+function canvasLeading(
+  ctx: CanvasRenderingContext2D,
+): (font: FontSpec, cell: number) => number {
+  const doc = (globalThis as { document?: Document }).document;
+  if (!doc?.body) return () => 0;
+  const cache = new Map<string, number>();
+  return (font, cell) => {
+    const key = `${font.family}|${font.bold ? 'b' : ''}|${font.italic ? 'i' : ''}`;
+    let ratio = cache.get(key);
+    if (ratio === undefined) {
+      const probe = doc.createElement('div');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;white-space:nowrap;' +
+        'line-height:normal;padding:0;border:0;margin:0';
+      probe.style.font = fontShorthand({
+        ...font,
+        sizePt: LEADING_PROBE_PX * (72 / 96),
+      });
+      probe.textContent = 'Mg';
+      doc.body.appendChild(probe);
+      const natural = probe.getBoundingClientRect().height;
+      doc.body.removeChild(probe);
+      // The same face measured through canvas at the probe size — subtracting
+      // the box the caller will use is what leaves the GAP, and doing it at
+      // one size keeps the two measurements commensurable.
+      ctx.font = fontShorthand({
+        ...font,
+        sizePt: LEADING_PROBE_PX * (72 / 96),
+      });
+      const pm = ctx.measureText('Mg');
+      const probeCell =
+        (pm.fontBoundingBoxAscent ?? pm.actualBoundingBoxAscent) +
+        (pm.fontBoundingBoxDescent ?? pm.actualBoundingBoxDescent);
+      ratio =
+        probeCell > 0 ? Math.max(0, (natural - probeCell) / probeCell) : 0;
+      cache.set(key, ratio);
+    }
+    return cell * ratio;
   };
 }
 

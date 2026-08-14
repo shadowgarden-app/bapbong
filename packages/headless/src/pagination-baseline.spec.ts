@@ -32,6 +32,12 @@ import {
  *     problem; both are table-heavy, and that is where to look next.
  *   - NAVY +2 — the one multi-column, float-heavy document, and the one where
  *     we run LONG.
+ *   - nested_table −2, and the one entry these numbers cannot yet judge: it is
+ *     75% Open Sans and 24% Aptos. We bundle neither, this Mac has neither
+ *     installed, and Aptos — Microsoft 365's default since 2023 — has no
+ *     metric-compatible clone in existence. Headless it measures through the
+ *     approximation end to end (3 pages); in the browser, where a substitute
+ *     face at least supplies real ascent and descent, it reaches 4.
  *
  * When a fix lands, update `ours` in the same commit and say which way it
  * moved. Do not update `word`: those are the target.
@@ -47,6 +53,7 @@ const BASELINE: { file: string; word: number; ours: number }[] = [
     word: 3,
     ours: 5,
   },
+  { file: 'nested_table.docx', word: 5, ours: 3 },
 ];
 
 const PUB = path.resolve(__dirname, '../../../apps/playground/public');
