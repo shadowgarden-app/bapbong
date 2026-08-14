@@ -60,6 +60,7 @@ import type {
   BorderSide,
   CellDiagonals,
   BorderStyle,
+  ColumnConfig,
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
@@ -3452,18 +3453,53 @@ function parsePageNumbers(
   return out.start != null || out.fmt ? out : undefined;
 }
 
-/** Column flow from a section's w:cols (equal-width only). count defaults to 1;
- *  the gap is w:space (twips→px), Word's default 720 twips = 0.5in. */
-function parseColumns(sectPr: OoxmlNode | undefined): {
-  count: number;
-  gap: number;
-} {
+/**
+ * Column flow from a section's `w:cols`, by Word's rules rather than the
+ * standard's — they differ here, and the corpus cannot tell them apart.
+ * count defaults to 1; the gap is `w:space` (twips→px, Word's default 720 =
+ * 0.5in); unequal sections carry each column's own width instead.
+ */
+function parseColumns(sectPr: OoxmlNode | undefined): ColumnConfig {
   const cols = sectPr && child(sectPr, 'w:cols');
+  // MS-OI29500 §17.6.4(a): Word restricts @w:num to 1..45.
   const num = Number(attrOf(cols, 'w:num') ?? '1');
-  const explicit = cols ? children(cols, 'w:col').length : 0;
-  const count = Math.max(Number.isNaN(num) ? 1 : num, explicit, 1);
+  const count = Math.min(45, Math.max(1, Number.isNaN(num) ? 1 : num));
   const spaceTw = Number(attrOf(cols, 'w:space') ?? '720');
-  return { count, gap: twipsToPx(Number.isNaN(spaceTw) ? 720 : spaceTw) };
+  const gap = twipsToPx(Number.isNaN(spaceTw) ? 720 : spaceTw);
+
+  // Equal width is Word's default for an ABSENT attribute — the standard
+  // declares none, "Word uses a default value of true" (MS-OI29500
+  // §17.6.4(b)) — and when it is on, "the col elements are ignored".
+  const eq = attrOf(cols, 'w:equalWidth');
+  if (eq === undefined || !['false', '0', 'off'].includes(eq))
+    return { count, gap };
+
+  // Unequal: each w:col carries its own width and the space AFTER it, and
+  // the cols/@w:space above is disregarded.
+  //
+  // The count still comes from @w:num, NOT from the number of children. The
+  // standard says the opposite — num "is ignored in favor of the number of
+  // child col elements" — but Word "requires that the value of the num
+  // attribute matches the number of child col elements. If the num attribute
+  // is not specified, then Word assumes a value of 1" (MS-OI29500 §17.6.4(c)).
+  // Every unequal section in the corpus satisfies that requirement, so no
+  // fixture can tell the two readings apart; following the standard here
+  // would be wrong in a way the tests could never catch.
+  const colEls = cols ? children(cols, 'w:col') : [];
+  if (colEls.length !== count) return { count, gap };
+  const list = colEls.map((c) => {
+    const w = Number(attrOf(c, 'w:w') ?? '0');
+    const s = Number(attrOf(c, 'w:space') ?? '0');
+    return {
+      width: twipsToPx(Number.isNaN(w) ? 0 : w),
+      space: twipsToPx(Number.isNaN(s) ? 0 : s),
+    };
+  });
+  // The widths ride through verbatim even when they happen to be uniform —
+  // re-deriving them from a gap would silently rescale a section whose
+  // declared widths do not add up to the text area. Whether the columns
+  // differ is the layout's question, not this one's.
+  return { count, gap, cols: list };
 }
 
 /** A continuous section break switches columns mid-page; every other type

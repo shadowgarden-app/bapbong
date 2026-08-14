@@ -2632,6 +2632,31 @@ describe('multi-column layout', () => {
     expect(Math.abs(p2col0.length - p2col1.length)).toBeLessThanOrEqual(1);
   });
 
+  it('gives each column the width the section declared', () => {
+    // Content width 200. Declared 120 + gap 20 + 60 — a layout the equal
+    // split (90|20|90) cannot express, and the shape of the factsheet whose
+    // narrow second column collapsed a bullet list into one letter per line.
+    const cfg = {
+      ...config({ height: 200 }),
+      columns: {
+        count: 2,
+        gap: 20,
+        cols: [
+          { width: 120, space: 20 },
+          { width: 60, space: 0 },
+        ],
+      },
+    };
+    const blocks = Array.from({ length: 15 }, (_, i) => para(`p${i}`));
+    const r = layoutBlocks(blocks, cfg);
+    const xs = new Set(r.pages.flatMap((p) => p.lines.map((l) => l.x)));
+    // Column 0 at the content left, column 1 at 20 + 120 + 20 — NOT the
+    // 20 + 90 + 20 the count-and-divide arithmetic would give.
+    expect([...xs].sort((a, b) => a - b)).toEqual([20, 160]);
+    const widths = new Set(r.pages.flatMap((p) => p.lines.map((l) => l.width)));
+    expect([...widths].sort((a, b) => a - b)).toEqual([60, 120]);
+  });
+
   it('single column is unchanged (no x shift)', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 1, gap: 20 } };
     const r = layoutBlocks([para('a'), para('b')], cfg);

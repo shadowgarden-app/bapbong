@@ -19,6 +19,19 @@ export interface PageConfig {
 export interface ColumnConfig {
   count: number;
   gap: number;
+  /**
+   * Per-column geometry (px), in document order, when the section declares
+   * `w:cols/@w:equalWidth="0"` — each column carries its own width and the
+   * gap that FOLLOWS it (the last column's is unused, nothing follows it).
+   *
+   * Present whenever the section declares them, even if they happen to come
+   * out uniform: re-deriving uniform widths from `gap` would silently rescale
+   * a section whose declared widths do not fill the text area. Consumers that
+   * only care whether the columns DIFFER should compare the widths.
+   * `cols.length` always equals `count`; a file whose `w:col` count disagrees
+   * with `@w:num` falls back to equal columns before reaching here.
+   */
+  cols?: { width: number; space: number }[];
 }
 
 /** One document section's flow properties. Sections are delimited by section

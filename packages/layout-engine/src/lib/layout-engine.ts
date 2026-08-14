@@ -2484,6 +2484,9 @@ interface PageCheckpoint {
   colCount: number;
   colGap: number;
   colWidth: number;
+  /** Per-column boxes of the section in flow (identity-stable: applyColumns
+   *  builds one array per section, so identity is a sound comparison). */
+  colBoxes: ColumnBox[] | null;
   balancing: boolean;
   sectionRemaining: number;
   activePBdr: {
@@ -2731,6 +2734,7 @@ function placeBlocks(
     a.colCount === b.colCount &&
     a.colGap === b.colGap &&
     a.colWidth === b.colWidth &&
+    a.colBoxes === b.colBoxes &&
     a.balancing === b.balancing &&
     a.sectionRemaining === b.sectionRemaining &&
     sameGeom(a.curPage, b.curPage);
@@ -2802,6 +2806,10 @@ function placeBlocks(
   let colCount = 1;
   let colGap = 0;
   let colWidth = contentWidth;
+  // Per-column boxes when the section's columns are not all the same width
+  // (w:cols/@w:equalWidth="0"); null keeps the uniform `colWidth + colGap`
+  // arithmetic, which every other document uses.
+  let colBoxes: ColumnBox[] | null = null;
   let colIndex = 0;
   let bandTop = top;
   let sectionMaxY = top;
@@ -2810,9 +2818,11 @@ function placeBlocks(
   // space-before collapses against it (collapsedBefore) — OOXML takes the
   // MAXIMUM of the two, not their sum.
   let pendingAfter = 0;
-  const xShift = () => colIndex * (colWidth + colGap);
+  const xShift = () =>
+    colBoxes ? colBoxes[colIndex].x : colIndex * (colWidth + colGap);
   const colX0 = () => contentLeft + xShift();
-  const colX1 = () => colX0() + colWidth;
+  const colX1 = () =>
+    colX0() + (colBoxes ? colBoxes[colIndex].width : colWidth);
   const bump = () => {
     if (y > sectionMaxY) sectionMaxY = y;
   };
@@ -2820,6 +2830,7 @@ function placeBlocks(
     colCount = Math.max(1, cols.count);
     colGap = colCount > 1 ? cols.gap : 0;
     colWidth = (contentWidth - colGap * (colCount - 1)) / colCount;
+    colBoxes = columnBoxes(cols);
   };
 
   /** Recompute the band for the current page/chrome and restart on it. Only
@@ -3089,6 +3100,7 @@ function placeBlocks(
     colCount,
     colGap,
     colWidth,
+    colBoxes,
     balancing,
     sectionRemaining,
     activePBdr: activePBdr && {
@@ -3114,6 +3126,7 @@ function placeBlocks(
     colCount = cp.colCount;
     colGap = cp.colGap;
     colWidth = cp.colWidth;
+    colBoxes = cp.colBoxes;
     balancing = cp.balancing;
     sectionRemaining = cp.sectionRemaining;
     activePBdr = cp.activePBdr && {
@@ -3175,7 +3188,18 @@ function placeBlocks(
     pageFirstOffset ??= it.nodeOffset ?? null;
   };
 
-  const emitLine = (draft: LineDraft) => {
+  /**
+   * Place one wrapped line at the cursor.
+   *
+   * `preShifted` says the draft already carries absolute x: the banded path
+   * wraps against `bandAt`, which starts from `colX0()`, whereas the
+   * pre-wrapped drafts are measured from the content-area left edge and have
+   * to be slid into the current column. Adding the shift to a banded line
+   * counts the column offset twice — invisible while the banded path only
+   * ever ran in single-column flow (xShift 0), and a 1600px x the moment a
+   * multi-column section used it.
+   */
+  const emitLine = (draft: LineDraft, preShifted = false) => {
     let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     const floor = () =>
       Math.min(colBottom(), bottom - reservedFor([...pageFnNums, ...add]));
@@ -3184,7 +3208,7 @@ function placeBlocks(
       add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     }
     noteNodePlaced();
-    lines.push(draftToLine(draft, y, xShift()));
+    lines.push(draftToLine(draft, y, preShifted ? 0 : xShift()));
     if (activePBdr) {
       if (!activePBdr.frag) {
         activePBdr.frag = { x0: colX0(), x1: colX1(), y0: y, y1: y };
@@ -3491,7 +3515,7 @@ function placeBlocks(
    *  marks the checkpoint unreplayable, the pre-existing degraded mode. */
   const emitBandedLine = (draft: LineDraft): void => {
     midBandedFrom = draft.from ?? UNRESUMABLE;
-    emitLine(draft);
+    emitLine(draft, true);
   };
 
   /** Re-enter a float paragraph split by the replayed page's start: its
@@ -4152,17 +4176,24 @@ export function layoutBlocks(
   const right = config.page.width - config.page.margin.right;
   // Whole-document column flow: lay every block at the column content width.
   const cols: ColumnConfig = config.columns ?? { count: 1, gap: 0 };
-  const colWidth = columnWidth(right - left, cols);
+  const docBoxes = columnBoxes(cols);
+  const colWidth = docBoxes
+    ? docBoxes[0].width
+    : columnWidth(right - left, cols);
   const colRight = left + colWidth;
+  // See the sectioned builder: columns of differing widths cannot share one
+  // pre-wrap, so their paragraphs wrap where they are placed.
+  const unevenCols = unevenColumns(cols);
   const items: BlockItem[] = blocks.map((block, i) => {
     const item: BlockItem =
       block.type === 'paragraph'
         ? {
             para: {
               getFlow: () => block,
-              drafts: block.floats?.length
-                ? null
-                : layoutParagraph(block, left, colRight, ctx),
+              drafts:
+                block.floats?.length || unevenCols
+                  ? null
+                  : layoutParagraph(block, left, colRight, ctx),
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
@@ -4186,6 +4217,46 @@ function columnWidth(totalWidth: number, cols: ColumnConfig): number {
   const count = Math.max(1, cols.count);
   const gap = count > 1 ? cols.gap : 0;
   return (totalWidth - gap * (count - 1)) / count;
+}
+
+/** One text column's box, x measured from the content-area left edge. */
+type ColumnBox = { x: number; width: number };
+
+/**
+ * Per-column boxes for a section that declares its columns individually, or
+ * null when there is nothing to declare and the uniform arithmetic applies.
+ *
+ * Each `w:col` gives its own width and the space that FOLLOWS it, so the
+ * columns simply accumulate. The declared numbers are used verbatim, never
+ * re-derived: a file may spell out EQUAL widths with a gap that the
+ * count-and-divide arithmetic would not reproduce (one in the corpus declares
+ * 4470|420|4470 where dividing gives 4320|720|4320), and rebuilding those from
+ * `gap` would move both columns while looking like a harmless shortcut.
+ */
+function columnBoxes(cols: ColumnConfig): ColumnBox[] | null {
+  const list = cols.cols;
+  if (!list || list.length < 2) return null;
+  const boxes: ColumnBox[] = [];
+  let x = 0;
+  for (const c of list) {
+    boxes.push({ x, width: c.width });
+    x += c.width + c.space;
+  }
+  return boxes;
+}
+
+/**
+ * Whether the section's columns have DIFFERENT widths — a separate question
+ * from whether they are declared individually, and the one that decides how
+ * paragraphs wrap. Equal columns share one wrap, so a paragraph measured once
+ * is valid wherever it lands; unequal ones have no such width, and a paragraph
+ * that straddles the boundary has to re-wrap halfway.
+ */
+function unevenColumns(cols: ColumnConfig): boolean {
+  const list = cols.cols;
+  return (
+    !!list && list.length > 1 && list.some((c) => c.width !== list[0].width)
+  );
 }
 
 // ── Incremental re-layout (M4+) ─────────────────────────────────────
@@ -4704,7 +4775,21 @@ export function layout(
     const secPage = bs.page ?? page;
     const bLeft = contentLeftOf(secPage);
     const bRight = secPage.width - secPage.margin.right;
-    const colRight = bLeft + columnWidth(bRight - bLeft, bs.columns);
+    // The pre-wrap width comes from the declared boxes when there are any,
+    // never from the count-and-divide arithmetic: a landscape section in the
+    // corpus declares 4470|420|4470 inside a 12960-twip text area, so dividing
+    // gives 408px columns where the file asks for 298px and every line would
+    // be wrapped a third too wide for the column it is painted in.
+    const secBoxes = columnBoxes(bs.columns);
+    const colRight =
+      bLeft +
+      (secBoxes ? secBoxes[0].width : columnWidth(bRight - bLeft, bs.columns));
+    // Columns of DIFFERENT widths have no single width to pre-wrap at: a
+    // paragraph wrapped for column 0 is wrong in column 1, and one that
+    // straddles the boundary has to re-wrap halfway. Such sections take the
+    // placement-time path, which asks the band for the column it actually
+    // lands in — the same path float-anchoring paragraphs already use.
+    const unevenCols = unevenColumns(bs.columns);
     const tag = (item: BlockItem): BlockItem => {
       if (bs.start) {
         item.section = { ...bs.columns, newPage: bs.newPage };
@@ -4771,7 +4856,7 @@ export function layout(
       });
       // Float-anchoring paragraphs always wrap at placement time (their band
       // depends on where they land).
-      if (hasFloats) {
+      if (hasFloats || unevenCols) {
         items.push(tag({ para: mkItem(null) }));
         return;
       }

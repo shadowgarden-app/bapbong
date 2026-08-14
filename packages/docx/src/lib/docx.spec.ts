@@ -2017,6 +2017,64 @@ describe('importDocx', () => {
     });
   });
 
+  it('reads unequal column widths, by Word’s rules not the standard’s', async () => {
+    // A trailing second section keeps doc.attrs.sections populated: a document
+    // that is one single-column section carries none at all.
+    const colsOf = async (cols: string) => {
+      const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+        <w:p><w:pPr><w:sectPr><w:type w:val="continuous"/>${cols}</w:sectPr></w:pPr><w:r><w:t>a</w:t></w:r></w:p>
+        <w:p><w:r><w:t>b</w:t></w:r></w:p>
+        <w:sectPr><w:cols w:num="1"/></w:sectPr>
+      </w:body></w:document>`;
+      const { doc } = await importDocx(await makeDocx(documentXml));
+      const sections = doc.attrs['sections'] as
+        | { columns: { count: number; gap: number; cols?: unknown } }[]
+        | null;
+      return sections?.[0].columns;
+    };
+    const COLS = '<w:col w:w="8096" w:space="652"/><w:col w:w="3022"/>';
+
+    // equalWidth="0": each column carries its own width and the space AFTER
+    // it, and cols/@w:space is disregarded.
+    expect(
+      await colsOf(
+        `<w:cols w:num="2" w:space="720" w:equalWidth="0">${COLS}</w:cols>`,
+      ),
+    ).toMatchObject({
+      count: 2,
+      cols: [
+        { width: Math.round(8096 / 15), space: Math.round(652 / 15) },
+        { width: Math.round(3022 / 15), space: 0 },
+      ],
+    });
+
+    // Absent equalWidth is TRUE — the standard declares no default, "Word uses
+    // a default value of true" (MS-OI29500 §17.6.4 b) — and when it is on the
+    // col elements are ignored.
+    expect(await colsOf(`<w:cols w:num="2">${COLS}</w:cols>`)).toEqual({
+      count: 2,
+      gap: 48,
+    });
+    expect(
+      await colsOf(`<w:cols w:num="2" w:equalWidth="1">${COLS}</w:cols>`),
+    ).toEqual({ count: 2, gap: 48 });
+
+    // The count comes from @w:num, NOT from the number of children. The
+    // standard says num is "ignored in favor of the number of child col
+    // elements"; Word instead "requires that the value of the num attribute
+    // matches" them, and assumes 1 when num is absent (§17.6.4 c). A file that
+    // breaks that requirement gets equal columns rather than a made-up grid.
+    expect(
+      await colsOf(`<w:cols w:num="3" w:equalWidth="0">${COLS}</w:cols>`),
+    ).toEqual({ count: 3, gap: 48 });
+    expect(await colsOf(`<w:cols w:equalWidth="0">${COLS}</w:cols>`)).toEqual({
+      count: 1,
+      gap: 48,
+    });
+    // …and 45 is Word's ceiling on num (§17.6.4 a).
+    expect((await colsOf('<w:cols w:num="90"/>'))?.count).toBe(45);
+  });
+
   it('leaves doc.sections null for a plain single-column document', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:t>Plain</w:t></w:r></w:p>
