@@ -624,7 +624,15 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
     if (off !== undefined && float['hAlign'] === undefined)
       float['hOffset'] = off;
     const rel = attrOf(posH, 'relativeFrom');
-    float['hRel'] = rel === 'page' ? 'page' : 'margin'; // column/margin/… ≈ margin
+    // ST_RelFromH: margin | page | column | character | leftMargin |
+    // rightMargin | insideMargin | outsideMargin. `column` positions the
+    // object "with respect to the column it resides in" — identical to the
+    // margin box in a single-column section, which is how it went unnoticed,
+    // and 67 of the 69 anchors in the corpus use it. The four side-margin
+    // bases and `character` have no model counterpart (and no document here
+    // uses them); they keep the margin reading rather than a made-up one.
+    float['hRel'] =
+      rel === 'page' ? 'page' : rel === 'column' ? 'column' : 'margin';
   }
   const posV = child(anchor, 'wp:positionV');
   if (posV) {

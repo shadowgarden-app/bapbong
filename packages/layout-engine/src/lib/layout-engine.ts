@@ -3409,8 +3409,18 @@ function placeBlocks(
   /** Pin a paragraph's floats relative to its start; register text exclusions. */
   const registerFloats = (flow: FlowParagraph, yPara: number) => {
     for (const f of flow.floats ?? []) {
-      const baseL = f.hRel === 'page' ? 0 : contentLeft;
-      const baseR = f.hRel === 'page' ? curPage.width : contentRight;
+      // `column` is the text column the anchor paragraph sits in — this runs
+      // inside the placer, so colX0/colX1 already name it. Reading it as the
+      // content box put six pictures of a two- and three-column factsheet off
+      // the page, one of them entirely (x −339..−3).
+      const baseL =
+        f.hRel === 'page' ? 0 : f.hRel === 'column' ? colX0() : contentLeft;
+      const baseR =
+        f.hRel === 'page'
+          ? curPage.width
+          : f.hRel === 'column'
+            ? colX1()
+            : contentRight;
       const fx =
         f.hAlign === 'right'
           ? baseR - f.width

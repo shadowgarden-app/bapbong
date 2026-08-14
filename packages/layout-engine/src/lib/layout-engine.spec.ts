@@ -2765,6 +2765,41 @@ describe('multi-column layout', () => {
     expect(r.pages.length).toBeGreaterThan(1);
   });
 
+  it('measures a column-anchored float from its own column', () => {
+    // wp:positionH relativeFrom="column" — 67 of the 69 anchors in the corpus
+    // use it, and it means the column the anchor paragraph sits in. Read as
+    // the content box it is right until the section has two columns, and then
+    // it puts pictures off the page: a factsheet had six, one of them
+    // entirely (x −339..−3).
+    const withFloat = (hRel: 'column' | 'margin'): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 40,
+          height: 20,
+          wrap: 'none',
+          hRel,
+          hOffset: 30,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    });
+    // Band [20,180] = 160px → 10 lines fill column 0, so the 11th paragraph
+    // — the one carrying the float — is laid out in column 1 (x 130).
+    const filler = Array.from({ length: 10 }, (_, i) => para(`p${i}`));
+    const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
+    const col = layoutBlocks([...filler, withFloat('column')], cfg).pages[0];
+    expect(col.lines[10].x).toBe(130); // the anchor really is in column 1
+    expect(col.floats?.[0].x).toBe(130 + 30);
+    // A margin-anchored float ignores the column, as before.
+    const mar = layoutBlocks([...filler, withFloat('margin')], cfg).pages[0];
+    expect(mar.floats?.[0].x).toBe(20 + 30);
+  });
+
   it('balances a section that ENDS in a continuous break', () => {
     // 15 lines in a 2-column section that another continuous section follows:
     // this is the one shape Word balances, and the reason people insert a

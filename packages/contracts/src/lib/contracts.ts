@@ -368,7 +368,12 @@ export interface FlowFloat {
   /** Horizontal: alignment within hRel, or an offset from its left edge. */
   hAlign?: 'left' | 'right' | 'center';
   hOffset?: number;
-  hRel?: 'margin' | 'page';
+  /** What `hOffset` / `hAlign` is measured from. `column` is the text column
+   *  the ANCHOR PARAGRAPH sits in — the same thing as `margin` until the
+   *  section has more than one column, which is why the two were conflated
+   *  for so long. The four `*Margin` bases and `character` have no counterpart
+   *  here and fall back to `margin`. */
+  hRel?: 'margin' | 'page' | 'column';
   /** Vertical: offset from the anchor paragraph top / margin / page top. */
   vOffset?: number;
   vRel?: 'paragraph' | 'margin' | 'page';
