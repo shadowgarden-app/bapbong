@@ -2602,34 +2602,33 @@ describe('layout with footnotes', () => {
 
 describe('multi-column layout', () => {
   // content width 200; 2 cols, gap 20 → colWidth 90; col0 x=20, col1 x=130.
-  it('balances columns evenly on a single-page section', () => {
+  it('fills the columns of a LAST section instead of balancing them', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
-    // band [20,180] = 160px → 10 lines fit a column, but 15 lines balance to
-    // ~7/8 across the two columns instead of packing column 0 to 10.
+    // band [20,180] = 160px → 10 lines per column. Word balances only a
+    // section that ends in a continuous break — "without a section break at
+    // the end of your columned section, Word won't balance the text, it will
+    // simply fill the first column before moving to the next" — and nothing
+    // follows this one.
     const blocks = Array.from({ length: 15 }, (_, i) => para(`p${i}`));
     const r = layoutBlocks(blocks, cfg);
     expect(r.pages).toHaveLength(1);
     const col0 = r.pages[0].lines.filter((l) => l.x === 20);
     const col1 = r.pages[0].lines.filter((l) => l.x === 130);
-    expect(col0.length + col1.length).toBe(15);
-    expect(Math.abs(col0.length - col1.length)).toBeLessThanOrEqual(1); // even
-    expect(col0.length).toBeLessThan(10); // not greedily packed
+    expect(col0).toHaveLength(10); // packed full
+    expect(col1).toHaveLength(5);
     expect(col1[0].y).toBe(20); // column 1 restarts at the band top
   });
 
-  it('fills full-height columns on non-final pages, balances the last', () => {
+  it('fills full-height columns on every page of a last section', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
     const blocks = Array.from({ length: 25 }, (_, i) => para(`p${i}`));
     const r = layoutBlocks(blocks, cfg);
     expect(r.pages).toHaveLength(2);
-    // Page 1 is greedy: column 0 packs to the full 10 lines.
     expect(r.pages[0].lines.filter((l) => l.x === 20)).toHaveLength(10);
     expect(r.pages[0].lines).toHaveLength(20);
-    // Page 2 (the final page) balances its 5 lines ~3/2 across the columns.
-    const p2col0 = r.pages[1].lines.filter((l) => l.x === 20);
-    const p2col1 = r.pages[1].lines.filter((l) => l.x === 130);
-    expect(p2col0.length + p2col1.length).toBe(5);
-    expect(Math.abs(p2col0.length - p2col1.length)).toBeLessThanOrEqual(1);
+    // The final page fills too: 5 lines, all in column 0.
+    expect(r.pages[1].lines.filter((l) => l.x === 20)).toHaveLength(5);
+    expect(r.pages[1].lines.filter((l) => l.x === 130)).toHaveLength(0);
   });
 
   it('gives each column the width the section declared', () => {
@@ -2764,6 +2763,37 @@ describe('multi-column layout', () => {
     const all = r.pages.flatMap((p) => p.lines);
     expect(all.some((l) => l.x === 130)).toBe(true); // column 1 of section B
     expect(r.pages.length).toBeGreaterThan(1);
+  });
+
+  it('balances a section that ENDS in a continuous break', () => {
+    // 15 lines in a 2-column section that another continuous section follows:
+    // this is the one shape Word balances, and the reason people insert a
+    // continuous break at the end of a columned stretch.
+    const doc = secDoc(
+      [
+        { blockCount: 15, columns: { count: 2, gap: 20 }, newPage: false },
+        { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: false },
+      ],
+      16,
+    );
+    const r = layout(doc, config({ height: 200 }));
+    const col0 = r.pages[0].lines.filter((l) => l.x === 20 && l.y < 180);
+    const col1 = r.pages[0].lines.filter((l) => l.x === 130);
+    expect(col1.length).toBeGreaterThan(0);
+    expect(Math.abs(col0.length - col1.length)).toBeLessThanOrEqual(2);
+    expect(col0.length).toBeLessThan(10); // not packed to the band bottom
+
+    // The same content with a NEXT-PAGE section after it is not balanced —
+    // only a continuous break asks for it.
+    const paged = secDoc(
+      [
+        { blockCount: 15, columns: { count: 2, gap: 20 }, newPage: false },
+        { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: true },
+      ],
+      16,
+    );
+    const rp = layout(paged, config({ height: 200 }));
+    expect(rp.pages[0].lines.filter((l) => l.x === 20)).toHaveLength(10);
   });
 
   it('starts a new page at a next-page section break', () => {

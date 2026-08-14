@@ -1855,6 +1855,14 @@ type SectionMarker = ColumnConfig & {
    *  and a manual break is the author saying where the column ends instead.
    *  Filled by assignSectionHeights, which already walks each section. */
   hasColumnBreak?: boolean;
+  /** The section is followed by one that starts CONTINUOUS — i.e. it ends in
+   *  a continuous section break, which is the only thing that makes Word
+   *  balance its columns: "without a section break at the end of your
+   *  columned section, Word won't balance the text — it will simply fill the
+   *  first column before moving to the next". The document's last section
+   *  never has it. Filled by assignSectionHeights, which sees the markers in
+   *  order. */
+  endsContinuous?: boolean;
   /** Per-section page-geometry override (sanitized); absent → config.page. */
   page?: PageConfig;
   /** Section index — stamps pages (ResolvedPage.chromeIndex) so the painter
@@ -1934,6 +1942,11 @@ function assignSectionHeights(items: BlockItem[]): void {
   let pendingAfter = 0;
   for (const item of items) {
     if (item.section) {
+      // This section starting continuous is exactly what "the previous one
+      // ends in a continuous break" means — the break type lives on the
+      // section it BEGINS (ISO 29500 §17.6.18 puts a section's properties at
+      // its end, which is what makes the XML read backwards).
+      if (current) current.endsContinuous = !item.section.newPage;
       current = item.section;
       current.height = 0;
       current.hasColumnBreak = false;
@@ -3751,9 +3764,15 @@ function placeBlocks(
           applyColumns(item.section);
         }
         // Balance the new section's columns once its content fits a page —
-        // unless the author placed a column break, which decides the split
-        // themselves and which Word takes as "do not balance this".
-        balancing = colCount > 1 && !item.section.hasColumnBreak;
+        // but ONLY a section that ends in a continuous break, which is the
+        // whole reason people insert one. The document's last section fills
+        // column 1 to the bottom and spills into column 2, and so does a
+        // section that ends in a page break. A manual column break also turns
+        // balancing off: it is the author saying where the column ends.
+        balancing =
+          colCount > 1 &&
+          !item.section.hasColumnBreak &&
+          item.section.endsContinuous === true;
         sectionRemaining = item.section.height ?? 0;
         rebalance();
       }
