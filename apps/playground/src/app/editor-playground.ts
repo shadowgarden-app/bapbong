@@ -194,8 +194,11 @@ export class EditorPlayground implements OnDestroy {
    *  UNKNOWN count and folded away by default — visible on demand so the
    *  demotion stays auditable rather than becoming a silent ignore-list. */
   protected readonly auditInert = signal<AuditEntry[]>([]);
+  /** Declared but unreachable — see AuditReport.unreferenced. */
+  protected readonly auditUnref = signal<AuditEntry[]>([]);
   protected readonly auditIgnored = signal<AuditEntry[]>([]);
   protected readonly showAuditInert = signal(false);
+  protected readonly showAuditUnref = signal(false);
   protected readonly showAuditIgnored = signal(false);
   protected readonly pageCount = signal(0);
 
@@ -297,6 +300,7 @@ export class EditorPlayground implements OnDestroy {
     const report = audit.enabled ? audit.lastReport : null;
     this.auditUnknown.set(report?.unknown ?? []);
     this.auditInert.set(report?.inert ?? []);
+    this.auditUnref.set(report?.unreferenced ?? []);
     this.auditIgnored.set(report?.ignored ?? []);
   }
 
@@ -314,6 +318,7 @@ export class EditorPlayground implements OnDestroy {
     if (!on) {
       this.auditUnknown.set([]);
       this.auditInert.set([]);
+      this.auditUnref.set([]);
       this.auditIgnored.set([]);
     }
   }

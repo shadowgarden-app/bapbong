@@ -10,6 +10,7 @@ const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 async function makeDocx(
   documentXml: string,
   stylesXml?: string,
+  themeXml?: string,
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
@@ -22,6 +23,7 @@ async function makeDocx(
   );
   zip.file('word/document.xml', documentXml);
   if (stylesXml) zip.file('word/styles.xml', stylesXml);
+  if (themeXml) zip.file('word/theme/theme1.xml', themeXml);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -205,6 +207,46 @@ describe('xml audit (import)', () => {
     // On (including the absent-means-on default) is a feature we lack.
     expect((await run('')).unknown).toContain('w:autoSpaceDE');
     expect((await run('w:val="1"')).unknown).toContain('w:autoSpaceDN');
+  });
+
+  it('separates a declaration nothing points at from a real gap', async () => {
+    audit.setEnabled(true);
+    const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+    // A theme whose format scheme offers a gradient nobody selects.
+    const theme =
+      `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}" name="t"><a:themeElements>` +
+      `<a:fmtScheme name="Office"><a:fillStyleLst>` +
+      `<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs></a:gsLst></a:gradFill>` +
+      `</a:fillStyleLst></a:fmtScheme></a:themeElements></a:theme>`;
+    const body = (ref: string) =>
+      `<?xml version="1.0"?><w:document ${NS}><w:body><w:p><w:r><w:drawing>` +
+      `<wp:inline><wp:extent cx="914400" cy="914400"/><a:graphic><a:graphicData><wps:wsp>` +
+      `<wps:spPr><a:prstGeom prst="rect"/></wps:spPr>${ref}` +
+      `</wps:wsp></a:graphicData></a:graphic></wp:inline>` +
+      `</w:drawing></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const run = async (ref: string) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      await importDocx(await makeDocx(body(ref), undefined, theme));
+      log.mockRestore();
+      const r = audit.lastReport;
+      return {
+        unknown: keys(r?.unknown ?? []),
+        unref: keys(r?.unreferenced ?? []),
+      };
+    };
+
+    // No shape selects from the matrix: the gradient renders nothing here.
+    const dead = await run('');
+    expect(dead.unref).toContain('a:gradFill');
+    expect(dead.unknown).not.toContain('a:gradFill');
+
+    // One a:lnRef anywhere and the whole matrix is back in play — a shape is
+    // picking entries out of it, and the ones we do not read are real gaps.
+    const live = await run(
+      `<wps:style><a:lnRef idx="2"><a:srgbClr val="000000"/></a:lnRef></wps:style>`,
+    );
+    expect(live.unknown).toContain('a:gradFill');
+    expect(live.unref).not.toContain('a:gradFill');
   });
 
   it('counts a smart tag handled once its runs are unwrapped', async () => {

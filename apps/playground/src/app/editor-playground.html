@@ -45,18 +45,26 @@
   </div>
 
   @if (xmlAudit() && (auditUnknown().length || auditInert().length ||
-  auditIgnored().length)) {
+  auditUnref().length || auditIgnored().length)) {
   <div class="audit">
     <div class="audit-head">
       <strong>{{ auditUnknown().length }}</strong> UNKNOWN · {{
-      auditInert().length }} inert · {{ auditIgnored().length }}
-      ignored-by-design @if (auditInert().length) {
+      auditInert().length }} inert · {{ auditUnref().length }} unreferenced · {{
+      auditIgnored().length }} ignored-by-design @if (auditInert().length) {
       <button
         type="button"
         class="audit-more"
         (click)="showAuditInert.set(!showAuditInert())"
       >
         {{ showAuditInert() ? 'hide inert' : 'show inert' }}
+      </button>
+      } @if (auditUnref().length) {
+      <button
+        type="button"
+        class="audit-more"
+        (click)="showAuditUnref.set(!showAuditUnref())"
+      >
+        {{ showAuditUnref() ? 'hide unreferenced' : 'show unreferenced' }}
       </button>
       } @if (auditIgnored().length) {
       <button
@@ -78,6 +86,14 @@
     } @if (showAuditInert()) { @for (e of auditInert(); track e.part + e.key) {
     <div class="audit-row is-ignored">
       <span class="a-kind">inert</span>
+      <span class="a-part">{{ e.part }}</span>
+      <span class="a-key">{{ e.key }}</span>
+      <span class="a-count">×{{ e.count }}</span>
+    </div>
+    } } @if (showAuditUnref()) { @for (e of auditUnref(); track e.part + e.key)
+    {
+    <div class="audit-row is-ignored">
+      <span class="a-kind">unref</span>
       <span class="a-part">{{ e.part }}</span>
       <span class="a-key">{{ e.key }}</span>
       <span class="a-count">×{{ e.count }}</span>

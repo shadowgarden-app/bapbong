@@ -56,6 +56,9 @@ export interface AuditEntry {
  *  value-derived verdict only the tree walk can compute. */
 interface Counted extends AuditEntry {
   inert: boolean;
+  /** Inside a declaration nothing in the document points at — see
+   *  {@link collectPart}'s dead-zone walk. */
+  unreferenced: boolean;
 }
 
 export interface AuditReport {
@@ -65,6 +68,15 @@ export interface AuditReport {
   /** Unread, but carrying a value the spec defines as having no effect — so
    *  reading it would change nothing on the page. See INERT_ATTRS. */
   inert: AuditEntry[];
+  /**
+   * Unread, and inside something the document DECLARES but never uses: a
+   * `w:style` whose id is mentioned nowhere, or the theme's `a:fmtScheme`
+   * when no shape references it. Nothing on the page comes from these, so
+   * counting them as gaps buries the real ones — but they are a separate
+   * bucket from `inert`, because the reason is reachability rather than
+   * value, and from `ignored`, because we did not decide to skip them.
+   */
+  unreferenced: AuditEntry[];
   ignored: AuditEntry[];
 }
 
@@ -490,6 +502,9 @@ let visited = new WeakSet<OoxmlNode>();
 let subtrees = new WeakSet<OoxmlNode>();
 let readAttrs = new WeakMap<OoxmlNode, Set<string>>();
 let parts: { name: string; root: OoxmlNode }[] = [];
+/** Whether any shape points into the theme's format scheme — the input to the
+ *  dead-zone rule. Filled by scanThemeReferences at endImport. */
+let themeReferenced = false;
 let exportCounts = new Map<string, number>();
 let lastReport: AuditReport | null = null;
 
@@ -511,6 +526,7 @@ function emitLine(line: string): void {
 function classify(counts: Map<string, Counted>): {
   unknown: AuditEntry[];
   inert: AuditEntry[];
+  unreferenced: AuditEntry[];
   ignored: AuditEntry[];
 } {
   const unknown: AuditEntry[] = [];
@@ -518,6 +534,7 @@ function classify(counts: Map<string, Counted>): {
   // inert and ignored-by-design ones aggregate across parts — pure noise
   // volume otherwise (the same rsid attr once per header/footer part).
   const inertByKey = new Map<string, AuditEntry>();
+  const deadByKey = new Map<string, AuditEntry>();
   const ignoredByKey = new Map<string, AuditEntry>();
   const aggregate = (into: Map<string, AuditEntry>, e: Counted) => {
     const agg = into.get(e.key);
@@ -531,6 +548,8 @@ function classify(counts: Map<string, Counted>): {
       aggregate(ignoredByKey, e);
     } else if (e.inert) {
       aggregate(inertByKey, e);
+    } else if (e.unreferenced) {
+      aggregate(deadByKey, e);
     } else {
       unknown.push({ part: e.part, key: e.key, count: e.count });
     }
@@ -539,17 +558,19 @@ function classify(counts: Map<string, Counted>): {
     b.count - a.count || a.key.localeCompare(b.key);
   unknown.sort(byCount);
   const inert = [...inertByKey.values()].sort(byCount);
+  const unreferenced = [...deadByKey.values()].sort(byCount);
   const ignored = [...ignoredByKey.values()].sort(byCount);
-  return { unknown, inert, ignored };
+  return { unknown, inert, unreferenced, ignored };
 }
 
 function emitReport(report: AuditReport): void {
   lastReport = report;
   const { mode, label, unknown, inert, ignored } = report;
+  const unref = report.unreferenced ?? [];
   const header =
     `[xml-audit] ${mode} "${label}" — ` +
     `${unknown.length} UNKNOWN, ${inert.length} inert, ` +
-    `${ignored.length} ignored-by-design`;
+    `${unref.length} unreferenced, ${ignored.length} ignored-by-design`;
   const c = console as unknown as {
     groupCollapsed?: (l: string) => void;
     groupEnd?: () => void;
@@ -560,15 +581,57 @@ function emitReport(report: AuditReport): void {
   if (sink && grouped) sink(header);
   const pad = Math.max(
     0,
-    ...[...unknown, ...inert, ...ignored].map((e) => e.part.length),
+    ...[...unknown, ...inert, ...unref, ...ignored].map((e) => e.part.length),
   );
   for (const e of unknown)
     emitLine(`  UNKNOWN ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
   for (const e of inert)
     emitLine(`  inert   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
+  for (const e of unref)
+    emitLine(`  unref   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
   for (const e of ignored)
     emitLine(`  ignored ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
   if (grouped) c.groupEnd?.();
+}
+
+/**
+ * Does any shape in the package point into the theme's style matrix?
+ *
+ * `a:fmtScheme` is a menu of fills, lines and effects that shapes select from
+ * by index — `a:lnRef idx="2"` means "the second entry of lnStyleLst". A
+ * document with no such reference renders nothing from it, however many
+ * gradients it declares. (`a:clrScheme` is deliberately NOT part of this: theme
+ * colours are resolved by name, and stay accountable.)
+ *
+ * Note what this does NOT do: styles. Unreferenced `w:style` elements are
+ * already handled at the source — `auditMarkUnusedStyles` in styles.ts marks
+ * their subtrees consumed, with the same "a w:default style is never unused"
+ * guard. An earlier cut of this duplicated that rule here and the test proved
+ * it dead: an orphan style's properties never reach the sweep at all.
+ */
+function scanThemeReferences(): void {
+  themeReferenced = false;
+  const walk = (n: OoxmlNode): void => {
+    if (
+      n.name === 'a:lnRef' ||
+      n.name === 'a:fillRef' ||
+      n.name === 'a:effectRef' ||
+      n.name === 'a:fontRef'
+    ) {
+      themeReferenced = true;
+      return;
+    }
+    for (const c of n.children) walk(c);
+  };
+  for (const p of parts) {
+    walk(p.root);
+    if (themeReferenced) return;
+  }
+}
+
+/** Does this node open a declaration nothing in the document points at? */
+function isDeadDeclaration(n: OoxmlNode): boolean {
+  return n.name === 'a:fmtScheme' && !themeReferenced;
 }
 
 /** Walk a registered part, collecting untouched tags/attrs (see module doc
@@ -581,15 +644,17 @@ function collectPart(
   root: OoxmlNode,
   counts: Map<string, Counted>,
 ): void {
-  const bump = (key: string, inert: boolean) => {
-    const id = `${part} ${key} ${inert}`;
+  const bump = (key: string, inert: boolean, dead: boolean) => {
+    const id = `${part} ${key} ${inert} ${dead}`;
     const e = counts.get(id);
     if (e) e.count++;
-    else counts.set(id, { part, key, count: 1, inert });
+    else counts.set(id, { part, key, count: 1, inert, unreferenced: dead });
   };
-  const walk = (node: OoxmlNode, parentVisited: boolean) => {
+  const walk = (node: OoxmlNode, parentVisited: boolean, dead: boolean) => {
     for (const c of node.children) {
       if (subtrees.has(c)) continue; // consumed wholesale by design
+      // A declaration nothing points at makes a dead zone for its subtree.
+      const inDead = dead || isDeadDeclaration(c);
       const v = visited.has(c);
       if (v) {
         const asked = readAttrs.get(c);
@@ -597,15 +662,19 @@ function collectPart(
           // xmlns declarations aren't content — not worth an "ignored" line.
           if (a.startsWith('xmlns')) continue;
           if (!asked?.has(a))
-            bump(`${c.name} @${a}`, isInertAttr(c.name, a, c.attrs[a], c));
+            bump(
+              `${c.name} @${a}`,
+              isInertAttr(c.name, a, c.attrs[a], c),
+              inDead,
+            );
         }
       } else if (parentVisited) {
-        bump(c.name, isInertTag(c));
+        bump(c.name, isInertTag(c), inDead);
       }
-      walk(c, v);
+      walk(c, v, inDead);
     }
   };
-  walk(root, true); // the synthetic #root counts as visited
+  walk(root, true, false); // the synthetic #root counts as visited
 }
 
 export const audit = {
@@ -695,6 +764,7 @@ export const audit = {
     if (importDepth > 0 || !importActive) return;
     importActive = false;
     const counts = new Map<string, Counted>();
+    scanThemeReferences();
     for (const p of parts) collectPart(p.name, p.root, counts);
     emitReport({ mode: 'import', label: importLabel, ...classify(counts) });
     parts = [];
@@ -727,6 +797,7 @@ export const audit = {
       label: exportLabel,
       unknown,
       inert: [],
+      unreferenced: [],
       ignored: [],
     });
   },
