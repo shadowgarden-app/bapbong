@@ -443,6 +443,9 @@ export interface FlowParagraph {
   /** Force this paragraph to start a new page (w:pageBreakBefore / a page
    *  break run at its head). */
   pageBreakBefore?: boolean;
+  /** Force it to start in the next text column (w:br w:type="column"). With
+   *  one column that IS a page break, which is what Word does. */
+  columnBreakBefore?: boolean;
   /** w:keepNext — stay on the same page as the next block's first line. */
   keepNext?: boolean;
   /** w:keepLines — never split this paragraph across pages when it fits a

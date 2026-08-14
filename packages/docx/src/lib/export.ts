@@ -653,7 +653,14 @@ function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
     open += `<w:bookmarkStart w:id="${id}" w:name="${esc(name)}"/>`;
     close += `<w:bookmarkEnd w:id="${id}"/>`;
   }
-  return `<w:p>${pPr}${open}${inlineContent(node, ctx)}${close}</w:p>`;
+  // A column break has no pPr flag to write — it only exists as a run's
+  // w:br, so it goes back the way it came in: at the paragraph's head, ahead
+  // of its content. Without this the break would vanish on the first save and
+  // the section's text would reflow into one column.
+  const colBreak = node.attrs['columnBreakBefore']
+    ? '<w:r><w:br w:type="column"/></w:r>'
+    : '';
+  return `<w:p>${pPr}${open}${colBreak}${inlineContent(node, ctx)}${close}</w:p>`;
 }
 
 // ── tables ──────────────────────────────────────────────────────────

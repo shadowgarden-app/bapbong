@@ -165,6 +165,9 @@ export const schema = new Schema({
         field: { default: null },
         // w:pageBreakBefore — start this paragraph on a new page.
         pageBreakBefore: { default: false },
+        // A w:br w:type="column" at this paragraph's head — start it in the
+        // next text column (in a single-column section, on the next page).
+        columnBreakBefore: { default: false },
         // w:contextualSpacing — "ignore spacing above and below when using
         // identical styles". Present ⇒ the flag is on; the two booleans say
         // which side actually borders a paragraph of the SAME style, which is

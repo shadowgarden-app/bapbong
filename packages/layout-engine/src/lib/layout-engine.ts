@@ -334,6 +334,7 @@ function paragraphToFlow(
   );
   if (spacing) flow.spacing = spacing;
   if (node.attrs['pageBreakBefore'] === true) flow.pageBreakBefore = true;
+  if (node.attrs['columnBreakBefore'] === true) flow.columnBreakBefore = true;
   if (node.attrs['keepNext'] === true) flow.keepNext = true;
   if (node.attrs['keepLines'] === true) flow.keepLines = true;
   if (node.attrs['widowControl'] === false) flow.widowControl = false;
@@ -1776,6 +1777,7 @@ type ParaItem = {
   before?: number;
   after?: number;
   pageBreakBefore?: boolean;
+  columnBreakBefore?: boolean;
   /** Pagination keeps (w:keepNext / w:keepLines / w:widowControl off). */
   keepNext?: boolean;
   keepLines?: boolean;
@@ -1788,6 +1790,11 @@ type ParaItem = {
 type SectionMarker = ColumnConfig & {
   newPage: boolean;
   height?: number;
+  /** The section contains an explicit column break, so its columns are NOT
+   *  balanced — Word balances what a continuous section break leaves over,
+   *  and a manual break is the author saying where the column ends instead.
+   *  Filled by assignSectionHeights, which already walks each section. */
+  hasColumnBreak?: boolean;
   /** Per-section page-geometry override (sanitized); absent → config.page. */
   page?: PageConfig;
   /** Section index — stamps pages (ResolvedPage.chromeIndex) so the painter
@@ -1869,8 +1876,11 @@ function assignSectionHeights(items: BlockItem[]): void {
     if (item.section) {
       current = item.section;
       current.height = 0;
+      current.hasColumnBreak = false;
       pendingAfter = 0;
     }
+    if (current && 'para' in item && item.para.columnBreakBefore)
+      current.hasColumnBreak = true;
     const overlap =
       'para' in item
         ? Math.min(pendingAfter, item.para.before ?? 0)
@@ -3676,8 +3686,10 @@ function placeBlocks(
           }
           applyColumns(item.section);
         }
-        // Balance the new section's columns once its content fits a page.
-        balancing = colCount > 1;
+        // Balance the new section's columns once its content fits a page —
+        // unless the author placed a column break, which decides the split
+        // themselves and which Word takes as "do not balance this".
+        balancing = colCount > 1 && !item.section.hasColumnBreak;
         sectionRemaining = item.section.height ?? 0;
         rebalance();
       }
@@ -3728,6 +3740,12 @@ function placeBlocks(
           finalizePage();
           rebalance();
         }
+        // w:br w:type="column": resume in the next text column. breakBand
+        // finalizes the page instead when this is the last column — which is
+        // also what makes a column break in a single-column section behave as
+        // a page break, as Word does. An empty column swallows it: there is
+        // nothing to push away from.
+        else if (item.para.columnBreakBefore && colDirty) breakBand();
         // Pagination keeps: break the band early when this paragraph
         // (keepLines) — or this paragraph plus the head of what must follow
         // it (keepNext) — cannot finish here but WOULD fit a fresh band.
@@ -4197,6 +4215,7 @@ export function layoutBlocks(
               before: block.spacing?.before,
               after: block.spacing?.after,
               pageBreakBefore: block.pageBreakBefore,
+              columnBreakBefore: block.columnBreakBefore,
               keepNext: block.keepNext,
               keepLines: block.keepLines,
               widowControl: block.widowControl,
@@ -4847,6 +4866,7 @@ export function layout(
         before: sp?.before,
         after: sp?.after,
         pageBreakBefore: node.attrs['pageBreakBefore'] === true,
+        columnBreakBefore: node.attrs['columnBreakBefore'] === true,
         keepNext: node.attrs['keepNext'] === true,
         keepLines: node.attrs['keepLines'] === true,
         widowControl: node.attrs['widowControl'] !== false,

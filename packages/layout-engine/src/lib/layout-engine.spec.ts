@@ -2657,6 +2657,45 @@ describe('multi-column layout', () => {
     expect([...widths].sort((a, b) => a - b)).toEqual([60, 120]);
   });
 
+  it('starts a paragraph with a column break in the next column', () => {
+    const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
+    const blocks = [
+      para('a'),
+      { ...para('b'), columnBreakBefore: true } as FlowBlock,
+      para('c'),
+    ];
+    const r = layoutBlocks(blocks, cfg);
+    expect(r.pages).toHaveLength(1);
+    expect(r.pages[0].lines.map((l) => l.x)).toEqual([20, 130, 130]);
+    // The break also switches off balancing: Word balances what a continuous
+    // section break leaves over, and a manual break is the author saying where
+    // the column ends instead. Balanced, these three lines would split 2/1.
+    expect(r.pages[0].lines[1].y).toBe(20); // column 1 restarts at the top
+  });
+
+  it('a column break in the last column starts a new page', () => {
+    const cfg = { ...config({ height: 200 }), columns: { count: 2, gap: 20 } };
+    const r = layoutBlocks(
+      [
+        para('a'),
+        { ...para('b'), columnBreakBefore: true } as FlowBlock,
+        { ...para('c'), columnBreakBefore: true } as FlowBlock,
+      ],
+      cfg,
+    );
+    expect(r.pages).toHaveLength(2);
+    expect(r.pages[1].lines.map((l) => l.x)).toEqual([20]);
+  });
+
+  it('a column break with one column is a page break, as Word has it', () => {
+    const cfg = { ...config({ height: 200 }), columns: { count: 1, gap: 20 } };
+    const r = layoutBlocks(
+      [para('a'), { ...para('b'), columnBreakBefore: true } as FlowBlock],
+      cfg,
+    );
+    expect(r.pages).toHaveLength(2);
+  });
+
   it('single column is unchanged (no x shift)', () => {
     const cfg = { ...config({ height: 200 }), columns: { count: 1, gap: 20 } };
     const r = layoutBlocks([para('a'), para('b')], cfg);

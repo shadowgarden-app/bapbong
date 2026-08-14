@@ -2075,6 +2075,32 @@ describe('importDocx', () => {
     expect((await colsOf('<w:cols w:num="90"/>'))?.count).toBe(45);
   });
 
+  it('reads w:br w:type="column" as a column break, not a line break', async () => {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>first</w:t></w:r></w:p>
+      <w:p><w:r><w:br w:type="column"/><w:t>second</w:t></w:r></w:p>
+      <w:sectPr><w:cols w:num="2"/></w:sectPr>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const paras: import('prosemirror-model').Node[] = [];
+    doc.forEach((n) => paras.push(n));
+    expect(paras[1].attrs['columnBreakBefore']).toBe(true);
+    // It used to fall through to the generic w:br handler and show up as a
+    // stray blank line at the head of the paragraph.
+    expect(paras[1].childCount).toBe(1);
+    expect(paras[1].textContent).toBe('second');
+
+    // A column break has no pPr flag to save it — it has to go back out as
+    // the run it came from, or the section reflows into one column on save.
+    const out = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(out);
+    const xml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    expect(xml).toContain('<w:br w:type="column"/>');
+    expect(xml.indexOf('<w:br w:type="column"/>')).toBeLessThan(
+      xml.indexOf('second'),
+    );
+  });
+
   it('leaves doc.sections null for a plain single-column document', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:t>Plain</w:t></w:r></w:p>
