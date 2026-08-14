@@ -3669,6 +3669,48 @@ describe('legacy VML shapes', () => {
     expect(box).toContain('chú thích');
   });
 
+  it('measures a VML float from the anchor its wrap names', async () => {
+    const floatOf = async (shapeAttrs: string, wrap: string) => {
+      const bytes = await makeDocx(
+        vmlDoc(`<w:p><w:r><w:pict>
+          <v:shape type="#_x0000_t202" style="position:absolute;margin-left:24pt;margin-top:5pt;width:60pt;height:30pt${shapeAttrs}">
+            <v:textbox><w:txbxContent><w:p><w:r><w:t>x</w:t></w:r></w:p></w:txbxContent></v:textbox>
+            ${wrap}
+          </v:shape>
+        </w:pict></w:r></w:p>`),
+      );
+      const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+      let img: import('prosemirror-model').Node | null = null;
+      doc.descendants((n) => {
+        if (n.type.name === 'image') img = n;
+        return true;
+      });
+      return img!.attrs['float'] as Record<string, unknown>;
+    };
+    // w10:wrap/@anchorx — the factsheet's two table boxes carry exactly this,
+    // and reading it as "margin" put them a left margin too far right.
+    expect(await floatOf('', '<w10:wrap anchorx="page"/>')).toMatchObject({
+      hRel: 'page',
+      vRel: 'paragraph',
+    });
+    expect(
+      await floatOf('', '<w10:wrap anchorx="margin" anchory="margin"/>'),
+    ).toMatchObject({ hRel: 'margin', vRel: 'margin' });
+    // An omitted anchorx must not beat a style that speaks: a file in the
+    // corpus pairs <w10:wrap type="through"/> with mso-position-*-relative:text
+    // on 15 shapes, and the spec's "assume page" default would move them all.
+    expect(
+      await floatOf(
+        ';mso-position-horizontal-relative:text;mso-position-vertical-relative:text',
+        '<w10:wrap type="through"/>',
+      ),
+    ).toMatchObject({ hRel: 'margin', vRel: 'paragraph' });
+    // The style alone is enough — no w10:wrap element at all.
+    expect(
+      await floatOf(';mso-position-horizontal-relative:page', ''),
+    ).toMatchObject({ hRel: 'page' });
+  });
+
   it('reads arcsize in each encoding, halving it against the shorter side', async () => {
     const ratioOf = async (attr: string) => {
       const bytes = await makeDocx(

@@ -1191,6 +1191,11 @@ function parseVmlStyle(style: string): {
   height?: number;
   zIndex?: number;
   flipV?: boolean;
+  /** mso-position-horizontal-relative: what margin-left is measured from
+   *  (margin | page | text | char). */
+  hRelRaw?: string;
+  /** mso-position-vertical-relative (margin | page | text | line). */
+  vRelRaw?: string;
 } {
   const out: ReturnType<typeof parseVmlStyle> = { absolute: false };
   for (const part of style.split(';')) {
@@ -1205,6 +1210,8 @@ function parseVmlStyle(style: string): {
     else if (k === 'height') out.height = cssLenToPx(v);
     else if (k === 'z-index') out.zIndex = Number(v) || 0;
     else if (k === 'flip') out.flipV = v.includes('y');
+    else if (k === 'mso-position-horizontal-relative') out.hRelRaw = v;
+    else if (k === 'mso-position-vertical-relative') out.vRelRaw = v;
   }
   return out;
 }
@@ -1319,6 +1326,53 @@ function parseVmlTextbox(
   return { blocks };
 }
 
+/**
+ * What a VML float's `margin-left` is measured from.
+ *
+ * Two sources say it and they agree wherever both appear: `w10:wrap/@anchorx`
+ * (ECMA-376 Part 4 — "If this attribute is omitted, then its value shall be
+ * assumed to be `page`") and the `mso-position-horizontal-relative` style
+ * property (margin | page | text | char). An EXPLICIT style property beats the
+ * element's default, because an omitted attribute must not overrule something
+ * the document states outright — a file here has `<w10:wrap type="through"/>`
+ * with no anchorx next to a style that says `text`, and reading the default
+ * there would move 15 shapes.
+ *
+ * `text` and `char` mean the text column and the anchor character; the model
+ * has no such anchor base, so they keep the historical `margin` reading rather
+ * than being mapped to something they are not.
+ */
+function vmlHRel(
+  wrap: OoxmlNode | undefined,
+  styleValue: string | undefined,
+): 'margin' | 'page' {
+  const explicit = attrOf(wrap, 'anchorx') ?? styleValue;
+  if (explicit === 'page') return 'page';
+  if (explicit === 'margin') return 'margin';
+  // Element present but silent, and the style says nothing either: the spec's
+  // default. No document in the corpus reaches this branch.
+  if (!explicit && wrap) return 'page';
+  return 'margin';
+}
+
+/** The vertical twin of {@link vmlHRel}, from `w10:wrap/@anchory` or
+ *  `mso-position-vertical-relative` (margin | page | text | line). No source
+ *  found states a default for `anchory`, so an absent value keeps the
+ *  paragraph-relative reading instead of inventing one. `line` is the line the
+ *  anchor sits on — unmodelled, and the anchor paragraph is the closest thing
+ *  we have. */
+function vmlVRel(
+  wrap: OoxmlNode | undefined,
+  styleValue: string | undefined,
+): 'paragraph' | 'margin' | 'page' {
+  const explicit = attrOf(wrap, 'anchory') ?? styleValue;
+  return explicit === 'page'
+    ? 'page'
+    : explicit === 'margin'
+      ? 'margin'
+      : 'paragraph';
+}
+
 /** A drawn legacy VML shape in a run's w:pict: v:roundrect / v:rect / v:oval
  *  boxes (with their v:textbox content) and straight connectors
  *  (o:connectortype, or a `type="#id"` reference to a v:shapetype with
@@ -1411,7 +1465,12 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
 
   let float: Record<string, unknown> | null = null;
   if (st.absolute) {
-    float = { wrap: 'none', hRel: 'margin', vRel: 'paragraph' };
+    const wrapEl = child(el, 'w10:wrap');
+    float = {
+      wrap: 'none',
+      hRel: vmlHRel(wrapEl, st.hRelRaw),
+      vRel: vmlVRel(wrapEl, st.vRelRaw),
+    };
     if (st.left !== undefined) float['hOffset'] = Math.round(st.left + dx);
     if (st.top !== undefined) float['vOffset'] = Math.round(st.top + dy);
     if ((st.zIndex ?? 0) < 0) float['behind'] = true;
