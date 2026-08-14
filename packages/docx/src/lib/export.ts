@@ -298,15 +298,17 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
     s.kind === 'roundRect' && s.cornerRatio != null
       ? `<a:avLst><a:gd name="adj" fmla="val ${Math.round(s.cornerRatio * 100000)}"/></a:avLst>`
       : '<a:avLst/>';
-  // Textbox paragraphs ride the node as PM JSON; re-emit them as txbxContent
-  // so the text survives the round-trip.
+  // Textbox content rides the node as PM JSON; re-emit it as txbxContent so
+  // the story survives the round-trip — through `blockXml`, because a textbox
+  // may hold tables as well as paragraphs and emitting only the paragraphs
+  // would delete a table on the first save.
   const tb = node.attrs['textbox'] as {
-    paragraphs: unknown[];
+    blocks: unknown[];
     inset?: { l: number; t: number; r: number; b: number };
   } | null;
   const txbx = tb
-    ? `<wps:txbx><w:txbxContent>${tb.paragraphs
-        .map((json) => paragraphXml(node.type.schema.nodeFromJSON(json), ctx))
+    ? `<wps:txbx><w:txbxContent>${tb.blocks
+        .map((json) => blockXml(node.type.schema.nodeFromJSON(json), ctx))
         .join('')}</w:txbxContent></wps:txbx>`
     : '';
   const bodyPr = tb?.inset

@@ -9,6 +9,7 @@ import {
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
 import { importDocx } from './docx';
+import { exportDocx } from './export';
 import { DocxImportError, IMPORT_ERROR_MESSAGES, sniffDocx } from './sniff';
 import { buildEncryptedDocx, importFailure } from './crypto-docx.spec-helper';
 
@@ -1880,9 +1881,9 @@ describe('importDocx', () => {
     expect(outerCell.child(2).attrs.align).toBe('right');
     // A textbox is its own story: the table style must not reach its text.
     const box = outerCell.child(3).child(0).attrs.textbox as {
-      paragraphs: { attrs: { align: string | null } }[];
+      blocks: { attrs: { align: string | null } }[];
     };
-    expect(box.paragraphs[0].attrs.align).toBeNull();
+    expect(box.blocks[0].attrs.align).toBeNull();
   });
 
   it('parses table border visibility (direct w:tblBorders and via table style)', async () => {
@@ -2714,11 +2715,11 @@ describe('importDocx', () => {
     expect(node.type.name).toBe('image');
     expect(node.attrs.shape).toMatchObject({ kind: 'rect', fill: '#FFFFFF' });
 
-    const tb = node.attrs.textbox as { paragraphs: unknown[]; inset?: unknown };
+    const tb = node.attrs.textbox as { blocks: unknown[]; inset?: unknown };
     expect(tb).toBeTruthy();
-    expect(tb.paragraphs).toHaveLength(2);
+    expect(tb.blocks).toHaveLength(2);
     // Formatting survives: paragraphs are real PM JSON with marks.
-    const p0 = schema.nodeFromJSON(tb.paragraphs[0] as never);
+    const p0 = schema.nodeFromJSON(tb.blocks[0] as never);
     expect(p0.textContent).toBe('Phiếu học tập: Học sinh trả lời.');
     expect(p0.child(0).marks.map((m) => m.type.name)).toContain('strong');
     // Explicit bodyPr insets in EMU → px (missing sides get Word defaults).
@@ -3620,10 +3621,52 @@ describe('legacy VML shapes', () => {
       hRel: 'margin',
       vRel: 'paragraph',
     });
-    const tb = a['textbox'] as { paragraphs: unknown[]; inset?: object };
-    expect(tb.paragraphs).toHaveLength(1);
-    expect(JSON.stringify(tb.paragraphs)).toContain('Dịch vụ kì vọng');
+    const tb = a['textbox'] as { blocks: unknown[]; inset?: object };
+    expect(tb.blocks).toHaveLength(1);
+    expect(JSON.stringify(tb.blocks)).toContain('Dịch vụ kì vọng');
     expect(tb.inset).toMatchObject({ l: 2, t: 1, r: 2, b: 1 });
+  });
+
+  it('keeps a table inside a textbox — txbxContent holds block content', async () => {
+    // CT_TxbxContent is EG_BlockLevelElts: the same group w:body uses. Reading
+    // only w:p dropped two whole tables from a factsheet whose textboxes are
+    // invisible frames holding nothing else.
+    const bytes = await makeDocx(
+      vmlDoc(`<w:p><w:r><w:pict>
+        <v:shape id="_x0000_s1032" type="#_x0000_t202" style="position:absolute;margin-left:24pt;margin-top:56pt;width:270pt;height:135pt" filled="f" stroked="f">
+          <v:textbox inset="0,0,0,0"><w:txbxContent>
+            <w:tbl>
+              <w:tblGrid><w:gridCol w:w="3737"/><w:gridCol w:w="1729"/></w:tblGrid>
+              <w:tr><w:tc><w:p><w:r><w:t>Điểm đến</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:p><w:r><w:t>Khoảng cách</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            <w:p><w:r><w:t>chú thích</w:t></w:r></w:p>
+          </w:txbxContent></v:textbox>
+        </v:shape>
+      </w:pict></w:r></w:p>`),
+    );
+    const { doc } = await importDocx(bytes.buffer as ArrayBuffer, { schema });
+    let img: import('prosemirror-model').Node | null = null;
+    doc.descendants((n) => {
+      if (n.type.name === 'image') img = n;
+      return true;
+    });
+    const tb = img!.attrs['textbox'] as { blocks: { type: string }[] };
+    expect(tb.blocks.map((b) => b.type)).toEqual(['table', 'paragraph']);
+    expect(JSON.stringify(tb.blocks[0])).toContain('Khoảng cách');
+
+    // …and it must survive a save: emitting only the paragraphs would delete
+    // the table the first time the customer pressed Ctrl+S.
+    const out = await exportDocx(doc);
+    const zip = await JSZip.loadAsync(out);
+    const xml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    const box = xml.slice(
+      xml.indexOf('<w:txbxContent>'),
+      xml.indexOf('</w:txbxContent>'),
+    );
+    expect(box).toContain('<w:tbl>');
+    expect(box).toContain('Khoảng cách');
+    expect(box).toContain('chú thích');
   });
 
   it('reads arcsize in each encoding, halving it against the shorter side', async () => {

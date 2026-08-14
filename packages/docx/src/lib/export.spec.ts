@@ -1011,7 +1011,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
             fill: '#FFFFFF',
           },
           textbox: {
-            paragraphs: boxParas,
+            blocks: boxParas,
             inset: { l: 19, t: 10, r: 10, b: 5 },
           },
         }),
@@ -1020,12 +1020,12 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     const { doc: back } = await importDocx(await exportDocx(doc));
     const node = [...range(back.child(0))].find((n) => n.type.name === 'image');
     const tb = node?.attrs['textbox'] as {
-      paragraphs: unknown[];
+      blocks: unknown[];
       inset?: unknown;
     };
     expect(tb).toBeTruthy();
-    expect(tb.paragraphs).toHaveLength(2);
-    const p0 = schema.nodeFromJSON(tb.paragraphs[0] as never);
+    expect(tb.blocks).toHaveLength(2);
+    const p0 = schema.nodeFromJSON(tb.blocks[0] as never);
     expect(p0.textContent).toBe('Phiếu học tập: Học sinh trả lời.');
     expect(p0.child(0).marks.map((m) => m.type.name)).toContain('strong');
     expect(tb.inset).toEqual({ l: 19, t: 10, r: 10, b: 5 });

@@ -1083,15 +1083,15 @@ function parseTextbox(
   wsp: OoxmlNode | undefined,
   ctx: Ctx,
 ): {
-  paragraphs: unknown[];
+  blocks: unknown[];
   inset?: { l: number; t: number; r: number; b: number };
   anchor?: 'ctr' | 'b';
 } | null {
-  const paragraphs = txbxParagraphs(
+  const blocks = txbxBlocks(
     child(child(wsp, 'wps:txbx'), 'w:txbxContent'),
     ctx,
   );
-  if (!paragraphs) return null;
+  if (!blocks) return null;
   const bodyPr = child(wsp, 'wps:bodyPr');
   const ins = (name: string): number | undefined =>
     emuToPxZero(attrOf(bodyPr, name));
@@ -1113,15 +1113,29 @@ function parseTextbox(
   const anchor =
     anchorAttr === 'ctr' ? 'ctr' : anchorAttr === 'b' ? 'b' : undefined;
   return {
-    paragraphs,
+    blocks,
     ...(inset && { inset }),
     ...(anchor && { anchor }),
   };
 }
 
-/** Paragraph JSON of a `w:txbxContent` — shared by the modern (wps:txbx) and
- *  legacy VML (v:textbox) textbox paths. */
-function txbxParagraphs(
+/**
+ * Block JSON of a `w:txbxContent` — shared by the modern (wps:txbx) and legacy
+ * VML (v:textbox) textbox paths.
+ *
+ * A textbox holds a whole story, not a run of paragraphs: CT_TxbxContent is
+ * `EG_BlockLevelElts`, the same group `w:body` uses, so `w:tbl`, `w:sdt` and
+ * `w:customXml` are as legal in here as `w:p` is. Reading only `w:p` dropped
+ * two entire tables from a hotel factsheet whose textboxes are invisible
+ * frames (`filled="f" stroked="f"`) holding nothing else — the boxes rendered
+ * empty and the tables vanished.
+ *
+ * So this hands the content to `parseBlocks`, the reader `w:body` and table
+ * cells already use, rather than keeping a second, poorer content model here.
+ * That brings the container unwrapping, block bookmarks and the contextual /
+ * automatic spacing resolution the textbox path never had.
+ */
+function txbxBlocks(
   content: OoxmlNode | undefined,
   ctx: Ctx,
 ): unknown[] | null {
@@ -1132,10 +1146,8 @@ function txbxParagraphs(
   // parseTextbox runs mid-run, deep inside parseTable.
   const enclosing = ctx.tableStyles.splice(0, ctx.tableStyles.length);
   try {
-    const paragraphs = children(content, 'w:p').map((p) =>
-      parseParagraph(p, ctx).toJSON(),
-    );
-    return paragraphs.length > 0 ? paragraphs : null;
+    const blocks = parseBlocks(content, ctx).map((b) => b.toJSON());
+    return blocks.length > 0 ? blocks : null;
   } finally {
     ctx.tableStyles.push(...enclosing);
   }
@@ -1287,12 +1299,12 @@ function parseVmlTextbox(
   el: OoxmlNode,
   ctx: Ctx,
 ): {
-  paragraphs: unknown[];
+  blocks: unknown[];
   inset?: { l: number; t: number; r: number; b: number };
 } | null {
   const tb = child(el, 'v:textbox');
-  const paragraphs = txbxParagraphs(child(tb, 'w:txbxContent'), ctx);
-  if (!paragraphs) return null;
+  const blocks = txbxBlocks(child(tb, 'w:txbxContent'), ctx);
+  if (!blocks) return null;
   const insetAttr = attrOf(tb, 'inset');
   if (insetAttr) {
     const p = insetAttr.split(',').map((s) => {
@@ -1300,11 +1312,11 @@ function parseVmlTextbox(
       return px === undefined ? undefined : Math.round(px);
     });
     return {
-      paragraphs,
+      blocks,
       inset: { l: p[0] ?? 10, t: p[1] ?? 5, r: p[2] ?? 10, b: p[3] ?? 5 },
     };
   }
-  return { paragraphs };
+  return { blocks };
 }
 
 /** A drawn legacy VML shape in a run's w:pict: v:roundrect / v:rect / v:oval

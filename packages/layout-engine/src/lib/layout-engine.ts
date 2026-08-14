@@ -283,18 +283,20 @@ function paragraphToFlow(
             ? { rotation: Number(child.attrs['rotation']) }
             : {}),
         };
-        // Textbox paragraphs ride the image node as PM JSON; rebuild them and
-        // flatten like any other flow (no nested floats inside the box).
+        // Textbox content rides the image node as PM JSON; rebuild it and
+        // flatten like any other flow (no nested floats inside the box). It is
+        // a whole story, tables included — `nodeToBlock`, not the paragraph
+        // path, is what makes a table inside a textbox reach the page.
         const tb = child.attrs['textbox'] as {
-          paragraphs: unknown[];
+          blocks: unknown[];
           inset?: { l: number; t: number; r: number; b: number };
           anchor?: 'ctr' | 'b';
         } | null;
-        if (tb && tb.paragraphs.length > 0) {
+        if (tb && tb.blocks.length > 0) {
           const schema = child.type.schema;
-          f.content = tb.paragraphs.map((json, i) =>
-            paragraphToFlow(schema.nodeFromJSON(json), base, i),
-          );
+          f.content = tb.blocks
+            .map((json, i) => nodeToBlock(schema.nodeFromJSON(json), base, i))
+            .filter((b): b is FlowBlock => b !== null);
           if (tb.inset) f.inset = tb.inset;
           if (tb.anchor) f.anchor = tb.anchor;
         }
@@ -1333,8 +1335,12 @@ function resolveFloat(
     const slack = Math.max(0, f.height - inset.t - inset.b - inner.height);
     const shift = f.anchor === 'ctr' ? slack / 2 : f.anchor === 'b' ? slack : 0;
     const lines = inner.lines.map((l) => ({ ...l, y: l.y + inset.t + shift }));
+    // Tables get the same drop as the lines. They are mutated in place rather
+    // than copied because layoutFlow builds them fresh on every pass.
+    for (const t of inner.tables) offsetTable(t, inset.t + shift);
     stripPositions(lines, inner.tables);
     if (lines.length > 0) rf.lines = lines;
+    if (inner.tables.length > 0) rf.tables = inner.tables;
   }
   return rf;
 }

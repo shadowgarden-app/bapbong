@@ -1979,6 +1979,46 @@ describe('textbox floats', () => {
     expect(f?.lines?.[0].segments[0].pos).toBeUndefined();
   });
 
+  it('lays out a table inside the box, dropped by the same inset', () => {
+    // A textbox holds block content, so a table in one has to reach the page —
+    // two of them were being dropped from a factsheet whose boxes are
+    // invisible frames holding nothing but a table. `layoutFlow` was already
+    // producing them; resolveFloat computed and then discarded them.
+    const boxCell = (text: string, width: number): FlowTableCell => ({
+      colspan: 1,
+      rowspan: 1,
+      colwidth: [width],
+      content: [{ type: 'paragraph', runs: [{ text, font: font() }] }],
+    });
+    const table: FlowBlock = {
+      type: 'table',
+      rows: [{ cells: [boxCell('aa', 50), boxCell('bb', 50)] }],
+    };
+    const host: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 120,
+          height: 60,
+          wrap: 'none',
+          hOffset: 40,
+          vOffset: 10,
+          vRel: 'paragraph',
+          content: [table],
+        },
+      ],
+    };
+    const f = layoutBlocks([host], config()).pages[0].floats?.[0];
+    expect(f?.tables).toHaveLength(1);
+    // Box-local, and dropped by the interior inset like the lines are.
+    expect(f?.tables?.[0].y).toBe(5);
+    expect(f?.tables?.[0].cells[0].lines[0].segments[0].text).toBe('aa');
+    // Paint-only: the caret can never land in a textbox.
+    expect(f?.tables?.[0].cells[0].lines[0].from).toBeUndefined();
+  });
+
   it('slides the text block down for wps:bodyPr @anchor ctr / b', () => {
     // Same box: 120x60, default inset t 5 / b 5, one 16px line.
     // Slack = 60 - 5 - 5 - 16 = 34.

@@ -515,14 +515,18 @@ export class CanvasPainter {
         if (f.outline)
           this.strokeBox(f.outline, f.x, yOffset + f.y, f.width, f.height);
       }
-      if (f.lines && f.lines.length > 0) {
+      const lines = f.lines ?? [];
+      const tables = f.tables ?? [];
+      if (lines.length > 0 || tables.length > 0) {
         const ctx = this.ctx;
         ctx.save();
         ctx.beginPath();
         ctx.rect(f.x, yOffset + f.y, f.width, f.height);
         ctx.clip();
         ctx.translate(f.x, yOffset + f.y);
-        for (const line of f.lines) this.paintLine(line, 0, o, pageInfo);
+        // Same order as a page: text, then tables over it.
+        for (const line of lines) this.paintLine(line, 0, o, pageInfo);
+        for (const table of tables) this.paintTable(table, 0, o, pageInfo);
         ctx.restore();
       }
     });

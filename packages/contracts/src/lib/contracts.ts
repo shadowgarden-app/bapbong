@@ -349,8 +349,10 @@ export interface FlowFloat {
   distR?: number;
   distT?: number;
   distB?: number;
-  /** Textbox (wps:txbx) paragraphs laid out inside the shape's box. */
-  content?: FlowParagraph[];
+  /** Textbox (wps:txbx / v:textbox) content laid out inside the shape's box.
+   *  Blocks, not just paragraphs: `CT_TxbxContent` is `EG_BlockLevelElts`, so
+   *  a textbox may hold tables exactly as the body does. */
+  content?: FlowBlock[];
   /** Textbox interior padding (wps:bodyPr lIns…), px. Absent → Word defaults. */
   inset?: { l: number; t: number; r: number; b: number };
   /** Where the text block sits vertically in the box (wps:bodyPr @anchor).
@@ -731,6 +733,11 @@ export interface ResolvedFloat {
    *  (origin at the float's top-left) — the painter translates by (x, y).
    *  Never caret-addressable; PM positions are stripped. */
   lines?: LayoutLine[];
+  /** Tables laid out inside the shape — a textbox holds block-level content
+   *  (`CT_TxbxContent` is `EG_BlockLevelElts`), so `w:tbl` belongs here as
+   *  much as `w:p` does. Same box-local coordinates and same paint-only
+   *  status as {@link lines}; the two arrays interleave by `y`. */
+  tables?: ResolvedTable[];
   /** Clockwise degrees around the box center (paint-only). */
   rotation?: number;
   /** The offsets that WOULD render the float exactly here — i.e. resolved
