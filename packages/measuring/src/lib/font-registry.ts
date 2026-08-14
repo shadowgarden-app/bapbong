@@ -20,6 +20,49 @@ function faceKey(family: string, bold: boolean, italic: boolean): string {
 }
 
 /**
+ * Words that name a FACE inside a family rather than a family of their own.
+ *
+ * Word treats "Calibri Light" as its own family name, so a document written in
+ * it asks for a family no registry has — and a teaching plan in this corpus is
+ * 96% Calibri Light, which fell all the way through to the approximate
+ * measurer and paginated 31 pages short of Word.
+ *
+ * Stripping one of these only ever hands over the family's VERTICAL metrics
+ * (see metricsFace) — never its advance widths, which are the very thing a
+ * weight changes.
+ */
+const FACE_WORDS = new Set([
+  'thin',
+  'extralight',
+  'ultralight',
+  'light',
+  'semilight',
+  'book',
+  'regular',
+  'normal',
+  'medium',
+  'semibold',
+  'demibold',
+  'demi',
+  'bold',
+  'extrabold',
+  'ultrabold',
+  'black',
+  'heavy',
+  'italic',
+  'oblique',
+]);
+
+/** "Calibri Light" → "Calibri"; null when nothing was stripped. */
+function baseFamily(family: string): string | null {
+  const parts = family.trim().split(/\s+/);
+  const kept = parts.filter((p) => !FACE_WORDS.has(p.toLowerCase()));
+  const base = kept.join(' ');
+  if (!base || kept.length === parts.length) return null;
+  return base;
+}
+
+/**
  * Holds parsed font faces keyed by family + bold/italic and resolves per-glyph
  * advance widths + vertical metrics from the font files. Widths derived here are
  * byte-for-byte identical on every platform and WebView engine — that
@@ -55,8 +98,9 @@ export class FontRegistry {
     this.register(family, variant, opentype.parse(bytes));
   }
 
-  /** The files backing a spec: the exact family+bold+italic face, else the
-   *  family's regular face, else empty. */
+  /** The files backing a spec — the EXACT family+bold+italic face, else that
+   *  family's regular face, else empty. Advance widths come from here, and
+   *  only from a face the document actually named. */
   private files(spec: FontSpec): opentype.Font[] {
     return (
       this.faces.get(faceKey(spec.family, spec.bold, spec.italic)) ??
@@ -65,15 +109,43 @@ export class FontRegistry {
     );
   }
 
-  /** Whether any registered file can serve this spec. */
+  /** Whether any registered file can serve this spec's WIDTHS. */
   has(spec: FontSpec): boolean {
     return this.files(spec).length > 0;
+  }
+
+  /**
+   * The face whose vertical metrics apply: the exact face, else the family
+   * with its face-naming word stripped ("Calibri Light" → "Calibri").
+   *
+   * The two axes are split on purpose, and the split is not a compromise —
+   * it is what the two kinds of metric MEAN. Vertical metrics belong to the
+   * FAMILY ("every font in a family must share the same vertical metric
+   * values" — SIL's line-metrics guidance, and Google Fonts'), while advance
+   * widths are exactly what distinguishes one weight from another.
+   *
+   * Measured on the teaching plan that is 96% Calibri Light, against the 246
+   * pages Word reports for it: borrowing neither gives 215 (31 short, the
+   * approximation has no line gap at all); borrowing both gives 268, because
+   * Calibri's advances are far wider than its Light sibling's; borrowing the
+   * metrics alone gives 251.
+   */
+  private metricsFace(spec: FontSpec): opentype.Font | null {
+    const exact = this.files(spec)[0];
+    if (exact) return exact;
+    const base = baseFamily(spec.family);
+    if (!base) return null;
+    return (
+      this.faces.get(faceKey(base, spec.bold, spec.italic))?.[0] ??
+      this.faces.get(faceKey(base, false, false))?.[0] ??
+      null
+    );
   }
 
   /** The face's first file, for shared vertical metrics (all subset files of one
    *  face carry the same hhea/head metrics), or null. */
   primary(spec: FontSpec): opentype.Font | null {
-    return this.files(spec)[0] ?? null;
+    return this.metricsFace(spec);
   }
 
   /** The file in the face that has a glyph for `codePoint`, else the first file

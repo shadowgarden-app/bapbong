@@ -24,9 +24,12 @@ import {
  *
  *   - large_sample, de_cuong — exact. Both are ordinary flowed text, which is
  *     the case the engine has been tuned against.
- *   - khbd −31, LeMinhThu −3, bc_rieng −2 — all three are table-heavy (69% of
- *     khbd's paragraphs live in table cells) and all three come out SHORT, so
- *     our rows are more compact than Word's.
+ *   - khbd +5. It was 31 SHORT until the font fallback landed: the document is
+ *     96% Calibri Light, a family no registry carries, and everything about it
+ *     — widths and line heights — was coming from the approximate measurer.
+ *     It now borrows Calibri's vertical metrics (not its widths).
+ *   - LeMinhThu −3, bc_rieng −2 — both Times New Roman, so neither is a font
+ *     problem; both are table-heavy, and that is where to look next.
  *   - NAVY +2 — the one multi-column, float-heavy document, and the one where
  *     we run LONG.
  *
@@ -38,7 +41,7 @@ const BASELINE: { file: string; word: number; ours: number }[] = [
   { file: 'de_cuong_cuoi_ki.docx', word: 7, ours: 7 },
   { file: 'bc_rieng.docx', word: 28, ours: 26 },
   { file: 'LeMinhThu52DL- Shop Kpop.docx', word: 22, ours: 19 },
-  { file: 'khbd.docx', word: 246, ours: 215 },
+  { file: 'khbd.docx', word: 246, ours: 251 },
   {
     file: 'NAVY HOTEL THE REGION IV- Factsheet-Vietnamese.docx',
     word: 3,

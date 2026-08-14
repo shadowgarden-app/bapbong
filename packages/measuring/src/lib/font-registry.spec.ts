@@ -96,6 +96,31 @@ describe('FontRegistry', () => {
     expect(reg.has(spec({ family: 'Nope' }))).toBe(false);
   });
 
+  it("lends a family's vertical metrics to its weight siblings, not its widths", () => {
+    // Word names "Calibri Light" as a family of its own, so a document written
+    // in it asks for something no registry has. Its vertical metrics belong to
+    // the family — "every font in a family must share the same vertical metric
+    // values" — but its advance widths are the very thing the weight changes,
+    // so those keep falling back.
+    const reg = new FontRegistry();
+    const base = makeFont({ advance: 500, ascender: 800, descender: -200 });
+    reg.register('Test', {}, base);
+
+    expect(reg.primary(spec({ family: 'Test Light' }))).toBe(base);
+    expect(reg.primary(spec({ family: 'Test Semibold' }))).toBe(base);
+    expect(reg.primary(spec({ family: 'Test Black Italic' }))).toBe(base);
+    // …while the width path still says "I do not have this face".
+    expect(reg.has(spec({ family: 'Test Light' }))).toBe(false);
+
+    // A WIDTH word is not a weight word: Narrow and Condensed faces really are
+    // drawn to different advances, and borrowing anything from the base family
+    // would mis-break every line.
+    expect(reg.primary(spec({ family: 'Test Narrow' }))).toBeNull();
+    expect(reg.primary(spec({ family: 'Test Condensed' }))).toBeNull();
+    // An unrelated family is still unknown, weight word or not.
+    expect(reg.primary(spec({ family: 'Nope Light' }))).toBeNull();
+  });
+
   it('is case-insensitive on family name', () => {
     const reg = new FontRegistry();
     reg.register('Test', {}, makeFont());
