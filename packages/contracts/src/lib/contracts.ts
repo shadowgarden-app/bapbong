@@ -45,8 +45,10 @@ export interface SectionConfig {
   /** Page geometry override (w:pgSz/w:pgMar on this section's sectPr) when it
    *  differs from the document default (`doc.attrs.page`) — e.g. a landscape
    *  section inside a portrait document. Absent → the document geometry.
-   *  Geometry can only change at a page boundary, so a continuous section
-   *  with a differing `page` is laid out as next-page (Word's own promotion). */
+   *  The SHEET can only change at a page boundary, so a continuous section on
+   *  a different page size is laid out as next-page (Word's own promotion);
+   *  differing margins alone keep the page, taking effect horizontally at
+   *  once and vertically from the next page. */
   page?: PageConfig;
   /** Page-number restart/format (w:pgNumType) declared on this section's
    *  sectPr. Absent → numbering continues from the previous section in

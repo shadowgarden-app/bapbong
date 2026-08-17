@@ -2944,13 +2944,27 @@ function placeBlocks(
     y = top;
   };
 
-  /** Swap to a section's page geometry and restart the band on it. Only ever
-   *  called at a page boundary (after finalizePage, or before any content). */
-  const setGeometry = (p: PageConfig) => {
+  /**
+   * Adopt a section's geometry WITHOUT restarting the page.
+   *
+   * Everything horizontal takes effect from this section's first line, which is
+   * what a continuous break changing the left/right margins is for. Everything
+   * vertical is deliberately left alone: a page already has a band, and Word
+   * cannot apply a new top margin to a page it has begun. It doesn't need to be
+   * remembered separately either — `finalizePage` re-reads `curPage` for the
+   * next page's band, so the new vertical margins arrive exactly there.
+   */
+  const adoptGeometry = (p: PageConfig) => {
     curPage = p;
     contentLeft = contentLeftOf(p);
     contentRight = p.width - p.margin.right;
     contentWidth = contentRight - contentLeft;
+  };
+
+  /** Swap to a section's page geometry and restart the band on it. Only ever
+   *  called at a page boundary (after finalizePage, or before any content). */
+  const setGeometry = (p: PageConfig) => {
+    adoptGeometry(p);
     restartBand();
   };
 
@@ -3753,6 +3767,9 @@ function placeBlocks(
       if (item.section) {
         const nextPage = item.section.page ?? page;
         const geomChanges = !sameGeom(nextPage, curPage);
+        // Only a different SHEET forces a page; different margins on the same
+        // sheet do not (see sameSheet).
+        const sheetChanges = !sameSheet(nextPage, curPage);
         curChromeIndex = item.section.chromeIndex;
         if (firstItem) {
           pageChromeIndex = curChromeIndex;
@@ -3760,9 +3777,11 @@ function placeBlocks(
           if (geomChanges) setGeometry(nextPage);
           else restartBand(); // page is empty — adopt this section's chrome band
           applyColumns(item.section);
-        } else if (item.section.newPage || geomChanges) {
-          // Geometry may only change at a page boundary — a continuous break
-          // with a differing page is laid out as next-page (Word's promotion).
+        } else if (item.section.newPage || sheetChanges) {
+          // The sheet may only change at a page boundary — a continuous break
+          // onto a different page size is laid out as next-page (Word's
+          // promotion). A margin change alone falls through to the branch
+          // below and keeps the page.
           sectionFirstPending = true;
           if (pageHasContent()) {
             finalizePage(); // its tail re-bands for the new section's chrome
@@ -3782,7 +3801,12 @@ function placeBlocks(
           if (sectionMaxY >= limit()) {
             sectionFirstPending = true; // the fresh page opens this section
             finalizePage();
+            // A page boundary after all, so this section's margins apply whole.
+            if (geomChanges) setGeometry(nextPage);
           } else {
+            // Same page, possibly new margins: the horizontal ones take effect
+            // from here, the vertical ones from the next page.
+            if (geomChanges) adoptGeometry(nextPage);
             bandTop = sectionMaxY;
             y = bandTop;
             colIndex = 0;
@@ -4270,6 +4294,30 @@ function sanitizePage(p: PageConfig): PageConfig {
 function sanitizeConfig(config: LayoutConfig): LayoutConfig {
   const page = sanitizePage(config.page);
   return page === config.page ? config : { ...config, page };
+}
+
+/**
+ * Whether two section geometries print on the same SHEET.
+ *
+ * This is the only part of the geometry that can force a page break. A sheet
+ * has one size, so a section that changes it cannot share a page with the one
+ * before — Word promotes even a continuous break to next-page there. Margins
+ * are not the sheet: they describe where text sits on it, and Word lets a
+ * continuous section change them without starting a page (the horizontal ones
+ * take effect at once — the documented way to change left/right margins
+ * mid-page — while the vertical ones simply wait, because "the first place
+ * Word can make this margin change is at the top of page 2").
+ *
+ * Measured, not inferred: guidance on the web says both things, so the corpus
+ * factsheet's own PDF from Word decided it. Its section 3 (top margin 280tw)
+ * is followed by a CONTINUOUS section 4 (400tw), and every anchored image on
+ * that page sits 17px lower in Word's PDF than a sec4-opened page allows —
+ * which is exactly 16.5px, the difference between opening the page at sec3
+ * (18.67px margin plus its three empty paragraphs, 24.5px) and opening it at
+ * sec4 (26.67px). Word put both sections on one page.
+ */
+function sameSheet(a: PageConfig, b: PageConfig): boolean {
+  return a.width === b.width && a.height === b.height;
 }
 
 /** Field-equality for page geometry (identity is not enough — overrides come

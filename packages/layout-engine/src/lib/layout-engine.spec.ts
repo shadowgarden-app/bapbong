@@ -2876,6 +2876,55 @@ describe('multi-column layout', () => {
     expect(r.pages[1].lines[0].y).toBe(20); // section B at the new page top
   });
 
+  it('keeps the page when a continuous section only changes its margins', () => {
+    // A sheet has one size, so a continuous section printing on a different
+    // one is promoted to next-page. Margins are not the sheet: Word changes
+    // them mid-page, applying the horizontal ones from the section's first
+    // line and the vertical ones only from the next page. The corpus
+    // factsheet's own PDF from Word shows both sections sharing a page.
+    const marginsOnly = {
+      width: 240,
+      height: 1000,
+      margin: { top: 60, right: 50, bottom: 20, left: 50 },
+    };
+    const doc = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: false },
+        {
+          blockCount: 2,
+          columns: { count: 1, gap: 0 },
+          newPage: false,
+          page: marginsOnly,
+        },
+      ],
+      4,
+    );
+    const r = layout(doc, config({ height: 1000 }));
+    expect(r.pages).toHaveLength(1);
+    // Horizontal at once: section B's left margin is 50, section A's is 20.
+    expect(r.pages[0].lines[0].x).toBe(20);
+    expect(r.pages[0].lines[2].x).toBe(50);
+    // Vertical NOT on this page — B's 60px top margin cannot move a band that
+    // already started, so B resumes right under A instead of jumping to 60.
+    expect(r.pages[0].lines[2].y).toBeLessThan(60);
+
+    // The same override with a different SHEET does force a page.
+    const landscape = { ...marginsOnly, width: 500, height: 240 };
+    const paged = secDoc(
+      [
+        { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: false },
+        {
+          blockCount: 2,
+          columns: { count: 1, gap: 0 },
+          newPage: false,
+          page: landscape,
+        },
+      ],
+      4,
+    );
+    expect(layout(paged, config({ height: 1000 })).pages).toHaveLength(2);
+  });
+
   it('lays a per-section page override on its own page geometry', () => {
     // Section B rotates to landscape (500×240) with wider margins.
     const landscape = {

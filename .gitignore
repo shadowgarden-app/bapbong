@@ -54,6 +54,7 @@ vitest.config.*.timestamp*
 # personal data; the repo goes open-source). Drop your own here for the
 # "Load sample" buttons and file-link previews.
 apps/playground/public/*.docx
+apps/playground/public/*.pdf
 
 # Compiled MCP shim (bun build --compile; rebuilt by nx build-shim) and its
 # staged copy inside the desktop app.
