@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-docx",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "bapbong — DOCX (OOXML) import / export",
   "license": "MIT",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-ui",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "bapbong — framework-agnostic editor UI (toolbar/menubar) that mounts into a host element and binds to editor.commands",
   "license": "MIT",
   "repository": {
