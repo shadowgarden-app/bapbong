@@ -2222,8 +2222,42 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     styleId?: string;
     borders?: Record<string, BorderSide>;
     shading?: string;
+    markFont?: {
+      family?: string;
+      sizePt?: number;
+      bold?: boolean;
+      italic?: boolean;
+    };
     carry?: { pPr?: string; markRPr?: string };
   } = {};
+  // The paragraph mark's own font, but only where it decides anything: a
+  // paragraph with no runs draws exactly one line, and that line IS the mark
+  // (§17.3.1.29 — the mark is "a physical character in the document"). One
+  // corpus factsheet ends a section with two 3pt marks and a 10pt one; sized
+  // from the document default instead they came to 17px each, which is most
+  // of a spurious page.
+  //
+  // Resolved through the run cascade, not read raw: the size can come from
+  // docDefaults or the paragraph style with the mark's own rPr setting only
+  // the font (`paraBase` is that cascade, minus the run layer).
+  if (inline.length === 0) {
+    const markRPr = child(pPr, 'w:rPr');
+    const eff = [
+      paraBase,
+      ctx.styles.resolveStyle(
+        attrOf(child(markRPr, 'w:rStyle'), 'w:val') ??
+          ctx.styles.defaultStyleIdFor('character'),
+      ),
+      parseRunProps(markRPr, ctx.resolveTheme, ctx.resolveFont),
+    ].reduce(mergeRunProps, {} as RunProps);
+    const markFont = {
+      ...(eff.fontFamily !== undefined && { family: eff.fontFamily }),
+      ...(eff.sizePt !== undefined && { sizePt: eff.sizePt }),
+      ...(eff.bold !== undefined && { bold: eff.bold }),
+      ...(eff.italic !== undefined && { italic: eff.italic }),
+    };
+    if (Object.keys(markFont).length > 0) attrs.markFont = markFont;
+  }
   // Carry-through: unmodelled INLINE pPr children + the paragraph mark's
   // w:rPr, preserved verbatim for export (see collectCarry).
   const carryPPr = collectCarry(pPr, CONSUMED_PPR);

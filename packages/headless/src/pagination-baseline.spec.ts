@@ -22,16 +22,24 @@ import {
  * `ours` is what this engine produces today. Where it differs from `word`, the
  * gap is a known defect with a direction, not a mystery:
  *
- *   - large_sample, de_cuong — exact. Both are ordinary flowed text, which is
- *     the case the engine has been tuned against.
- *   - khbd +5. It was 31 SHORT until the font fallback landed: the document is
- *     96% Calibri Light, a family no registry carries, and everything about it
- *     — widths and line heights — was coming from the approximate measurer.
- *     It now borrows Calibri's vertical metrics (not its widths).
- *   - LeMinhThu −3, bc_rieng −2 — both Times New Roman, so neither is a font
- *     problem; both are table-heavy, and that is where to look next.
- *   - NAVY +2 — the one multi-column, float-heavy document, and the one where
- *     we run LONG.
+ *   - de_cuong, bc_rieng — exact. bc_rieng was −2 until empty paragraphs
+ *     started measuring their own paragraph mark instead of the document
+ *     default font.
+ *   - LeMinhThu −1, from −3 for the same reason. Both it and bc_rieng are
+ *     table-heavy Times New Roman documents, and both moved the moment the
+ *     mark was measured.
+ *   - large_sample +1 and khbd +11 moved the OTHER way on that same change,
+ *     and the change was not the error: khbd's blank lines really are 13pt
+ *     Calibri Light (1230 of them say so on the mark), we really did draw them
+ *     11pt, and 1145 of them sit inside table cells. Drawing them too short
+ *     had been hiding something that makes our pages hold less than Word's —
+ *     almost certainly the table row geometry khbd is already known for.
+ *     Neither number is evidence against the mark; both point at rows.
+ *   - NAVY +2 — the one multi-column, float-heavy document. Two of its five
+ *     pages are near-blank, and they come from section breaks, not from
+ *     measurement: a top-margin-only change at a continuous break splits one
+ *     page in two here (removing it alone gives 4), and the last empty
+ *     paragraph of a section spills off page 1.
  *   - nested_table −2, and the one entry these numbers cannot yet judge: it is
  *     75% Open Sans and 24% Aptos. We bundle neither, this Mac has neither
  *     installed, and Aptos — Microsoft 365's default since 2023 — has no
@@ -43,11 +51,11 @@ import {
  * moved. Do not update `word`: those are the target.
  */
 const BASELINE: { file: string; word: number; ours: number }[] = [
-  { file: 'large_sample.docx', word: 122, ours: 122 },
+  { file: 'large_sample.docx', word: 122, ours: 123 },
   { file: 'de_cuong_cuoi_ki.docx', word: 7, ours: 7 },
-  { file: 'bc_rieng.docx', word: 28, ours: 26 },
-  { file: 'LeMinhThu52DL- Shop Kpop.docx', word: 22, ours: 19 },
-  { file: 'khbd.docx', word: 246, ours: 251 },
+  { file: 'bc_rieng.docx', word: 28, ours: 28 },
+  { file: 'LeMinhThu52DL- Shop Kpop.docx', word: 22, ours: 21 },
+  { file: 'khbd.docx', word: 246, ours: 257 },
   {
     file: 'NAVY HOTEL THE REGION IV- Factsheet-Vietnamese.docx',
     word: 3,

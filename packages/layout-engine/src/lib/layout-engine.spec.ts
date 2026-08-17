@@ -1155,6 +1155,37 @@ describe('layoutBlocks', () => {
     expect(pages[0].lines[0]).toMatchObject({ from: 7, to: 7 });
   });
 
+  it('sizes an empty paragraph by its mark font, not the document default', () => {
+    // The paragraph mark is the only glyph on the line, so it sets the line's
+    // height. A 3pt mark is a 3pt gap; sized from the 10pt document default it
+    // would be a blank line of body text — which over one factsheet's trailing
+    // empties came to most of a spurious page.
+    const tiny: FlowBlock = {
+      type: 'paragraph',
+      runs: [],
+      markFont: { sizePt: 3 },
+    };
+    const plain: FlowBlock = { type: 'paragraph', runs: [] };
+    const { pages } = layoutBlocks([tiny, plain], config());
+    const [small, dflt] = pages[0].lines;
+    expect(small.height).toBeLessThan(dflt.height);
+    // 10pt default → 16px (see `font`); 3pt mark → 3/10 of it.
+    expect(dflt.height).toBeCloseTo(16);
+    expect(small.height).toBeCloseTo(16 * 0.3);
+
+    // A paragraph that HAS runs keeps the document base as its seed: the mark
+    // only shares that paragraph's last line, a rule we don't model, so a
+    // stale markFont left by an edit must not shrink real text.
+    const withText: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'x', font: font() }],
+      markFont: { sizePt: 3 },
+    };
+    expect(
+      layoutBlocks([withText], config()).pages[0].lines[0].height,
+    ).toBeCloseTo(16);
+  });
+
   it('renders typed leading spaces on a first line, drops them after a wrap', () => {
     // Real documents right-position text ("Ký tên") with a run of spaces —
     // those must render. Spaces landing at a soft-wrapped line start don't.

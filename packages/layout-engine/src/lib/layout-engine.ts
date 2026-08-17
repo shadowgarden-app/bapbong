@@ -19,6 +19,7 @@ import type {
   FlowTable,
   FlowTableCell,
   FlowTableRow,
+  FontFace,
   FontSpec,
   InlineField,
   InlineImage,
@@ -325,6 +326,12 @@ function paragraphToFlow(
     end: contentStart + node.content.size,
   };
   if (floats.length > 0) flow.floats = floats;
+  // Only carried for a paragraph that has nothing else on its line — the
+  // importer sets it on exactly those, and wrapParagraph uses it on exactly
+  // those. Checked here too so an EDIT that gave the paragraph text can't
+  // leave a stale mark font sizing its lines.
+  const markFont = node.attrs['markFont'] as Partial<FontFace> | null;
+  if (markFont && runs.length === 0) flow.markFont = markFont;
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
   const spacing = effectiveSpacing(
@@ -757,10 +764,20 @@ function wrapParagraph(
 
   // Baseline metrics for the default font seed every line (so empty lines have
   // a sensible height too).
-  const baseMetrics = metrics ? metrics(base) : null;
+  //
+  // For a paragraph with NO runs that seed is the whole answer, and the font
+  // it should come from is the paragraph MARK's: the mark is the only glyph on
+  // that line, so its size is the line's. (A paragraph that has text keeps the
+  // document base as its seed — the mark joins only the LAST line there, which
+  // is a separate rule this does not implement.)
+  const seedFont =
+    block.runs.length === 0 && block.markFont
+      ? { ...base, ...block.markFont }
+      : base;
+  const baseMetrics = metrics ? metrics(seedFont) : null;
   const nominalH = baseMetrics
     ? baseMetrics.ascent + baseMetrics.descent + (baseMetrics.leading ?? 0)
-    : sizePx(base) * LINE_HEIGHT_FACTOR;
+    : sizePx(seedFont) * LINE_HEIGHT_FACTOR;
 
   // Bounds for the line currently being assembled.
   //
@@ -826,7 +843,7 @@ function wrapParagraph(
   let firstLine = resumeFrom === undefined; // a resumed line is a continuation
   let prevTo: number | undefined; // caret slot after the previous line's content
 
-  let maxFontPx = sizePx(base); // tallest text (fallback line-height mode)
+  let maxFontPx = sizePx(seedFont); // tallest text (fallback line-height mode)
   let maxImagePx = 0; // tallest inline image on the line
   let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
   let maxDescent = baseMetrics?.descent ?? 0;
@@ -1096,7 +1113,7 @@ function wrapParagraph(
 
     lineTokens = [];
     lineWidth = 0;
-    maxFontPx = sizePx(base);
+    maxFontPx = sizePx(seedFont);
     maxImagePx = 0;
     maxAscent = baseMetrics?.ascent ?? 0;
     maxDescent = baseMetrics?.descent ?? 0;

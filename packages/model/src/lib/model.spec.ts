@@ -46,7 +46,7 @@ describe('schema', () => {
 
     it('parses h1–h6 into the heading attr and text-align into align', () => {
       const p = rules(schema.nodes.paragraph.spec as never);
-      const base = { borders: null, carry: null };
+      const base = { borders: null, markFont: null, carry: null };
       expect(p.get('p')!(el({}))).toEqual({
         heading: null,
         align: null,

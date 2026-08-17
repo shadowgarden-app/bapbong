@@ -28,6 +28,7 @@ function pastedParagraphAttrs(el: unknown, heading: number | null) {
     heading,
     align: m ? m[1].toLowerCase() : null,
     borders: dataJson(el, 'data-borders'),
+    markFont: dataJson(el, 'data-mark-font'),
     carry: dataJson(el, 'data-carry'),
   };
 }
@@ -184,6 +185,13 @@ export const schema = new Schema({
         // null). Painted behind the paragraph's lines, in the same box the
         // borders use.
         shading: { default: null },
+        // The paragraph MARK's own font ({ family?, sizePt?, bold?, italic? }
+        // or null) — w:pPr/w:rPr resolved through the same cascade a run gets.
+        // Set only on paragraphs imported EMPTY, where the mark is the only
+        // thing on the line and therefore sets its height. `carry.markRPr`
+        // keeps the same rPr verbatim for export; this is the measured
+        // reading of it, and nothing writes it back.
+        markFont: { default: null },
         // Carry-through fidelity (docx round-trip): OOXML paragraph
         // properties the model does NOT represent, preserved verbatim so a
         // customer's save never drops them. { pPr?: string, markRPr?: string }
@@ -213,6 +221,8 @@ export const schema = new Schema({
           dom['data-shading'] = String(node.attrs['shading']);
         // Round-trip fidelity survives in-app copy/paste (PM's clipboard is
         // DOM-serialized); external HTML paste simply has no such attribute.
+        if (node.attrs['markFont'])
+          dom['data-mark-font'] = JSON.stringify(node.attrs['markFont']);
         if (node.attrs['carry'])
           dom['data-carry'] = JSON.stringify(node.attrs['carry']);
         return [tag, dom, 0];

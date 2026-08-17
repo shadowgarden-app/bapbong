@@ -248,6 +248,45 @@ describe('importDocx', () => {
     expect(body.fontFamily.family).toBe('Calibri');
   });
 
+  it('reads the paragraph mark font, but only for paragraphs with no runs', async () => {
+    // §17.3.1.29: w:pPr/w:rPr formats "the glyph used to represent the
+    // physical location of the paragraph mark". When nothing else is on the
+    // line, that glyph alone sizes it — a 3pt mark is a 3pt gap. Resolved
+    // through the same cascade a run gets, so the size may come from
+    // docDefaults while the mark supplies only the font.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/><w:rFonts w:ascii="Arial"/></w:rPr></w:rPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:styleId="S"><w:rPr><w:sz w:val="40"/></w:rPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="6"/></w:rPr></w:pPr></w:p>
+      <w:p><w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman"/></w:rPr></w:pPr></w:p>
+      <w:p><w:pPr><w:pStyle w:val="S"/></w:pPr></w:p>
+      <w:p><w:pPr><w:rPr><w:sz w:val="6"/></w:rPr></w:pPr><w:r><w:t>x</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+
+    // The mark's own rPr wins outright.
+    expect(doc.child(0).attrs['markFont']).toEqual({
+      family: 'Times New Roman',
+      sizePt: 3,
+    });
+    // No w:sz on the mark: the size still comes from docDefaults (11pt), not
+    // from a hardcoded default — reading the mark raw would lose it.
+    expect(doc.child(1).attrs['markFont']).toEqual({
+      family: 'Times New Roman',
+      sizePt: 11,
+    });
+    // No mark rPr at all: the paragraph STYLE's size is what the mark inherits.
+    expect(doc.child(2).attrs['markFont']).toEqual({
+      family: 'Arial',
+      sizePt: 20,
+    });
+    // The paragraph has text, so the mark shares its last line with runs
+    // instead of owning one. Not modelled — and not emitted.
+    expect(doc.child(3).attrs['markFont']).toBeNull();
+  });
+
   it('lets inline run properties override the paragraph style', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:style w:type="paragraph" w:styleId="S"><w:rPr><w:b/></w:rPr></w:style>

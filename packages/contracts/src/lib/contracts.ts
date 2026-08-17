@@ -483,6 +483,27 @@ export interface FlowParagraph {
   borders?: ParagraphBorders;
   /** w:shd fill "#RRGGBB" painted behind the paragraph's lines. */
   shading?: string;
+  /**
+   * The font of the paragraph MARK (w:pPr/w:rPr), when the paragraph has no
+   * runs of its own.
+   *
+   * The mark is a real character. ECMA-376 §17.3.1.29 (rPr, Run Properties
+   * for the Paragraph Mark) defines w:pPr/w:rPr as "the set of run properties
+   * applied to the glyph used to represent the physical location of the
+   * paragraph mark for this paragraph", which "being a physical character in
+   * the document … must be capable of representing this formatting like any
+   * other character". So an EMPTY paragraph's line box is the mark's line box
+   * and nothing else's: a 3pt mark is a 3pt gap, not a blank line of body
+   * text. One factsheet in the corpus ends a section with two of exactly
+   * those, and we drew them 17px tall apiece.
+   *
+   * Set by the importer only for paragraphs it imported empty, because that is
+   * the only case the layout uses it for. (The mark also joins the LAST line
+   * of a paragraph that DOES have text, which is a separate rule and not
+   * modelled here.) Partial: whatever the cascade left unset falls back to the
+   * layout's base font.
+   */
+  markFont?: Partial<FontFace>;
 }
 
 /** Paragraph box borders (w:pBdr). Only visible sides are present; the
