@@ -2240,7 +2240,16 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // Resolved through the run cascade, not read raw: the size can come from
   // docDefaults or the paragraph style with the mark's own rPr setting only
   // the font (`paraBase` is that cascade, minus the run layer).
-  if (inline.length === 0) {
+  //
+  // "Empty" means nothing that occupies the LINE, which is not the same as no
+  // children: an anchored image is a child of the paragraph it is anchored to,
+  // but it floats out of the text flow and leaves the mark alone on the line.
+  // The layout draws exactly those paragraphs as a bare mark, so this test has
+  // to be the one it makes (FlowParagraph.runs, which floats never enter) —
+  // a factsheet anchors twelve pictures to empty paragraphs, and sizing those
+  // from the document default while their neighbours used the mark stacked the
+  // pictures 4px too close per paragraph and overlapped three of them.
+  if (inline.every((n) => n.type.name === 'image' && n.attrs['float'])) {
     const markRPr = child(pPr, 'w:rPr');
     const eff = [
       paraBase,

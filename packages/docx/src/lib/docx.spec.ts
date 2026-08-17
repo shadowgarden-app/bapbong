@@ -287,6 +287,36 @@ describe('importDocx', () => {
     expect(doc.child(3).attrs['markFont']).toBeNull();
   });
 
+  it('treats a paragraph holding only an anchored float as mark-only', async () => {
+    // An anchored image is a CHILD of the paragraph it is anchored to, but it
+    // floats out of the text flow — the mark is still alone on the line, so it
+    // still sets that line's height. Counting children would miss exactly
+    // these paragraphs, and a factsheet anchors twelve pictures to them: the
+    // anchors then measured 4px shorter per paragraph than the empty
+    // paragraphs interleaved between them, and the pictures stacked too close.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:r="${R_NS}"><w:body>
+      <w:p><w:pPr><w:rPr><w:sz w:val="28"/></w:rPr></w:pPr>
+        <w:r><w:drawing><wp:anchor behindDoc="0">
+          <wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>
+          <wp:extent cx="914400" cy="914400"/><wp:wrapSquare wrapText="bothSides"/>
+          <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId9"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+        </wp:anchor></w:drawing></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/i.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'i.png': PNG_1x1,
+      }),
+    );
+    const p = doc.child(0);
+    // The float really is a child — this is not the no-children case.
+    expect(p.childCount).toBe(1);
+    expect(p.child(0).attrs['float']).toBeTruthy();
+    expect(p.attrs['markFont']).toMatchObject({ sizePt: 14 });
+  });
+
   it('lets inline run properties override the paragraph style', async () => {
     const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
       <w:style w:type="paragraph" w:styleId="S"><w:rPr><w:b/></w:rPr></w:style>
