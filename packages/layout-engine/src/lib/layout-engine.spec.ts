@@ -2831,6 +2831,65 @@ describe('multi-column layout', () => {
     expect(mar.floats?.[0].x).toBe(20 + 30);
   });
 
+  it('measures a column-anchored float from the band its anchor line got', () => {
+    // "Column" means the column as the ANCHOR LINE sees it — narrowed by any
+    // float that line already wraps around. Word's PDF of the corpus factsheet
+    // pins this: one picture's offset resolves from 712 where its column
+    // starts at 673, exactly the right edge of the float above it plus that
+    // float's distR. Read from the bare column it lands 38px left.
+    const blocker: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 60,
+          height: 100, // spans well past the next paragraph's line
+          wrap: 'square',
+          hRel: 'column',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          distR: 5,
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    const anchored: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 20,
+          height: 10,
+          wrap: 'none',
+          hRel: 'column',
+          hOffset: 7,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    const cfg = config({ height: 400, width: 300 });
+    const r = layoutBlocks([blocker, anchored], cfg).pages[0];
+    // Content box starts at 20; the blocker occupies 20..80 plus 5px distR, so
+    // the second paragraph's line — and its float — measure from 85, not 20.
+    expect(r.floats?.[0].x).toBe(20);
+    expect(r.floats?.[1].x).toBe(85 + 7);
+
+    // When the blocker leaves too little to use, there is no band to measure
+    // from and the column edge is the origin again — which is how Word places
+    // the factsheet's last picture.
+    const wide: FlowBlock = {
+      ...blocker,
+      floats: [{ ...blocker.floats![0], width: 250 }],
+    };
+    const r2 = layoutBlocks([wide, anchored], cfg).pages[0];
+    expect(r2.floats?.[1].x).toBe(20 + 7);
+  });
+
   it('balances a section that ENDS in a continuous break', () => {
     // 15 lines in a 2-column section that another continuous section follows:
     // this is the one shape Word balances, and the reason people insert a

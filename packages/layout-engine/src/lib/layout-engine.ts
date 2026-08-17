@@ -3463,20 +3463,51 @@ function placeBlocks(
     }
   };
 
-  /** Pin a paragraph's floats relative to its start; register text exclusions. */
-  const registerFloats = (flow: FlowParagraph, yPara: number) => {
+  /** Pin a paragraph's floats relative to its start; register text exclusions.
+   *  `anchorH` is the anchor line's nominal height — the slice of the page the
+   *  anchor occupies, and therefore the slice whose band a column-relative
+   *  offset is measured from. */
+  const registerFloats = (
+    flow: FlowParagraph,
+    yPara: number,
+    anchorH: number,
+  ) => {
+    // The column as the ANCHOR LINE sees it, not the bare column box.
+    //
+    // Word measures a column-relative offset from the text band the anchor
+    // got, which is the column narrowed by whatever floats that line already
+    // wraps around. Read as the bare column, two of the corpus factsheet's
+    // pictures land in the wrong place, and Word's own PDF says by how much:
+    // one wants origin 712 where the column starts at 673 — exactly the right
+    // edge of the float above it (700) plus that float's 12px distR — and two
+    // more want 359 where the column starts at 9, again a float's right edge
+    // (347) plus 12. With 359 those two land at 421 and 11, which is where
+    // Word has them to the pixel; from the column they land at 71 and −339,
+    // the second one entirely off the page.
+    //
+    // Computed ONCE, before any of this paragraph's own floats join the
+    // exclusions — a paragraph anchoring several pictures measures them all
+    // from the same band, not each from the one its siblings just narrowed.
+    // Indents are excluded deliberately: a paragraph in the factsheet carries
+    // an 8px left indent and Word still measures its pictures from 9, the
+    // column edge.
+    const anchorBand = bandAt(yPara, anchorH, { left: 0, right: 0 });
     for (const f of flow.floats ?? []) {
       // `column` is the text column the anchor paragraph sits in — this runs
       // inside the placer, so colX0/colX1 already name it. Reading it as the
       // content box put six pictures of a two- and three-column factsheet off
       // the page, one of them entirely (x −339..−3).
       const baseL =
-        f.hRel === 'page' ? 0 : f.hRel === 'column' ? colX0() : contentLeft;
+        f.hRel === 'page'
+          ? 0
+          : f.hRel === 'column'
+            ? (anchorBand?.left ?? colX0())
+            : contentLeft;
       const baseR =
         f.hRel === 'page'
           ? curPage.width
           : f.hRel === 'column'
-            ? colX1()
+            ? (anchorBand?.right ?? colX1())
             : contentRight;
       const fx =
         f.hAlign === 'right'
@@ -3601,11 +3632,11 @@ function placeBlocks(
     // deliberately WITHOUT this paragraph's own floats, whose exclusions
     // don't exist yet (same rule as Word: the anchor's page is decided by
     // the text position, then the drawing follows the anchor).
+    const bm = ctx.metrics ? ctx.metrics(ctx.base) : null;
+    const estH = bm
+      ? bm.ascent + bm.descent
+      : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
     if (flow.floats && flow.floats.length > 0) {
-      const bm = ctx.metrics ? ctx.metrics(ctx.base) : null;
-      const estH = bm
-        ? bm.ascent + bm.descent
-        : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
       for (;;) {
         if (y + estH > colBottom() && colDirty) {
           breakBand();
@@ -3621,7 +3652,7 @@ function placeBlocks(
         y = Math.min(...blockers.map((ex) => ex.bottom));
       }
     }
-    registerFloats(flow, y);
+    registerFloats(flow, y, estH);
     wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, undefined, () => {
       if (colDirty) breakBand();
     });
