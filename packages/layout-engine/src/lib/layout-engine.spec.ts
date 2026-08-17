@@ -2876,6 +2876,42 @@ describe('multi-column layout', () => {
     expect(r.pages[1].lines[0].y).toBe(20); // section B at the new page top
   });
 
+  it('draws no line for a continuous break mark, and keeps its space-before', () => {
+    // The last paragraph of a section IS the section break. Word draws that as
+    // a formatting mark, so with marks hidden (and on paper) the next section
+    // starts flush against the previous section's last real line. And a
+    // section resuming mid-page is not the top of a page or column, so the
+    // first paragraph of the new section keeps its space-before — Word
+    // suppresses that only at a real page/column top.
+    // Section A = [text, EMPTY]; the empty one carries A's sectPr, so it is
+    // the break itself. Section B = [text, text].
+    const brkDoc = (newPage: boolean) =>
+      secSchema.node(
+        'doc',
+        {
+          sections: [
+            { blockCount: 2, columns: { count: 1, gap: 0 }, newPage: false },
+            { blockCount: 2, columns: { count: 1, gap: 0 }, newPage },
+          ],
+        },
+        [
+          secSchema.node('paragraph', null, [secSchema.text('a')]),
+          secSchema.node('paragraph'), // A's break mark
+          secSchema.node('paragraph', null, [secSchema.text('b')]),
+          secSchema.node('paragraph', null, [secSchema.text('c')]),
+        ],
+      );
+    const r = layout(brkDoc(false), config({ height: 1000 })).pages[0];
+    expect(r.lines[0].y).toBe(20);
+    expect(r.lines[1].height).toBe(0);
+    // Section B starts flush against A's last REAL line, not below the mark.
+    expect(r.lines[2].y).toBe(r.lines[0].y + r.lines[0].height);
+
+    // A next-page break keeps its line: the page it ends still has to hold it.
+    const rp = layout(brkDoc(true), config({ height: 1000 })).pages[0];
+    expect(rp.lines[1].height).toBeGreaterThan(0);
+  });
+
   it('keeps the page when a continuous section only changes its margins', () => {
     // A sheet has one size, so a continuous section printing on a different
     // one is promoted to next-page. Margins are not the sheet: Word changes

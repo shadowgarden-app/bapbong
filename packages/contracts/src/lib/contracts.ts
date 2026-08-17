@@ -506,6 +506,25 @@ export interface FlowParagraph {
    * layout's base font.
    */
   markFont?: Partial<FontFace>;
+  /**
+   * This paragraph's mark IS a section break — it is the last paragraph of a
+   * section, and its w:sectPr is what ends that section.
+   *
+   * Word draws the break as a formatting mark, not as content: with marks
+   * hidden (and on paper) a continuous section break is invisible and the next
+   * section starts flush against the previous one's last line. So a paragraph
+   * that holds nothing but the break contributes no height. It still exists —
+   * it has a PM position and a caret can sit on it — it simply does not push
+   * the page down.
+   *
+   * Measured on the corpus factsheet against Word's own PDF: between the last
+   * line of its section 2 and the first line of section 3 Word leaves 0.5px,
+   * where the break paragraph's own font would have asked for 17.5px.
+   *
+   * Set by the layout from the section table, not by the importer: which
+   * paragraph ends a section is a property of the section list.
+   */
+  breakMark?: boolean;
 }
 
 /** Paragraph box borders (w:pBdr). Only visible sides are present; the

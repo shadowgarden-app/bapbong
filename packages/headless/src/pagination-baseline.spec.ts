@@ -35,13 +35,13 @@ import {
  *     had been hiding something that makes our pages hold less than Word's —
  *     almost certainly the table row geometry khbd is already known for.
  *     Neither number is evidence against the mark; both point at rows.
- *   - NAVY +1, down from +2 once a margin-only change at a continuous break
- *     stopped forcing a page. The remaining page is near-blank: page 1 spills
- *     its section's last empty paragraph, because the three photos along its
- *     bottom sit 27px lower than Word puts them. This is the one file whose
- *     rendering can be checked exactly — Word's own PDF export of it sits
- *     beside the .docx, and comparing image rectangles against it is how the
- *     margin rule was settled.
+ *   - NAVY — exact, and the one file whose rendering can be checked exactly:
+ *     Word's own PDF export of it sits beside the .docx (gitignored, like the
+ *     .docx), and its 18 image rectangles map 1:1 to the 18 wp:anchor by size.
+ *     Comparing against those settled three rules that reading could not: what
+ *     a margin-only section break does, that an empty paragraph is as tall as
+ *     its own mark, and that a continuous break's mark draws no line. Its
+ *     three page-1 photos went from 27px below Word's to 5px.
  *   - nested_table −2, and the one entry these numbers cannot yet judge: it is
  *     75% Open Sans and 24% Aptos. We bundle neither, this Mac has neither
  *     installed, and Aptos — Microsoft 365's default since 2023 — has no
@@ -61,7 +61,7 @@ const BASELINE: { file: string; word: number; ours: number }[] = [
   {
     file: 'NAVY HOTEL THE REGION IV- Factsheet-Vietnamese.docx',
     word: 3,
-    ours: 4,
+    ours: 3,
   },
   { file: 'nested_table.docx', word: 5, ours: 3 },
 ];

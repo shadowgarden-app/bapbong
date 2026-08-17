@@ -770,11 +770,18 @@ function wrapParagraph(
   // that line, so its size is the line's. (A paragraph that has text keeps the
   // document base as its seed — the mark joins only the LAST line there, which
   // is a separate rule this does not implement.)
+  const markOnly = block.runs.length === 0;
   const seedFont =
-    block.runs.length === 0 && block.markFont
-      ? { ...base, ...block.markFont }
-      : base;
-  const baseMetrics = metrics ? metrics(seedFont) : null;
+    markOnly && block.markFont ? { ...base, ...block.markFont } : base;
+  // A mark-only paragraph whose mark IS a section break draws no line box at
+  // all — the break is a formatting mark, and the next section starts flush
+  // against the last real line (see FlowParagraph.breakMark).
+  const baseMetrics =
+    markOnly && block.breakMark
+      ? { ascent: 0, descent: 0, leading: 0 }
+      : metrics
+        ? metrics(seedFont)
+        : null;
   const nominalH = baseMetrics
     ? baseMetrics.ascent + baseMetrics.descent + (baseMetrics.leading ?? 0)
     : sizePx(seedFont) * LINE_HEIGHT_FACTOR;
@@ -843,7 +850,9 @@ function wrapParagraph(
   let firstLine = resumeFrom === undefined; // a resumed line is a continuation
   let prevTo: number | undefined; // caret slot after the previous line's content
 
-  let maxFontPx = sizePx(seedFont); // tallest text (fallback line-height mode)
+  // Zero for a section-break mark, matching baseMetrics above.
+  const seedPx = markOnly && block.breakMark ? 0 : sizePx(seedFont);
+  let maxFontPx = seedPx; // tallest text (fallback line-height mode)
   let maxImagePx = 0; // tallest inline image on the line
   let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
   let maxDescent = baseMetrics?.descent ?? 0;
@@ -1113,7 +1122,7 @@ function wrapParagraph(
 
     lineTokens = [];
     lineWidth = 0;
-    maxFontPx = sizePx(seedFont);
+    maxFontPx = seedPx;
     maxImagePx = 0;
     maxAscent = baseMetrics?.ascent ?? 0;
     maxDescent = baseMetrics?.descent ?? 0;
@@ -2914,6 +2923,19 @@ function placeBlocks(
   let bandTop = top;
   let sectionMaxY = top;
   let colDirty = false; // current column holds content (a break would progress)
+  /**
+   * Whether this band was opened by a CONTINUOUS section break rather than by
+   * a page or a column.
+   *
+   * Word drops a paragraph's space-before at the top of a page or column, and
+   * `colDirty` is how that is spelled here — nothing above to space away from.
+   * A section resuming under the previous section's content is neither: it is
+   * the middle of a page, and Word keeps the space there. The factsheet's own
+   * PDF from Word measures it twice — its section 2 opens with a 155tw
+   * space-before that Word honours (10.3px) and section 3 with an 89tw one
+   * (5.9px), while both landed flush against the previous section here.
+   */
+  let bandOpensSection = false;
   // Space-after the previous block already put on the page. The next block's
   // space-before collapses against it (collapsedBefore) — OOXML takes the
   // MAXIMUM of the two, not their sum.
@@ -2941,6 +2963,7 @@ function placeBlocks(
     bandTop = top;
     sectionMaxY = top;
     colDirty = false;
+    bandOpensSection = false;
     y = top;
   };
 
@@ -3150,6 +3173,7 @@ function placeBlocks(
     bandTop = top;
     sectionMaxY = top;
     colDirty = false;
+    bandOpensSection = false;
     y = top;
     // A page closed cleanly: its seeds are spent, and the NEXT page gets a
     // fresh retry budget and its own checkpoint (all accumulators are empty
@@ -3260,6 +3284,7 @@ function placeBlocks(
     bandTop = top;
     sectionMaxY = top;
     colDirty = false;
+    bandOpensSection = false;
     pendingAfter = 0; // nothing above to collapse against at a fresh band
     y = top;
     rebalance();
@@ -3281,6 +3306,7 @@ function placeBlocks(
     if (colIndex < colCount - 1) {
       colIndex++;
       colDirty = false;
+      bandOpensSection = false;
       y = bandTop;
     } else {
       finalizePage();
@@ -3811,6 +3837,7 @@ function placeBlocks(
             y = bandTop;
             colIndex = 0;
             colDirty = false;
+            bandOpensSection = true; // mid-page: space-before still applies
           }
           applyColumns(item.section);
         }
@@ -3882,9 +3909,10 @@ function placeBlocks(
         // previous block's space-after. Used by BOTH the keep math and the
         // placement below, so a keep decision can never be made against a gap
         // the placer will not add.
-        const effBefore = colDirty
-          ? collapsedBefore(item.para.before, pendingAfter)
-          : 0;
+        const effBefore =
+          colDirty || bandOpensSection
+            ? collapsedBefore(item.para.before, pendingAfter)
+            : 0;
         if (colDirty && item.para.drafts) {
           const selfH = effBefore + draftsTotal(item.para.drafts);
           const bandH = colBottom() - bandTop;
@@ -4867,6 +4895,11 @@ export function layout(
     newPage: boolean;
     page?: PageConfig;
     chromeIndex: number;
+    /** Last block of a section whose break is CONTINUOUS — its paragraph mark
+     *  is the break itself and draws nothing (see FlowParagraph.breakMark).
+     *  A next-page break keeps its line: the page it ends still has to hold
+     *  it, and Word is known to spill a whole extra page over exactly that. */
+    breakMark: boolean;
   }[] = [];
   sections.forEach((sec, si) => {
     // Per-section geometry overrides are attr data — sanitize like config.page
@@ -4879,6 +4912,10 @@ export function layout(
         newPage: sec.newPage,
         page: secPage,
         chromeIndex: si,
+        breakMark:
+          k === sec.blockCount - 1 &&
+          si < sections.length - 1 &&
+          !sections[si + 1].newPage,
       });
     }
   });
@@ -4891,6 +4928,7 @@ export function layout(
       newPage: lastSec.newPage,
       page: lastSecPage,
       chromeIndex: sections.length - 1,
+      breakMark: false,
     });
   }
 
@@ -5005,8 +5043,20 @@ export function layout(
       }
       // Miss (or float-anchoring paragraph, never cached): build fresh.
       const hasFloats = nodeHasFloats(node);
-      const getFlow = () =>
-        paragraphToFlow(node, ctx.base, offset, true, marker, markerStyle);
+      // Which paragraph ends a section is a property of the SECTION table, not
+      // of the node, so it is stamped here rather than by the importer.
+      const getFlow = () => {
+        const f = paragraphToFlow(
+          node,
+          ctx.base,
+          offset,
+          true,
+          marker,
+          markerStyle,
+        );
+        if (bs.breakMark) f.breakMark = true;
+        return f;
+      };
       const sp = effectiveSpacing(
         node.attrs['spacing'] as ParagraphSpacing | null,
         node.attrs['contextualSpacing'] as {
@@ -5032,19 +5082,20 @@ export function layout(
       // depends on where they land).
       // A column break splits the paragraph across two columns, which a
       // single pre-wrapped run of lines cannot express.
-      if (hasFloats || unevenCols || paragraphHasColumnBreak(node)) {
+      // Break marks join the never-cached set: an edit that moves a section
+      // boundary changes the flag without changing the node, so a cached
+      // draft would keep the old line height.
+      if (
+        hasFloats ||
+        unevenCols ||
+        bs.breakMark ||
+        paragraphHasColumnBreak(node)
+      ) {
         items.push(tag({ para: mkItem(null) }));
         return;
       }
       perf.bump('para.miss');
-      const flow = paragraphToFlow(
-        node,
-        ctx.base,
-        offset,
-        true,
-        marker,
-        markerStyle,
-      );
+      const flow = getFlow();
       const drafts = layoutParagraph(flow, bLeft, colRight, ctx);
       const item: ParaItem = { ...mkItem(drafts), getFlow: () => flow };
       cache?.paragraphs.set(node, {
