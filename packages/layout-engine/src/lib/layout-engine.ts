@@ -3636,10 +3636,18 @@ function placeBlocks(
     const estH = bm
       ? bm.ascent + bm.descent
       : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
+    // Where the paragraph BELONGS. The loop below walks `y` down past floats
+    // to find room for its first LINE, but a float's wrap does not move the
+    // paragraph — Word anchors a paragraph-relative drawing at the position
+    // the paragraph would have had. The probe pins it to 0.02px, at two
+    // different shove distances. A real column/page change is different:
+    // that relocates the paragraph itself, so the anchor follows.
+    let anchorY = y;
     if (flow.floats && flow.floats.length > 0) {
       for (;;) {
         if (y + estH > colBottom() && colDirty) {
           breakBand();
+          anchorY = y; // a new band: the paragraph really did move
           continue;
         }
         // Only asking "is there any room at y" — the paragraph's own indents
@@ -3659,10 +3667,25 @@ function placeBlocks(
     // 0.9px of the paragraph's top and 17px above its first line. `y` here has
     // the space already added (and any float-skip applied to both), so the
     // paragraph's top is that much higher.
-    registerFloats(flow, y - spaceBefore, estH);
+    registerFloats(flow, anchorY - spaceBefore, estH);
+    bandedEndY = null;
     wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, undefined, () => {
       if (colDirty) breakBand();
     });
+    // A paragraph ends at the bottom of the last line it actually drew.
+    //
+    // wrapParagraph asks the band callback for one more line after its last
+    // token, and bandedBandFn walks the shared `y` down past any float in the
+    // way — looking for room for a line that never comes. Left there, that
+    // speculative walk became the NEXT paragraph's starting position, so a
+    // paragraph anchoring a float shoved the paragraph after it below its own
+    // float. Word does not: on a generated probe the following paragraph sat
+    // at the previous paragraph's bottom, 104px above where the walk had left
+    // us — and 204px when the float was twice as tall.
+    //
+    // Rewind only within the band the line was drawn in: a genuine column or
+    // page change means the paragraph really ended there.
+    if (bandedEndY !== null && bandedEndBand === bandTag()) y = bandedEndY;
   };
 
   const bandedBandFn: BandFn = (estH, indents, minWidth) => {
@@ -3706,7 +3729,14 @@ function placeBlocks(
   const emitBandedLine = (draft: LineDraft): void => {
     midBandedFrom = draft.from ?? UNRESUMABLE;
     emitLine(draft, true);
+    bandedEndY = y; // emitLine leaves y at this line's bottom
+    bandedEndBand = bandTag();
   };
+  /** Identity of the band lines are landing in, so the rewind below can tell
+   *  "the column we drew on" from "a column the band search wandered into". */
+  const bandTag = () => pages.length * 1024 + colIndex;
+  let bandedEndY: number | null = null;
+  let bandedEndBand = -1;
 
   /** Re-enter a float paragraph split by the replayed page's start: its
    *  floats stayed on the earlier page (they belong where the first line

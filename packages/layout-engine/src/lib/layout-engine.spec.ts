@@ -2864,6 +2864,56 @@ describe('multi-column layout', () => {
     expect(r.floats?.[0].y).toBeCloseTo(first.y + first.height);
   });
 
+  it("starts the next paragraph at a float paragraph's last line, not below its float", () => {
+    // wrapParagraph asks the band callback for one more line after its last
+    // token, and that speculative search used to walk the shared y past the
+    // paragraph's own float — so the NEXT paragraph started below the float
+    // instead of at the line. Word does not: on a generated probe the
+    // following paragraph sat at the previous paragraph's bottom, 104px above
+    // where the walk had left us.
+    const withFloat: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'a', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 200, // the whole 200px content box: nothing fits beside
+          height: 100,
+          wrap: 'square',
+          hRel: 'column',
+          hOffset: 0,
+          vOffset: 20,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    const next: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 20,
+          height: 10,
+          wrap: 'none',
+          hRel: 'column',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    const r = layoutBlocks([withFloat, next], config({ height: 600 })).pages[0];
+    const first = r.lines[0];
+    // next's LINE is pushed below the float (20+16+20+100 = down the page)...
+    expect(r.lines[1].y).toBeGreaterThan(first.y + first.height + 100);
+    // ...but its ANCHOR — and so its own float — sits at the paragraph's
+    // natural position: the bottom of the previous paragraph's line.
+    expect(r.floats?.[1].y).toBeCloseTo(first.y + first.height);
+  });
+
   it('measures a column-anchored float from the band its anchor line got', () => {
     // "Column" means the column as the ANCHOR LINE sees it — narrowed by any
     // float that line already wraps around. Word's PDF of the corpus factsheet
