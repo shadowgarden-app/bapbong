@@ -293,6 +293,61 @@ describe('xml audit (import)', () => {
     );
     expect(live.unknown).toContain('a:gradFill');
     expect(live.unref).not.toContain('a:gradFill');
+
+    // …but the theme's OWN object defaults pointing into the matrix (every
+    // stock theme's a:lnDef does) is the theme describing itself, not the
+    // document using it: still dead.
+    const selfRef =
+      `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}" name="t"><a:themeElements>` +
+      `<a:fmtScheme name="Office"><a:fillStyleLst>` +
+      `<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs></a:gsLst></a:gradFill>` +
+      `</a:fillStyleLst></a:fmtScheme></a:themeElements>` +
+      `<a:objectDefaults><a:lnDef><a:style><a:lnRef idx="2"><a:schemeClr val="accent1"/></a:lnRef>` +
+      `<a:fillRef idx="0"><a:schemeClr val="accent1"/></a:fillRef></a:style></a:lnDef></a:objectDefaults></a:theme>`;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await importDocx(await makeDocx(body(''), undefined, selfRef));
+    log.mockRestore();
+    expect(keys(audit.lastReport?.unreferenced ?? [])).toContain('a:gradFill');
+    expect(keys(audit.lastReport?.unknown ?? [])).not.toContain('a:gradFill');
+  });
+
+  it('demotes overflowPunct/adjustRightInd OFF and baseline textAlignment', async () => {
+    // Off is what this program does; baseline is where its text sits. Any
+    // other value is a feature it lacks and stays UNKNOWN.
+    audit.setEnabled(true);
+    const styles = (ppr: string) =>
+      `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}"><w:style w:type="paragraph" w:styleId="Body"><w:pPr>${ppr}</w:pPr></w:style></w:styles>`;
+    const body =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p>` +
+      `<w:pPr><w:pStyle w:val="Body"/></w:pPr><w:r><w:t>x</w:t></w:r>` +
+      `</w:p><w:sectPr><w:paperSrc w:first="15" w:other="15"/></w:sectPr></w:body></w:document>`;
+    const run = async (ppr: string) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      await importDocx(await makeDocx(body, styles(ppr)));
+      log.mockRestore();
+      return {
+        unknown: keys(audit.lastReport?.unknown ?? []),
+        inert: keys(audit.lastReport?.inert ?? []),
+        ignored: keys(audit.lastReport?.ignored ?? []),
+      };
+    };
+    const off = await run(
+      '<w:adjustRightInd w:val="0"/><w:overflowPunct w:val="0"/><w:textAlignment w:val="baseline"/>',
+    );
+    for (const k of [
+      'w:adjustRightInd',
+      'w:overflowPunct',
+      'w:textAlignment',
+    ]) {
+      expect(off.inert).toContain(k);
+      expect(off.unknown).not.toContain(k);
+    }
+    expect(off.ignored).toContain('w:paperSrc'); // printer tray
+    const on = await run(
+      '<w:adjustRightInd/><w:overflowPunct w:val="1"/><w:textAlignment w:val="center"/>',
+    );
+    for (const k of ['w:adjustRightInd', 'w:overflowPunct', 'w:textAlignment'])
+      expect(on.unknown).toContain(k);
   });
 
   it('counts a smart tag handled once its runs are unwrapped', async () => {

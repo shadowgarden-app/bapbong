@@ -111,6 +111,11 @@ const IGNORED_TAGS = new Set([
   'w:commentReference',
   // Style-gallery / revision bookkeeping in styles.xml & settings.xml.
   'w:latentStyles',
+  // The Styles pane's filter/sort (which styles Word LISTS), and whether the
+  // system fonts get embedded on save — pane UI and file size, not layout.
+  'w:stylePaneFormatFilter',
+  'w:stylePaneSortMethod',
+  'w:embedSystemFonts',
   'w:rsids',
   'w:shapeDefaults',
   'w:themeFontLang',
@@ -216,6 +221,9 @@ const IGNORED_TAGS = new Set([
   // beside it, which is read and rendered. Editing the embedded object is
   // not something this program does, so the link has nothing to drive.
   'o:OLEObject',
+  // The printer tray a section prints from (w:paperSrc @first/@other) —
+  // print-driver plumbing, like w:pgSz @w:code.
+  'w:paperSrc',
   // Hyphenation is out of layout scope by decision.
   'w:autoHyphenation',
   'w:hyphenationZone',
@@ -327,7 +335,8 @@ function isIgnoredAttr(tag: string, name: string): boolean {
     (tag === 'Relationship' && name === 'Type') ||
     // The printer's paper code (ST_DecimalNumber naming a tray/form). Page
     // geometry comes from @w:w/@w:h/@w:orient, which are read; this one
-    // addresses a print driver we do not talk to.
+    // addresses a print driver we do not talk to. (w:paperSrc, the tray
+    // selection itself, is in IGNORED_TAGS for the same reason.)
     (tag === 'w:pgSz' && name === 'w:code') ||
     // The OLE siblings of o:OLEObject above: the flag marking a VML shape as
     // an embedded object, and the object's ORIGINAL size — the shape's own
@@ -473,6 +482,18 @@ const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
   // report.
   'w:autoSpaceDE': (n) => isFalse(String(n.attrs['w:val'] ?? '')),
   'w:autoSpaceDN': (n) => isFalse(String(n.attrs['w:val'] ?? '')),
+  // Two more East-Asian layout toggles on the same terms — OFF is what this
+  // program does, ON (including the absent-means-on default) is a feature it
+  // lacks and stays UNKNOWN. overflowPunct: punctuation hanging past the
+  // right edge. adjustRightInd: the right indent snapping to a document
+  // grid.
+  'w:overflowPunct': (n) => isFalse(String(n.attrs['w:val'] ?? '')),
+  'w:adjustRightInd': (n) => isFalse(String(n.attrs['w:val'] ?? '')),
+  // Vertical alignment of a line's runs: text sits on the BASELINE here,
+  // which is also what "auto" resolves to for Latin text. top/center/bottom
+  // ask for something else and stay UNKNOWN.
+  'w:textAlignment': (n) =>
+    ['baseline', 'auto'].includes(String(n.attrs['w:val'] ?? 'auto')),
   // A wrap polygon that IS the shape's box: Word writes one on every
   // tight/through-wrapped picture whose outline it never traced. The
   // coordinate space is 0..21600 of the extent, and Word rounds the far edge
@@ -691,6 +712,13 @@ function emitReport(report: AuditReport): void {
 function scanThemeReferences(): void {
   themeReferenced = false;
   const walk = (n: OoxmlNode): void => {
+    // The theme's OWN object defaults (what a shape drawn in Word's UI
+    // starts as) point into the matrix too — a:lnDef/a:style/a:lnRef on
+    // every stock theme. That is the theme describing itself, not the
+    // document selecting from it, and the subtree is ignored by design
+    // (IGNORED_TAGS): it must not wake the matrix, or every document with a
+    // stock theme reports its gradients as gaps.
+    if (n.name === 'a:objectDefaults') return;
     if (
       n.name === 'a:lnRef' ||
       n.name === 'a:fillRef' ||

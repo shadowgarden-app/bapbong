@@ -40,6 +40,67 @@ const VARIANTS = [
   { bold: true, italic: true, weight: '700', style: 'italic' },
 ] as const;
 
+/** The unicode ranges @fontsource gives each subset (copied from its css), so
+ *  the alias faces below compose per character exactly like the originals. */
+const SUBSET_RANGES: Record<(typeof SUBSETS)[number], string> = {
+  latin:
+    'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD',
+  'latin-ext':
+    'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF',
+  vietnamese:
+    'U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB',
+};
+
+/**
+ * Canvas paints by the DOCUMENT's family name ("Calibri"), while the bundled
+ * @font-face (styles.css) is named after the bundled font ("Carlito"). On a
+ * machine without Calibri the canvas fell back to whatever the engine picked —
+ * a serif, wider than the Carlito the layout measured — and words painted over
+ * each other. Register the bundled face under the document's name as well,
+ * system font FIRST: `local()` keeps the real Calibri where it is installed
+ * (same metrics, its own glyphs) and the metric twin fills in elsewhere. Loaded
+ * up front, with the registry, so the first paint already has it.
+ */
+function aliasFace(
+  alias: string,
+  url: string,
+  v: (typeof VARIANTS)[number],
+  subset: (typeof SUBSETS)[number],
+): Promise<unknown> {
+  if (typeof FontFace === 'undefined' || !document.fonts)
+    return Promise.resolve();
+  // local() names a FACE, not a family: local('Times New Roman') is the
+  // Regular face, and a weight-700 FontFace built on it paints bold text
+  // with regular glyphs. Name the face the variant really is — its full name
+  // ("Times New Roman Bold Italic") and the PostScript spellings macOS and
+  // Windows use for it.
+  const style =
+    v.bold && v.italic
+      ? 'Bold Italic'
+      : v.bold
+        ? 'Bold'
+        : v.italic
+          ? 'Italic'
+          : '';
+  const compact = alias.replace(/\s+/g, '');
+  const ps = style.replace(/\s+/g, '');
+  const locals = [
+    style ? `${alias} ${style}` : alias,
+    style ? `${compact}-${ps}` : compact,
+    style ? `${compact}-${ps}MT` : `${compact}MT`,
+    style ? `${compact}PS-${ps}MT` : `${compact}PSMT`,
+  ]
+    .map((n) => `local('${n}')`)
+    .join(', ');
+  const face = new FontFace(alias, `${locals}, url(${url})`, {
+    weight: v.weight,
+    style: v.style,
+    unicodeRange: SUBSET_RANGES[subset],
+  });
+  document.fonts.add(face);
+  return face.load().catch(() => undefined); // offline: canvas fallback covers it
+}
+
 /**
  * Fetch and parse the bundled woff faces into a {@link FontRegistry}. Served at
  * `/fonts/<family>/*.woff` (see project.json assets). Individual fetch failures
@@ -52,6 +113,11 @@ export async function loadBundledFonts(): Promise<FontRegistry> {
       VARIANTS.flatMap((v) =>
         SUBSETS.map(async (subset) => {
           const url = `fonts/${file}/${file}-${subset}-${v.weight}-${v.style}.woff`;
+          // The alias faces for painting; the first name IS the bundled font
+          // and styles.css already declares it.
+          const aliases = Promise.all(
+            names.slice(1).map((n) => aliasFace(n, url, v, subset)),
+          );
           try {
             const res = await fetch(url);
             if (!res.ok) return;
@@ -66,6 +132,7 @@ export async function loadBundledFonts(): Promise<FontRegistry> {
           } catch {
             /* offline / missing subset — canvas fallback covers it */
           }
+          await aliases;
         }),
       ),
     ),
