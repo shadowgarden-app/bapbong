@@ -6,6 +6,11 @@
    imported (cyrillic/greek dropped — they are never used and just bloat the
    bundle). Each subset file carries the 400 + 700 weights; italics are separate
    files. The matching layout metrics come from FontRegistry (app/fonts.ts). */
+/* Symbol fallback (contracts SYMBOL_FALLBACK_FAMILY): the ☐ ☑ ☒ ✓ ● → … the
+   importer maps Wingdings/Symbol/Monotype Sorts to. OFL. Only the two subsets
+   those code points live in. */
+@import '@fontsource/noto-sans-symbols-2/symbols.css';
+@import '@fontsource/noto-sans-symbols-2/math.css';
 @import '@fontsource/carlito/latin.css';
 @import '@fontsource/carlito/latin-italic.css';
 @import '@fontsource/carlito/latin-ext.css';

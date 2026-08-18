@@ -25,7 +25,7 @@ describe('applyGlyphSpec', () => {
   it('writes the shorthand and the tracking', () => {
     const ctx = fakeCtx();
     applyGlyphSpec(ctx, font({ bold: true, letterSpacing: 1.3 }));
-    expect(ctx.font).toBe('700 11pt Arial');
+    expect(ctx.font).toBe('700 11pt Arial, "Noto Sans Symbols 2"');
     expect(ctx.letterSpacing).toBe('1.3px');
   });
 

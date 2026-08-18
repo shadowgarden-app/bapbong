@@ -108,6 +108,16 @@ function aliasFace(
  */
 export async function loadBundledFonts(): Promise<FontRegistry> {
   const registry = new FontRegistry();
+  // The symbol fallback face (styles.css) is font-display: swap and loads on
+  // first use — which would be the first MEASURE of a ☑, so the layout would
+  // size it with the engine's stand-in and the paint, a moment later, draw
+  // Noto's. Load it here with the rest so both see the same glyph.
+  const symbolFallback =
+    typeof document !== 'undefined' && document.fonts
+      ? document.fonts
+          .load('16px "Noto Sans Symbols 2"', '☐☑☒✓●■⊗')
+          .catch(() => undefined)
+      : Promise.resolve();
   await Promise.all(
     FAMILIES.flatMap(({ file, names }) =>
       VARIANTS.flatMap((v) =>
@@ -137,5 +147,6 @@ export async function loadBundledFonts(): Promise<FontRegistry> {
       ),
     ),
   );
+  await symbolFallback;
   return registry;
 }

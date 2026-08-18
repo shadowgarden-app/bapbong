@@ -32,6 +32,9 @@ importers:
       '@fontsource/carlito':
         specifier: ^5.2.8
         version: 5.2.8
+      '@fontsource/noto-sans-symbols-2':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/tinos':
         specifier: ^5.3.0
         version: 5.3.0
@@ -1598,6 +1601,9 @@ packages:
 
   '@fontsource/carlito@5.2.8':
     resolution: {integrity: sha512-EbsNaWvGUWiuSAv/9+n9lHMi2hfPabhw5rY7r+B84XDb0fvkw+3bCksrcEBE3sQDIKgAsIjDzzSbb0+GYJlvEQ==}
+
+  '@fontsource/noto-sans-symbols-2@5.3.0':
+    resolution: {integrity: sha512-hFnEnIXOIgLLJ61SO9icRXKoS+LSWoq7ZqKJQ/NaQR7ptdC6+7yW4ci6EuXgsS1S9JmWpciX6w0AFZkU1DKn1A==}
 
   '@fontsource/tinos@5.3.0':
     resolution: {integrity: sha512-VVDyyZdbcsLKxo/W7rClAvacD/7DsGc7J5xzzp51Tndib8kDkEe/0bqbb3Xb3iH6+IUjt07aRsvtQ9MGeGGi4w==}
@@ -9530,6 +9536,8 @@ snapshots:
   '@fontsource/arimo@5.3.0': {}
 
   '@fontsource/carlito@5.2.8': {}
+
+  '@fontsource/noto-sans-symbols-2@5.3.0': {}
 
   '@fontsource/tinos@5.3.0': {}
 

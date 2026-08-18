@@ -6,12 +6,13 @@ import {
 
 describe('measuring', () => {
   it('builds CSS font shorthand', () => {
+    // The symbol fallback rides every shorthand (see SYMBOL_FALLBACK_FAMILY).
     expect(
       fontToCss({ family: 'Arial', sizePt: 11, bold: true, italic: false }),
-    ).toBe('700 11pt Arial');
+    ).toBe('700 11pt Arial, "Noto Sans Symbols 2"');
     expect(
       fontToCss({ family: 'Times', sizePt: 12, bold: false, italic: true }),
-    ).toBe('italic 400 12pt Times');
+    ).toBe('italic 400 12pt Times, "Noto Sans Symbols 2"');
   });
 
   it('approx measurer scales with text length and font size', () => {

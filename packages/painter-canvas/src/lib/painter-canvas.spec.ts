@@ -225,7 +225,7 @@ describe('CanvasPainter', () => {
     expect(bg.fillStyle).toBe('#ffffff');
     const text = ctx.of('fillText')[0];
     expect(text.args).toEqual(['Hello', 20, 32]); // line.y 20 + baseline 12
-    expect(text.font).toBe('700 11pt Arial');
+    expect(text.font).toBe('700 11pt Arial, "Noto Sans Symbols 2"');
     expect(text.fillStyle).toBe('#ff0000');
   });
 
