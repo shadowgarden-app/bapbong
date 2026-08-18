@@ -1484,7 +1484,7 @@ describe('toFlowBlocks', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
       image: {
@@ -1802,7 +1802,7 @@ describe('floats in table cells', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
       image: {
@@ -2365,7 +2365,7 @@ describe('layout with page chrome (header/footer)', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
     },
@@ -2484,7 +2484,7 @@ describe('layout with footnotes', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
     },
@@ -2565,7 +2565,7 @@ describe('layout with footnotes', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
       table: {
@@ -2766,7 +2766,7 @@ describe('multi-column layout', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
     },
@@ -3061,6 +3061,63 @@ describe('multi-column layout', () => {
     );
     const rp = layout(paged, config({ height: 200 }));
     expect(rp.pages[0].lines.filter((l) => l.x === 20)).toHaveLength(10);
+  });
+
+  it('wraps a tab that would pass the right edge to the next line', () => {
+    // Spaces hang past the edge; a TAB does not. Word's PDF of the corpus
+    // factsheet shows a paragraph ending in a bare w:tab whose next default
+    // stop lies past the right indent getting a second, tab-only line.
+    // Content box 20..220; 'aaaaaaaaaaaaaaaaaaa' = 190px ends at 210; the
+    // tab's next default-grid stop (48px grid from x=20) is 260 > 220.
+    const withTab: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaaaaaaaaaaaaaaaaa\tb', font: font() }],
+    };
+    const r = layoutBlocks([withTab], config()).pages[0];
+    expect(r.lines).toHaveLength(2);
+    // The text after the tab followed it down.
+    expect(r.lines[1].segments.map((s) => s.text).join('')).toContain('b');
+  });
+
+  it('absorbs a next-page break mark that barely overflows, spills a tall one', () => {
+    // Word's page simply ends at the last line that fits when the section
+    // mark pokes only a few px past the floor (a generated probe and the
+    // factsheet, pokes 3-9px); a mark poking further gets its own page (two
+    // report covers, pokes >=9.9px). The threshold is measured on both
+    // sides — see PAGE_BREAK_MARK_POKE.
+    const mk = (fillers: number, markPt: number) =>
+      secSchema.node(
+        'doc',
+        {
+          sections: [
+            {
+              blockCount: fillers + 1,
+              columns: { count: 1, gap: 0 },
+              newPage: false,
+            },
+            { blockCount: 1, columns: { count: 1, gap: 0 }, newPage: true },
+          ],
+        },
+        [
+          ...Array.from({ length: fillers }, (_, i) =>
+            secSchema.node('paragraph', null, [secSchema.text(`p${i}`)]),
+          ),
+          secSchema.node('paragraph', {
+            markFont: { sizePt: markPt },
+          } as never),
+          secSchema.node('paragraph', null, [secSchema.text('next')]),
+        ],
+      );
+    // Band 20..80 = 60px; 3 filler lines (16px each) end at 68. A 10pt mark
+    // (16px) pokes 4px -> absorbed: the mark stays (clipped), 'next' opens
+    // page 2.
+    const a = layout(mk(3, 10), config({ height: 100 }));
+    expect(a.pages).toHaveLength(2);
+    expect(a.pages[1].lines[0].segments[0]?.text).toBe('next');
+    // A 25pt mark (40px) pokes 28px -> the mark takes a page of its own.
+    const b = layout(mk(3, 25), config({ height: 100 }));
+    expect(b.pages).toHaveLength(3);
+    expect(b.pages[2].lines[0].segments[0]?.text).toBe('next');
   });
 
   it('starts a new page at a next-page section break', () => {
@@ -3404,7 +3461,7 @@ describe('incremental table re-layout', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
       table: {
@@ -3562,7 +3619,7 @@ describe('layout with comments', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
     },
@@ -3595,7 +3652,7 @@ describe('live list numbering', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
     },
@@ -3633,7 +3690,7 @@ describe('layout with LayoutCache', () => {
       paragraph: {
         group: 'block',
         content: 'inline*',
-        attrs: { list: { default: null } },
+        attrs: { list: { default: null }, markFont: { default: null } },
       },
       text: { group: 'inline' },
     },

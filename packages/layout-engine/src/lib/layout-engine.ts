@@ -1132,12 +1132,15 @@ function wrapParagraph(
     textLeading = baseMetrics?.leading ?? 0;
     firstLine = false;
 
-    // The next line may sit beside (or past) a float — fetch its band.
-    band = bandFn(nominalH, indents);
-    lineLeft = band.left;
-    lineRight = band.right;
-    contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
+    // The next line may sit beside (or past) a float — its band is fetched
+    // LAZILY, at the next token. Fetching it here asked the band callback
+    // for a line that need not exist: after the paragraph's LAST line the
+    // request walked `y` past floats and could even close the page — a
+    // page break decided by a phantom line. (One factsheet lost its section
+    // mark to a fresh page exactly that way.)
+    bandStale = true;
   };
+  let bandStale = false;
 
   // Kerning across token boundaries: consecutive same-font text tokens (a word
   // split across runs, e.g. by a mark change) are measured cumulatively, so
@@ -1161,6 +1164,13 @@ function wrapParagraph(
   let softWrapped = false;
 
   for (let ti = 0; ti < tokens.length; ti++) {
+    if (bandStale) {
+      band = bandFn(nominalH, indents);
+      lineLeft = band.left;
+      lineRight = band.right;
+      contStart = marker ? Math.max(markerTextX, lineLeft) : lineLeft;
+      bandStale = false;
+    }
     const token = tokens[ti];
     // A column break ends the line WITHOUT adding one of its own — unlike a
     // line break, which leaves an empty line behind when it opens a
@@ -1206,8 +1216,15 @@ function wrapParagraph(
       );
     }
     const cursor = lineStart() + lineWidth;
+    // Spaces hang past the right edge rather than wrapping — but a TAB does
+    // not: it wraps to the next line and resolves against the stops there.
+    // Measured in the corpus factsheet's PDF: a paragraph ending in a bare
+    // w:tab whose next stop (537) lies past the right indent (532.5) gets a
+    // second line holding just the tab, 16.8px tall — and the three empty
+    // paragraphs after it sit exactly one line pitch lower than an engine
+    // that swallows the tab puts them.
     if (
-      !token.isSpace &&
+      (!token.isSpace || token.isTab) &&
       lineTokens.length > 0 &&
       cursor + token.width > lineRight
     ) {
@@ -1864,6 +1881,10 @@ type ParaItem = {
    *  paragraph column switch has no pre-wrapped form) and so a section that
    *  holds one is left unbalanced, without flattening the flow to find out. */
   columnBreak?: boolean;
+  /** A next-page section break's mark: keeps its line mid-page and may flow
+   *  to the next column, but never OPENS a page — an unfitting one is
+   *  clipped at the floor instead (see blockSection.pageBreakMark). */
+  pageBreakMark?: boolean;
   /** Pagination keeps (w:keepNext / w:keepLines / w:widowControl off). */
   keepNext?: boolean;
   keepLines?: boolean;
@@ -2003,6 +2024,22 @@ interface Exclusion {
 
 /** Narrowest band we'll still flow text into beside a float. */
 const MIN_BAND = 24;
+
+/**
+ * How far a NEXT-PAGE section-break mark's line may poke past the page floor
+ * and still be absorbed (clipped) rather than spilled to a page of its own.
+ *
+ * The two sides of this constant are measured, the exact value is not. A
+ * generated probe (four sections, marks alternately fitting and not, at
+ * bottom margins 720 and 0) paginates in Word as one page per section with
+ * marks poking 3–6px; the factsheet's mark pokes 8.9px and Word absorbs it
+ * too. Two report covers carry 1.5-spaced marks that Word gives a page of
+ * their own, the nearer poking 9.9px. Absorbed at ≤8.9, spilled at ≥9.9 —
+ * the value sits in that gap. The gap is one pixel wide in OUR coordinates,
+ * so any future change to line metrics near a report cover will trip the
+ * pagination baseline; that is the tripwire working, not a mystery.
+ */
+const PAGE_BREAK_MARK_POKE = 9.4;
 
 /** Shift one cell (box + contents) vertically in place. */
 function shiftCell(cell: ResolvedCell, dy: number): ResolvedCell {
@@ -2757,6 +2794,20 @@ function placeBlocks(
   let resumeDraftIdx: number | null = null; // of a replayed page
   let resumeBandedFrom: number | null = null;
   const seeds = new Map<string, Exclusion>();
+  /**
+   * First-pass float positions, by the float's PM pos.
+   *
+   * A replay wraps LINES around the seeded exclusions, but it must not move
+   * the ANCHORS: Word's model is incremental — a float's position is fixed
+   * when its paragraph is first laid (later floats do not exist yet), and
+   * "wrap the whole page around a float" then re-wraps the text alone. Left
+   * to recompute, a replayed float whose own exclusion pushed its anchor's
+   * paragraph re-registered somewhere new, threw a fresh seed, and the
+   * sticky-drop gave up — leaving the factsheet's photo cluster overlapping
+   * the lines above it. Pinned, the replay reproduces the first-pass rect
+   * and the fixed point closes in one round trip.
+   */
+  const seedPins = new Map<number, { x: number; y: number; key: string }>();
   // Seeds retracted because they pushed their own anchor off the page —
   // never re-tried, so the oscillating case settles in one round trip.
   const droppedSeeds = new Set<string>();
@@ -2926,6 +2977,10 @@ function placeBlocks(
   let bandTop = top;
   let sectionMaxY = top;
   let colDirty = false; // current column holds content (a break would progress)
+  /** True while placing a next-page section-break mark. It may still flow to
+   *  the next column, but a break that would FINALIZE the page is suppressed
+   *  — the mark is clipped at the floor instead (see blockSection). */
+  let placingPageBreakMark = false;
   /**
    * Whether this band was opened by a CONTINUOUS section break rather than by
    * a page or a column.
@@ -3183,6 +3238,7 @@ function placeBlocks(
     // here, so the checkpoint is a handful of scalars).
     seeds.clear();
     droppedSeeds.clear();
+    seedPins.clear();
     registeredKeys.clear();
     retriesLeft = MAX_PAGE_RETRIES;
     pageStartCp = takeCheckpoint();
@@ -3346,7 +3402,15 @@ function placeBlocks(
     let add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     const floor = () =>
       Math.min(colBottom(), bottom - reservedFor([...pageFnNums, ...add]));
-    if (y + draft.height > floor() && colDirty) {
+    if (
+      y + draft.height > floor() &&
+      colDirty &&
+      !(
+        placingPageBreakMark &&
+        colIndex >= colCount - 1 &&
+        y + draft.height - floor() <= PAGE_BREAK_MARK_POKE
+      )
+    ) {
       breakBand(); // next column, or next page; footnotes ride the page
       add = lineFnNums(draft.segments).filter((n) => !pageFnSet.has(n));
     }
@@ -3520,26 +3584,32 @@ function placeBlocks(
             : f.hAlign === 'left'
               ? baseL
               : baseL + (f.hOffset ?? 0);
-      const fy =
+      let fy =
         f.vRel === 'page'
           ? (f.vOffset ?? 0)
           : f.vRel === 'margin'
             ? top + (f.vOffset ?? 0)
             : yPara + (f.vOffset ?? 0);
+      let fxEff = fx;
+      const pin = f.pos !== undefined ? seedPins.get(f.pos) : undefined;
+      if (pin) {
+        fxEff = pin.x;
+        fy = pin.y;
+      }
       pageFloats.push({
-        ...resolveFloat(f, fx, fy, ctx),
+        ...resolveFloat(f, fxEff, fy, ctx),
         // Effective offsets for drag-to-move: what hOffset/vOffset would put
         // the float at exactly this spot. For an hAlign float this is the
         // alignment resolved to a number, which is what a drag pins it to.
-        effHOffset: fx - baseL,
+        effHOffset: fxEff - baseL,
         effVOffset: f.vOffset ?? 0,
       });
       colDirty = true;
       const rect: Exclusion | null =
         f.wrap === 'square'
           ? {
-              left: fx - (f.distL ?? 0),
-              right: fx + f.width + (f.distR ?? 0),
+              left: fxEff - (f.distL ?? 0),
+              right: fxEff + f.width + (f.distR ?? 0),
               top: fy - (f.distT ?? 0),
               bottom: fy + f.height + (f.distB ?? 0),
               ...(f.through && { through: true }),
@@ -3567,6 +3637,8 @@ function placeBlocks(
           !pageStartCp.unreplayable &&
           overlapsPlaced(rect)
         ) {
+          if (f.pos !== undefined)
+            seedPins.set(f.pos, { x: fxEff, y: fy, key });
           throw new PageRetrySignal([{ key, rect }]);
         }
         exclusions.push(rect);
@@ -3672,8 +3744,14 @@ function placeBlocks(
         // Only asking "is there any room at y" — the paragraph's own indents
         // do not decide where its FLOATS may sit.
         if (bandAt(y, estH, { left: 0, right: 0 })) break;
+        // Same column gate as the band callback: a float in another column
+        // is not a blocker here.
         const blockers = exclusions.filter(
-          (ex) => ex.top < y + estH && ex.bottom > y,
+          (ex) =>
+            ex.top < y + estH &&
+            ex.bottom > y &&
+            ex.left < colX1() &&
+            ex.right > colX0(),
         );
         if (blockers.length === 0) break;
         // Two skip modes, measured apart by a generated probe read from
@@ -3725,13 +3803,27 @@ function placeBlocks(
 
   const bandedBandFn: BandFn = (estH, indents, minWidth) => {
     for (;;) {
-      if (y + estH > colBottom() && colDirty) {
+      if (
+        y + estH > colBottom() &&
+        colDirty &&
+        !(placingPageBreakMark && colIndex >= colCount - 1 && y < colBottom())
+      ) {
+        // (For a section-break mark the loose y-test above only defers the
+        // decision — emitLine re-judges with the line's real BASELINE.)
         breakBand(); // next column/page: exclusions are gone
         continue;
       }
       const b = bandAt(y, estH, indents);
+      // Only floats that intrude on THIS column block it — one wholly in a
+      // neighbouring column shares the y-range but not the band, and letting
+      // it into the list made a through float in column 1 grid-step the
+      // lines of column 2.
       const blockers = exclusions.filter(
-        (ex) => ex.top < y + estH && ex.bottom > y,
+        (ex) =>
+          ex.top < y + estH &&
+          ex.bottom > y &&
+          ex.left < colX1() &&
+          ex.right > colX0(),
       );
       // A band that passed the MIN_BAND floor can still be too narrow for
       // an unbreakable item (an inline image). While a float is what
@@ -3877,6 +3969,7 @@ function placeBlocks(
       for (const k of e.drop) {
         seeds.delete(k);
         droppedSeeds.add(k);
+        for (const [pp, pn] of seedPins) if (pn.key === k) seedPins.delete(pp);
       }
       restoreCheckpoint(pageStartCp);
       startIdx = pageStartCp.itemIdx;
@@ -3896,6 +3989,7 @@ function placeBlocks(
   function placeRun(from: number): void {
     for (idx = from; idx < items.length; idx++) {
       const item = items[idx];
+      placingPageBreakMark = false; // per-item; several paths continue early
       // Section boundary: switch column flow (and break) before the block.
       if (item.section) {
         const nextPage = item.section.page ?? page;
@@ -4008,6 +4102,7 @@ function placeBlocks(
           finalizePage();
           rebalance();
         }
+        placingPageBreakMark = item.para.pageBreakMark === true;
         // Pagination keeps: break the band early when this paragraph
         // (keepLines) — or this paragraph plus the head of what must follow
         // it (keepNext) — cannot finish here but WOULD fit a fresh band.
@@ -5007,6 +5102,13 @@ export function layout(
      *  A next-page break keeps its line: the page it ends still has to hold
      *  it, and Word is known to spill a whole extra page over exactly that. */
     breakMark: boolean;
+    /** Last block of a section whose break is NEXT-PAGE. Its mark keeps its
+     *  line MID-page, and may still flow to the next column — but it never
+     *  opens a page: a probe with four such sections, marks alternately
+     *  fitting and not, at bottom margins 720 and 0, paginates in Word as
+     *  exactly one page per section. An unfitting mark is simply clipped at
+     *  the floor of its section's last page. */
+    pageBreakMark: boolean;
   }[] = [];
   sections.forEach((sec, si) => {
     // Per-section geometry overrides are attr data — sanitize like config.page
@@ -5023,6 +5125,10 @@ export function layout(
           k === sec.blockCount - 1 &&
           si < sections.length - 1 &&
           !sections[si + 1].newPage,
+        pageBreakMark:
+          k === sec.blockCount - 1 &&
+          si < sections.length - 1 &&
+          sections[si + 1].newPage,
       });
     }
   });
@@ -5036,6 +5142,7 @@ export function layout(
       page: lastSecPage,
       chromeIndex: sections.length - 1,
       breakMark: false,
+      pageBreakMark: false,
     });
   }
 
@@ -5174,6 +5281,8 @@ export function layout(
       const mkItem = (drafts: LineDraft[] | null): ParaItem => ({
         getFlow,
         drafts,
+        ...(bs.pageBreakMark &&
+          node.childCount === 0 && { pageBreakMark: true }),
         before: sp?.before,
         after: sp?.after,
         pageBreakBefore: node.attrs['pageBreakBefore'] === true,
@@ -5196,6 +5305,7 @@ export function layout(
         hasFloats ||
         unevenCols ||
         bs.breakMark ||
+        bs.pageBreakMark ||
         paragraphHasColumnBreak(node)
       ) {
         items.push(tag({ para: mkItem(null) }));
