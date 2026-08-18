@@ -38,10 +38,12 @@ import {
  *   - NAVY — exact, and the one file whose rendering can be checked exactly:
  *     Word's own PDF export of it sits beside the .docx (gitignored, like the
  *     .docx), and its 18 image rectangles map 1:1 to the 18 wp:anchor by size.
- *     Comparing against those settled three rules that reading could not: what
- *     a margin-only section break does, that an empty paragraph is as tall as
- *     its own mark, and that a continuous break's mark draws no line. Its
- *     three page-1 photos went from 27px below Word's to 5px.
+ *     Comparing against those settled six rules that reading could not —
+ *     margin-only section breaks, mark-sized empty paragraphs, invisible
+ *     break marks, both float-anchor origins, and the through-wrap line
+ *     grid. Its 18 images now sit at mean 0.4px horizontal and 4.4px
+ *     vertical from Word's, 16 of them within 10px, and every page opens
+ *     on the block Word opens it with.
  *   - nested_table −2, and the one entry these numbers cannot yet judge: it is
  *     75% Open Sans and 24% Aptos. We bundle neither, this Mac has neither
  *     installed, and Aptos — Microsoft 365's default since 2023 — has no

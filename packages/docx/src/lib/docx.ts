@@ -610,6 +610,10 @@ function parseAnchorFloat(drawing: OoxmlNode): Record<string, unknown> | null {
       : 'none'; // wrapNone / absent: paints without affecting text
 
   const float: Record<string, unknown> = { wrap };
+  // Tight/through carve the same rectangle here (the polygon is not
+  // modelled) but anchor differently — see FlowFloat.through.
+  if (child(anchor, 'wp:wrapTight') || child(anchor, 'wp:wrapThrough'))
+    float['through'] = true;
   // z-order: behindDoc="1" puts the drawing UNDER the text (watermarks, page
   // backgrounds). Word's default is in front. Dropping this flag on import is
   // what silently pulled behind-text images in front of the text on save.

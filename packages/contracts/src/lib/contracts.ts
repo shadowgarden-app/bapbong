@@ -364,6 +364,16 @@ export interface FlowFloat {
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
   wrap: 'square' | 'topAndBottom' | 'none';
+  /**
+   * The 'square' wrap came from wp:wrapThrough / wp:wrapTight rather than
+   * wp:wrapSquare. Text still flows around the same rectangle here (the
+   * polygon is not modelled), but the ANCHORING differs, and measurably: a
+   * paragraph whose first line is pushed below a through-wrapped float takes
+   * its anchor position with it, while a square-wrapped float displaces the
+   * line only. A generated probe pins both behaviours in Word's own PDF —
+   * and the corpus factsheet's column 3 hinges on the difference.
+   */
+  through?: boolean;
   /** wp:anchor behindDoc="1" — paint UNDER the text (watermarks). Absent =
    *  Word's default: anchored drawings paint over the text. */
   behind?: boolean;

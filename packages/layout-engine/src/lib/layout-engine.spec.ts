@@ -2914,6 +2914,65 @@ describe('multi-column layout', () => {
     expect(r.floats?.[1].y).toBeCloseTo(first.y + first.height);
   });
 
+  it('a through float takes the pushed paragraph with it, on its line grid', () => {
+    // Word's PDF of a generated probe, four cases to 0.02px: pushed below a
+    // wrapSquare float, a line restarts FLUSH at its bottom and the anchor
+    // stays put; pushed below a wrapThrough float, the line advances in whole
+    // line-heights from where the paragraph stood — through-wrap means the
+    // lines still exist across the float's span — and the ANCHOR follows.
+    const blocker = (through: boolean): FlowBlock => ({
+      type: 'paragraph',
+      runs: [{ text: 'a', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 200, // the whole 200px content box: nothing fits beside
+          height: 50,
+          wrap: 'square',
+          ...(through && { through: true }),
+          hRel: 'column',
+          hOffset: 0,
+          vOffset: 20,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    });
+    const marked: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 20,
+          height: 10,
+          wrap: 'none',
+          hRel: 'column',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    // The blocker's float: paragraph top 20 + vOffset 20 → box 40..90.
+    // Square: the next line restarts FLUSH at 90; the anchor stays at the
+    // paragraph's natural position (the blocker's line bottom, 36).
+    const sq = layoutBlocks([blocker(false), marked], config({ height: 600 }))
+      .pages[0];
+    const lineH = sq.lines[0].height; // 16px at the 10pt default
+    expect(sq.lines[1].y).toBeCloseTo(20 + 20 + 50); // flush at the box bottom
+    expect(sq.floats?.[1].y).toBeCloseTo(20 + lineH);
+    // Through: the line lands on the paragraph's own grid — natural 36,
+    // first slot clearing the float bottom (90) is 36 + 4·16 = 100 — and
+    // the anchor (so the marker) went with it.
+    const th = layoutBlocks([blocker(true), marked], config({ height: 600 }))
+      .pages[0];
+    const gridY = 20 + lineH + 4 * lineH;
+    expect(th.lines[1].y).toBeCloseTo(gridY);
+    expect(th.floats?.[1].y).toBeCloseTo(gridY);
+  });
+
   it('measures a column-anchored float from the band its anchor line got', () => {
     // "Column" means the column as the ANCHOR LINE sees it — narrowed by any
     // float that line already wraps around. Word's PDF of the corpus factsheet

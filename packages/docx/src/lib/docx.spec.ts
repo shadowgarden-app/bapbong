@@ -287,6 +287,38 @@ describe('importDocx', () => {
     expect(doc.child(3).attrs['markFont']).toBeNull();
   });
 
+  it('marks tight/through wraps as through, square as not', async () => {
+    // Both carve the same rectangle here, but they ANCHOR differently — a
+    // paragraph pushed below a through float takes its anchor with it — so
+    // the flag must survive import (see FlowFloat.through).
+    const anchor = (wrap: string) => `<w:drawing><wp:anchor behindDoc="0">
+          <wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>
+          <wp:extent cx="914400" cy="914400"/>${wrap}
+          <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId9"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+        </wp:anchor></w:drawing>`;
+    const poly =
+      '<wp:wrapPolygon><wp:start x="0" y="0"/><wp:lineTo x="0" y="21600"/><wp:lineTo x="21600" y="21600"/><wp:lineTo x="21600" y="0"/></wp:wrapPolygon>';
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:r="${R_NS}"><w:body>
+      <w:p><w:r>${anchor(`<wp:wrapThrough wrapText="bothSides">${poly}</wp:wrapThrough>`)}</w:r></w:p>
+      <w:p><w:r>${anchor(`<wp:wrapTight wrapText="bothSides">${poly}</wp:wrapTight>`)}</w:r></w:p>
+      <w:p><w:r>${anchor('<wp:wrapSquare wrapText="bothSides"/>')}</w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/i.png"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'i.png': PNG_1x1,
+      }),
+    );
+    const floatOf = (i: number) =>
+      doc.child(i).child(0).attrs['float'] as Record<string, unknown>;
+    expect(floatOf(0)['wrap']).toBe('square');
+    expect(floatOf(0)['through']).toBe(true);
+    expect(floatOf(1)['through']).toBe(true);
+    expect(floatOf(2)['wrap']).toBe('square');
+    expect(floatOf(2)['through']).toBeUndefined();
+  });
+
   it('treats a paragraph holding only an anchored float as mark-only', async () => {
     // An anchored image is a CHILD of the paragraph it is anchored to, but it
     // floats out of the text flow — the mark is still alone on the line, so it

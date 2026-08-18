@@ -1996,6 +1996,9 @@ interface Exclusion {
   right: number;
   top: number;
   bottom: number;
+  /** From a through/tight-wrapped float: a paragraph pushed below this
+   *  rectangle takes its ANCHOR with it (see FlowFloat.through). */
+  through?: boolean;
 }
 
 /** Narrowest band we'll still flow text into beside a float. */
@@ -3539,6 +3542,7 @@ function placeBlocks(
               right: fx + f.width + (f.distR ?? 0),
               top: fy - (f.distT ?? 0),
               bottom: fy + f.height + (f.distB ?? 0),
+              ...(f.through && { through: true }),
             }
           : f.wrap === 'topAndBottom'
             ? {
@@ -3632,10 +3636,25 @@ function placeBlocks(
     // deliberately WITHOUT this paragraph's own floats, whose exclusions
     // don't exist yet (same rule as Word: the anchor's page is decided by
     // the text position, then the drawing follows the anchor).
-    const bm = ctx.metrics ? ctx.metrics(ctx.base) : null;
+    // The paragraph's OWN nominal line height, seeded the same way
+    // wrapParagraph seeds it (the mark's font for a run-less paragraph, zero
+    // for a break mark). It has to be: the through-float walk below advances
+    // on this paragraph's LINE GRID, and a step in someone else's pitch puts
+    // every landing off — 14pt marks stepped at the 11pt document default
+    // even slipped PAST a float's top edge and never saw the blocker at all.
+    const seed =
+      flow.runs.length === 0 && flow.markFont
+        ? { ...ctx.base, ...flow.markFont }
+        : ctx.base;
+    const bm =
+      flow.runs.length === 0 && flow.breakMark
+        ? { ascent: 0, descent: 0, leading: 0 }
+        : ctx.metrics
+          ? ctx.metrics(seed)
+          : null;
     const estH = bm
-      ? bm.ascent + bm.descent
-      : sizePx(ctx.base) * LINE_HEIGHT_FACTOR;
+      ? bm.ascent + bm.descent + (bm.leading ?? 0)
+      : sizePx(seed) * LINE_HEIGHT_FACTOR;
     // Where the paragraph BELONGS. The loop below walks `y` down past floats
     // to find room for its first LINE, but a float's wrap does not move the
     // paragraph — Word anchors a paragraph-relative drawing at the position
@@ -3657,7 +3676,23 @@ function placeBlocks(
           (ex) => ex.top < y + estH && ex.bottom > y,
         );
         if (blockers.length === 0) break;
-        y = Math.min(...blockers.map((ex) => ex.bottom));
+        // Two skip modes, measured apart by a generated probe read from
+        // Word's own PDF:
+        //   square  — the line restarts FLUSH below the float.
+        //   through — the line stays on the paragraph's own LINE GRID: whole
+        //             line-heights from where it stood. Through-wrap means
+        //             the lines still exist across the float's span (each
+        //             fully blocked horizontally), so the first free slot is
+        //             a grid position, not the float's edge. Three cases pin
+        //             it to 0.1px, at three different shove distances.
+        // And a through float takes the paragraph WITH it — the anchor
+        // follows the line — while a square float displaces the line only.
+        if (blockers.some((ex) => ex.through) && estH > 0.5) {
+          y += estH;
+          anchorY = y;
+        } else {
+          y = Math.min(...blockers.map((ex) => ex.bottom));
+        }
       }
     }
     // A paragraph-relative anchor measures from the TOP OF THE PARAGRAPH, and
@@ -3717,7 +3752,11 @@ function placeBlocks(
           right: column.right - indents.right,
           column,
         };
-      y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below the float
+      // Same two skip modes as the anchor walk above: flush below a square
+      // float, whole line-heights below a through one (see the probe notes
+      // there). estH here is the line being placed.
+      if (blockers.some((ex) => ex.through) && estH > 0.5) y += estH;
+      else y = Math.min(...blockers.map((ex) => ex.bottom)); // skip below
     }
   };
 
