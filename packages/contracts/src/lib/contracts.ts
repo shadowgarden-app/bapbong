@@ -640,6 +640,12 @@ export interface FlowTable {
   borders?: TableBorders;
   /** Table alignment within the content area (w:jc); left default. */
   align?: 'center' | 'right';
+  /** Offset of a left-aligned table's leading BORDER from the content left
+   *  edge, in px (w:tblInd, resolved by the importer for the document's
+   *  compatibility mode). Absent: Word's implicit outdent by the left cell
+   *  margin, so the first cell's text sits on the margin. Ignored when
+   *  `align` positions the table. */
+  indent?: number;
 }
 
 export type FlowBlock = FlowParagraph | FlowTable;

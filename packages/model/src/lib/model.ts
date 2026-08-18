@@ -335,6 +335,11 @@ export const schema = new Schema({
         borders: { default: null },
         // w:tblPr/w:jc — 'center' | 'right' table alignment, or null (left).
         align: { default: null },
+        // w:tblInd resolved to px: where a left-aligned table's leading
+        // border sits relative to the text margin (compat-mode aware — see
+        // the importer). null = Word's implicit outdent by the left cell
+        // margin. Importer-set; the element itself rides carry for export.
+        indent: { default: null },
         // Carry-through fidelity: unmodelled w:tblPr children (tblStyle,
         // tblLayout, tblLook, tblInd, floating tblpPr, …) as one raw XML
         // string ({ tblPr: string }), or null. Importer-set; the exporter
@@ -351,6 +356,7 @@ export const schema = new Schema({
             borders: dataJson(el, 'data-borders'),
             cellPadding: dataJson(el, 'data-cell-padding'),
             align: (el as DomEl).getAttribute('data-align'),
+            indent: dataJson(el, 'data-indent'),
             carry: dataJson(el, 'data-carry'),
           }),
         },
@@ -362,6 +368,7 @@ export const schema = new Schema({
         if (a['cellPadding'])
           dom['data-cell-padding'] = JSON.stringify(a['cellPadding']);
         if (a['align']) dom['data-align'] = String(a['align']);
+        if (a['indent'] != null) dom['data-indent'] = String(a['indent']);
         if (a['carry']) dom['data-carry'] = JSON.stringify(a['carry']);
         return ['table', dom, ['tbody', 0]];
       },

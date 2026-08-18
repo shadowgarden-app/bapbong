@@ -2386,6 +2386,80 @@ describe('importDocx', () => {
     expect(table.child(0).child(0).attrs.vAlign).toBe('center');
   });
 
+  it('resolves w:tblInd to a border offset by compatibility mode', async () => {
+    // Word 2013+ (mode 15) indents the table's leading BORDER by tblInd;
+    // older modes indent the first cell's TEXT, so the border sits one left
+    // cell margin further out — a rate card in mode 14 indents its tables
+    // 1648 twips (with 0 cell margins) to sit under a centred heading, and
+    // drawn at the margin they were 110px off Word.
+    const tables = `
+      <w:tbl>
+        <w:tblPr><w:tblInd w:w="1648" w:type="dxa"/><w:tblCellMar><w:left w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblPr><w:tblInd w:w="300" w:type="dxa"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblPr><w:tblInd w:w="300" w:type="dxa"/><w:jc w:val="center"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+      <w:tbl>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>d</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${tables}</w:body></w:document>`;
+    // Table Normal with Word's stock margins and a style-level indent of 0.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:left w:w="108" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>
+    </w:styles>`;
+    const settings = (mode: number) => ({
+      'word/settings.xml':
+        `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:compat>` +
+        `<w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="${mode}"/>` +
+        `</w:compat></w:settings>`,
+    });
+    const at = async (mode: number) =>
+      (
+        await importDocx(
+          await makeDocx(
+            documentXml,
+            stylesXml,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            settings(mode),
+          ),
+        )
+      ).doc;
+
+    const old = await at(14);
+    // 1648tw → 109.87px, to the text; 0 cell margin → the border is there too.
+    expect(old.child(0).attrs['indent']).toBeCloseTo(1648 / 15, 0);
+    // 300tw with the style's 108tw margin: border = 300 − 108 = 192tw.
+    expect(old.child(1).attrs['indent']).toBeCloseTo(192 / 15, 0);
+    // A centred table is positioned by w:jc; tblInd has no say.
+    expect(old.child(2).attrs['indent']).toBeNull();
+    // No tblInd of its own: the style's 0 still resolves — border one margin
+    // out (Word 2010's text-on-the-margin look).
+    expect(old.child(3).attrs['indent']).toBeCloseTo(-108 / 15, 0);
+
+    const modern = await at(15);
+    expect(modern.child(0).attrs['indent']).toBeCloseTo(1648 / 15, 0);
+    expect(modern.child(1).attrs['indent']).toBeCloseTo(300 / 15, 0); // to the border
+    expect(modern.child(3).attrs['indent']).toBe(0); // border on the margin
+
+    // No compatibility setting at all: Word reads that as mode 12.
+    const legacy = (await importDocx(await makeDocx(documentXml, stylesXml)))
+      .doc;
+    expect(legacy.child(1).attrs['indent']).toBeCloseTo(192 / 15, 0);
+  });
+
   it('parses per-table cell margins (w:tblCellMar)', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:tbl>

@@ -2,6 +2,7 @@ import { Schema } from 'prosemirror-model';
 import type {
   FlowBlock,
   FlowParagraph,
+  FlowTable,
   FlowTableCell,
   FontSpec,
   LayoutConfig,
@@ -444,6 +445,30 @@ describe('layoutBlocks', () => {
     expect(resolved.cells[1]).toMatchObject({ y: 20, width: 120 });
     expect(resolved.cells[2].x).toBeCloseTo(12.8);
     expect(resolved.cells[2]).toMatchObject({ y: 36, width: 80 });
+  });
+
+  it("places a left table's border at its resolved indent (w:tblInd)", () => {
+    // The importer resolves tblInd to a BORDER offset for the document's
+    // compat mode; the layout adds exactly that. 110px here (a rate card's
+    // 1648 twips under a centred heading), instead of the implicit −7.2.
+    const t: FlowBlock = {
+      ...(table([[cell('a', { colwidth: [80] })]]) as FlowTable),
+      indent: 110,
+    };
+    const [resolved] = layoutBlocks([t], config()).pages[0].tables ?? [];
+    expect(resolved.x).toBeCloseTo(130); // 20 + 110
+    expect(resolved.cells[0].x).toBeCloseTo(130);
+    expect(resolved.cells[0].lines[0].segments[0].x).toBeCloseTo(137.2);
+    // An explicit 0 is 0 (Word 2013+ border-on-the-margin), not the outdent.
+    const flush: FlowBlock = { ...(t as FlowTable), indent: 0 };
+    expect(
+      (layoutBlocks([flush], config()).pages[0].tables ?? [])[0].x,
+    ).toBeCloseTo(20);
+    // A centred table ignores the indent — w:jc positions it.
+    const centred: FlowBlock = { ...(t as FlowTable), align: 'center' };
+    expect(
+      (layoutBlocks([centred], config()).pages[0].tables ?? [])[0].x,
+    ).toBeCloseTo(20 + (200 - 80) / 2);
   });
 
   it('honors a tblGrid wider than a single-column flow (overflows, like Word)', () => {

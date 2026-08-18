@@ -478,6 +478,8 @@ function tableToFlow(
   if (cellPadding) flow.cellPadding = cellPadding;
   const align = node.attrs['align'] as 'center' | 'right' | null;
   if (align) flow.align = align;
+  const indent = node.attrs['indent'] as number | null;
+  if (indent != null) flow.indent = indent;
   const borders = node.attrs['borders'] as TableBorders | null;
   if (borders) flow.borders = borders;
   return flow;
@@ -1654,10 +1656,14 @@ function layoutTable(
       : table.align === 'right'
         ? Math.max(0, avail - tableWidth)
         : 0;
-  // Word's implicit table indent: a left-aligned table's grid shifts LEFT by
-  // the left cell margin, so the first cell's CONTENT (grid + padding) lines
-  // up with the body text margin — Word letterheads rely on this.
-  const indent = table.align ? 0 : -pad.left;
+  // A left-aligned table's leading border sits at w:tblInd (resolved by the
+  // importer to a border offset for the document's compat mode); without one,
+  // Word's implicit indent applies: the grid shifts LEFT by the left cell
+  // margin, so the first cell's CONTENT (grid + padding) lines up with the
+  // body text margin — Word letterheads rely on this. A rate card indents its
+  // tables 1648 twips to sit under a centred heading; drawn at the margin
+  // they were 110px off Word.
+  const indent = table.align ? 0 : (table.indent ?? -pad.left);
   const colX = new Array<number>(ncols + 1).fill(contentLeft + indent + xShift);
   for (let i = 0; i < ncols; i++) colX[i + 1] = colX[i] + colWidths[i];
 

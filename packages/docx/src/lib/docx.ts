@@ -237,6 +237,15 @@ interface Ctx {
    * emulation. Default true — the compat flag is opt-in.
    */
   htmlAutoSpacing: boolean;
+  /**
+   * Where `w:tblInd` is measured to. Word 2013+ (`compatibilityMode` ≥ 15)
+   * indents the table's leading BORDER by that much; earlier modes (and a
+   * document that names none — Word reads that as 12) indent the TEXT of the
+   * first cell, i.e. the border sits a left cell margin further out. The
+   * same rule is why a stock older-mode table's border pokes past the margin
+   * by 0.08" while its text lines up.
+   */
+  tableIndentToBorder: boolean;
   /** VML shapetype registry (`v:shapetype` id → o:spt), filled as picts are
    *  parsed in document order — Word always defines a type before its first
    *  `type="#id"` reference. Lazily created by parseVmlShape. */
@@ -3471,6 +3480,29 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
   if (borders) attrs['borders'] = borders;
   if (jc === 'center' || jc === 'right' || jc === 'end')
     attrs['align'] = jc === 'end' ? 'right' : jc;
+  // w:tblInd — the table's own, else its style's — resolved here to where
+  // the leading BORDER lands relative to the text margin, so the layout has
+  // one number to add and no compat mode to know: to-border in Word 2013+
+  // documents, to-the-first-cell's-text (border = indent − left cell margin)
+  // in older ones (see Ctx.tableIndentToBorder). Only a left-aligned table
+  // is indented — w:jc center/right position the table on their own. The
+  // element itself still rides carry, verbatim, for the save.
+  const tblInd =
+    child(child(tbl, 'w:tblPr'), 'w:tblInd') ??
+    ctx.styles.resolveTableInd(tblCond.styleId);
+  const tblIndType = attrOf(tblInd, 'w:type') ?? 'dxa';
+  if (!attrs['align'] && (tblIndType === 'dxa' || tblIndType === 'nil')) {
+    // No element at all is an indent of 0 — which the two rules still place
+    // differently, so it is resolved rather than left to a layout default.
+    const value =
+      tblInd && tblIndType === 'dxa'
+        ? twipsToPx(Number(attrOf(tblInd, 'w:w') ?? 0))
+        : 0;
+    // The older rule measures to the text: the border sits one left cell
+    // margin further out (Word's 0.08" default when the table names none).
+    const leftPad = cellPadding?.left ?? twipsToPx(108);
+    attrs['indent'] = ctx.tableIndentToBorder ? value : value - leftPad;
+  }
   // Carry-through: tblStyle/tblW/tblLayout/tblInd/tblLook/… survive the save.
   const tblCarry = collectCarry(child(tbl, 'w:tblPr'), CONSUMED_TBLPR);
   if (tblCarry) attrs['carry'] = { tblPr: tblCarry };
@@ -4290,8 +4322,18 @@ async function importDocxImpl(
   const htmlAutoSpacing = !isToggleOn(
     child(settingsEl, 'w:doNotUseHTMLParagraphAutoSpacing'),
   );
+  const compatMode = Number(
+    attrOf(
+      children(child(settingsEl, 'w:compat'), 'w:compatSetting').find(
+        (c) => attrOf(c, 'w:name') === 'compatibilityMode',
+      ),
+      'w:val',
+    ) ?? 12,
+  );
+  const tableIndentToBorder = compatMode >= 15;
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     htmlAutoSpacing,
+    tableIndentToBorder,
     styles,
     numbering,
     rels,
