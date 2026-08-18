@@ -69,6 +69,7 @@ import type {
 import { audit } from './audit.js';
 import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
 import { parseCompat } from './compat.js';
+import { emfBitmapDataUrl } from './emf.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
@@ -276,6 +277,10 @@ function mimeOf(path: string): string {
     case 'tif':
     case 'tiff':
       return 'image/tiff';
+    case 'emf':
+      return 'image/emf';
+    case 'wmf':
+      return 'image/wmf';
     default:
       return 'application/octet-stream';
   }
@@ -4219,6 +4224,16 @@ async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
     if (!path.startsWith('word/media/')) continue;
     const entry = zip.file(path);
     if (!entry || entry.dir) continue;
+    // A metafile no browser can decode — but the kind Word writes most, a
+    // single bitmap in EMF clothing, is re-framed as the .bmp it really is
+    // (see emf.ts). Anything else keeps its bytes for the export.
+    if (path.toLowerCase().endsWith('.emf')) {
+      const bmp = emfBitmapDataUrl(await entry.async('uint8array'));
+      if (bmp) {
+        media.set(path, bmp);
+        continue;
+      }
+    }
     media.set(
       path,
       `data:${mimeOf(path)};base64,${await entry.async('base64')}`,
