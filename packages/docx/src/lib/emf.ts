@@ -1,5 +1,5 @@
 /**
- * Windows Enhanced Metafiles (`.emf`) in a .docx.
+ * Windows metafiles (`.emf`, `.wmf`) in a .docx.
  *
  * Browsers decode no metafile, so an EMF picture used to import as an
  * `application/octet-stream` data URL the painter could not draw — a blank of
@@ -166,6 +166,147 @@ export function extractSoleDib(bytes: Uint8Array): Uint8Array | null {
   out.set(bmi, 14);
   out.set(bits, 14 + cbBmi);
   return out;
+}
+
+// ── WMF ─────────────────────────────────────────────────────────────
+// The 16-bit ancestor ([MS-WMF]): an optional 22-byte placeable header
+// (magic 0x9AC6CDD7), META_HEADER (18 bytes), then records of
+// Size(4, in 16-bit WORDS) + Function(2) + parameters. The bitmap records
+// carry the DIB — header, colour table, bits — as one blob to the record's
+// end, so unlike EMF there is no offset table: the colour-table size has to be
+// worked out from the DIB header to know where the bits start.
+
+const WMF_PLACEABLE = 0x9ac6cdd7;
+/** Function → byte offset of the DIB from the record start (Size+Function =
+ *  6, then the fixed parameters). */
+const WMF_BITMAP_RECORDS: Record<number, number> = {
+  0x0f43: 28, // META_STRETCHDIB: rop(4) usage(2) + 8 shorts
+  0x0b41: 26, // META_DIBSTRETCHBLT: rop(4) + 8 shorts
+  0x0940: 22, // META_DIBBITBLT: rop(4) + 6 shorts
+  0x0d33: 24, // META_SETDIBTODEV: usage(2) scans(2) start(2) + 6 shorts
+};
+/** ColorUsage lives at these offsets (DIB_RGB_COLORS = 0); the two blts have
+ *  none (always RGB). */
+const WMF_USAGE_OFFSET: Record<number, number> = { 0x0f43: 10, 0x0d33: 6 };
+/** State / object / control functions — see STATE_RECORDS for the rule. */
+const WMF_STATE_RECORDS = new Set<number>([
+  0x0000, // EOF
+  0x0035, // REALIZEPALETTE
+  0x00f7, // CREATEPALETTE
+  0x0102, // SETBKMODE
+  0x0103, // SETMAPMODE
+  0x0104, // SETROP2
+  0x0105, // SETRELABS
+  0x0106, // SETPOLYFILLMODE
+  0x0107, // SETSTRETCHBLTMODE
+  0x0108, // SETTEXTCHAREXTRA
+  0x0127, // RESTOREDC
+  0x012d, // SELECTOBJECT
+  0x012e, // SETTEXTALIGN
+  0x0139, // RESIZEPALETTE
+  0x0142, // DIBCREATEPATTERNBRUSH
+  0x0149, // SETLAYOUT
+  0x001e, // SAVEDC
+  0x01f0, // DELETEOBJECT
+  0x01f9, // CREATEPATTERNBRUSH
+  0x0201, // SETBKCOLOR
+  0x0209, // SETTEXTCOLOR
+  0x020a, // SETTEXTJUSTIFICATION
+  0x020b, // SETWINDOWORG
+  0x020c, // SETWINDOWEXT
+  0x020d, // SETVIEWPORTORG
+  0x020e, // SETVIEWPORTEXT
+  0x020f, // OFFSETWINDOWORG
+  0x0211, // OFFSETVIEWPORTORG
+  0x0214, // MOVETO
+  0x0220, // OFFSETCLIPRGN
+  0x0231, // SETMAPPERFLAGS
+  0x0234, // SELECTPALETTE
+  0x02fa, // CREATEPENINDIRECT
+  0x02fb, // CREATEFONTINDIRECT
+  0x02fc, // CREATEBRUSHINDIRECT
+  0x0410, // SCALEWINDOWEXT
+  0x0412, // SCALEVIEWPORTEXT
+  0x0415, // EXCLUDECLIPRECT
+  0x0416, // INTERSECTCLIPRECT
+  0x0626, // ESCAPE
+  0x06ff, // CREATEREGION
+  0x012c, // SELECTCLIPREGION
+  0x0037, // SETPALENTRIES
+  0x0038, // ANIMATEPALETTE
+]);
+
+/** The bitmap inside a bitmap-only WMF as a `data:image/bmp;base64,…` URL,
+ *  or null (see {@link emfBitmapDataUrl} — same contract). */
+export function wmfBitmapDataUrl(bytes: Uint8Array): string | null {
+  const dib = extractSoleWmfDib(bytes);
+  return dib ? `data:image/bmp;base64,${toBase64(dib)}` : null;
+}
+
+/** The DIB of a bitmap-only WMF, framed as a complete BMP file. */
+export function extractSoleWmfDib(bytes: Uint8Array): Uint8Array | null {
+  if (bytes.length < 18) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let off = view.getUint32(0, true) === WMF_PLACEABLE ? 22 : 0;
+  // META_HEADER: Type (1 memory / 2 disk), HeaderSize in words (9).
+  const type = view.getUint16(off, true);
+  const headerWords = view.getUint16(off + 2, true);
+  if ((type !== 1 && type !== 2) || headerWords !== 9) return null;
+  off += 18;
+  let bitmap: { start: number; size: number; fn: number } | null = null;
+  while (off + 6 <= bytes.length) {
+    const size = view.getUint32(off, true) * 2;
+    const fn = view.getUint16(off + 4, true);
+    if (size < 6 || off + size > bytes.length) return null;
+    if (WMF_BITMAP_RECORDS[fn] !== undefined) {
+      // A META_DIBBITBLT with no DIB is the pattern-fill form: nothing to lift.
+      if (size <= WMF_BITMAP_RECORDS[fn]) return null;
+      if (bitmap) return null;
+      bitmap = { start: off, size, fn };
+    } else if (!WMF_STATE_RECORDS.has(fn)) {
+      return null;
+    }
+    if (fn === 0) break;
+    off += size;
+  }
+  if (!bitmap) return null;
+  const usageOff = WMF_USAGE_OFFSET[bitmap.fn];
+  if (
+    usageOff !== undefined &&
+    view.getUint16(bitmap.start + usageOff, true) !== 0
+  )
+    return null;
+  const dibStart = bitmap.start + WMF_BITMAP_RECORDS[bitmap.fn];
+  const dib = bytes.subarray(dibStart, bitmap.start + bitmap.size);
+  const bmiSize = dibInfoSize(dib);
+  if (bmiSize === null || bmiSize >= dib.length) return null;
+  const out = new Uint8Array(14 + dib.length);
+  const ov = new DataView(out.buffer);
+  out[0] = 0x42;
+  out[1] = 0x4d;
+  ov.setUint32(2, out.length, true);
+  ov.setUint32(10, 14 + bmiSize, true);
+  out.set(dib, 14);
+  return out;
+}
+
+/** Bytes from a DIB's start to its pixel array: BITMAPINFOHEADER (or a V4/V5
+ *  one), the BI_BITFIELDS masks a 40-byte header keeps outside itself, and
+ *  the colour table. Null for the 12-byte BITMAPCOREHEADER (RGBTRIPLE
+ *  palettes; not seen in Word output) or a truncated header. */
+function dibInfoSize(dib: Uint8Array): number | null {
+  if (dib.length < 40) return null;
+  const v = new DataView(dib.buffer, dib.byteOffset, dib.byteLength);
+  const biSize = v.getUint32(0, true);
+  if (biSize < 40) return null;
+  const bpp = v.getUint16(14, true);
+  const compression = v.getUint32(16, true);
+  const clrUsed = v.getUint32(32, true);
+  let size = biSize;
+  if (biSize === 40 && compression === 3) size += 12; // BI_BITFIELDS masks
+  if (bpp <= 8) size += (clrUsed || 1 << bpp) * 4;
+  else if (clrUsed) size += clrUsed * 4; // optional palette on true colour
+  return size;
 }
 
 /** Base64 without a browser-only `btoa` string round-trip (Node has Buffer;

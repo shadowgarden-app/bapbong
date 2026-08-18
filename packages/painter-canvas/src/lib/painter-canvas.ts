@@ -137,6 +137,11 @@ interface PageSlot {
 export class CanvasPainter {
   private readonly createCanvas: () => HTMLCanvasElement;
   private readonly images = new Map<string, HTMLImageElement>();
+  /** Sources the engine could not decode (a vector metafile, a broken data
+   *  URL, an unreachable link). Painted as a placeholder box — the layout
+   *  reserved the space, and an empty gap where the document has a picture
+   *  reads as "nothing here" rather than "something we cannot show". */
+  private readonly undecodable = new Set<string>();
   /** pageIndex → its mounted canvas; idle canvases wait in `pool`. */
   private readonly mounted = new Map<number, PageSlot>();
   private readonly pool: PageSlot[] = [];
@@ -510,6 +515,8 @@ export class CanvasPainter {
         const el = this.requestImage(f.src);
         if (el?.complete && el.naturalWidth > 0) {
           this.drawBitmap(el, f.crop, f.x, yOffset + f.y, f.width, f.height);
+        } else if (this.undecodable.has(f.src)) {
+          this.drawPlaceholder(f.x, yOffset + f.y, f.width, f.height);
         }
         // Word's picture border sits ON the box edge, over the bitmap.
         if (f.outline)
@@ -649,6 +656,13 @@ export class CanvasPainter {
                 img.width,
                 img.height,
               );
+          } else if (this.undecodable.has(img.src)) {
+            this.drawPlaceholder(
+              img.x,
+              baselineY - img.height,
+              img.width,
+              img.height,
+            );
           }
         },
       );
@@ -922,6 +936,43 @@ export class CanvasPainter {
   }
 
   /** Four edges of a box in one border style — a picture's own outline. */
+  /** The stand-in for a picture the engine cannot decode: a light box with a
+   *  hairline border and a small "picture" glyph (frame + sun + hills) in the
+   *  middle, sized to the box — the same idea as Word's "cannot be displayed"
+   *  frame, without its text (whose font would be a guess). Kept flat and
+   *  neutral so it never competes with the page. */
+  private drawPlaceholder(x: number, y: number, w: number, h: number): void {
+    if (w <= 0 || h <= 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = '#f2f2f2';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#b8b8b8';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+    const s = Math.min(w, h) * 0.5;
+    if (s >= 8) {
+      const gx = x + (w - s) / 2;
+      const gy = y + (h - s) / 2;
+      ctx.strokeStyle = '#9a9a9a';
+      ctx.lineWidth = Math.max(1, s / 24);
+      ctx.strokeRect(gx, gy, s, s * 0.8);
+      ctx.fillStyle = '#9a9a9a';
+      ctx.beginPath(); // sun
+      ctx.arc(gx + s * 0.3, gy + s * 0.25, s * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath(); // hills
+      ctx.moveTo(gx + s * 0.08, gy + s * 0.72);
+      ctx.lineTo(gx + s * 0.38, gy + s * 0.4);
+      ctx.lineTo(gx + s * 0.56, gy + s * 0.58);
+      ctx.lineTo(gx + s * 0.68, gy + s * 0.46);
+      ctx.lineTo(gx + s * 0.92, gy + s * 0.72);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   private strokeBox(
     side: BorderSide,
     x: number,
@@ -1079,6 +1130,18 @@ export class CanvasPainter {
             selection: this.lastOverlay.selection,
           }),
         );
+      }
+    };
+    el.onerror = () => {
+      // Undecodable: remember, and repaint so the placeholder replaces the
+      // blank the first paint left where the picture belongs.
+      this.undecodable.add(src);
+      if (this.lastLayout) {
+        this.paint(this.lastLayout, {
+          ...this.lastOptions,
+          caret: this.lastOverlay.caret,
+          selection: this.lastOverlay.selection,
+        });
       }
     };
     el.src = src;
