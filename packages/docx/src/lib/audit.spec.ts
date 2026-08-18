@@ -11,6 +11,7 @@ async function makeDocx(
   documentXml: string,
   stylesXml?: string,
   themeXml?: string,
+  settingsXml?: string,
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file(
@@ -24,6 +25,7 @@ async function makeDocx(
   zip.file('word/document.xml', documentXml);
   if (stylesXml) zip.file('word/styles.xml', stylesXml);
   if (themeXml) zip.file('word/theme/theme1.xml', themeXml);
+  if (settingsXml) zip.file('word/settings.xml', settingsXml);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -115,6 +117,49 @@ describe('xml audit (import)', () => {
     // Asked-for attrs count as covered.
     expect(unknown).not.toContain('w:jc @w:val');
     expect(unknown).not.toContain('w:pgMar @w:top');
+  });
+
+  it('judges w:compat entry by entry: read, not adopted, or a real gap', async () => {
+    // settings.xml used to be ignored wholesale as "editor UI". Its w:compat
+    // block is layout: two entries are READ into DocCompat, the ones Word
+    // writes on every file but this program has not adopted are classified
+    // by name (each a candidate field), and anything new stays UNKNOWN.
+    audit.setEnabled(true);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cs = (name: string, val: string) =>
+      `<w:compatSetting w:name="${name}" w:uri="http://schemas.microsoft.com/office/word" w:val="${val}"/>`;
+    await importDocx(
+      await makeDocx(
+        DOCUMENT_XML,
+        undefined,
+        undefined,
+        `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:compat>` +
+          '<w:ulTrailSpace/><w:doNotUseHTMLParagraphAutoSpacing/><w:fictionalCompat/>' +
+          cs('compatibilityMode', '15') +
+          cs('overrideTableStyleFontSizeAndJustification', '1') +
+          cs('enableOpenTypeFeatures', '1') +
+          cs('brandNewSetting', '1') +
+          '</w:compat></w:settings>',
+      ),
+    );
+    log.mockRestore();
+    const report = audit.lastReport;
+    const unknown = keys(report?.unknown ?? []);
+    const ignored = keys(report?.ignored ?? []);
+    // Read.
+    expect(unknown.filter((k) => k.includes('compatibilityMode'))).toEqual([]);
+    expect(
+      unknown.filter((k) => k.includes('overrideTableStyleFontSize')),
+    ).toEqual([]);
+    expect(unknown).not.toContain('w:doNotUseHTMLParagraphAutoSpacing');
+    // Not adopted, by name — keyed per setting so the list stays readable.
+    expect(ignored).toContain('w:compatSetting[enableOpenTypeFeatures] @w:val');
+    expect(ignored).toContain('w:ulTrailSpace');
+    // The namespace URI is plumbing on every entry.
+    expect(unknown.some((k) => k.endsWith('@w:uri'))).toBe(false);
+    // New to us: a real gap, and it says which one.
+    expect(unknown).toContain('w:compatSetting[brandNewSetting] @w:val');
+    expect(unknown).toContain('w:fictionalCompat');
   });
 
   it('demotes a value that asks for nothing — and only that value', async () => {

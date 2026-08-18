@@ -162,8 +162,8 @@ const IGNORED_TAGS = new Set([
   'wp:simplePos',
   'wp:wrapNone',
   // Settings that tune Word's own editing/proofing UI, not rendering; the
-  // whole settings.xml part is carried on export.
-  'w:compat',
+  // whole settings.xml part is carried on export. (w:compat is NOT here: it is
+  // read — see compat.ts — and its children are judged one by one below.)
   'w:decimalSymbol',
   'w:characterSpacingControl',
   'w:hideSpellingErrors',
@@ -180,6 +180,42 @@ const IGNORED_TAGS = new Set([
   'w:doNotAutoCompressPictures',
   'w:doNotIncludeSubdocsInStats',
   'w:uiCompat97To2003',
+  // ── w:compat children not adopted into DocCompat ─────────────────────
+  // Every one of these is a real Word layout switch, and each is a candidate
+  // field for DocCompat (compat.ts) the day its rule is implemented. Listed by
+  // NAME on purpose: a flag Word writes that is not here still surfaces as
+  // UNKNOWN, which is the signal to go and read up on it. The two compat
+  // children that ARE consulted (compatSetting/compatibilityMode and
+  // doNotUseHTMLParagraphAutoSpacing) are read and never reach this list.
+  //
+  // Word 2003→2007 conversion set (a converted .doc carries all of these):
+  'w:useNormalStyleForList',
+  'w:doNotUseIndentAsNumberingTabStop',
+  'w:useAltKinsokuLineBreakRules',
+  'w:allowSpaceOfSameStyleInTable',
+  'w:doNotSuppressIndentation',
+  'w:doNotAutofitConstrainedTables',
+  'w:autofitToFirstFixedWidthCell',
+  'w:underlineTabInNumList',
+  'w:displayHangulFixedWidth',
+  'w:splitPgBreakAndParaMark',
+  'w:doNotVertAlignCellWithSp',
+  'w:doNotBreakConstrainedForcedTable',
+  'w:doNotVertAlignInTxbx',
+  'w:useAnsiKerningPairs',
+  'w:cachedColBalance',
+  // East-Asian layout switches — no CJK line-breaking or width balancing yet.
+  'w:useFELayout',
+  'w:balanceSingleByteDoubleByteWidth',
+  'w:doNotLeaveBackslashAlone',
+  // Underline under trailing spaces at a line end (WordPerfect habit) — the
+  // trailing spaces are trimmed off every line, so nothing to underline.
+  'w:ulTrailSpace',
+  // Justified text ending in Shift+Enter: whether that line stretches. Not
+  // modelled either way (the line before a w:br justifies as a last line).
+  'w:doNotExpandShiftReturn',
+  // Word's own drawing grid origin — UI, like the other drawingGrid* above.
+  'w:doNotUseMarginsForDrawingGridOrigin',
   // An embedded object's link to its editor: ProgID, the OLE stream, the
   // shape it belongs to. What the reader SEES is the v:imagedata preview
   // beside it, which is read and rendered. Editing the embedded object is
@@ -234,8 +270,52 @@ function isIgnoredTag(name: string): boolean {
   return IGNORED_TAG_PREFIXES.some((p) => name.startsWith(p));
 }
 
+/**
+ * `w:compatSetting` entries Word 2010+ writes on every document that are not
+ * adopted into DocCompat — the report keys them `w:compatSetting[<name>]` so
+ * each is judged on its own (see {@link keyOf}). Same contract as the element
+ * list above: a setting Word starts writing that is not here surfaces as
+ * UNKNOWN. compatibilityMode and overrideTableStyleFontSizeAndJustification
+ * are READ (compat.ts) and never reach this list.
+ */
+const COMPAT_SETTINGS_NOT_ADOPTED = new Set([
+  // OpenType typographic features (ligatures, stylistic sets): the per-run
+  // w14:* requests that would use them are ignored by prefix already, so the
+  // master switch has nothing to enable.
+  'enableOpenTypeFeatures',
+  // Mirror indents on facing pages: w:mirrorIndents itself is not modelled
+  // and stays countable wherever a paragraph uses it; the flip rule is moot.
+  'doNotFlipMirrorIndents',
+  // Hyphenation is out of layout scope by decision (see w:autoHyphenation).
+  'useWord2013TrackBottomHyphenation',
+  'allowHyphenationAtTrackBottom',
+  // Repeated header rows: whether Word treats a multi-row header block as
+  // one; the rows repeat either way and nothing here reads the difference.
+  'differentiateMultirowTableHeaders',
+  // Floating (tblpPr) tables are not modelled — the break rule has no table
+  // to apply to.
+  'allowTextAfterFloatingTableBreak',
+]);
+
+/** The report key of an element: its tag, except a `w:compatSetting`, which
+ *  is `w:compatSetting[<w:name>]` — the name IS the setting's identity, and
+ *  one entry per setting is what makes the compat list above readable. */
+function keyOf(node: OoxmlNode): string {
+  return node.name === 'w:compatSetting'
+    ? `w:compatSetting[${node.attrs['w:name'] ?? ''}]`
+    : node.name;
+}
+
 /** Attribute names skipped on purpose (on otherwise-covered elements). */
 function isIgnoredAttr(tag: string, name: string): boolean {
+  if (tag.startsWith('w:compatSetting')) {
+    // The namespace URI is the same constant on every entry; the name is
+    // always read (it is how an entry is found) and rides the key.
+    if (name === 'w:uri' || name === 'w:name') return true;
+    const setting = tag.slice('w:compatSetting['.length, -1);
+    if (name === 'w:val' && COMPAT_SETTINGS_NOT_ADOPTED.has(setting))
+      return true;
+  }
   return (
     name.startsWith('xmlns') ||
     name.startsWith('w:rsid') ||
@@ -359,6 +439,10 @@ const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // "Keep the text upright while the shape is rotated" — nothing to keep
   // upright when the shape is not rotated. @rot sits on this same element.
   'wps:bodyPr @upright': (_v, n) => Number(n.attrs['rot'] ?? '0') === 0,
+  // CT_TblWidth: with @w:type="nil" there is no width, so the @w:w beside it
+  // says nothing (the reader takes 0 from the type alone). Any other type
+  // reads the value, and an unread one is a real gap.
+  'w:tblInd @w:w': (_v, n) => n.attrs['w:type'] === 'nil',
   // ST_WrapText defaults to bothSides: text flows down both sides of the
   // float, which is what our square-wrap already does. left/right/largest
   // pick ONE side and stay UNKNOWN.
@@ -663,13 +747,13 @@ function collectPart(
           if (a.startsWith('xmlns')) continue;
           if (!asked?.has(a))
             bump(
-              `${c.name} @${a}`,
+              `${keyOf(c)} @${a}`,
               isInertAttr(c.name, a, c.attrs[a], c),
               inDead,
             );
         }
       } else if (parentVisited) {
-        bump(c.name, isInertTag(c), inDead);
+        bump(keyOf(c), isInertTag(c), inDead);
       }
       walk(c, v, inDead);
     }

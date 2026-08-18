@@ -1864,9 +1864,11 @@ describe('importDocx', () => {
         undefined,
         undefined,
         {
+          // Where Word writes it: inside w:compat (CT_Compat). Reading it at
+          // the settings level, as this test once did, never saw a real file's.
           'word/settings.xml':
-            `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}">` +
-            `<w:doNotUseHTMLParagraphAutoSpacing/></w:settings>`,
+            `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:compat>` +
+            `<w:doNotUseHTMLParagraphAutoSpacing/></w:compat></w:settings>`,
         },
       ),
     );
@@ -1880,6 +1882,84 @@ describe('importDocx', () => {
     expect(sp(0)).toMatchObject({ before: 7, after: 13 });
     // An inline "0" turns the flag off, so this paragraph's own 240tw applies.
     expect(sp(1)).toMatchObject({ before: 16, after: 16 });
+  });
+
+  it('lets a stock Normal yield to the table style in Word 2007 documents', async () => {
+    // overrideTableStyleFontSizeAndJustification OFF (absent — every Word
+    // 2007 file, and every mode-12 file since): the DEFAULT paragraph style's
+    // 11pt/12pt size and its LEFT justification do not beat the table
+    // style's, even though a paragraph style outranks a table style. ON
+    // (Word 2010+ writes "1"): the plain hierarchy, Normal wins.
+    const styles = (
+      normalSz: number,
+    ) => `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:pPr><w:jc w:val="left"/></w:pPr><w:rPr><w:sz w:val="${normalSz}"/></w:rPr>
+      </w:style>
+      <w:style w:type="paragraph" w:styleId="Body"><w:basedOn w:val="Normal"/></w:style>
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal">
+        <w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:sz w:val="20"/></w:rPr>
+      </w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl><w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid><w:tr><w:tc>
+        <w:p><w:r><w:t>plain</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Body"/></w:pPr><w:r><w:t>styled</w:t></w:r></w:p>
+      </w:tc></w:tr></w:tbl>
+      <w:p><w:r><w:t>outside</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const settings = (val: string | null) => ({
+      'word/settings.xml':
+        `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:compat>` +
+        (val === null
+          ? ''
+          : `<w:compatSetting w:name="overrideTableStyleFontSizeAndJustification" w:uri="http://schemas.microsoft.com/office/word" w:val="${val}"/>`) +
+        `</w:compat></w:settings>`,
+    });
+    const load = async (normalSz: number, val: string | null) => {
+      const { doc } = await importDocx(
+        await makeDocx(
+          documentXml,
+          styles(normalSz),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          settings(val),
+        ),
+      );
+      const cell = doc.child(0).child(0).child(0);
+      const size = (p: number) =>
+        cell
+          .child(p)
+          .child(0)
+          .marks.find((m) => m.type.name === 'fontSize')?.attrs['size'];
+      return {
+        plainSize: size(0),
+        plainAlign: cell.child(0).attrs['align'],
+        styledSize: size(1),
+        outsideSize: doc
+          .child(1)
+          .child(0)
+          .marks.find((m) => m.type.name === 'fontSize')?.attrs['size'],
+      };
+    };
+    // Legacy: Normal's 12pt and left give way to the table style's 10pt and
+    // center — inside the table only, and only for the DEFAULT style (a
+    // style based on Normal keeps the hierarchy: 12pt).
+    expect(await load(24, null)).toMatchObject({
+      plainSize: 10,
+      plainAlign: 'center',
+      styledSize: 12,
+      outsideSize: 12,
+    });
+    // Only 11pt/12pt yield: a 13pt Normal outranks the table style as usual.
+    expect(await load(26, null)).toMatchObject({ plainSize: 13 });
+    // Word 2010+: the flag is on, Normal wins outright.
+    expect(await load(24, '1')).toMatchObject({
+      plainSize: 12,
+      plainAlign: 'left',
+    });
   });
 
   it("applies a table style's w:pPr to the paragraphs inside the table", async () => {
@@ -2444,6 +2524,7 @@ describe('importDocx', () => {
       mode: 14,
       htmlAutoSpacing: true,
       tableIndentToBorder: false,
+      normalStyleYieldsToTableStyle: true, // the setting is not in this file
     });
     // 1648tw → 109.87px, to the text; 0 cell margin → the border is there too.
     expect(old.child(0).attrs['indent']).toBeCloseTo(1648 / 15, 0);

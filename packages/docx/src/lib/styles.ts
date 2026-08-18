@@ -50,8 +50,11 @@ interface StyleDef {
   tblCellMar?: OoxmlNode;
   /** w:tblPr/w:jc of a table style — the alignment it gives the whole table. */
   tblJc?: string;
-  /** `w:tblPr/w:tblInd` element (the value is resolved by the caller). */
-  tblInd?: OoxmlNode;
+  /** The style's `w:tblPr`, for properties resolved LAZILY (tblInd): read
+   *  only on the layer the cascade actually lands on, so a base style's
+   *  value that a derived style overrides stays unread — and the audit's
+   *  own inert/overridden reasoning, not a stray visit, decides its fate. */
+  tblPr?: OoxmlNode;
   /** The w:style element itself — for the audit's unused-style sweep. */
   el: OoxmlNode;
   /** w:style/@w:type. Optional in the schema; absent reads as "paragraph". */
@@ -191,7 +194,7 @@ export function buildStyleRegistry(
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
       tblJc: attrOf(child(child(style, 'w:tblPr'), 'w:jc'), 'w:val'),
-      tblInd: child(child(style, 'w:tblPr'), 'w:tblInd'),
+      tblPr: child(style, 'w:tblPr'),
       // Filtered off node.children, not via children(): the accessor would
       // mark every branch as read, including the wholeTable one the audit is
       // supposed to keep reporting.
@@ -282,7 +285,7 @@ export function buildStyleRegistry(
     if (!def) return undefined;
     seen.add(styleId);
     usedIds.add(styleId);
-    return def.tblInd ?? resolveTblInd(def.basedOn, seen);
+    return child(def.tblPr, 'w:tblInd') ?? resolveTblInd(def.basedOn, seen);
   }
 
   function resolveTblCellMar(

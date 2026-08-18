@@ -22,6 +22,7 @@ describe('parseCompat', () => {
         mode: DEFAULT_COMPAT_MODE,
         htmlAutoSpacing: true,
         tableIndentToBorder: false,
+        normalStyleYieldsToTableStyle: true,
       });
     }
     expect(DEFAULT_COMPAT_MODE).toBe(12);
@@ -42,13 +43,35 @@ describe('parseCompat', () => {
   });
 
   it('reads the individual compat toggles, w:val aware', () => {
+    // Where Word writes it — inside w:compat — and, tolerated, at the
+    // settings level.
+    expect(
+      parseCompat(
+        settings('<w:compat><w:doNotUseHTMLParagraphAutoSpacing/></w:compat>'),
+      ).htmlAutoSpacing,
+    ).toBe(false);
     expect(
       parseCompat(settings('<w:doNotUseHTMLParagraphAutoSpacing/>'))
         .htmlAutoSpacing,
     ).toBe(false);
     expect(
-      parseCompat(settings('<w:doNotUseHTMLParagraphAutoSpacing w:val="0"/>'))
-        .htmlAutoSpacing,
+      parseCompat(
+        settings(
+          '<w:compat><w:doNotUseHTMLParagraphAutoSpacing w:val="0"/></w:compat>',
+        ),
+      ).htmlAutoSpacing,
     ).toBe(true);
+  });
+
+  it('overrideTableStyleFontSizeAndJustification: absent/0 is the 2007 reading', () => {
+    const cs = (val: string) =>
+      `<w:compat><w:compatSetting w:name="overrideTableStyleFontSizeAndJustification" w:uri="http://schemas.microsoft.com/office/word" w:val="${val}"/></w:compat>`;
+    expect(parseCompat(undefined).normalStyleYieldsToTableStyle).toBe(true);
+    expect(parseCompat(settings(cs('0'))).normalStyleYieldsToTableStyle).toBe(
+      true,
+    );
+    expect(parseCompat(settings(cs('1'))).normalStyleYieldsToTableStyle).toBe(
+      false,
+    );
   });
 });

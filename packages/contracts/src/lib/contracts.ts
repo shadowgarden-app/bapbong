@@ -35,6 +35,15 @@ export interface DocCompat {
    * older-mode table.
    */
   tableIndentToBorder: boolean;
+  /**
+   * `overrideTableStyleFontSizeAndJustification` OFF (absent, the Word 2007
+   * reading): inside a table, the DEFAULT paragraph style's font size — when
+   * it is 11pt or 12pt — and its left justification do NOT override the
+   * table style's, even though the paragraph style sits above the table
+   * style in the hierarchy. ON (what Word 2010+ writes) is the plain ISO
+   * §17.7.2 cascade: paragraph style over table style, no exception.
+   */
+  normalStyleYieldsToTableStyle: boolean;
 }
 
 /** Page geometry, in CSS pixels. */

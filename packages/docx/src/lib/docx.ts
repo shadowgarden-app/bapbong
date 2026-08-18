@@ -1942,10 +1942,29 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // an even number of levels"). Not implemented, deliberately: no docDefaults
   // in any of the 18 documents in this repo turns a toggle on, so there is
   // nothing to test it against and a guess would be worse than the omission.
+  //
+  // Word 2007's reading (DocCompat.normalStyleYieldsToTableStyle): the DEFAULT
+  // paragraph style's 11pt/12pt size does not beat the table style's size,
+  // and its left justification does not beat the table style's — a stock
+  // Normal must not undo a table style's look. Only those two properties, only
+  // the default style, only when the table style sets them.
+  const legacyTableRule =
+    !!tableLayer &&
+    ctx.compat.normalStyleYieldsToTableStyle &&
+    styleId === ctx.styles.defaultStyleIdFor('paragraph');
+  let styleRPr = ctx.styles.resolveStyle(styleId);
+  if (
+    legacyTableRule &&
+    tableLayer.rPr.sizePt !== undefined &&
+    (styleRPr.sizePt === 11 || styleRPr.sizePt === 12)
+  ) {
+    const { sizePt: _dropped, ...rest } = styleRPr;
+    styleRPr = rest;
+  }
   const paraBase = [
     ctx.styles.docDefaults,
     ...(tableLayer ? [tableLayer.rPr] : []),
-    ctx.styles.resolveStyle(styleId),
+    styleRPr,
   ].reduce(mergeRunProps, {} as RunProps);
   // Paragraph-property cascade, base-most first; later layers win:
   // docDefaults pPrDefault → TABLE style (for content inside a table)
@@ -1962,10 +1981,23 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // The numbering layer sitting AFTER the style chain rather than before it is
   // a pre-existing, deliberate deviation (Word's list indents win); untouched
   // here.
+  let stylePPr = ctx.styles.resolveStylePPr(styleId);
+  if (legacyTableRule && lastWith(tableLayer.pPr, 'w:jc')) {
+    // Same rule for justification: the default style's LEFT gives way (any
+    // other alignment it names still wins, as does an inline w:jc below).
+    const styleJc = lastWith(stylePPr, 'w:jc');
+    const val = attrOf(child(styleJc, 'w:jc'), 'w:val');
+    if (val === 'left' || val === 'start')
+      stylePPr = stylePPr.map((n) =>
+        n === styleJc
+          ? { ...n, children: n.children.filter((c) => c.name !== 'w:jc') }
+          : n,
+      );
+  }
   const pPrChain: (OoxmlNode | undefined)[] = [
     ctx.styles.docDefaultsPPr,
     ...(tableLayer?.pPr ?? []),
-    ...ctx.styles.resolveStylePPr(styleId),
+    ...stylePPr,
     pPr,
   ];
   const parsedList = parseList(lastWith(pPrChain, 'w:numPr'));
@@ -3478,17 +3510,21 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
   // in older ones (see DocCompat.tableIndentToBorder). Only a left-aligned table
   // is indented — w:jc center/right position the table on their own. The
   // element itself still rides carry, verbatim, for the save.
-  const tblInd =
-    child(child(tbl, 'w:tblPr'), 'w:tblInd') ??
-    ctx.styles.resolveTableInd(tblCond.styleId);
-  const tblIndType = attrOf(tblInd, 'w:type') ?? 'dxa';
-  if (!attrs['align'] && (tblIndType === 'dxa' || tblIndType === 'nil')) {
+  // Both layers of the cascade are read — the style's tblInd is what the
+  // table inherits, and the table's own overrides it.
+  const indentOf = (el: OoxmlNode | undefined): number | undefined => {
+    if (!el) return undefined;
+    const type = attrOf(el, 'w:type') ?? 'dxa';
+    if (type === 'nil') return 0;
+    if (type !== 'dxa') return undefined; // pct/auto: not modelled
+    return twipsToPx(Number(attrOf(el, 'w:w') ?? 0));
+  };
+  const styleInd = indentOf(ctx.styles.resolveTableInd(tblCond.styleId));
+  const ownInd = indentOf(child(child(tbl, 'w:tblPr'), 'w:tblInd'));
+  if (!attrs['align']) {
     // No element at all is an indent of 0 — which the two rules still place
     // differently, so it is resolved rather than left to a layout default.
-    const value =
-      tblInd && tblIndType === 'dxa'
-        ? twipsToPx(Number(attrOf(tblInd, 'w:w') ?? 0))
-        : 0;
+    const value = ownInd ?? styleInd ?? 0;
     // The older rule measures to the text: the border sits one left cell
     // margin further out (Word's 0.08" default when the table names none).
     const leftPad = cellPadding?.left ?? twipsToPx(108);
