@@ -2831,6 +2831,39 @@ describe('multi-column layout', () => {
     expect(mar.floats?.[0].x).toBe(20 + 30);
   });
 
+  it('measures a paragraph-anchored float from above the space-before', () => {
+    // relativeFrom="paragraph" means the top of the PARAGRAPH, and a paragraph
+    // begins where its space-before begins, not where its first line does.
+    // Word's PDF of a one-variable probe settles it: an anchor with posOffset 0
+    // on a paragraph carrying 248tw (16.5px) of space-before lands within 0.9px
+    // of the paragraph's top — 17px ABOVE its first line.
+    const anchored: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'b', font: font() }],
+      spacing: { before: 30 },
+      floats: [
+        {
+          src: '',
+          width: 20,
+          height: 10,
+          wrap: 'none',
+          hRel: 'column',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+        },
+      ],
+    };
+    const r = layoutBlocks([para('a'), anchored], config()).pages[0];
+    const first = r.lines[0];
+    const second = r.lines[1];
+    // The 30px gap really is there between the two lines...
+    expect(second.y).toBeCloseTo(first.y + first.height + 30);
+    // ...and the float sits at the TOP of that gap, not at the line.
+    expect(r.floats?.[0].y).toBeCloseTo(first.y + first.height);
+  });
+
   it('measures a column-anchored float from the band its anchor line got', () => {
     // "Column" means the column as the ANCHOR LINE sees it — narrowed by any
     // float that line already wraps around. Word's PDF of the corpus factsheet

@@ -3608,19 +3608,19 @@ function placeBlocks(
   };
 
   /** Wrap + place a paragraph line by line, flowing around active floats. */
-  const placeParaBanded = (flow: FlowParagraph) => {
+  const placeParaBanded = (flow: FlowParagraph, spaceBefore = 0) => {
     // Wrapping is one uninterruptible call: a page boundary inside it has no
     // resumable midpoint, so checkpoints taken while this flag is up are
     // marked unreplayable and float triggers on that page stand down.
     inBandedPara = true;
     try {
-      placeParaBandedInner(flow);
+      placeParaBandedInner(flow, spaceBefore);
     } finally {
       inBandedPara = false;
       midBandedFrom = null;
     }
   };
-  const placeParaBandedInner = (flow: FlowParagraph) => {
+  const placeParaBandedInner = (flow: FlowParagraph, spaceBefore: number) => {
     // A paragraph's floats belong on the page its FIRST LINE lands on — but
     // that page-break decision normally happens inside the band callback,
     // AFTER registerFloats has already pushed the floats into the CURRENT
@@ -3652,7 +3652,14 @@ function placeBlocks(
         y = Math.min(...blockers.map((ex) => ex.bottom));
       }
     }
-    registerFloats(flow, y, estH);
+    // A paragraph-relative anchor measures from the TOP OF THE PARAGRAPH, and
+    // a paragraph begins where its space-before begins — not where its first
+    // line does. Word's PDF of a one-variable probe settles it: an anchor with
+    // posOffset 0 on a paragraph carrying 248tw of space-before lands within
+    // 0.9px of the paragraph's top and 17px above its first line. `y` here has
+    // the space already added (and any float-skip applied to both), so the
+    // paragraph's top is that much higher.
+    registerFloats(flow, y - spaceBefore, estH);
     wrapParagraph(flow, ctx, bandedBandFn, emitBandedLine, undefined, () => {
       if (colDirty) breakBand();
     });
@@ -3984,7 +3991,7 @@ function placeBlocks(
         if (drafts && !floatsAhead) {
           emitParaDrafts(drafts, item.para.widowControl !== false);
         } else {
-          placeParaBanded(item.para.getFlow());
+          placeParaBanded(item.para.getFlow(), effBefore);
         }
         if (activePBdr) {
           flushPBdrFrag(true); // last fragment closes the box's bottom edge
