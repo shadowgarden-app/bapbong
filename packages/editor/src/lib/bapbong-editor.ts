@@ -557,7 +557,16 @@ export class BapbongEditor {
     let blockIdx = 0;
     for (let b = 0; b < sections.length - 1; b++) {
       blockIdx += sections[b].blockCount; // first block of section b+1
-      const pos = (offsets[blockIdx] ?? 0) + 1;
+      // A NEXT-PAGE break's marker lives in the page gap, so it anchors on
+      // the new page's first block. A CONTINUOUS break happens mid-page, and
+      // its true position is the BREAK MARK itself — the last paragraph of
+      // the ending section, whose (zero-height) line sits exactly on the
+      // boundary. Anchoring on the next section's first block put the line
+      // at that block's first line, which is BELOW the boundary by its
+      // space-before — and above a column that starts flush, the marker cut
+      // straight through the neighbouring column's heading.
+      const anchorIdx = sections[b + 1].newPage ? blockIdx : blockIdx - 1;
+      const pos = (offsets[anchorIdx] ?? 0) + 1;
       const cr = this.core.caretRect(pos);
       const page = cr && this.core.layout?.pages[cr.pageIndex];
       out.push({
