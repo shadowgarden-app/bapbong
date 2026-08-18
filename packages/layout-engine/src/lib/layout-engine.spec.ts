@@ -1242,6 +1242,53 @@ describe('layoutBlocks', () => {
     expect(c[1].height).toBeCloseTo(16);
   });
 
+  it('stretches a line before a soft break unless doNotExpandShiftReturn', () => {
+    // Content 200px; "aa bb" (50px) + w:br + "cc". Word's default: the line
+    // before the break is justified like any other non-final line — the
+    // Shift+Enter gap. With the compat flag the line is set ragged.
+    const p: FlowBlock = {
+      type: 'paragraph',
+      align: 'justify',
+      runs: [
+        { text: 'aa bb', font: font() },
+        { break: true },
+        { text: 'cc', font: font() },
+      ],
+    };
+    const gapOf = (compat?: LayoutConfig['compat']) => {
+      const [l0] = layoutBlocks([p], { ...config(), compat }).pages[0].lines;
+      const [a, b] = l0.segments.filter((s) => s.text.trim());
+      return b.x - (a.x + (a.width ?? 0)); // the space between aa and bb
+    };
+    expect(gapOf()).toBeCloseTo(200 - 40); // one gap swallows the slack
+    expect(gapOf({ expandLineBeforeSoftBreak: false })).toBeCloseTo(10);
+  });
+
+  it('paints underlined trailing spaces only under w:ulTrailSpace', () => {
+    // "ab  " underlined: the two trailing spaces hang and are not painted —
+    // Word stops the underline at "b" — unless the WordPerfect-compat flag
+    // asks for them, in which case they ARE segments (the painter runs the
+    // underline under them) but still hang: the text does not move.
+    const p: FlowBlock = {
+      type: 'paragraph',
+      align: 'center',
+      runs: [{ text: 'ab  ', font: font(), underline: true }],
+    };
+    const off = layoutBlocks([p], config()).pages[0].lines[0];
+    expect(off.segments.map((s) => s.text)).toEqual(['ab']);
+    const on = layoutBlocks([p], {
+      ...config(),
+      compat: { underlineTrailingSpaces: true },
+    }).pages[0].lines[0];
+    expect(on.segments.map((s) => s.text)).toEqual(['ab', '  ']);
+    expect(on.segments.every((s) => s.underline)).toBe(true);
+    // Centred on "ab" alone (20px in 200px → x = 20 + 90), both ways.
+    expect(off.segments[0].x).toBeCloseTo(110);
+    expect(on.segments[0].x).toBeCloseTo(110);
+    expect(on.segments[1].x).toBeCloseTo(130); // hangs to the right
+    expect(on.segments[1].width).toBeCloseTo(20);
+  });
+
   it('renders typed leading spaces on a first line, drops them after a wrap', () => {
     // Real documents right-position text ("Ký tên") with a run of spaces —
     // those must render. Spaces landing at a soft-wrapped line start don't.

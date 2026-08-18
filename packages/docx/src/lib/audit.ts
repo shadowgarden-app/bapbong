@@ -208,12 +208,7 @@ const IGNORED_TAGS = new Set([
   'w:useFELayout',
   'w:balanceSingleByteDoubleByteWidth',
   'w:doNotLeaveBackslashAlone',
-  // Underline under trailing spaces at a line end (WordPerfect habit) — the
-  // trailing spaces are trimmed off every line, so nothing to underline.
-  'w:ulTrailSpace',
-  // Justified text ending in Shift+Enter: whether that line stretches. Not
-  // modelled either way (the line before a w:br justifies as a last line).
-  'w:doNotExpandShiftReturn',
+  // (w:ulTrailSpace and w:doNotExpandShiftReturn are READ — DocCompat.)
   // Word's own drawing grid origin — UI, like the other drawingGrid* above.
   'w:doNotUseMarginsForDrawingGridOrigin',
   // An embedded object's link to its editor: ProgID, the OLE stream, the

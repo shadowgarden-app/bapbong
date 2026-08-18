@@ -23,6 +23,8 @@ describe('parseCompat', () => {
         htmlAutoSpacing: true,
         tableIndentToBorder: false,
         normalStyleYieldsToTableStyle: true,
+        underlineTrailingSpaces: false,
+        expandLineBeforeSoftBreak: true,
       });
     }
     expect(DEFAULT_COMPAT_MODE).toBe(12);
@@ -61,6 +63,27 @@ describe('parseCompat', () => {
         ),
       ).htmlAutoSpacing,
     ).toBe(true);
+  });
+
+  it('reads the two line-level toggles: ulTrailSpace, doNotExpandShiftReturn', () => {
+    const on = parseCompat(
+      settings(
+        '<w:compat><w:ulTrailSpace/><w:doNotExpandShiftReturn/></w:compat>',
+      ),
+    );
+    expect(on).toMatchObject({
+      underlineTrailingSpaces: true,
+      expandLineBeforeSoftBreak: false,
+    });
+    const off = parseCompat(
+      settings(
+        '<w:compat><w:ulTrailSpace w:val="0"/><w:doNotExpandShiftReturn w:val="false"/></w:compat>',
+      ),
+    );
+    expect(off).toMatchObject({
+      underlineTrailingSpaces: false,
+      expandLineBeforeSoftBreak: true,
+    });
   });
 
   it('overrideTableStyleFontSizeAndJustification: absent/0 is the 2007 reading', () => {

@@ -44,6 +44,22 @@ export interface DocCompat {
    * §17.7.2 cascade: paragraph style over table style, no exception.
    */
   normalStyleYieldsToTableStyle: boolean;
+  /**
+   * `w:ulTrailSpace` (§17.15.3.79): underline the trailing spaces at the end
+   * of a line when they are underlined. Word normally stops the underline at
+   * the last non-space character of the line (the WordPerfect habit this
+   * flag restores is the exception), and so does the layout: trailing spaces
+   * are trimmed off every line unless this is on.
+   */
+  underlineTrailingSpaces: boolean;
+  /**
+   * In a justified paragraph, a line that ends in a soft line break (w:br)
+   * is stretched like any other non-final line — Word's default, and the
+   * source of the famous Shift+Enter gaps. `w:doNotExpandShiftReturn`
+   * (§17.15.3.20) turns that off: such a line is then set like the last
+   * line, ragged. False when that flag is on.
+   */
+  expandLineBeforeSoftBreak: boolean;
 }
 
 /** Page geometry, in CSS pixels. */
@@ -709,6 +725,10 @@ export interface LayoutConfig {
   /** Whole-document column config for the flat (FlowBlock) layout path. The PM
    *  doc path reads per-section columns from the doc instead. */
   columns?: ColumnConfig;
+  /** The Word compatibility profile the layout rules consult. The PM doc path
+   *  takes `doc.attrs.compat` first (importer-set); this is the flat path's
+   *  and the fallback. Absent → current Word's rules. */
+  compat?: Partial<DocCompat>;
 }
 
 // ── Resolved (paint-ready) output ──────────────────────────────────

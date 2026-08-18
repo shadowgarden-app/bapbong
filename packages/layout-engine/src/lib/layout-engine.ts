@@ -12,6 +12,7 @@ import type {
   CellPadding,
   ImageCrop,
   ColumnConfig,
+  DocCompat,
   FlowBlock,
   FlowFloat,
   FlowInline,
@@ -100,7 +101,22 @@ interface Ctx {
   /** Width placeholder for page-number fields (digit count of the page
    *  total once known; '1' on the first pass). */
   fieldPlaceholder: string;
+  /** The document's Word compatibility profile (doc.attrs.compat, else the
+   *  config's, else current Word). Rules that differ by Word version ask
+   *  this and nothing else. */
+  compat: DocCompat;
 }
+
+/** Current Word's rules — what an editor-authored document (no settings.xml
+ *  behind it) is laid out by. Mirrors what Word 365 writes on a new file. */
+const CURRENT_WORD_COMPAT: DocCompat = {
+  mode: 15,
+  htmlAutoSpacing: true,
+  tableIndentToBorder: true,
+  normalStyleYieldsToTableStyle: false,
+  underlineTrailingSpaces: false,
+  expandLineBeforeSoftBreak: true,
+};
 
 function findMark(marks: readonly Mark[], name: string): Mark | undefined {
   return marks.find((m) => m.type.name === name);
@@ -993,21 +1009,39 @@ function wrapParagraph(
     }
   };
 
-  const flushLine = (isLast: boolean) => {
+  const flushLine = (isLast: boolean, softBreak = false) => {
     const startX = lineStart();
     const avail = lineRight - startX;
 
-    // Trailing whitespace doesn't count toward alignment, nor is it painted.
+    // Trailing whitespace doesn't count toward alignment, nor is it painted —
+    // Word lets it hang past the line's end. With w:ulTrailSpace the
+    // underlined part of it is still painted (an underline runs under the
+    // hanging spaces); it hangs all the same, so it never moves the text.
     let end = lineTokens.length;
     let contentWidth = lineWidth;
     while (end > 0 && lineTokens[end - 1].isSpace) {
       contentWidth -= lineTokens[end - 1].width;
       end--;
     }
+    let paintEnd = end;
+    if (ctx.compat.underlineTrailingSpaces) {
+      while (
+        paintEnd < lineTokens.length &&
+        lineTokens[paintEnd].isSpace &&
+        !lineTokens[paintEnd].isTab &&
+        lineTokens[paintEnd].underline
+      )
+        paintEnd++;
+    }
 
     let x = startX;
     let extraPerGap = 0;
-    if (align === 'justify' && !isLast) {
+    // A line ending in a soft break (w:br) is stretched like any other
+    // non-final line — unless w:doNotExpandShiftReturn asks for it to be set
+    // ragged, like the last line.
+    const ragged =
+      isLast || (softBreak && !ctx.compat.expandLineBeforeSoftBreak);
+    if (align === 'justify' && !ragged) {
       const gaps = lineTokens
         .slice(0, end)
         .filter((t) => t.isSpace && !t.isTab).length;
@@ -1020,7 +1054,7 @@ function wrapParagraph(
 
     const segments: LayoutSegment[] = [];
     const images: LayoutImageSegment[] = [];
-    for (let i = 0; i < end; i++) {
+    for (let i = 0; i < paintEnd; i++) {
       const t = lineTokens[i];
       if (t.image) {
         images.push({
@@ -1220,7 +1254,7 @@ function wrapParagraph(
     // after the line so the caret can sit on it.
     if (token.isBreak) {
       if (token.pos != null) prevTo = token.pos + 1;
-      flushLine(false);
+      flushLine(false, true);
       resetCluster();
       softWrapped = false;
       continue;
@@ -2628,13 +2662,14 @@ function remainderView(r: TableRemainder, windowH: number): ResolvedTable {
   return view;
 }
 
-function buildCtx(config: LayoutConfig): Ctx {
+function buildCtx(config: LayoutConfig, docCompat?: DocCompat | null): Ctx {
   return {
     base: { ...DEFAULT_FONT, ...config.defaultFont },
     measure: config.measureText,
     metrics: config.measureMetrics,
     tabWidth: config.tabWidth ?? DEFAULT_TAB_WIDTH,
     fieldPlaceholder: '1',
+    compat: { ...CURRENT_WORD_COMPAT, ...config.compat, ...docCompat },
   };
 }
 
@@ -5072,7 +5107,7 @@ export function layout(
   footnotes?: Record<number, PMNode>,
 ): ResolvedLayout {
   config = sanitizeConfig(config);
-  const ctx = buildCtx(config);
+  const ctx = buildCtx(config, doc.attrs['compat'] as DocCompat | null);
   const { page } = config;
   const left = contentLeftOf(page);
   const right = page.width - page.margin.right;

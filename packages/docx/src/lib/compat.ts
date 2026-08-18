@@ -47,5 +47,9 @@ export function parseCompat(settings: OoxmlNode | undefined): DocCompat {
     normalStyleYieldsToTableStyle: !(
       overrideVal !== undefined && !['0', 'false', 'off'].includes(overrideVal)
     ),
+    underlineTrailingSpaces: isToggleOn(child(compat, 'w:ulTrailSpace')),
+    expandLineBeforeSoftBreak: !isToggleOn(
+      child(compat, 'w:doNotExpandShiftReturn'),
+    ),
   };
 }

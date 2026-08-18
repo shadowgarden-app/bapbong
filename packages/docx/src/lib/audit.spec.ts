@@ -134,7 +134,7 @@ describe('xml audit (import)', () => {
         undefined,
         undefined,
         `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}"><w:compat>` +
-          '<w:ulTrailSpace/><w:doNotUseHTMLParagraphAutoSpacing/><w:fictionalCompat/>' +
+          '<w:ulTrailSpace/><w:useFELayout/><w:doNotUseHTMLParagraphAutoSpacing/><w:fictionalCompat/>' +
           cs('compatibilityMode', '15') +
           cs('overrideTableStyleFontSizeAndJustification', '1') +
           cs('enableOpenTypeFeatures', '1') +
@@ -152,9 +152,10 @@ describe('xml audit (import)', () => {
       unknown.filter((k) => k.includes('overrideTableStyleFontSize')),
     ).toEqual([]);
     expect(unknown).not.toContain('w:doNotUseHTMLParagraphAutoSpacing');
+    expect(unknown).not.toContain('w:ulTrailSpace'); // read: DocCompat
     // Not adopted, by name — keyed per setting so the list stays readable.
     expect(ignored).toContain('w:compatSetting[enableOpenTypeFeatures] @w:val');
-    expect(ignored).toContain('w:ulTrailSpace');
+    expect(ignored).toContain('w:useFELayout');
     // The namespace URI is plumbing on every entry.
     expect(unknown.some((k) => k.endsWith('@w:uri'))).toBe(false);
     // New to us: a real gap, and it says which one.

@@ -2525,6 +2525,8 @@ describe('importDocx', () => {
       htmlAutoSpacing: true,
       tableIndentToBorder: false,
       normalStyleYieldsToTableStyle: true, // the setting is not in this file
+      underlineTrailingSpaces: false,
+      expandLineBeforeSoftBreak: true,
     });
     // 1648tw → 109.87px, to the text; 0 cell margin → the border is there too.
     expect(old.child(0).attrs['indent']).toBeCloseTo(1648 / 15, 0);
