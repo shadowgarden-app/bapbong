@@ -47,6 +47,7 @@ import {
   child,
   children,
   findDescendant,
+  isToggleOn,
   mergeRunProps,
   normalizeHex,
   OoxmlNode,
@@ -61,11 +62,13 @@ import type {
   CellDiagonals,
   BorderStyle,
   ColumnConfig,
+  DocCompat,
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
 import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
+import { parseCompat } from './compat.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
@@ -231,21 +234,9 @@ interface Ctx {
   /** Page content-box width in px (page minus side margins) — what
    *  percentage-based table widths (w:tblW/w:tcW type="pct") resolve against. */
   contentWidth: number;
-  /**
-   * False when the document sets `w:doNotUseHTMLParagraphAutoSpacing`: auto
-   * paragraph spacing is then the fixed 5pt/10pt pair instead of Word's HTML
-   * emulation. Default true — the compat flag is opt-in.
-   */
-  htmlAutoSpacing: boolean;
-  /**
-   * Where `w:tblInd` is measured to. Word 2013+ (`compatibilityMode` ≥ 15)
-   * indents the table's leading BORDER by that much; earlier modes (and a
-   * document that names none — Word reads that as 12) indent the TEXT of the
-   * first cell, i.e. the border sits a left cell margin further out. The
-   * same rule is why a stock older-mode table's border pokes past the margin
-   * by 0.08" while its text lines up.
-   */
-  tableIndentToBorder: boolean;
+  /** The document's Word compatibility profile (settings.xml `w:compat`,
+   *  resolved once by parseCompat). Every mode-dependent rule reads from here. */
+  compat: DocCompat;
   /** VML shapetype registry (`v:shapetype` id → o:spt), filled as picts are
    *  parsed in document order — Word always defines a type before its first
    *  `type="#id"` reference. Lazily created by parseVmlShape. */
@@ -3484,7 +3475,7 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
   // the leading BORDER lands relative to the text margin, so the layout has
   // one number to add and no compat mode to know: to-border in Word 2013+
   // documents, to-the-first-cell's-text (border = indent − left cell margin)
-  // in older ones (see Ctx.tableIndentToBorder). Only a left-aligned table
+  // in older ones (see DocCompat.tableIndentToBorder). Only a left-aligned table
   // is indented — w:jc center/right position the table on their own. The
   // element itself still rides carry, verbatim, for the save.
   const tblInd =
@@ -3501,7 +3492,7 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
     // The older rule measures to the text: the border sits one left cell
     // margin further out (Word's 0.08" default when the table names none).
     const leftPad = cellPadding?.left ?? twipsToPx(108);
-    attrs['indent'] = ctx.tableIndentToBorder ? value : value - leftPad;
+    attrs['indent'] = ctx.compat.tableIndentToBorder ? value : value - leftPad;
   }
   // Carry-through: tblStyle/tblW/tblLayout/tblInd/tblLook/… survive the save.
   const tblCarry = collectCarry(child(tbl, 'w:tblPr'), CONSUMED_TBLPR);
@@ -3766,7 +3757,7 @@ function resolveAutoSpacing(blocks: PMNode[], ctx: Ctx): PMNode[] {
       return null; // spacing applies
     };
     const amount = (side: 'before' | 'after', at: number) =>
-      ctx.htmlAutoSpacing
+      ctx.compat.htmlAutoSpacing
         ? (neighbour(at) ?? AUTO_SPACING_PX)
         : AUTO_SPACING_FIXED[side];
     return node.type.create(
@@ -4176,6 +4167,10 @@ function storyDoc(
   if (sections) attrs['sections'] = sections;
   if (comments && comments.length > 0) attrs['comments'] = comments;
   if (page) attrs['page'] = page;
+  // The compat profile rides every story doc (body, headers, notes) so a
+  // layout rule that depends on it can ask the doc, wherever it is laid out.
+  if (ctx.schema.nodes['doc'].spec.attrs?.['compat'])
+    attrs['compat'] = ctx.compat;
   return ctx.schema.nodes['doc'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [ctx.schema.nodes['paragraph'].create()],
@@ -4312,28 +4307,16 @@ async function importDocxImpl(
   // Stateless — markers are recounted by the layout engine, so one resolver
   // serves every story (and its audit usage-tracking sees them all).
   const numbering = buildNumbering(numberingRoot, resolveTheme, resolveFont);
-  // Read here rather than with the other settings below: auto paragraph
-  // spacing is resolved while the body is parsed, so the flag has to be known
-  // before makeCtx runs.
+  // Read here rather than with the other settings below: the compat profile
+  // is consulted while the body is parsed (auto spacing, table indents), so it
+  // has to be known before makeCtx runs.
   const settingsPart = await readPart(zip, 'word/settings.xml');
   const settingsEl = settingsPart
     ? child(parsePart('word/settings.xml', settingsPart), 'w:settings')
     : undefined;
-  const htmlAutoSpacing = !isToggleOn(
-    child(settingsEl, 'w:doNotUseHTMLParagraphAutoSpacing'),
-  );
-  const compatMode = Number(
-    attrOf(
-      children(child(settingsEl, 'w:compat'), 'w:compatSetting').find(
-        (c) => attrOf(c, 'w:name') === 'compatibilityMode',
-      ),
-      'w:val',
-    ) ?? 12,
-  );
-  const tableIndentToBorder = compatMode >= 15;
+  const compat = parseCompat(settingsEl);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
-    htmlAutoSpacing,
-    tableIndentToBorder,
+    compat,
     styles,
     numbering,
     rels,
@@ -4530,14 +4513,6 @@ async function importDocxImpl(
     out.sectionChrome = sectionChrome;
   }
   return out;
-}
-
-/** An OOXML on/off toggle element (w:titlePg, w:evenAndOddHeaders, …): present
- *  means on, unless it carries w:val="false"/"0"/"off". */
-function isToggleOn(el: OoxmlNode | undefined): boolean {
-  if (!el) return false;
-  const val = attrOf(el, 'w:val');
-  return val === undefined || !['false', '0', 'off'].includes(val);
 }
 
 /** Page size + margins from w:sectPr (twips→px). Defaults to A4 @96dpi with

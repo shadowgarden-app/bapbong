@@ -111,6 +111,11 @@ export const schema = new Schema({
         // body w:sectPr. Edited via setDocAttribute (page-setup commands) so
         // orientation/paper-size changes undo cleanly. null → A4 default.
         page: { default: null },
+        // DocCompat (contracts) — the Word compatibility profile settings.xml
+        // declares (compatibilityMode + the compat flags), resolved to the
+        // answers layout rules ask. Importer-set on every story doc; null
+        // (an editor-authored doc) reads as current Word.
+        compat: { default: null },
         // CommentNode[] (contracts) — comment threads keyed to `comment` marks.
         // Edited via setDocAttribute so add/reply/resolve/delete undo cleanly.
         comments: { default: null },

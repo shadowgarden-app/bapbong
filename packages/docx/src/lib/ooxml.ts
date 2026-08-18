@@ -389,3 +389,11 @@ export function parseRunProps(
 export function mergeRunProps(base: RunProps, over: RunProps): RunProps {
   return { ...base, ...over };
 }
+
+/** An OOXML on/off toggle element (w:titlePg, w:evenAndOddHeaders, …): present
+ *  means on, unless it carries w:val="false"/"0"/"off". */
+export function isToggleOn(el: OoxmlNode | undefined): boolean {
+  if (!el) return false;
+  const val = attrOf(el, 'w:val');
+  return val === undefined || !['false', '0', 'off'].includes(val);
+}

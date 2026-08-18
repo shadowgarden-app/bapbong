@@ -2439,6 +2439,12 @@ describe('importDocx', () => {
       ).doc;
 
     const old = await at(14);
+    // The profile rides the doc, for layout rules that need it later.
+    expect(old.attrs['compat']).toEqual({
+      mode: 14,
+      htmlAutoSpacing: true,
+      tableIndentToBorder: false,
+    });
     // 1648tw → 109.87px, to the text; 0 cell margin → the border is there too.
     expect(old.child(0).attrs['indent']).toBeCloseTo(1648 / 15, 0);
     // 300tw with the style's 108tw margin: border = 300 − 108 = 192tw.

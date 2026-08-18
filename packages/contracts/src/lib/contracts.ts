@@ -1,5 +1,42 @@
 // Shared layout contracts for bapbong. Pure types only — no runtime, no DOM.
 
+/**
+ * The document's Word compatibility profile — `word/settings.xml`'s
+ * `w:compat` block, resolved to the questions the layout actually asks.
+ *
+ * Word does not migrate a file on save: a document authored in Word 2007/2010
+ * (or converted from .doc) keeps its `compatibilityMode` for life unless the
+ * user runs File › Info › Convert, so both worlds are common in real corpora
+ * and several layout rules genuinely differ between them. Every such rule
+ * reads its answer from HERE — one place that knows the mode — instead of a
+ * flag of its own. Add a field per rule as they are discovered; keep each a
+ * resolved yes/no or value, never a raw setting the consumer must interpret.
+ *
+ * Rides `doc.attrs.compat` (importer-set) so the layout engine, which never
+ * sees settings.xml, can consult it too.
+ */
+export interface DocCompat {
+  /** `w:compatSetting compatibilityMode` — 12 (Word 2007, also what a file
+   *  naming none is read as), 14 (Word 2010), 15 (Word 2013 and every
+   *  version since; there is no 16). */
+  mode: number;
+  /**
+   * Auto paragraph spacing (`w:beforeAutospacing` / `w:afterAutospacing`)
+   * follows Word's HTML emulation (default) — false when the document sets
+   * `w:doNotUseHTMLParagraphAutoSpacing`, which pins it to the fixed
+   * 5pt / 10pt pair.
+   */
+  htmlAutoSpacing: boolean;
+  /**
+   * Where `w:tblInd` (and a table's implicit position) is measured to. Word
+   * 2013+ (mode ≥ 15) indents the table's leading BORDER by that much; earlier
+   * modes indent the TEXT of the first cell, so the border sits one left cell
+   * margin further out — the same rule behind the −0.08" outdent of a stock
+   * older-mode table.
+   */
+  tableIndentToBorder: boolean;
+}
+
 /** Page geometry, in CSS pixels. */
 export interface PageConfig {
   width: number;
