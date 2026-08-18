@@ -353,6 +353,56 @@ const WINGDINGS: Record<number, string> = {
   0xfe: '☑',
 };
 
+/** Wingdings 2 is a DIFFERENT font with its own layout — not a superset of
+ *  Wingdings, though it shares the name's stem: 0x52 is the ticked box here
+ *  and a pointing hand there. Word's HR forms tick their boxes with it
+ *  (`w:sym w:font="Wingdings 2" w:char="F052"`). Codes per Microsoft's chart
+ *  as tabulated at alanwood.net/demos/wingdings-2.html; the Unicode 7 astral
+ *  equivalents (🗴, 🗵, ⯾) are traded for BMP look-alikes that every font
+ *  set has (✗, ☒, ⊗). */
+const WINGDINGS_2: Record<number, string> = {
+  0x4f: '✗', // 🗴 ballot script X
+  0x50: '✓',
+  0x51: '☒', // 🗵 ballot box with script X
+  0x52: '☑',
+  0x53: '☒',
+  0x54: '☒',
+  0x55: '⊗', // ⯾ circled X
+  0x56: '⊗',
+  0x95: '•',
+  0x96: '●',
+  0x97: '●',
+  0x98: '●',
+  0x99: '○',
+  0x9a: '○',
+  0x9b: '○',
+  0x9c: '○',
+  0x9d: '◉',
+  0x9e: '⦿',
+  0x9f: '◾',
+  0xa0: '■',
+  0xa1: '◼',
+  0xa2: '■',
+  // The empty boxes: BALLOT BOX, like WINGDINGS' 0x6F–0x73, so an unticked
+  // one sits beside a ticked one at the same size.
+  0xa3: '☐',
+  0xa4: '☐',
+  0xa5: '☐',
+};
+
+/** Monotype Sorts — Monotype's clone of ITC Zapf Dingbats, same encoding.
+ *  Only the box family, which forms lean on: 0x6F–0x72 are Zapf's four
+ *  squares. 0x7F is unassigned in Zapf Dingbats yet Word draws an EMPTY
+ *  BALLOT BOX for it (an application form pairs "Monotype Sorts F07F Not
+ *  yet" with "Wingdings 2 F052 Yes", and Word shows ☐ beside ☑). */
+const MONOTYPE_SORTS: Record<number, string> = {
+  0x6f: '❏',
+  0x70: '❐',
+  0x71: '❑',
+  0x72: '❒',
+  0x7f: '☐',
+};
+
 /** Symbol font: only the few glyphs documents actually lean on (its letters
  *  are Greek, which we leave to the font). */
 const SYMBOL_FONT: Record<number, string> = {
@@ -365,8 +415,13 @@ const SYMBOL_FONT: Record<number, string> = {
 /** Fonts whose bytes are pictures, not letters. */
 function symbolTable(font: string | undefined): Record<number, string> | null {
   if (!font) return null;
-  const f = font.toLowerCase();
-  if (f.startsWith('wingdings')) return WINGDINGS;
+  const f = font.toLowerCase().trim();
+  // Exact names: "Wingdings 2" and "Wingdings 3" are different fonts, and a
+  // prefix match once sent Wingdings 2's ticked box through Wingdings'
+  // table (0x52 there is a pointing hand — the box came out as tofu).
+  if (f === 'wingdings') return WINGDINGS;
+  if (f === 'wingdings 2') return WINGDINGS_2;
+  if (f === 'monotype sorts') return MONOTYPE_SORTS;
   if (f === 'symbol') return SYMBOL_FONT;
   return null;
 }

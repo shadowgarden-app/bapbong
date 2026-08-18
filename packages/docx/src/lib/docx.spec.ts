@@ -3417,6 +3417,26 @@ describe('importDocx', () => {
     expect(markMap(unknown.marks).fontFamily.family).toBe('Wingdings'); // …in its font
   });
 
+  it('keeps Wingdings 2 and Monotype Sorts apart from Wingdings', async () => {
+    // Different fonts, different layouts: 0x52 is a ticked box in Wingdings
+    // 2 and a pointing hand in Wingdings. A prefix match once sent an
+    // application form's "☑ Yes" through the wrong table.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r>
+        <w:sym w:font="Wingdings 2" w:char="F052"/>
+        <w:sym w:font="Wingdings 2" w:char="F0A3"/>
+        <w:sym w:font="Monotype Sorts" w:char="F07F"/>
+        <w:sym w:font="Wingdings" w:char="F052"/>
+      </w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml));
+    const p = doc.child(0);
+    expect(p.child(0).text).toBe('☑☐☐'); // ticked, empty, empty — one run
+    // Wingdings' own 0x52 has no entry: kept in its font, not mistranslated.
+    expect(p.child(1).text).toBe(String.fromCodePoint(0xf052));
+    expect(markMap(p.child(1).marks).fontFamily.family).toBe('Wingdings');
+  });
+
   it('anchors bookmarks on their paragraph and spans the TOC field across them', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p>
