@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-measuring",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "bapbong — text measurement (canvas) + font helpers",
   "license": "MIT",
   "repository": {

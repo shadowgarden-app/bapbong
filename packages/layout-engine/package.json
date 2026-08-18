@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-layout-engine",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "description": "bapbong — line-breaking + pagination: ProseMirror doc → ResolvedLayout",
   "license": "MIT",
   "repository": {
