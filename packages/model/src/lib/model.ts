@@ -187,10 +187,12 @@ export const schema = new Schema({
         shading: { default: null },
         // The paragraph MARK's own font ({ family?, sizePt?, bold?, italic? }
         // or null) — w:pPr/w:rPr resolved through the same cascade a run gets.
-        // Set only on paragraphs imported EMPTY, where the mark is the only
-        // thing on the line and therefore sets its height. `carry.markRPr`
-        // keeps the same rPr verbatim for export; this is the measured
-        // reading of it, and nothing writes it back.
+        // The mark is a glyph on the paragraph's LAST line (the only glyph
+        // when the paragraph is empty), so it takes part in that line's
+        // height. Importer-set on every paragraph; the font commands edit it
+        // when the selection takes the mark in (Word: a ¶ inside the
+        // selection is re-sized with the text); the exporter writes it back
+        // into w:pPr/w:rPr ahead of `carry.markRPr` (the rest of that rPr).
         markFont: { default: null },
         // Carry-through fidelity (docx round-trip): OOXML paragraph
         // properties the model does NOT represent, preserved verbatim so a

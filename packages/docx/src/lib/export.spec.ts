@@ -161,15 +161,15 @@ describe('exportDocx (round-trip)', () => {
       run.marks.find((m) => m.type.name === 'kern')?.attrs['halfPoints'],
     ).toBe(28);
     // keepNext and contextualSpacing are both MODELLED now (attrs, re-emitted
-    // by the exporter), so only the paragraph mark's rPr still rides carry.
+    // by the exporter), and so is the paragraph mark's font (`markFont`, the
+    // font commands edit it) — nothing is left for carry here.
     expect(doc.child(0).attrs['keepNext']).toBe(true);
     expect(doc.child(0).attrs['contextualSpacing']).toEqual({
       before: false, // a lone paragraph borders no same-styled neighbour
       after: false,
     });
-    expect(doc.child(0).attrs['carry']).toEqual({
-      markRPr: '<w:b/><w:sz w:val="16"/>',
-    });
+    expect(doc.child(0).attrs['markFont']).toEqual({ bold: true, sizePt: 8 });
+    expect(doc.child(0).attrs['carry']).toBeNull();
 
     const outBytes = await exportDocx(doc, { carry: raw });
     const outZip = await JSZip.loadAsync(outBytes);
@@ -180,7 +180,8 @@ describe('exportDocx (round-trip)', () => {
     expect(xml.match(/<w:b\/>/g)?.length).toBe(2); // run rPr + mark rPr — no dupes
     expect(xml).not.toContain('w14:glow');
     // Paragraph: modelled keepNext + contextualSpacing re-emitted (each in its
-    // CT_PPr slot) plus the paragraph-mark rPr; revision record dropped.
+    // CT_PPr slot) plus the paragraph-mark rPr written back from markFont;
+    // revision record dropped.
     expect(xml).toContain('<w:keepNext/>');
     expect(xml).toContain('<w:contextualSpacing/>');
     expect(xml).toContain('<w:rPr><w:b/><w:sz w:val="16"/></w:rPr>');
@@ -197,6 +198,9 @@ describe('exportDocx (round-trip)', () => {
       run2.marks.find((m) => m.type.name === 'kern')?.attrs['halfPoints'],
     ).toBe(28);
     expect(doc2.child(0).attrs['carry']).toEqual(doc.child(0).attrs['carry']);
+    expect(doc2.child(0).attrs['markFont']).toEqual(
+      doc.child(0).attrs['markFont'],
+    );
   });
 
   it('carry-through: unmodelled table props survive import → export', async () => {

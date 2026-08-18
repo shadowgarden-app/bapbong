@@ -11,7 +11,7 @@ import {
   moveCaretCommand,
   backspaceOutdent,
   shiftListLevel,
-  splitListItem,
+  paragraphEnter,
   type Command,
   // EditorView comes via input-bridge's re-export (not straight from
   // prosemirror-view) so `bridge.view` and this type share ONE identity.
@@ -927,7 +927,9 @@ export class BapbongEditor {
       doc,
       state,
       keys: {
-        Enter: splitListItem, // continue lists; falls through outside them
+        // Continue lists; outside them an at-end Enter keeps the paragraph
+        // formatting (Word); mid-paragraph falls through to the base split.
+        Enter: paragraphEnter,
         Backspace: backspaceOutdent, // drop marker, then indent, before joining
         Tab: shiftListLevel(1), // demote list items; inert outside lists
         'Shift-Tab': shiftListLevel(-1), // promote list items

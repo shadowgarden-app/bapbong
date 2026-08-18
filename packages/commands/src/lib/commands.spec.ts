@@ -81,6 +81,7 @@ const schema = new Schema({
         pageBreakBefore: { default: false },
         list: { default: null },
         heading: { default: null },
+        markFont: { default: null },
       },
       toDOM: () => ['p', 0],
     },
@@ -208,6 +209,101 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const h = apply(paraState(), setHighlight('#fff59d'));
     expect(activeHighlight(h)).toBe('#fff59d');
     expect(activeHighlight(apply(h, setHighlight(null)))).toBeNull();
+  });
+
+  describe('the paragraph mark (¶) follows the font commands, Word-style', () => {
+    // Two paragraphs, "ab" and "cd" (p1 content 1..3, p2 content 5..7, doc
+    // size 8), both with an 11pt Times mark the importer would have resolved.
+    const mark = { family: 'Times New Roman', sizePt: 11 };
+    const twoParas = () => {
+      const doc = n('doc', null, [
+        n('paragraph', { markFont: mark }, schema.text('ab')),
+        n('paragraph', { markFont: mark }, schema.text('cd')),
+      ]);
+      return EditorState.create({ schema, doc });
+    };
+    const select = (s: EditorState, from: number, to: number) =>
+      s.apply(s.tr.setSelection(TextSelection.create(s.doc, from, to)));
+    const markOf = (s: EditorState, i: number) =>
+      s.doc.child(i).attrs['markFont'];
+
+    it('re-sizes the ¶ when the selection runs past the paragraph end', () => {
+      // "ab" plus the break into "cd" (1..5): p1's mark is inside, p2's not.
+      const s = apply(select(twoParas(), 1, 5), setFontSize(8));
+      expect(markOf(s, 0)).toEqual({ family: 'Times New Roman', sizePt: 8 });
+      expect(markOf(s, 1)).toEqual(mark);
+    });
+
+    it('leaves the ¶ alone when the selection stops at the last character', () => {
+      const s = apply(select(twoParas(), 1, 3), setFontSize(8));
+      expect(markOf(s, 0)).toEqual(mark);
+      expect(activeFontSize(s)).toBe(8); // the text itself did change
+    });
+
+    it('select-all takes every ¶ in, the last one included', () => {
+      const base = twoParas();
+      // 1..7 ends AT p2's last character — Word would not include p2's ¶.
+      const s1 = apply(select(base, 1, 7), setFontFamily('Arial'));
+      expect(markOf(s1, 0)).toMatchObject({ family: 'Arial' });
+      expect(markOf(s1, 1)).toEqual(mark);
+      // …but a selection reaching the document end (as ⌘A does) does.
+      const s2 = apply(select(base, 1, 8), setFontFamily('Arial'));
+      expect(markOf(s2, 1)).toMatchObject({ family: 'Arial' });
+    });
+
+    it('a caret in an EMPTY paragraph formats its ¶; in a full one only primes typing', () => {
+      const doc = n('doc', null, [
+        n('paragraph', { markFont: mark }),
+        n('paragraph', { markFont: mark }, schema.text('cd')),
+      ]);
+      const base = EditorState.create({ schema, doc });
+      const inEmpty = select(base, 1, 1);
+      const bold = apply(inEmpty, toggleMarkCommand('bold', 'strong'));
+      expect(markOf(bold, 0)).toEqual({ ...mark, bold: true });
+      const unbold = apply(bold, toggleMarkCommand('bold', 'strong'));
+      expect(markOf(unbold, 0)).toEqual(mark);
+      const inFull = select(base, 3, 3);
+      const s = apply(inFull, setFontSize(20));
+      expect(markOf(s, 1)).toEqual(mark);
+      expect(activeFontSize(s)).toBe(20); // stored mark for the next keystroke
+    });
+
+    it('bold/italic toggle onto and off the ¶; clear formatting resets it', () => {
+      const s0 = select(twoParas(), 1, 5);
+      const on = apply(s0, toggleMarkCommand('bold', 'strong'));
+      expect(markOf(on, 0)).toEqual({ ...mark, bold: true });
+      const off = apply(on, toggleMarkCommand('bold', 'strong'));
+      expect(markOf(off, 0)).toEqual(mark);
+      const it_ = apply(s0, toggleMarkCommand('italic', 'em'));
+      expect(markOf(it_, 0)).toEqual({ ...mark, italic: true });
+      expect(markOf(apply(s0, clearMarks()), 0)).toBeNull();
+      // Colour has no bearing on the ¶'s font.
+      expect(markOf(apply(s0, setTextColor('#ff0000')), 0)).toEqual(mark);
+    });
+
+    it('the Font dialog applies family/size/bold/italic to the ¶ in one go', () => {
+      const s = apply(
+        select(twoParas(), 1, 5),
+        applyCharacterFormatting({
+          family: 'Arial',
+          sizePt: 9,
+          bold: true,
+          italic: false,
+          underline: undefined,
+          strike: undefined,
+          doubleStrike: undefined,
+          smallCaps: undefined,
+          vertAlign: undefined,
+          color: undefined,
+          highlight: undefined,
+          scalePercent: 100,
+          letterSpacingTwips: 0,
+          positionHalfPoints: 0,
+        }),
+      );
+      expect(markOf(s, 0)).toEqual({ family: 'Arial', sizePt: 9, bold: true });
+      expect(markOf(s, 1)).toEqual(mark);
+    });
   });
 
   it('clearMarks strips every mark from the selection', () => {

@@ -326,12 +326,12 @@ function paragraphToFlow(
     end: contentStart + node.content.size,
   };
   if (floats.length > 0) flow.floats = floats;
-  // Only carried for a paragraph that has nothing else on its line — the
-  // importer sets it on exactly those, and wrapParagraph uses it on exactly
-  // those. Checked here too so an EDIT that gave the paragraph text can't
-  // leave a stale mark font sizing its lines.
+  // The paragraph mark's font: it sizes the last line together with that
+  // line's runs (and the whole line of a run-less paragraph). A stale value
+  // left by an edit cannot shrink text — the mark only ever RAISES a line's
+  // maxima — so it is carried whether or not the paragraph has runs.
   const markFont = node.attrs['markFont'] as Partial<FontFace> | null;
-  if (markFont && runs.length === 0) flow.markFont = markFont;
+  if (markFont) flow.markFont = markFont;
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
   const spacing = effectiveSpacing(
@@ -762,17 +762,21 @@ function wrapParagraph(
     tokens = tokens.filter((t) => t.pos !== undefined && t.pos >= resumeFrom);
   }
 
-  // Baseline metrics for the default font seed every line (so empty lines have
-  // a sensible height too).
+  // A line is as tall as the tallest glyph on it — and the paragraph MARK is
+  // a glyph (§17.3.1.29, "a physical character in the document") that sits on
+  // the LAST line. So the last line is seeded with the mark's metrics: a mark
+  // larger than the text opens that line (Word: "a larger font character,
+  // including the paragraph mark, in the last line increases the spacing"),
+  // a mark no larger leaves the text's own height alone, and a paragraph
+  // with NO runs is exactly one mark-tall line. Every OTHER line has no seed:
+  // only its runs decide. Seeding every line from the document default (the
+  // old rule) made 8pt text inside 8pt-mark paragraphs 11pt tall, and a rate
+  // card's exact-height rows spilled every second line over the row below.
   //
-  // For a paragraph with NO runs that seed is the whole answer, and the font
-  // it should come from is the paragraph MARK's: the mark is the only glyph on
-  // that line, so its size is the line's. (A paragraph that has text keeps the
-  // document base as its seed — the mark joins only the LAST line there, which
-  // is a separate rule this does not implement.)
+  // The mark's font falls back to the document base when the importer did
+  // not resolve one (hand-built flows, older documents).
   const markOnly = block.runs.length === 0;
-  const seedFont =
-    markOnly && block.markFont ? { ...base, ...block.markFont } : base;
+  const seedFont = block.markFont ? { ...base, ...block.markFont } : base;
   // A mark-only paragraph whose mark IS a section break draws no line box at
   // all — the break is a formatting mark, and the next section starts flush
   // against the last real line (see FlowParagraph.breakMark).
@@ -852,20 +856,35 @@ function wrapParagraph(
 
   // Zero for a section-break mark, matching baseMetrics above.
   const seedPx = markOnly && block.breakMark ? 0 : sizePx(seedFont);
-  let maxFontPx = seedPx; // tallest text (fallback line-height mode)
+  // Per-line maxima start EMPTY — the mark joins only the last line, in
+  // flushLine (see foldMark).
+  let maxFontPx = 0; // tallest text (fallback line-height mode)
   let maxImagePx = 0; // tallest inline image on the line
-  let maxAscent = baseMetrics?.ascent ?? 0; // metrics mode
-  let maxDescent = baseMetrics?.descent ?? 0;
+  let maxAscent = 0; // metrics mode
+  let maxDescent = 0;
   // The font's own gap between lines. Tracked as its own maximum rather than
   // folded into the descent so `exact`/`atLeast` can reason about the cell and
   // the gap separately, and so the baseline stays at the ascent.
-  let maxLeading = baseMetrics?.leading ?? 0;
+  let maxLeading = 0;
   // Text-only ascent/descent, excluding image contributions: the w:line
   // 'auto' multiple scales the TEXT box, never an image (Word semantics) —
   // so the spacing code needs the text height by itself.
-  let textAscent = baseMetrics?.ascent ?? 0;
-  let textDescent = baseMetrics?.descent ?? 0;
-  let textLeading = baseMetrics?.leading ?? 0;
+  let textAscent = 0;
+  let textDescent = 0;
+  let textLeading = 0;
+  /** The paragraph mark takes its place on the line being flushed: it is a
+   *  text glyph, so it raises both the line maxima and the text-only ones. */
+  const foldMark = (): void => {
+    maxFontPx = Math.max(maxFontPx, seedPx);
+    if (baseMetrics) {
+      maxAscent = Math.max(maxAscent, baseMetrics.ascent);
+      maxDescent = Math.max(maxDescent, baseMetrics.descent);
+      maxLeading = Math.max(maxLeading, baseMetrics.leading ?? 0);
+      textAscent = Math.max(textAscent, baseMetrics.ascent);
+      textDescent = Math.max(textDescent, baseMetrics.descent);
+      textLeading = Math.max(textLeading, baseMetrics.leading ?? 0);
+    }
+  };
 
   const lineStart = () => (firstLine ? firstLineStart : contStart);
 
@@ -1053,6 +1072,9 @@ function wrapParagraph(
     const from = firstPos ?? prevTo ?? block.pos;
     const to = lastEnd ?? from;
 
+    // The paragraph mark sits on the last line and counts like any glyph.
+    if (isLast) foldMark();
+
     let height: number;
     let baseline: number;
     if (metrics) {
@@ -1122,14 +1144,14 @@ function wrapParagraph(
 
     lineTokens = [];
     lineWidth = 0;
-    maxFontPx = seedPx;
+    maxFontPx = 0;
     maxImagePx = 0;
-    maxAscent = baseMetrics?.ascent ?? 0;
-    maxDescent = baseMetrics?.descent ?? 0;
-    maxLeading = baseMetrics?.leading ?? 0;
-    textAscent = baseMetrics?.ascent ?? 0;
-    textDescent = baseMetrics?.descent ?? 0;
-    textLeading = baseMetrics?.leading ?? 0;
+    maxAscent = 0;
+    maxDescent = 0;
+    maxLeading = 0;
+    textAscent = 0;
+    textDescent = 0;
+    textLeading = 0;
     firstLine = false;
 
     // The next line may sit beside (or past) a float — its band is fetched
@@ -3709,15 +3731,12 @@ function placeBlocks(
     // don't exist yet (same rule as Word: the anchor's page is decided by
     // the text position, then the drawing follows the anchor).
     // The paragraph's OWN nominal line height, seeded the same way
-    // wrapParagraph seeds it (the mark's font for a run-less paragraph, zero
-    // for a break mark). It has to be: the through-float walk below advances
-    // on this paragraph's LINE GRID, and a step in someone else's pitch puts
-    // every landing off — 14pt marks stepped at the 11pt document default
-    // even slipped PAST a float's top edge and never saw the blocker at all.
-    const seed =
-      flow.runs.length === 0 && flow.markFont
-        ? { ...ctx.base, ...flow.markFont }
-        : ctx.base;
+    // wrapParagraph seeds it (the mark's font, zero for a break mark). It has
+    // to be: the through-float walk below advances on this paragraph's LINE
+    // GRID, and a step in someone else's pitch puts every landing off — 14pt
+    // marks stepped at the 11pt document default even slipped PAST a float's
+    // top edge and never saw the blocker at all.
+    const seed = flow.markFont ? { ...ctx.base, ...flow.markFont } : ctx.base;
     const bm =
       flow.runs.length === 0 && flow.breakMark
         ? { ascent: 0, descent: 0, leading: 0 }

@@ -509,11 +509,14 @@ export interface FlowParagraph {
    * text. One factsheet in the corpus ends a section with two of exactly
    * those, and we drew them 17px tall apiece.
    *
-   * Set by the importer only for paragraphs it imported empty, because that is
-   * the only case the layout uses it for. (The mark also joins the LAST line
-   * of a paragraph that DOES have text, which is a separate rule and not
-   * modelled here.) Partial: whatever the cascade left unset falls back to the
-   * layout's base font.
+   * The mark also joins the LAST line of a paragraph that DOES have text: Word
+   * sizes a line to its tallest glyph, mark included, so a mark larger than
+   * the text opens the last line and a smaller one leaves it alone. Every
+   * other line is sized by its runs alone — there is no document-default
+   * floor (8pt text in an 8pt-mark paragraph is 8pt tall). Set by the importer
+   * for every paragraph. Partial: whatever the cascade left unset falls back
+   * to the layout's base font, and a paragraph without one seeds its last
+   * line from the base font.
    */
   markFont?: Partial<FontFace>;
   /**

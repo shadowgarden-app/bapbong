@@ -75,6 +75,81 @@ export const splitListItem: Command = (state, dispatch) => {
   return true;
 };
 
+/** Enter at the END of a paragraph: the new paragraph keeps the paragraph
+ *  formatting, the way Word's does — alignment, indents, tabs, spacing,
+ *  pagination keeps, borders/shading and the paragraph MARK's own font
+ *  (`markFont`, what sizes an empty line and what typed text picks up). Not
+ *  carried: heading/styleId (Word moves on to the style's "next style",
+ *  Normal), bookmarks and field (anchors and generated content stay with the
+ *  paragraph they were on), list (see splitListItem, which runs first) and
+ *  carry (unmodelled XML). Enter MID-paragraph is left to the base keymap,
+ *  which already splits in place with the attrs intact; only the at-end
+ *  split fell back to a bare default paragraph. */
+export const splitParagraphKeepFormat: Command = (state, dispatch) => {
+  const { $from, $to } = state.selection;
+  const parent = $from.parent;
+  if (!(state.selection instanceof TextSelection)) return false;
+  if (!parent.isTextblock || $from.parent !== $to.parent) return false;
+  if ($to.parentOffset !== parent.content.size) return false; // not at end
+  const attrs = {
+    ...parent.attrs,
+    heading: null,
+    styleId: null,
+    bookmarks: null,
+    field: null,
+    list: null,
+    carry: null,
+  };
+  const tr = state.tr.deleteSelection();
+  const pos = tr.selection.from;
+  const types = [{ type: parent.type, attrs }];
+  if (!canSplit(tr.doc, pos, 1, types)) return false;
+  tr.split(pos, 1, types);
+  dispatch?.(tr.scrollIntoView());
+  return true;
+};
+
+/** The Enter key: continue a list, else keep the paragraph formatting on an
+ *  at-end split; anything else falls through to the base keymap. */
+export const paragraphEnter: Command = chainCommands(
+  splitListItem,
+  splitParagraphKeepFormat,
+);
+
+/** Word: text typed into an EMPTY paragraph takes the paragraph mark's font
+ *  — the ¶ is the only thing on that line, and it is what holds the
+ *  formatting there. ProseMirror has no such glyph: an empty textblock offers
+ *  no marks to inherit, so typing would fall back to the document default.
+ *  This plugin seeds the STORED marks from `markFont` whenever a caret comes
+ *  to rest in an empty paragraph without any (a stored-mark set left by a
+ *  font command — bold toggled off, say — is respected: `[]` is not null).
+ *  Only the four properties the mark models are seeded (family, size, bold,
+ *  italic), as resolved marks — the same shape imported runs carry. */
+export const markFontSeed = new Plugin({
+  appendTransaction(_trs, _old, state) {
+    if (state.storedMarks) return null;
+    const { empty, $from } = state.selection;
+    const parent = $from.parent;
+    if (!empty || !parent.isTextblock || parent.content.size !== 0) return null;
+    const mf = parent.attrs['markFont'] as {
+      family?: string;
+      sizePt?: number;
+      bold?: boolean;
+      italic?: boolean;
+    } | null;
+    if (!mf) return null;
+    const { marks } = state.schema;
+    const seeded = [];
+    if (mf.family && marks['fontFamily'])
+      seeded.push(marks['fontFamily'].create({ family: mf.family }));
+    if (mf.sizePt != null && marks['fontSize'])
+      seeded.push(marks['fontSize'].create({ size: mf.sizePt }));
+    if (mf.bold && marks['strong']) seeded.push(marks['strong'].create());
+    if (mf.italic && marks['em']) seeded.push(marks['em'].create());
+    return seeded.length ? state.tr.setStoredMarks(seeded) : null;
+  },
+});
+
 /** Backspace at the very start of a paragraph outdents in Word-like steps
  *  instead of immediately joining backward:
  *    1. a list item drops its marker (the `list` attr clears, indent kept);
@@ -210,6 +285,7 @@ export function createEditingState(
       keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo, 'Mod-y': redo }),
       keymap(keys),
       keymap(baseKeymap),
+      markFontSeed,
     ],
   });
 }

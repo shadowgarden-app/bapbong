@@ -1583,6 +1583,12 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
 // children are therefore preserved verbatim (raw XML on a mark / paragraph
 // attr) and spliced back by the exporter. See model.ts `carryRPr` / `carry`.
 
+/** The paragraph MARK's rPr children whose value lives in `markFont` (family,
+ *  size, bold, italic — re-emitted from it on export, so a font command that
+ *  re-sizes the mark is what the file says too). Everything else on the mark
+ *  is carried verbatim. */
+const MARK_CONSUMED_RPR = new Set(['w:rFonts', 'w:sz', 'w:b', 'w:i']);
+
 /** rPr children whose VALUE already lives in the model (re-emitted from
  *  marks on export) — carrying them too would duplicate or contradict. */
 const CONSUMED_RPR = new Set([
@@ -2234,26 +2240,22 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
     };
     carry?: { pPr?: string; markRPr?: string };
   } = {};
-  // The paragraph mark's own font, but only where it decides anything: a
-  // paragraph with no runs draws exactly one line, and that line IS the mark
-  // (§17.3.1.29 — the mark is "a physical character in the document"). One
-  // corpus factsheet ends a section with two 3pt marks and a 10pt one; sized
-  // from the document default instead they came to 17px each, which is most
-  // of a spurious page.
+  // The paragraph mark's own font. The mark is "a physical character in the
+  // document" (§17.3.1.29) and it sits on the paragraph's LAST line — Word
+  // sizes that line to the tallest glyph on it, mark included, so a mark
+  // larger than the text opens the last line and a mark no larger leaves the
+  // text's own height alone. Emitted for EVERY paragraph: with no runs the
+  // mark is the whole line (one corpus factsheet ends a section with two 3pt
+  // marks and a 10pt one; sized from the document default they came to 17px
+  // each, most of a spurious page), and with runs it is what the layout must
+  // NOT seed the line from the document default instead — a rate card sets
+  // 8pt text AND an 8pt mark inside exact-height rows, and a default-font
+  // seed spilled every second line over the row below.
   //
   // Resolved through the run cascade, not read raw: the size can come from
   // docDefaults or the paragraph style with the mark's own rPr setting only
   // the font (`paraBase` is that cascade, minus the run layer).
-  //
-  // "Empty" means nothing that occupies the LINE, which is not the same as no
-  // children: an anchored image is a child of the paragraph it is anchored to,
-  // but it floats out of the text flow and leaves the mark alone on the line.
-  // The layout draws exactly those paragraphs as a bare mark, so this test has
-  // to be the one it makes (FlowParagraph.runs, which floats never enter) —
-  // a factsheet anchors twelve pictures to empty paragraphs, and sizing those
-  // from the document default while their neighbours used the mark stacked the
-  // pictures 4px too close per paragraph and overlapped three of them.
-  if (inline.every((n) => n.type.name === 'image' && n.attrs['float'])) {
+  {
     const markRPr = child(pPr, 'w:rPr');
     const eff = [
       paraBase,
@@ -2274,7 +2276,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // Carry-through: unmodelled INLINE pPr children + the paragraph mark's
   // w:rPr, preserved verbatim for export (see collectCarry).
   const carryPPr = collectCarry(pPr, CONSUMED_PPR);
-  const carryMarkRPr = collectCarry(child(pPr, 'w:rPr'), new Set());
+  const carryMarkRPr = collectCarry(child(pPr, 'w:rPr'), MARK_CONSUMED_RPR);
   if (carryPPr || carryMarkRPr) {
     attrs.carry = {
       ...(carryPPr && { pPr: carryPPr }),

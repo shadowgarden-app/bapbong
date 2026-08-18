@@ -633,13 +633,48 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
   const align = a['align'] as string | null;
   if (align)
     out.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`);
-  // Carry-through fidelity: unmodelled pPr children + the paragraph mark's
-  // w:rPr, preserved verbatim by the importer. The mark rPr goes LAST — in
-  // CT_PPr it sits at the end of the property run (only sectPr, appended by
-  // the caller, may follow).
+  // Carry-through fidelity: unmodelled pPr children, then the paragraph
+  // mark's w:rPr — its font from `markFont` (the model's reading, which the
+  // font commands edit the way Word re-sizes a selected ¶), the rest of it
+  // preserved verbatim by the importer. The mark rPr goes LAST — in CT_PPr it
+  // sits at the end of the property run (only sectPr, appended by the
+  // caller, may follow).
   const carry = a['carry'] as { pPr?: string; markRPr?: string } | null;
   if (carry?.pPr) out.push(carry.pPr);
-  if (carry?.markRPr) out.push(`<w:rPr>${carry.markRPr}</w:rPr>`);
+  const markRPr = markProps(
+    a['markFont'] as {
+      family?: string;
+      sizePt?: number;
+      bold?: boolean;
+      italic?: boolean;
+    } | null,
+    carry?.markRPr,
+  );
+  if (markRPr) out.push(`<w:rPr>${markRPr}</w:rPr>`);
+  return out.join('');
+}
+
+/** The paragraph mark's rPr children: `markFont` written the way runProps
+ *  writes the same four properties from marks, followed by the carried rest. */
+function markProps(
+  mf: {
+    family?: string;
+    sizePt?: number;
+    bold?: boolean;
+    italic?: boolean;
+  } | null,
+  carry: string | undefined,
+): string {
+  const out: string[] = [];
+  if (mf?.family)
+    out.push(
+      `<w:rFonts w:ascii="${esc(mf.family)}" w:hAnsi="${esc(mf.family)}"/>`,
+    );
+  if (mf?.bold) out.push('<w:b/>');
+  if (mf?.italic) out.push('<w:i/>');
+  if (mf?.sizePt != null)
+    out.push(`<w:sz w:val="${Math.round(mf.sizePt * 2)}"/>`);
+  if (carry) out.push(carry);
   return out.join('');
 }
 

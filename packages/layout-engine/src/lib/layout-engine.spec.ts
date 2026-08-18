@@ -1173,9 +1173,9 @@ describe('layoutBlocks', () => {
     expect(dflt.height).toBeCloseTo(16);
     expect(small.height).toBeCloseTo(16 * 0.3);
 
-    // A paragraph that HAS runs keeps the document base as its seed: the mark
-    // only shares that paragraph's last line, a rule we don't model, so a
-    // stale markFont left by an edit must not shrink real text.
+    // A paragraph that HAS runs: the mark shares its last line and only ever
+    // RAISES it — a 3pt mark (stale from an edit, or real) cannot shrink 10pt
+    // text.
     const withText: FlowBlock = {
       type: 'paragraph',
       runs: [{ text: 'x', font: font() }],
@@ -1184,6 +1184,37 @@ describe('layoutBlocks', () => {
     expect(
       layoutBlocks([withText], config()).pages[0].lines[0].height,
     ).toBeCloseTo(16);
+  });
+
+  it('sizes lines by their glyphs — the mark joins the last line, the default font none', () => {
+    // Word: "a larger font character (including the paragraph mark) in the
+    // last line increases the spacing" — and nothing else does. 5pt runs
+    // wrapped over two lines with a 5pt mark: both lines 8px, no 10pt-default
+    // floor (a rate card with 8pt text in 8pt-mark paragraphs inside
+    // exact-height rows spilled every second line when seeded from 11pt).
+    const small = font({ sizePt: 5 });
+    const twoLines: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaaaaaaaaaaaaaaaaa bbbb', font: small }], // 190 + wrap
+      markFont: { sizePt: 5 },
+    };
+    const a = layoutBlocks([twoLines], config()).pages[0].lines;
+    expect(a).toHaveLength(2);
+    expect(a[0].height).toBeCloseTo(8);
+    expect(a[1].height).toBeCloseTo(8);
+
+    // A 20pt mark: the LAST line opens to the mark, the first stays 5pt.
+    const bigMark: FlowBlock = { ...twoLines, markFont: { sizePt: 20 } };
+    const b = layoutBlocks([bigMark], config()).pages[0].lines;
+    expect(b[0].height).toBeCloseTo(8);
+    expect(b[1].height).toBeCloseTo(32);
+
+    // No markFont at all: the base font stands in for the mark on the last
+    // line only.
+    const noMark: FlowBlock = { type: 'paragraph', runs: twoLines.runs };
+    const c = layoutBlocks([noMark], config()).pages[0].lines;
+    expect(c[0].height).toBeCloseTo(8);
+    expect(c[1].height).toBeCloseTo(16);
   });
 
   it('renders typed leading spaces on a first line, drops them after a wrap', () => {

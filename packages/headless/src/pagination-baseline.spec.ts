@@ -35,6 +35,11 @@ import {
  *     had been hiding something that makes our pages hold less than Word's —
  *     almost certainly the table row geometry khbd is already known for.
  *     Neither number is evidence against the mark; both point at rows.
+ *     khbd then went 257 → 248 (2026-08-18) when lines stopped being seeded
+ *     from the document default: a line is as tall as its glyphs, the mark
+ *     joining only the LAST line — so 8pt text in an 8pt-mark paragraph is
+ *     8pt tall, not 11 (a rate card's exact-height rows had spilled every
+ *     second line). Nothing else moved.
  *   - NAVY — exact, and the one file whose rendering can be checked exactly:
  *     Word's own PDF export of it sits beside the .docx (gitignored, like the
  *     .docx), and its 18 image rectangles map 1:1 to the 18 wp:anchor by size.
@@ -59,7 +64,7 @@ const BASELINE: { file: string; word: number; ours: number }[] = [
   { file: 'de_cuong_cuoi_ki.docx', word: 7, ours: 7 },
   { file: 'bc_rieng.docx', word: 28, ours: 28 },
   { file: 'LeMinhThu52DL- Shop Kpop.docx', word: 22, ours: 21 },
-  { file: 'khbd.docx', word: 246, ours: 257 },
+  { file: 'khbd.docx', word: 246, ours: 248 },
   {
     file: 'NAVY HOTEL THE REGION IV- Factsheet-Vietnamese.docx',
     word: 3,
