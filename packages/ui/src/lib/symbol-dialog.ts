@@ -356,9 +356,24 @@ export function createSymbolDialog(
       ? searchSymbols(q)
       : (SYMBOL_GROUPS.find((g) => g.id === groupSel.value)?.entries ?? []);
     fillGrid(grid, entries, GRID_COLS, 'No symbol matches that name.');
-    // First cell selected so Enter/Insert have something to act on.
+    // Nothing is chosen until the user chooses — a highlighted first cell on
+    // open read as a selection they never made. While a SEARCH is typed the
+    // first match is what Enter inserts, so that one is shown selected (the
+    // command-palette convention); a group change clears the selection.
     const first = grid.querySelector<HTMLElement>('.bb-sd-cell');
-    if (first && entries[0]) select(entries[0].char, first);
+    if (q && first && entries[0]) select(entries[0].char, first);
+    else clearSelection();
+  }
+
+  function clearSelection(): void {
+    selected = null;
+    selectedEl?.removeAttribute('aria-selected');
+    selectedEl = null;
+    big.textContent = '';
+    nameEl.textContent = 'Select a symbol';
+    cpEl.textContent = '';
+    if (document.activeElement !== code) code.value = '';
+    insertBtn.disabled = true;
   }
 
   groupSel.addEventListener('change', () => {

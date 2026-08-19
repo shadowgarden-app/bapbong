@@ -232,10 +232,16 @@ export function openSymbolPopover(options: SymbolPopoverOptions): {
     for (const [id, c] of chipEls)
       c.setAttribute('aria-pressed', String(!q && id === groupId));
     fill(grid, entries, 'No match.');
+    // Nothing is chosen until the user chooses: a highlighted first cell on
+    // open read as a selection they never made. While a SEARCH is typed the
+    // first match is what Enter inserts, so that one is shown selected — the
+    // command-palette convention.
     const first = grid.querySelector<HTMLElement>('.bb-spk-cell');
-    if (first && entries[0]) select(entries[0].char, first);
+    if (q && first && entries[0]) select(entries[0].char, first);
     else {
       selected = null;
+      selectedEl?.removeAttribute('aria-selected');
+      selectedEl = null;
       nameEl.textContent = '';
     }
   };
