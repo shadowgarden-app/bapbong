@@ -283,10 +283,20 @@ export function createSymbolDialog(
   }
 
   function insert(char: string): void {
+    // The host's insert typically ends with editor.focus(); Word keeps the
+    // Symbol dialog focused so the next Enter inserts again. Restore focus to
+    // whatever in the panel the user was on (search box, a cell, a row) —
+    // after the host's refocus, hence the microtask.
+    const active = document.activeElement;
     options.onInsert(char);
     recent = pushRecent(recent, char);
     options.onRecentChange?.([...recent]);
     renderRecent();
+    if (active instanceof HTMLElement && root.contains(active))
+      queueMicrotask(() => {
+        if (active.isConnected) active.focus();
+        else search.focus();
+      });
   }
 
   function cellFor(e: SymbolEntry): HTMLButtonElement {
@@ -356,6 +366,18 @@ export function createSymbolDialog(
     renderGroup();
   });
   search.addEventListener('input', renderGroup);
+  // The search box is where the panel opens (like Find's query field), so it
+  // has to be a complete keyboard path on its own: type to filter, Enter
+  // inserts the first match (renderGroup selects it), ↓ walks into the grid.
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && selected) {
+      e.preventDefault();
+      insert(selected);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      grid.querySelector<HTMLElement>('.bb-sd-cell')?.focus();
+    }
+  });
   code.addEventListener('input', () => {
     const ch = parseCodePoint(code.value);
     if (ch) {
@@ -389,9 +411,18 @@ export function createSymbolDialog(
   return {
     open() {
       dialog.open();
-      // Land on the grid so arrows work at once (Word focuses the grid too).
-      const first = grid.querySelector<HTMLElement>('.bb-sd-cell');
-      first?.focus();
+      // Focus the search box, as the find panel focuses its query — typing
+      // starts a name search at once, Enter inserts the first match, ↓ moves
+      // into the grid.
+      showTab(false);
+      // After the current task: the toolbar and menubar hand focus back to
+      // the editor synchronously once a command has run, and this panel is
+      // opened BY such a command — focusing here and now would be undone a
+      // moment later.
+      queueMicrotask(() => {
+        search.focus();
+        search.select();
+      });
     },
     close() {
       dialog.close();

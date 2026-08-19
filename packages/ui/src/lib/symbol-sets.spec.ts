@@ -54,6 +54,10 @@ describe('symbol sets', () => {
   it('searches names across groups, in grid order, without duplicates', () => {
     const r = searchSymbols('ballot');
     expect(r.map((e) => e.char)).toEqual(['☐', '☑', '☒', '✗', '✘']);
+    // A group whose label matches leads: "arrow" → the Arrows group before
+    // the arrowhead bullets that merely contain the word.
+    expect(searchSymbols('arrow')[0].char).toBe('←');
+    expect(searchSymbols('arrow').some((e) => e.char === '➢')).toBe(true);
     // "Check mark" sits in two groups; it comes back once.
     expect(searchSymbols('check mark').map((e) => e.char)).toEqual(['✓', '✔']);
     expect(searchSymbols('   ')).toEqual([]);

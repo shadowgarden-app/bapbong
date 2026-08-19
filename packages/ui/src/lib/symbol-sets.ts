@@ -441,12 +441,18 @@ export function searchSymbols(query: string): SymbolEntry[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const seen = new Set<string>();
-  const out: SymbolEntry[] = [];
-  for (const grp of SYMBOL_GROUPS)
-    for (const e of grp.entries)
-      if (!seen.has(e.char) && e.name.toLowerCase().includes(q)) {
-        seen.add(e.char);
-        out.push(e);
-      }
-  return out;
+  // Ranked, then stable: a group whose LABEL matches comes first ("arrow"
+  // lists the Arrows group before the arrowhead bullets), then names that
+  // start with the query, then the rest — each in grid order.
+  const ranked: { e: SymbolEntry; rank: number }[] = [];
+  for (const grp of SYMBOL_GROUPS) {
+    const groupHit = grp.label.toLowerCase().includes(q);
+    for (const e of grp.entries) {
+      const name = e.name.toLowerCase();
+      if (seen.has(e.char) || !name.includes(q)) continue;
+      seen.add(e.char);
+      ranked.push({ e, rank: groupHit ? 0 : name.startsWith(q) ? 1 : 2 });
+    }
+  }
+  return ranked.sort((a, b) => a.rank - b.rank).map((r) => r.e);
 }
