@@ -66,3 +66,56 @@ export function placeFloating(el: HTMLElement, anchor: FloatAnchor): void {
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
 }
+
+/**
+ * Arrow-key navigation over a 2-D grid of focusable cells with a roving
+ * tabindex — one cell is tabbable, the arrows move focus, so Tab passes over
+ * the whole grid in one stop. Cells get `role="gridcell"`; the caller sets
+ * `role="grid"` on the container. Rows may be ragged (the last row of a
+ * symbol grid): a move clamps to the target row's last cell. Returns a
+ * `focusCell` for the caller to place focus programmatically (initial cell,
+ * search results).
+ */
+export function rovingGrid(cells: HTMLElement[][]): {
+  focusCell(r: number, c: number): void;
+} {
+  let cur: [number, number] = [0, 0];
+  const at = (r: number, c: number): HTMLElement | undefined => cells[r]?.[c];
+  const focusCell = (r: number, c: number): void => {
+    const rows = cells.length;
+    if (rows === 0) return;
+    const nr = Math.min(rows - 1, Math.max(0, r));
+    const nc = Math.min(cells[nr].length - 1, Math.max(0, c));
+    const prev = at(cur[0], cur[1]);
+    if (prev) prev.tabIndex = -1;
+    const next = at(nr, nc);
+    if (!next) return;
+    next.tabIndex = 0;
+    next.focus();
+    cur = [nr, nc];
+  };
+  cells.forEach((row, r) =>
+    row.forEach((cell, c) => {
+      cell.setAttribute('role', 'gridcell');
+      cell.tabIndex = r === 0 && c === 0 ? 0 : -1;
+      cell.addEventListener('keydown', (e) => {
+        const delta: Record<string, [number, number]> = {
+          ArrowRight: [0, 1],
+          ArrowLeft: [0, -1],
+          ArrowDown: [1, 0],
+          ArrowUp: [-1, 0],
+          Home: [0, -Infinity],
+          End: [0, Infinity],
+        };
+        const d = delta[e.key];
+        if (!d) return;
+        e.preventDefault();
+        focusCell(r + d[0], c + d[1]);
+      });
+      cell.addEventListener('focus', () => {
+        cur = [r, c];
+      });
+    }),
+  );
+  return { focusCell };
+}

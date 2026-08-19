@@ -31,6 +31,24 @@ export function pageBreakCommand(): Command {
   };
 }
 
+/**
+ * Insert `text` at the selection (replacing it), in the formatting of the
+ * caret — the stored marks, else the marks of the position — exactly what a
+ * typed character gets, and what Word's Insert › Symbol does with a
+ * "(normal text)" character: it takes the surrounding font. Empty text is a
+ * no-op that still reports handled (nothing to undo).
+ */
+export function insertText(text: string): Command {
+  return {
+    name: 'insert-text',
+    run(state, dispatch) {
+      if (!text) return true;
+      if (dispatch) dispatch(state.tr.insertText(text).scrollIntoView());
+      return true;
+    },
+  };
+}
+
 /** Insert a `rows`×`cols` table of empty cells, replacing the selection.
  *  New tables get Word's default look: a full 1px solid grid — OOXML tables
  *  are borderless unless declared, and an invisible fresh table reads as

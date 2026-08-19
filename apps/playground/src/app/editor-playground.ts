@@ -28,6 +28,7 @@ import {
   insertImage,
   insertRow,
   insertTable,
+  insertText,
   linkInfoAt,
   listPresets,
   mergeCells,
@@ -66,6 +67,8 @@ import { loadBundledFonts } from './fonts';
 import {
   createFindDialog,
   createSectionChip,
+  createSymbolDialog,
+  type SymbolDialogHandle,
   Dialog,
   mountMenubar,
   mountToolbar,
@@ -161,6 +164,17 @@ function borderSidesFor(
  */
 /** Offered in the toolbar pickers and in Format ▸ Font, so the two cannot
  *  drift apart on what is available. */
+/** localStorage key for the Symbol dialog's recently-used row. */
+const RECENT_SYMBOLS_KEY = 'bapbong.recentSymbols';
+function readRecentSymbols(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_SYMBOLS_KEY) ?? '[]');
+    return Array.isArray(raw) ? raw.filter((c) => typeof c === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 const FONT_FAMILIES = [
   'Arial',
   'Times New Roman',
@@ -219,6 +233,8 @@ export class EditorPlayground implements OnDestroy {
   private menubar: MenubarHandle | null = null;
   private toolbar: ToolbarHandle | null = null;
   private findDialog: FindDialogHandle | null = null;
+  /** Insert › Symbol… — non-modal like Word's, built once per editor. */
+  private symbolDialog: SymbolDialogHandle | null = null;
 
   /** The framework-agnostic render/edit core (lazily created on first load). */
   private editor: BapbongEditor | null = null;
@@ -381,6 +397,25 @@ export class EditorPlayground implements OnDestroy {
     // itself. The menubar tree mixes registry commands with host actions (open
     // file, comment view, find, shortcuts) and a table-size widget — see
     // buildMenus().
+    // Symbol dialog + the `insert-symbol` command the toolbar's Ω button and
+    // the Insert menu both run. Recents are a playground preference.
+    this.symbolDialog = createSymbolDialog({
+      recent: readRecentSymbols(),
+      onInsert: (ch) => {
+        this.exec(insertText(ch));
+      },
+      onRecentChange: (r) =>
+        localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(r)),
+      anchor: () =>
+        this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
+    });
+    editor.commands.add({
+      name: 'insert-symbol',
+      run: (_state, dispatch) => {
+        if (dispatch) this.symbolDialog?.open();
+        return true;
+      },
+    });
     const menubarHost = this.editorMenubar()?.nativeElement;
     if (menubarHost)
       this.menubar = mountMenubar(menubarHost, editor, {
@@ -389,6 +424,9 @@ export class EditorPlayground implements OnDestroy {
     const toolbarHost = this.editorToolbar()?.nativeElement;
     if (toolbarHost)
       this.toolbar = mountToolbar(toolbarHost, editor, {
+        items: {
+          'insert-symbol': { title: 'Insert symbol', label: 'Ω' },
+        },
         groups: [
           ['undo', 'redo'],
           [
@@ -446,6 +484,7 @@ export class EditorPlayground implements OnDestroy {
               onSelect: (c) => this.exec(setHighlight(c)),
             },
             'clear-format',
+            'insert-symbol',
           ],
           [
             {
@@ -925,6 +964,10 @@ export class EditorPlayground implements OnDestroy {
             run: () => this.openLinkPanel(),
           },
           {
+            label: 'Symbol…',
+            run: () => this.symbolDialog?.open(),
+          },
+          {
             label: 'Remove link',
             isEnabled: () => {
               const ed = this.editor;
@@ -1291,6 +1334,8 @@ export class EditorPlayground implements OnDestroy {
   ngOnDestroy(): void {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
     this.findDialog?.destroy();
+    this.symbolDialog?.destroy();
+    this.symbolDialog = null;
     this.menubar?.destroy();
     this.toolbar?.destroy();
     this.editor?.destroy();

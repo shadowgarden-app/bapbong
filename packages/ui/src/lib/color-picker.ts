@@ -1,4 +1,4 @@
-import { injectStyle, placeFloating } from './internal.js';
+import { injectStyle, placeFloating, rovingGrid } from './internal.js';
 
 /**
  * The one colour picker.
@@ -222,46 +222,24 @@ export function openColorPicker({
   grid.className = 'bb-cpk-grid';
   grid.setAttribute('role', 'grid');
   const cells: HTMLButtonElement[][] = [];
-  COLOR_PALETTE.forEach((row, r) => {
+  COLOR_PALETTE.forEach((row) => {
     const rowCells: HTMLButtonElement[] = [];
-    row.forEach((color, c) => {
+    row.forEach((color) => {
       const sw = document.createElement('button');
       sw.type = 'button';
       sw.className = 'bb-cpk-sw';
       sw.style.background = color;
       sw.title = color;
-      sw.setAttribute('role', 'gridcell');
       sw.setAttribute('aria-label', color);
-      sw.tabIndex = -1;
       if (color.toUpperCase() === value?.toUpperCase()) sw.classList.add('on');
       sw.addEventListener('click', () => pick(color));
-      sw.addEventListener('keydown', (e) => onGridKey(e, r, c));
       grid.append(sw);
       rowCells.push(sw);
     });
     cells.push(rowCells);
   });
   panel.append(grid);
-
-  function onGridKey(e: KeyboardEvent, r: number, c: number): void {
-    const delta: Record<string, [number, number]> = {
-      ArrowRight: [0, 1],
-      ArrowLeft: [0, -1],
-      ArrowDown: [1, 0],
-      ArrowUp: [-1, 0],
-    };
-    const d = delta[e.key];
-    if (!d) return;
-    e.preventDefault();
-    const rows = cells.length;
-    const cols = cells[0].length;
-    const nr = Math.min(rows - 1, Math.max(0, r + d[0]));
-    const nc = Math.min(cols - 1, Math.max(0, c + d[1]));
-    cells[r][c].tabIndex = -1;
-    const next = cells[nr][nc];
-    next.tabIndex = 0;
-    next.focus();
-  }
+  const nav = rovingGrid(cells); // arrows + roving tabindex, shared with the symbol grid
 
   // ── custom ──────────────────────────────────────────────────────
   panel.append(
@@ -336,10 +314,14 @@ export function openColorPicker({
 
   // Open on the applied colour when there is one, so arrows start from where
   // the user already is rather than the top-left corner.
-  const start =
-    cells.flat().find((el) => el.classList.contains('on')) ?? cells[0][0];
-  start.tabIndex = 0;
-  start.focus();
+  const onRow = cells.findIndex((row) =>
+    row.some((el) => el.classList.contains('on')),
+  );
+  const onCol =
+    onRow >= 0
+      ? cells[onRow].findIndex((el) => el.classList.contains('on'))
+      : 0;
+  nav.focusCell(Math.max(0, onRow), Math.max(0, onCol));
 
   return { close };
 }

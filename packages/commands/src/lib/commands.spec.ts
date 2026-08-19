@@ -21,6 +21,7 @@ import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import {
   insertImage,
   insertTable,
+  insertText,
   linkInfoAt,
   pageBreakCommand,
   setLink,
@@ -487,6 +488,32 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     const after = apply(before, cmd);
     expect(after.doc.firstChild?.attrs['pageBreakBefore']).toBe(true);
     expect(cmd.isActive?.(after)).toBe(true);
+  });
+
+  it('insertText puts a character at the caret in the caret formatting', () => {
+    // A bold word, caret after it: the stored/at-position marks are bold, so
+    // the inserted ☑ is bold too — Word's Insert › Symbol behaviour.
+    const doc = n(
+      'doc',
+      null,
+      n(
+        'paragraph',
+        null,
+        schema.text('ab', [schema.marks['strong'].create()]),
+      ),
+    );
+    let s = EditorState.create({ schema, doc });
+    s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 3)));
+    s = apply(s, insertText('☑'));
+    expect(s.doc.textContent).toBe('ab☑');
+    expect(s.doc.child(0).lastChild!.marks.map((m) => m.type.name)).toEqual([
+      'strong',
+    ]);
+    // A range is replaced.
+    const r = apply(paraState(), insertText('—'));
+    expect(r.doc.textContent).toBe('—');
+    // Nothing to insert: handled, unchanged.
+    expect(apply(paraState(), insertText('')).doc.textContent).toBe('hello');
   });
 
   it('insertTable inserts a rows×cols grid of cells', () => {

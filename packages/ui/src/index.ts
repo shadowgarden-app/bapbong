@@ -11,3 +11,5 @@ export * from './lib/page-setup.js';
 export * from './lib/section-chip.js';
 export * from './lib/font-dialog.js';
 export * from './lib/color-picker.js';
+export * from './lib/symbol-dialog.js';
+export * from './lib/symbol-sets.js';
