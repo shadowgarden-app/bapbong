@@ -298,6 +298,9 @@ importers:
 
   packages/input-bridge:
     dependencies:
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
       prosemirror-commands:
         specifier: ^1.7.1
         version: 1.7.1

@@ -4,3 +4,4 @@ export * from './lib/collection.js';
 export * from './lib/plugin.js';
 export * from './lib/command.js';
 export * from './lib/perf.js';
+export * from './lib/keybinding.js';

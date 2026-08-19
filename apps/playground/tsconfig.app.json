@@ -20,6 +20,9 @@
       "path": "../../packages/measuring/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/input-bridge/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/contracts/tsconfig.lib.json"
     },
     {

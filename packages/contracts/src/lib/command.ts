@@ -17,6 +17,9 @@ export type Dispatch = (tr: Transaction) => void;
 export interface Command {
   /** Stable identifier — the registry key and the name a menu/toolbar references. */
   readonly name: string;
+  /** Human-readable label ("Bold", "Find and replace") — what the Keyboard
+   *  shortcuts dialog and other listings show; the name is the fallback. */
+  readonly title?: string;
   /**
    * Apply the operation. Following ProseMirror's convention, omit `dispatch` to
    * probe whether it *would* apply (returns true/false without mutating).

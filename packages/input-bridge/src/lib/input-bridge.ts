@@ -16,6 +16,10 @@ import {
 } from 'prosemirror-state';
 import { canSplit } from 'prosemirror-transform';
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
+import type {
+  Command as EditorCommand,
+  KeybindingRegistry,
+} from '@shadow-garden/bapbong-contracts';
 
 // Re-exported so hosts type against ONE prosemirror-state identity (mixing
 // module resolutions across packages makes TS treat duplicates as unrelated).
@@ -262,9 +266,11 @@ export interface InputBridgeOptions {
    *  passed as `doc` (same schema). `keys` still drives the keymaps it was built
    *  with, so the state must have been produced by `createEditingState`. */
   state?: EditorState;
-  /** Extra bindings, checked before the base keymap — e.g. ArrowUp/ArrowDown
-   *  wired to layout-aware caret motion from bapbong-selection. */
+  /** Extra STATIC bindings, checked before the base keymap. Prefer
+   *  `resolveKey`, which the editor backs with its keybinding registry. */
   keys?: Record<string, Command>;
+  /** Live key lookup — see {@link KeyResolver}. Checked first of all. */
+  resolveKey?: KeyResolver;
   /** Called after every dispatched transaction (typing, IME composition
    *  steps, undo, selection changes). Re-layout + repaint here. */
   onUpdate: (state: EditorState, tr: Transaction) => void;
@@ -273,15 +279,179 @@ export interface InputBridgeOptions {
   handlePaste?: (view: EditorView, event: ClipboardEvent) => boolean;
 }
 
-/** Editing state with history + base keymap; exported for headless tests. */
+/**
+ * Whether the platform reads `Mod` as ⌘ — the same test ProseMirror's keymap
+ * makes, so a chord registered as `Mod-b` matches the event it matches.
+ */
+export const IS_MAC: boolean =
+  typeof navigator !== 'undefined'
+    ? /Mac|iP(hone|[oa]d)/.test(navigator.platform)
+    : false;
+
+/**
+ * A key resolver: the NORMALIZED chord name of a keydown (ProseMirror's
+ * event shape — `Alt-Ctrl-Meta-Shift-name`, see contracts `normalizeKey`) →
+ * the command to run, or undefined. The editor answers from its keybinding
+ * registry, LIVE, so a binding added after the bridge mounted works at once
+ * and one removed stops — no keymap rebuild, no state reconfigure.
+ */
+export type KeyResolver = (name: string) => Command | undefined;
+
+/**
+ * The BASE character of a key by its legacy `keyCode` — what w3c-keyname's
+ * `base` table gives prosemirror-keymap for the shifted/Alt'ed fallback (the
+ * event says "Z" or "≈", the chord says `z`). Letters, digits and the US
+ * punctuation row; that is the whole range chords are written in. Modern
+ * engines report `event.key` for the primary name, so no library is needed
+ * for that side (and the apps bundle these packages from source, where a
+ * dependency of one package is not on the others' resolution path).
+ */
+function baseKeyOf(keyCode: number): string | undefined {
+  if (keyCode >= 48 && keyCode <= 57) return String.fromCharCode(keyCode); // 0-9
+  if (keyCode >= 65 && keyCode <= 90) return String.fromCharCode(keyCode + 32); // a-z
+  if (keyCode >= 96 && keyCode <= 105) return String(keyCode - 96); // numpad
+  return {
+    186: ';',
+    187: '=',
+    188: ',',
+    189: '-',
+    190: '.',
+    191: '/',
+    192: '`',
+    219: '[',
+    220: '\\',
+    221: ']',
+    222: "'",
+    32: ' ',
+  }[keyCode];
+}
+
+/** `KeyboardEvent.key`, with the one spelling the chord grammar differs on. */
+function keyName(event: KeyboardEvent): string {
+  return event.key === 'Spacebar' ? ' ' : event.key;
+}
+
+/** Modifier prefix in ProseMirror's order; `shift` false leaves Shift out. */
+function eventChord(name: string, event: KeyboardEvent, shift = true): string {
+  return (
+    (event.altKey ? 'Alt-' : '') +
+    (event.ctrlKey ? 'Ctrl-' : '') +
+    (event.metaKey ? 'Meta-' : '') +
+    (shift && event.shiftKey ? 'Shift-' : '') +
+    name
+  );
+}
+
+/**
+ * The registry-backed keymap: prosemirror-keymap's `keydownHandler`, with the
+ * static bindings map replaced by a live lookup. The matching rules are
+ * copied from it exactly — direct name first; then, for a character key
+ * reached through Shift/Alt/Meta or a non-ASCII layout, the BASE key of the
+ * keycode (so `Mod-Shift-z` fires on a layout where Shift+z is not "Z", and
+ * `Alt-x` on a Mac where Alt+x types ≈); then a Shift+character spelled as
+ * `Shift-` + character — so every chord that would have worked in a static
+ * keymap works here.
+ */
+export function keybindingKeymap(resolve: KeyResolver): Plugin {
+  const run = (view: EditorView, cmd: Command | undefined): boolean =>
+    !!cmd && cmd(view.state, view.dispatch, view);
+  return new Plugin({
+    props: {
+      handleKeyDown(view, event) {
+        const name = keyName(event);
+        const isChar = name.length === 1 && name !== ' ';
+        if (run(view, resolve(eventChord(name, event, !isChar)))) return true;
+        let baseName: string | undefined;
+        if (
+          isChar &&
+          (event.shiftKey ||
+            event.altKey ||
+            event.metaKey ||
+            name.charCodeAt(0) > 127) &&
+          (baseName = baseKeyOf(event.keyCode)) &&
+          baseName !== name
+        ) {
+          if (run(view, resolve(eventChord(baseName, event)))) return true;
+        } else if (isChar && event.shiftKey) {
+          if (run(view, resolve(eventChord(name, event, true)))) return true;
+        }
+        return false;
+      },
+    },
+  });
+}
+
+/**
+ * Dispatch a host's WINDOW-scope keybindings from one `keydown` listener on
+ * `target` (the document): ⌘S, ⌘F, ⌘W — chords that must work wherever focus
+ * is, and with no document open at all, so they cannot live in an editor's
+ * keymap. Chords are matched exactly as the editor keymap matches them (same
+ * normalization, same shifted-character fallbacks). An event the editor (or
+ * anything else) already handled — `defaultPrevented` — is left alone: a
+ * chord bound in both places is the EDITOR's while it has focus (⌘B is bold
+ * in the text, the sidebar toggle elsewhere). Returns a disposer.
+ */
+export function installWindowKeymap(opts: {
+  keybindings: KeybindingRegistry;
+  commands: { get(name: string): EditorCommand | undefined };
+  /** Editor state to hand a command that wants one; null-safe — app-level
+   *  commands typically ignore it. */
+  state?: () => EditorState | null;
+  dispatch?: (tr: Transaction) => void;
+  target?: EventTarget;
+}): () => void {
+  const target = opts.target ?? document;
+  const run = (name: string): boolean => {
+    const b = opts.keybindings.get(name);
+    if (!b || b.scope !== 'window') return false;
+    const cmd = opts.commands.get(b.command);
+    if (!cmd) return false;
+    // Window commands run without a state as a rule; a host that gives one
+    // gets it, and the dispatch alongside.
+    const state = opts.state?.() ?? null;
+    return cmd.run(state as EditorState, opts.dispatch ?? (() => undefined));
+  };
+  const onKeyDown = (e: Event): void => {
+    const event = e as KeyboardEvent;
+    if (event.defaultPrevented) return;
+    if (!(event.metaKey || event.ctrlKey || event.altKey)) return; // typing
+    const name = keyName(event);
+    const isChar = name.length === 1 && name !== ' ';
+    let handled = run(eventChord(name, event, !isChar));
+    let baseName: string | undefined;
+    if (
+      !handled &&
+      isChar &&
+      (event.shiftKey ||
+        event.altKey ||
+        event.metaKey ||
+        name.charCodeAt(0) > 127) &&
+      (baseName = baseKeyOf(event.keyCode)) &&
+      baseName !== name
+    )
+      handled = run(eventChord(baseName, event));
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+  target.addEventListener('keydown', onKeyDown);
+  return () => target.removeEventListener('keydown', onKeyDown);
+}
+
+/** Editing state with history + base keymap; exported for headless tests.
+ *  `resolveKey` (the editor's keybinding registry) sits ahead of the static
+ *  `keys` and the base keymap, so a registered binding wins. */
 export function createEditingState(
   doc: PMNode,
   keys: Record<string, Command> = {},
+  resolveKey?: KeyResolver,
 ): EditorState {
   return EditorState.create({
     doc,
     plugins: [
       history(),
+      ...(resolveKey ? [keybindingKeymap(resolveKey)] : []),
       keymap({ 'Mod-z': undo, 'Shift-Mod-z': redo, 'Mod-y': redo }),
       keymap(keys),
       keymap(baseKeymap),
@@ -490,11 +660,17 @@ export class InputBridge {
     // (caret jumps below the table it was typing in). Claim the beforeinput
     // and run the same Enter chain the keymap would have.
     const enterChain = chainCommands(
+      // Whatever Enter is bound to — the registry's binding first, a static
+      // key next — then the base split.
+      (state, dispatch, view) =>
+        options.resolveKey?.('Enter')?.(state, dispatch, view) ?? false,
       options.keys?.['Enter'] ?? (() => false),
       baseKeymap['Enter'],
     );
     this.view = new EditorView(this.host, {
-      state: options.state ?? createEditingState(options.doc, options.keys),
+      state:
+        options.state ??
+        createEditingState(options.doc, options.keys, options.resolveKey),
       handlePaste: options.handlePaste,
       // DOM windowing: only blocks near the selection render for real.
       decorations: windowDecorations,

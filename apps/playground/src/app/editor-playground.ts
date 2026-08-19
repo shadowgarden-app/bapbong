@@ -56,6 +56,14 @@ import type {
   SectionConfig,
 } from '@shadow-garden/bapbong-contracts';
 import {
+  Collection,
+  KeybindingRegistry,
+} from '@shadow-garden/bapbong-contracts';
+import {
+  IS_MAC,
+  installWindowKeymap,
+} from '@shadow-garden/bapbong-input-bridge';
+import {
   createCanvasMeasurer,
   createCanvasMetrics,
   createFontRegistryMeasurer,
@@ -241,6 +249,17 @@ export class EditorPlayground implements OnDestroy {
   private readonly floatAnchor = panelAnchor({
     area: () => this.wrapHost()?.nativeElement,
   });
+  /**
+   * App-level shortcuts — chords that work wherever focus is (⌘F): the host's
+   * own registry + commands, dispatched by one document listener. The
+   * editor's own chords (⌘B, Enter, …) live in `editor.keybindings`; the
+   * Keyboard-shortcuts dialog lists both.
+   */
+  private readonly appCommands = new Collection<Command>([], {
+    idProperty: 'name',
+  });
+  private readonly appKeys = new KeybindingRegistry(IS_MAC);
+  private disposeWindowKeys: (() => void) | null = null;
   /** Insert › Symbol… — non-modal like Word's, built once per editor. */
   private symbolDialog: SymbolDialogHandle | null = null;
 
@@ -548,8 +567,30 @@ export class EditorPlayground implements OnDestroy {
     // Find/replace as a (non-modal) dialog opened from Edit ▸ Find and replace,
     // pinned to the canvas viewport's top-right (like Google Docs). Uses the
     // lib's English defaults.
+    // ⌘F is an app chord (it opens a panel), so it is the app registry's —
+    // not the find dialog's own listener.
     this.findDialog = createFindDialog(() => editor.plugin('find'), {
       anchor: this.floatAnchor,
+      shortcut: false,
+    });
+    this.appCommands.add({
+      name: 'find',
+      title: 'Find and replace',
+      run: (_s, dispatch) => {
+        if (dispatch) this.findDialog?.open();
+        return true;
+      },
+    });
+    this.appKeys.add({
+      key: 'Mod-f',
+      command: 'find',
+      scope: 'window',
+      source: 'playground',
+    });
+    this.disposeWindowKeys?.();
+    this.disposeWindowKeys = installWindowKeymap({
+      keybindings: this.appKeys,
+      commands: this.appCommands,
     });
     this.editor = editor;
     return editor;
@@ -1349,6 +1390,8 @@ export class EditorPlayground implements OnDestroy {
     this.findDialog?.destroy();
     this.symbolDialog?.destroy();
     this.symbolDialog = null;
+    this.disposeWindowKeys?.();
+    this.disposeWindowKeys = null;
     this.menubar?.destroy();
     this.toolbar?.destroy();
     this.editor?.destroy();

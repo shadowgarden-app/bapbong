@@ -8,6 +8,7 @@ import { schema as baseSchema } from '@shadow-garden/bapbong-model';
 import { RenderCore } from '@shadow-garden/bapbong-view';
 import {
   InputBridge,
+  IS_MAC,
   moveCaretCommand,
   backspaceOutdent,
   shiftListLevel,
@@ -68,7 +69,11 @@ export { RenderCore } from '@shadow-garden/bapbong-view';
 // Built-in ("internal") plugins ship with the editor (see built-in-plugins.ts)
 // and are exposed as typed handles (e.g. editor.find) — no install needed.
 import { createBuiltins } from './built-in-plugins';
-import { Collection, perf } from '@shadow-garden/bapbong-contracts';
+import {
+  Collection,
+  KeybindingRegistry,
+  perf,
+} from '@shadow-garden/bapbong-contracts';
 import { defaultCommands } from '@shadow-garden/bapbong-commands';
 export type {
   TableSelectionPlugin,
@@ -232,11 +237,25 @@ export class BapbongEditor {
    *  (Plugin-contributed commands are an additive follow-up.) */
   readonly commands: Collection<EditorCommand> = defaultCommands();
 
+  /**
+   * Keyboard shortcuts as data — every chord the editor answers to WHILE IT
+   * HAS FOCUS, by command name (see contracts `Keybinding`). The bridge's
+   * keymap resolves keydowns against it live, so a binding added after mount
+   * works at once. The core registers its own here (source `core`); plugins
+   * and the host add theirs; a later `add` of the same chord replaces (a host
+   * overriding a core binding). App-wide chords that must work with focus
+   * elsewhere, or with no document open (⌘S, ⌘F, ⌘W), belong in the HOST's
+   * own registry, dispatched by input-bridge's `installWindowKeymap`; the
+   * Keyboard-shortcuts dialog lists both.
+   */
+  readonly keybindings = new KeybindingRegistry(IS_MAC);
+
   private readonly readClipboardFallback?: BapbongEditorOptions['readClipboardFallback'];
   private readonly printFallback?: BapbongEditorOptions['printFallback'];
 
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
+    this.registerCoreKeys();
     this.readClipboardFallback = opts.readClipboardFallback;
     this.printFallback = opts.printFallback;
     this.core = new RenderCore(stack, {
@@ -926,18 +945,9 @@ export class BapbongEditor {
     this.bridge = new InputBridge({
       doc,
       state,
-      keys: {
-        // Continue lists; outside them an at-end Enter keeps the paragraph
-        // formatting (Word); mid-paragraph falls through to the base split.
-        Enter: paragraphEnter,
-        Backspace: backspaceOutdent, // drop marker, then indent, before joining
-        Tab: shiftListLevel(1), // demote list items; inert outside lists
-        'Shift-Tab': shiftListLevel(-1), // promote list items
-        ArrowUp: this.verticalCmd(-1),
-        ArrowDown: this.verticalCmd(1),
-        'Shift-ArrowUp': this.verticalCmd(-1, true),
-        'Shift-ArrowDown': this.verticalCmd(1, true),
-      },
+      // Every chord — Enter/Backspace/Tab/arrows included — comes from the
+      // keybinding registry, resolved per keydown (see registerCoreKeys).
+      resolveKey: this.resolveEditorKey,
       onUpdate: (state, tr) => this.refresh(state, tr),
       handlePaste: imagePasteHandler,
     });
@@ -1065,6 +1075,80 @@ export class BapbongEditor {
 
   /** ArrowUp/ArrowDown against the canvas layout (the hidden DOM's own line
    *  wrapping is meaningless). With `extend`, Shift+arrow grows the selection. */
+  /**
+   * The core's own shortcuts: the editing keys that used to be a static map
+   * handed to the bridge, plus the Word/OS staples. Registered as COMMANDS
+   * (so they list with a title and can be rebound) and as bindings.
+   */
+  private registerCoreKeys(): void {
+    const core = (
+      name: string,
+      title: string,
+      run: Command,
+      isEnabled?: (state: EditorState) => boolean,
+    ) =>
+      this.commands.add({
+        name,
+        title,
+        run: (state, dispatch) => run(state, dispatch),
+        ...(isEnabled && { isEnabled }),
+      });
+    core('paragraph-enter', 'New paragraph / continue list', paragraphEnter);
+    core(
+      'backspace-outdent',
+      'Outdent (Backspace at line start)',
+      backspaceOutdent,
+    );
+    core('list-indent', 'Demote list item', shiftListLevel(1));
+    core('list-outdent', 'Promote list item', shiftListLevel(-1));
+    core('caret-up', 'Move caret up a line', this.verticalCmd(-1));
+    core('caret-down', 'Move caret down a line', this.verticalCmd(1));
+    core('select-up', 'Extend selection up a line', this.verticalCmd(-1, true));
+    core(
+      'select-down',
+      'Extend selection down a line',
+      this.verticalCmd(1, true),
+    );
+    const bind = (key: string, command: string, when?: string): void => {
+      this.keybindings.add({
+        key,
+        command,
+        source: 'core',
+        ...(when && { when }),
+      });
+    };
+    // Order matters only for the dialog's insertion order (it sorts anyway).
+    bind('Enter', 'paragraph-enter', 'editing text');
+    bind(
+      'Backspace',
+      'backspace-outdent',
+      'at the start of a list or indented paragraph',
+    );
+    bind('Tab', 'list-indent', 'in a list');
+    bind('Shift-Tab', 'list-outdent', 'in a list');
+    bind('ArrowUp', 'caret-up', 'editing text');
+    bind('ArrowDown', 'caret-down', 'editing text');
+    bind('Shift-ArrowUp', 'select-up', 'editing text');
+    bind('Shift-ArrowDown', 'select-down', 'editing text');
+    bind('Mod-z', 'undo');
+    bind('Shift-Mod-z', 'redo');
+    bind('Mod-y', 'redo');
+    // Word's staples. Nothing bound these before; the base keymap has none.
+    bind('Mod-b', 'bold', 'editing text');
+    bind('Mod-i', 'italic', 'editing text');
+    bind('Mod-u', 'underline', 'editing text');
+  }
+
+  /** The bridge's live key lookup: a registered chord → the command's run,
+   *  as a ProseMirror command. */
+  private readonly resolveEditorKey = (name: string): Command | undefined => {
+    const b = this.keybindings.get(name);
+    if (!b) return undefined;
+    const cmd = this.commands.get(b.command);
+    if (!cmd) return undefined;
+    return (state, dispatch) => cmd.run(state, dispatch);
+  };
+
   private verticalCmd(dir: -1 | 1, extend = false): Command {
     return moveCaretCommand((state) => {
       const head = state.selection.head;
@@ -1126,11 +1210,11 @@ export class BapbongEditor {
     // recency test as `<body>` below.
     const node = ev.target instanceof Node ? ev.target : null;
     const mine = node !== null && this.stack.contains(node);
-    if (node !== null && node !== document.body && !mine) return;
     // Focus is on <body>, so the event names no editor. Only the last one the
     // user touched may act on it — otherwise a second live editor on the page
     // would run its plugins over the same keystroke (see lastInteracted).
     if (!mine && lastInteracted !== null && lastInteracted !== this) return;
+    if (node !== null && node !== document.body && !mine) return;
     // Stamp the keyboard-event arrival so refresh() can report the full
     // keydown → painted latency. Ignore pure modifier presses (they produce no
     // edit, so their stamp would otherwise inflate the next real keystroke).
