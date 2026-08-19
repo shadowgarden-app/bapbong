@@ -3,7 +3,9 @@ import type {
   Command,
   Dispatch,
   EditorChange,
+  KeybindingRegistry,
 } from '@shadow-garden/bapbong-contracts';
+import { keyLabel } from '@shadow-garden/bapbong-contracts';
 
 /** The editor `run` state type, derived from the {@link Command} contract so
  *  this package needs no direct ProseMirror dependency. */
@@ -26,6 +28,33 @@ export interface EditorHandle {
   focus(): void;
   /** Subscribe to editor cycles; returns an unsubscribe. Drives active state. */
   onChange(cb: (c: EditorChange) => void): () => void;
+  /** The editor's keybinding registry — what menu rows and toolbar tooltips
+   *  label their shortcuts from. Optional so a minimal handle still works. */
+  readonly keybindings?: KeybindingRegistry;
+}
+
+/** Whether chords should read as ⌘ (the same test the editor's keymap makes
+ *  to resolve `Mod`). Read once; the platform does not change under us. */
+export const IS_MAC: boolean =
+  typeof navigator !== 'undefined'
+    ? /Mac|iP(hone|[oa]d)/.test(navigator.platform)
+    : false;
+
+/**
+ * The display label of a command's first binding across the given registries
+ * (`⇧⌘Z` / `Ctrl+Shift+Z`), or undefined. The editor's registry comes first;
+ * a host passes its app registry after it for chords like ⌘F that live there.
+ */
+export function shortcutLabel(
+  command: string,
+  registries: readonly (KeybindingRegistry | undefined)[],
+): string | undefined {
+  for (const r of registries) {
+    if (!r) continue;
+    for (const b of r)
+      if (b.command === command) return keyLabel(b.key, IS_MAC);
+  }
+  return undefined;
 }
 
 /** Inject a stylesheet once, keyed by `id` (idempotent across mounts). */

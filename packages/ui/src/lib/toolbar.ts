@@ -4,6 +4,7 @@ import {
   type EditorHandle,
   type EditorStateOf,
   injectStyle,
+  shortcutLabel,
 } from './internal.js';
 
 /** Presentation for one toolbar button — the headless {@link Command} carries
@@ -435,7 +436,13 @@ export function mountToolbar(
       btn.type = 'button';
       btn.className =
         'bb-toolbar-btn' + (item.className ? ` ${item.className}` : '');
+      // Tooltip carries the chord ("Bold (⌘B)"), read from the registry when
+      // the tip is about to show, so a rebinding is never stale.
       btn.title = item.title;
+      btn.addEventListener('mouseenter', () => {
+        const key = shortcutLabel(entry, [editor.keybindings]);
+        btn.title = key ? `${item.title} (${key})` : item.title;
+      });
       btn.setAttribute('aria-label', item.title);
       if (item.svg) btn.innerHTML = item.svg;
       else btn.textContent = item.label ?? entry;

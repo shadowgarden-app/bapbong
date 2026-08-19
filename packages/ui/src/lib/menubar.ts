@@ -1,8 +1,13 @@
-import type { Collection, Command } from '@shadow-garden/bapbong-contracts';
+import type {
+  Collection,
+  Command,
+  KeybindingRegistry,
+} from '@shadow-garden/bapbong-contracts';
 import {
   type EditorHandle,
   type EditorStateOf,
   injectStyle,
+  shortcutLabel,
 } from './internal.js';
 
 /** Run a registry command (and read its active/enabled state). */
@@ -16,7 +21,13 @@ export interface ActionEntry {
   run: () => void;
   isActive?: () => boolean;
   isEnabled?: () => boolean;
+  /** A literal shortcut label ("⌘X") — for actions the browser or OS owns.
+   *  Prefer `shortcutOf`, which reads the live registries. */
   shortcut?: string;
+  /** The command name whose binding to show as the row's shortcut — looked up
+   *  in the editor's registry and the extra ones (`MenubarOptions.
+   *  keybindings`), so the label follows a rebinding. */
+  shortcutOf?: string;
 }
 /** A nested dropdown. */
 export interface SubmenuEntry {
@@ -44,6 +55,10 @@ export interface Menu {
 export interface MenubarOptions {
   /** Menus to render. Default: a single "Format" menu derived from the registry. */
   menus?: Menu[];
+  /** Registries beyond the editor's own to label shortcuts from — a host's
+   *  app-level registry (⌘F, ⌘S live there). Labels are refreshed every time
+   *  a menu opens, so bindings added after mount show too. */
+  keybindings?: KeybindingRegistry[];
   /** Command-name → row label override, merged over the built-in labels. */
   labels?: Record<string, string>;
   /** `vertical` stacks the menu titles in a column and opens each dropdown to
@@ -112,7 +127,11 @@ const STYLE = `
 function makeRow(
   label: string,
   opts: { shortcut?: string; hasSub?: boolean },
-): { item: HTMLButtonElement; check: HTMLSpanElement } {
+): {
+  item: HTMLButtonElement;
+  check: HTMLSpanElement;
+  shortcutEl: HTMLSpanElement;
+} {
   const item = document.createElement('button');
   item.type = 'button';
   item.className = 'bb-menu-item' + (opts.hasSub ? ' bb-has-sub' : '');
@@ -123,19 +142,20 @@ function makeRow(
   text.className = 'bb-menu-label';
   text.textContent = label;
   item.append(check, text);
-  if (opts.shortcut) {
-    const sc = document.createElement('span');
-    sc.className = 'bb-menu-shortcut';
-    sc.textContent = opts.shortcut;
-    item.appendChild(sc);
-  }
+  // Always present (empty when there is no shortcut) so a binding registered
+  // after mount can fill it on the next open without rebuilding the row.
+  const sc = document.createElement('span');
+  sc.className = 'bb-menu-shortcut';
+  sc.textContent = opts.shortcut ?? '';
+  if (!opts.shortcut) sc.hidden = true;
+  item.appendChild(sc);
   if (opts.hasSub) {
     const arrow = document.createElement('span');
     arrow.className = 'bb-menu-arrow';
     arrow.textContent = '›';
     item.appendChild(arrow);
   }
-  return { item, check };
+  return { item, check, shortcutEl: sc };
 }
 
 /** How a menu wires its rows to live state: the menubar registers check /
@@ -146,6 +166,10 @@ interface MenuBuildCtx {
   close(): void;
   labels: Record<string, string>;
   editor?: EditorHandle;
+  /** The shortcut label for a command, from the live registries. */
+  shortcutOf?(command: string): string | undefined;
+  /** Register a shortcut span to refresh when a menu opens. */
+  shortcutRef?(el: HTMLElement, command: string): void;
   /** Latest editor state, or null before a document loads. */
   state(): EditorStateOf | null;
   check(el: HTMLElement, active: (s: EditorStateOf) => boolean): void;
@@ -193,10 +217,11 @@ function buildMenuEntries(
       const editor = ctx.editor;
       const cmd = editor?.commands.get(entry.command);
       if (!editor || !cmd) continue; // skip commands the schema/registry doesn't provide
-      const { item, check } = makeRow(
+      const { item, check, shortcutEl } = makeRow(
         entry.label ?? ctx.labels[entry.command] ?? entry.command,
-        {},
+        { shortcut: ctx.shortcutOf?.(entry.command) },
       );
+      ctx.shortcutRef?.(shortcutEl, entry.command);
       item.setAttribute('role', 'menuitemcheckbox');
       item.addEventListener('click', () => {
         const s = ctx.state();
@@ -212,9 +237,12 @@ function buildMenuEntries(
       container.appendChild(item);
     } else {
       // ActionEntry
-      const { item, check } = makeRow(entry.label, {
-        shortcut: entry.shortcut,
+      const { item, check, shortcutEl } = makeRow(entry.label, {
+        shortcut:
+          (entry.shortcutOf && ctx.shortcutOf?.(entry.shortcutOf)) ??
+          entry.shortcut,
       });
+      if (entry.shortcutOf) ctx.shortcutRef?.(shortcutEl, entry.shortcutOf);
       item.setAttribute(
         'role',
         entry.isActive ? 'menuitemcheckbox' : 'menuitem',
@@ -341,6 +369,8 @@ export function showMenu(
     close: () => handle?.close(),
     labels,
     editor: options.editor,
+    shortcutOf: (command) =>
+      shortcutLabel(command, [options.editor?.keybindings]),
     state: stateOf,
     check: (el, active) => {
       el.textContent = evalNow(active, false) ? '✓' : '';
@@ -415,6 +445,7 @@ export function mountMenubar(
   const open = (idx: number, focusFirst = false): void => {
     if (openIdx === idx) return;
     close();
+    refreshShortcuts();
     const p = panels[idx];
     p.dropdown.hidden = false;
     p.title.setAttribute('aria-expanded', 'true');
@@ -424,10 +455,23 @@ export function mountMenubar(
       p.dropdown.querySelector<HTMLButtonElement>('.bb-menu-item')?.focus();
   };
 
+  // Shortcut labels come from the registries, live: refreshed on every open,
+  // so a chord bound after mount (or rebound by the host) shows correctly.
+  const registries = [editor.keybindings, ...(options.keybindings ?? [])];
+  const shortcutRefs: { el: HTMLElement; command: string }[] = [];
+  const refreshShortcuts = (): void => {
+    for (const { el, command } of shortcutRefs) {
+      const label = shortcutLabel(command, registries);
+      el.textContent = label ?? '';
+      el.hidden = !label;
+    }
+  };
   const buildCtx: MenuBuildCtx = {
     close: () => close(),
     labels,
     editor,
+    shortcutOf: (command) => shortcutLabel(command, registries),
+    shortcutRef: (el, command) => shortcutRefs.push({ el, command }),
     state: () => latest,
     check: (el, active) => checks.push({ el, active }),
     enable: (el, enabled) => enables.push({ el, enabled }),

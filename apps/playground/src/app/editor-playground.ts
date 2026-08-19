@@ -76,10 +76,10 @@ import {
   createFindDialog,
   createSectionChip,
   createSymbolDialog,
+  openKeyboardShortcutsDialog,
   openSymbolPopover,
   panelAnchor,
   type SymbolDialogHandle,
-  Dialog,
   mountMenubar,
   mountToolbar,
   openCellProperties,
@@ -440,6 +440,7 @@ export class EditorPlayground implements OnDestroy {
     if (menubarHost)
       this.menubar = mountMenubar(menubarHost, editor, {
         menus: this.buildMenus(),
+        keybindings: [this.appKeys], // ⌘F and friends live here
       });
     const toolbarHost = this.editorToolbar()?.nativeElement;
     if (toolbarHost)
@@ -967,7 +968,7 @@ export class EditorPlayground implements OnDestroy {
           {
             label: 'Find and replace',
             run: () => this.findDialog?.open(),
-            shortcut: '⌘F',
+            shortcutOf: 'find', // the app registry's ⌘F
           },
         ],
       },
@@ -1369,20 +1370,18 @@ export class EditorPlayground implements OnDestroy {
   }
 
   /** A keyboard-shortcuts list shown in a bapbong-ui Dialog. */
+  /** Help › Keyboard shortcuts — generated from the registries: the editor's
+   *  chords and the playground's app-level ones. */
   private showShortcuts(): void {
-    const content = document.createElement('div');
-    content.style.cssText = 'font:13px system-ui;line-height:1.7';
-    content.innerHTML =
-      '<ul style="margin:0;padding-left:18px">' +
-      '<li><b>⌘Z</b> / <b>⇧⌘Z</b> — Undo / Redo</li>' +
-      '<li>Type to edit · arrows + ⇧ to select</li>' +
-      '<li><b>⌘C</b> / <b>⌘V</b> — copy / paste</li>' +
-      '<li>Find &amp; replace from Edit ▸ Find and replace</li>' +
-      '</ul>';
-    const dialog = new Dialog({ title: 'Keyboard shortcuts', modal: true });
-    dialog.setContent(content);
-    dialog.onClose(() => dialog.destroy());
-    dialog.open();
+    const editor = this.editor;
+    openKeyboardShortcutsDialog({
+      sources: [
+        ...(editor
+          ? [{ keybindings: editor.keybindings, commands: editor.commands }]
+          : []),
+        { keybindings: this.appKeys, commands: this.appCommands },
+      ],
+    });
   }
 
   ngOnDestroy(): void {

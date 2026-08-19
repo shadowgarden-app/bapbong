@@ -6,6 +6,8 @@ export interface DialogOptions {
   modal?: boolean;
   /** Extra class on the `<dialog>` element. */
   className?: string;
+  /** A wider box (up to 640px) for table-shaped content — the shortcuts list. */
+  wide?: boolean;
   /**
    * Pin a non-modal dialog's top-right corner just inside this rect (e.g. the
    * editor's canvas viewport) instead of the screen corner. Re-evaluated on
@@ -61,6 +63,7 @@ const STYLE = `
 .bb-dialog *{box-sizing:border-box}
 .bb-dialog::backdrop{background:rgba(0,0,0,.28)}
 .bb-dialog-modal{top:50%;left:50%;transform:translate(-50%,-50%)}
+.bb-dialog-wide{max-width:min(92vw,640px)}
 .bb-dialog-float{top:62px;right:24px}
 .bb-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px 9px 12px;border-bottom:1px solid var(--bb-ui-border,#e3e3e0)}
 .bb-dialog-title{font-size:13px;font-weight:600}
@@ -109,6 +112,7 @@ export class Dialog {
     // pseudo-class, which isn't matched by every engine).
     el.className =
       `bb-dialog ${this.modal ? 'bb-dialog-modal' : 'bb-dialog-float'}` +
+      (options.wide ? ' bb-dialog-wide' : '') +
       (options.className ? ` ${options.className}` : '');
 
     const header = document.createElement('div');
