@@ -56,6 +56,7 @@ const STYLE = `
 .bb-sd-pane[hidden]{display:none}
 .bb-sd-lbl{font-size:12px;opacity:.7;margin-bottom:5px}
 .bb-sd-row{display:flex;gap:10px;align-items:flex-end}
+.bb-sd-ctl::placeholder{color:inherit;opacity:.45}
 .bb-sd-ctl{width:100%;height:32px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:13px;padding:0 8px}
 .bb-sd-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:2px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:8px;padding:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));max-height:196px;overflow:auto}
 .bb-sd-grid.recent{grid-template-columns:repeat(16,1fr);max-height:none;border-color:transparent;padding:0;background:transparent;min-height:26px}
