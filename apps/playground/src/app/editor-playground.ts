@@ -68,6 +68,7 @@ import {
   createFindDialog,
   createSectionChip,
   createSymbolDialog,
+  panelAnchor,
   type SymbolDialogHandle,
   Dialog,
   mountMenubar,
@@ -233,6 +234,12 @@ export class EditorPlayground implements OnDestroy {
   private menubar: MenubarHandle | null = null;
   private toolbar: ToolbarHandle | null = null;
   private findDialog: FindDialogHandle | null = null;
+  /** Where floating panels (find, symbol) dock: the canvas viewport. The
+   *  playground's chrome sits ABOVE the wrap in normal flow, so nothing to
+   *  avoid — but it goes through the same helper the desktop shell uses. */
+  private readonly floatAnchor = panelAnchor({
+    area: () => this.wrapHost()?.nativeElement,
+  });
   /** Insert › Symbol… — non-modal like Word's, built once per editor. */
   private symbolDialog: SymbolDialogHandle | null = null;
 
@@ -406,8 +413,7 @@ export class EditorPlayground implements OnDestroy {
       },
       onRecentChange: (r) =>
         localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(r)),
-      anchor: () =>
-        this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
+      anchor: this.floatAnchor,
     });
     editor.commands.add({
       name: 'insert-symbol',
@@ -535,8 +541,7 @@ export class EditorPlayground implements OnDestroy {
     // pinned to the canvas viewport's top-right (like Google Docs). Uses the
     // lib's English defaults.
     this.findDialog = createFindDialog(() => editor.plugin('find'), {
-      anchor: () =>
-        this.wrapHost()?.nativeElement.getBoundingClientRect() ?? null,
+      anchor: this.floatAnchor,
     });
     this.editor = editor;
     return editor;

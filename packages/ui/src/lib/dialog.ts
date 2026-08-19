@@ -10,8 +10,50 @@ export interface DialogOptions {
    * Pin a non-modal dialog's top-right corner just inside this rect (e.g. the
    * editor's canvas viewport) instead of the screen corner. Re-evaluated on
    * open + scroll/resize. Return null to fall back to the default position.
+   * Hosts should build it with {@link panelAnchor} so every panel shares one
+   * description of the free area.
    */
   anchor?: () => DOMRect | null;
+}
+
+/**
+ * Where a host's floating panels (find, symbol, …) may sit: describe it ONCE
+ * and hand the result to every {@link Dialog} as its `anchor`.
+ *
+ * `area` is the region the panel docks into — normally the editor's scroll
+ * viewport. `avoid` lists chrome that floats OVER that region's top edge: a
+ * tab strip, a menubar/toolbar sheet positioned absolutely across the canvas.
+ * The panel then starts below the lowest such element that overlaps the area
+ * horizontally, so it never covers a tab, a toolbar or a window-drag strip —
+ * which is exactly what happened when each panel guessed at the viewport on
+ * its own and the desktop shell's toolbar sheet turned out to be a layer on
+ * top of it. Both getters are re-read on every reposition (open, scroll,
+ * resize), so panes that mount late or move are fine.
+ */
+export interface PanelAnchorOptions {
+  area: () => Element | null | undefined;
+  avoid?: () => (Element | null | undefined)[];
+}
+
+/** Build a {@link DialogOptions.anchor} from a {@link PanelAnchorOptions}. */
+export function panelAnchor(o: PanelAnchorOptions): () => DOMRect | null {
+  return () => {
+    const areaEl = o.area();
+    if (!areaEl) return null;
+    const a = areaEl.getBoundingClientRect();
+    let top = a.top;
+    for (const el of o.avoid?.() ?? []) {
+      if (!el) continue;
+      const b = el.getBoundingClientRect();
+      // Only chrome that actually lies over the area's top band counts; a
+      // sidebar beside it or a status bar under it must not push the panel.
+      const overlapsX = b.right > a.left && b.left < a.right;
+      const overTop = b.top < a.bottom && b.bottom > top;
+      if (overlapsX && overTop) top = Math.max(top, b.bottom);
+    }
+    if (top >= a.bottom) return null;
+    return new DOMRect(a.left, top, a.width, a.bottom - top);
+  };
 }
 
 const STYLE = `
