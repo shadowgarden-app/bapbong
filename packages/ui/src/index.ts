@@ -13,3 +13,4 @@ export * from './lib/font-dialog.js';
 export * from './lib/color-picker.js';
 export * from './lib/symbol-dialog.js';
 export * from './lib/symbol-sets.js';
+export * from './lib/symbol-popover.js';

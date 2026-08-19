@@ -22,22 +22,26 @@ export interface SymbolEntry {
 export interface SymbolGroup {
   id: string;
   label: string;
+  /** One-word label for a chip. */
+  short: string;
   entries: SymbolEntry[];
 }
 
 const g = (
   id: string,
   label: string,
+  short: string,
   pairs: [string, string][],
 ): SymbolGroup => ({
   id,
   label,
+  short,
   entries: pairs.map(([char, name]) => ({ char, name })),
 });
 
 /** The groups, in dialog order. Ids are stable (persist recents / tests). */
 export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
-  g('checks', 'Checkboxes & ticks', [
+  g('checks', 'Checkboxes & ticks', 'Checks', [
     ['☐', 'Ballot box'],
     ['☑', 'Ballot box with check'],
     ['☒', 'Ballot box with X'],
@@ -63,7 +67,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['◻', 'White medium square'],
     ['◼', 'Black medium square'],
   ]),
-  g('bullets', 'Bullets & shapes', [
+  g('bullets', 'Bullets & shapes', 'Bullets', [
     ['•', 'Bullet'],
     ['◦', 'White bullet'],
     ['▪', 'Black small square'],
@@ -95,7 +99,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['➣', 'Three-D bottom-lighted rightwards arrowhead'],
     ['✓', 'Check mark'],
   ]),
-  g('arrows', 'Arrows', [
+  g('arrows', 'Arrows', 'Arrows', [
     ['←', 'Leftwards arrow'],
     ['↑', 'Upwards arrow'],
     ['→', 'Rightwards arrow'],
@@ -130,7 +134,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['⤴', 'Arrow pointing rightwards then curving upwards'],
     ['⤵', 'Arrow pointing rightwards then curving downwards'],
   ]),
-  g('math', 'Math', [
+  g('math', 'Math', 'Math', [
     ['±', 'Plus-minus sign'],
     ['×', 'Multiplication sign'],
     ['÷', 'Division sign'],
@@ -178,7 +182,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['¼', 'Vulgar fraction one quarter'],
     ['¾', 'Vulgar fraction three quarters'],
   ]),
-  g('currency', 'Currency', [
+  g('currency', 'Currency', 'Currency', [
     ['₫', 'Dong sign'],
     ['$', 'Dollar sign'],
     ['€', 'Euro sign'],
@@ -193,7 +197,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['¤', 'Currency sign'],
     ['₿', 'Bitcoin sign'],
   ]),
-  g('punct', 'Punctuation & typography', [
+  g('punct', 'Punctuation & typography', 'Punct.', [
     ['–', 'En dash'],
     ['—', 'Em dash'],
     ['…', 'Horizontal ellipsis'],
@@ -225,7 +229,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['˜', 'Small tilde'],
     ['¦', 'Broken bar'],
   ]),
-  g('greek', 'Greek', [
+  g('greek', 'Greek', 'Greek', [
     ['α', 'Alpha'],
     ['β', 'Beta'],
     ['γ', 'Gamma'],
@@ -276,7 +280,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['Ψ', 'Capital psi'],
     ['Ω', 'Capital omega'],
   ]),
-  g('latin', 'Latin (Vietnamese & accents)', [
+  g('latin', 'Latin (Vietnamese & accents)', 'Latin', [
     ['Đ', 'Capital D with stroke'],
     ['đ', 'Small d with stroke'],
     ['Ă', 'Capital A with breve'],
@@ -327,7 +331,7 @@ export const SYMBOL_GROUPS: readonly SymbolGroup[] = [
     ['Œ', 'Capital ligature OE'],
     ['œ', 'Small ligature oe'],
   ]),
-  g('misc', 'Misc', [
+  g('misc', 'Misc', 'Misc', [
     ['☎', 'Black telephone'],
     ['✆', 'Telephone location sign'],
     ['✉', 'Envelope'],

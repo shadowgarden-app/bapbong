@@ -68,6 +68,7 @@ import {
   createFindDialog,
   createSectionChip,
   createSymbolDialog,
+  openSymbolPopover,
   panelAnchor,
   type SymbolDialogHandle,
   Dialog,
@@ -404,8 +405,9 @@ export class EditorPlayground implements OnDestroy {
     // itself. The menubar tree mixes registry commands with host actions (open
     // file, comment view, find, shortcuts) and a table-size widget — see
     // buildMenus().
-    // Symbol dialog + the `insert-symbol` command the toolbar's Ω button and
-    // the Insert menu both run. Recents are a playground preference.
+    // The full Symbol panel (Insert › Symbol…, and "More symbols…" from the
+    // toolbar's Ω picker). Recents are a playground preference the picker and
+    // the panel share through localStorage.
     this.symbolDialog = createSymbolDialog({
       recent: readRecentSymbols(),
       onInsert: (ch) => {
@@ -415,13 +417,6 @@ export class EditorPlayground implements OnDestroy {
         localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(r)),
       anchor: this.floatAnchor,
     });
-    editor.commands.add({
-      name: 'insert-symbol',
-      run: (_state, dispatch) => {
-        if (dispatch) this.symbolDialog?.open();
-        return true;
-      },
-    });
     const menubarHost = this.editorMenubar()?.nativeElement;
     if (menubarHost)
       this.menubar = mountMenubar(menubarHost, editor, {
@@ -430,9 +425,6 @@ export class EditorPlayground implements OnDestroy {
     const toolbarHost = this.editorToolbar()?.nativeElement;
     if (toolbarHost)
       this.toolbar = mountToolbar(toolbarHost, editor, {
-        items: {
-          'insert-symbol': { title: 'Insert symbol', label: 'Ω' },
-        },
         groups: [
           ['undo', 'redo'],
           [
@@ -490,7 +482,23 @@ export class EditorPlayground implements OnDestroy {
               onSelect: (c) => this.exec(setHighlight(c)),
             },
             'clear-format',
-            'insert-symbol',
+            {
+              // Ω opens the quick picker under the button; "More symbols…"
+              // there and Insert › Symbol… open the full panel.
+              kind: 'button',
+              title: 'Insert symbol',
+              label: 'Ω',
+              onClick: (anchor) =>
+                openSymbolPopover({
+                  anchor,
+                  recent: readRecentSymbols(),
+                  onInsert: (ch) => this.exec(insertText(ch)),
+                  onRecentChange: (r) =>
+                    localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(r)),
+                  onMore: () => this.symbolDialog?.open(),
+                  onClose: () => editor.focus(),
+                }),
+            },
           ],
           [
             {

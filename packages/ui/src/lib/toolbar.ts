@@ -75,8 +75,30 @@ export interface ToolbarSplit {
   onSelect: (value: string) => void;
 }
 
-/** A toolbar group entry: a command name (button) or a control (select/colour/split). */
-export type ToolbarEntry = string | ToolbarSelect | ToolbarColor | ToolbarSplit;
+/** A plain button that opens something of the host's — a picker, a popover —
+ *  and needs its own element as the anchor. Unlike a command button the
+ *  toolbar does NOT hand focus back to the editor after the click: whatever
+ *  opens takes it, and gives it back when it closes. */
+export interface ToolbarButton {
+  kind: 'button';
+  /** Tooltip + accessible label. */
+  title: string;
+  /** Text/glyph shown when `svg` is absent. */
+  label?: string;
+  /** Inline SVG markup (used instead of `label`). */
+  svg?: string;
+  /** Called with the button element (the anchor for what opens). */
+  onClick: (anchor: HTMLElement) => void;
+}
+
+/** A toolbar group entry: a command name (button) or a control
+ *  (select/colour/split/button). */
+export type ToolbarEntry =
+  | string
+  | ToolbarSelect
+  | ToolbarColor
+  | ToolbarSplit
+  | ToolbarButton;
 
 export interface ToolbarOptions {
   /** Groups rendered as separated clusters — command names (buttons) and/or
@@ -271,6 +293,22 @@ export function mountToolbar(
         });
         groupEl.appendChild(sel);
         selects.push({ spec: entry, el: sel });
+        continue;
+      }
+      if (typeof entry !== 'string' && entry.kind === 'button') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'bb-toolbar-btn';
+        btn.title = entry.title;
+        btn.setAttribute('aria-label', entry.title);
+        btn.setAttribute('aria-haspopup', 'dialog');
+        if (entry.svg) btn.innerHTML = entry.svg;
+        else btn.textContent = entry.label ?? entry.title;
+        // Keep the editor's selection when the button is pressed; the thing
+        // that opens is what takes focus, so no editor.focus() here.
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => entry.onClick(btn));
+        groupEl.appendChild(btn);
         continue;
       }
       if (typeof entry !== 'string' && entry.kind === 'color') {
