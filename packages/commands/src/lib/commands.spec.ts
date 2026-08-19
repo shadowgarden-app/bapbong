@@ -26,7 +26,7 @@ import {
   pageBreakCommand,
   setLink,
 } from './insert.js';
-import { deleteSelectionCommand } from './edit.js';
+import { deleteSelectionCommand, toggleUnicodeHex } from './edit.js';
 import {
   deleteColumn,
   deleteRow,
@@ -514,6 +514,35 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
     expect(r.doc.textContent).toBe('—');
     // Nothing to insert: handled, unchanged.
     expect(apply(paraState(), insertText('')).doc.textContent).toBe('hello');
+  });
+
+  it("toggleUnicodeHex: Word's Alt+X, both ways", () => {
+    const at = (text: string, pos: number) => {
+      const doc = n('doc', null, n('paragraph', null, schema.text(text)));
+      const s = EditorState.create({ schema, doc });
+      return s.apply(s.tr.setSelection(TextSelection.create(s.doc, pos)));
+    };
+    const cmd = toggleUnicodeHex();
+    // hex before the caret → the character (U+ prefix optional)
+    expect(apply(at('see 2611', 9), cmd).doc.textContent).toBe('see ☑');
+    expect(apply(at('see U+2611', 11), cmd).doc.textContent).toBe('see ☑');
+    // the longest valid reading wins: 1F600 → 😀, not F600
+    expect(apply(at('x1F600', 7), cmd).doc.textContent).toBe('x😀');
+    // …and a run past Unicode falls back to a shorter one
+    expect(apply(at('FFFFFF', 7), cmd).doc.textContent).toBe(
+      'F' + String.fromCodePoint(0xfffff),
+    );
+    // no hex: the character before the caret → its code
+    expect(apply(at('a☑', 3), cmd).doc.textContent).toBe('a2611');
+    expect(apply(at('a😀', 4), cmd).doc.textContent).toBe('a1F600'); // astral, 2 units
+    // a selection converts as a whole
+    const doc = n('doc', null, n('paragraph', null, schema.text('ab 2611 cd')));
+    let s = EditorState.create({ schema, doc });
+    s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 4, 8)));
+    expect(apply(s, cmd).doc.textContent).toBe('ab ☑ cd');
+    // nothing before the caret → not handled
+    expect(cmd.run(at('abc', 1))).toBe(false);
+    expect(cmd.isEnabled!(at('abc', 1))).toBe(false);
   });
 
   it('insertTable inserts a rows×cols grid of cells', () => {

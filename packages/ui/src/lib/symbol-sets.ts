@@ -12,6 +12,8 @@
  * people reach for in a form, a report, a contract.
  */
 
+import { AUTOCORRECT_RULES } from '@shadow-garden/bapbong-contracts';
+
 export interface SymbolEntry {
   /** The character (one code point; may be astral). */
   char: string;
@@ -376,6 +378,11 @@ export interface SpecialCharacter extends SymbolEntry {
   /** How to get it without the dialog, shown beside the name (may be ''). */
   hint: string;
 }
+/** The AutoCorrect sequence that produces `char`, if any ("(c)" for ©). */
+function autoCorrectHint(char: string): string {
+  return AUTOCORRECT_RULES.find((r) => r.to === char)?.seq ?? '';
+}
+
 export const SPECIAL_CHARACTERS: readonly SpecialCharacter[] = [
   { char: '—', name: 'Em dash', hint: '' },
   { char: '–', name: 'En dash', hint: '' },
@@ -385,12 +392,12 @@ export const SPECIAL_CHARACTERS: readonly SpecialCharacter[] = [
   { char: ' ', name: 'Em space', hint: '' },
   { char: ' ', name: 'En space', hint: '' },
   { char: ' ', name: 'Thin space', hint: '' },
-  { char: '©', name: 'Copyright', hint: '' },
-  { char: '®', name: 'Registered', hint: '' },
-  { char: '™', name: 'Trademark', hint: '' },
+  { char: '©', name: 'Copyright', hint: autoCorrectHint('©') },
+  { char: '®', name: 'Registered', hint: autoCorrectHint('®') },
+  { char: '™', name: 'Trademark', hint: autoCorrectHint('™') },
   { char: '§', name: 'Section', hint: '' },
   { char: '¶', name: 'Paragraph', hint: '' },
-  { char: '…', name: 'Ellipsis', hint: '' },
+  { char: '…', name: 'Ellipsis', hint: autoCorrectHint('…') },
   { char: '‘', name: 'Single opening quote', hint: '' },
   { char: '’', name: 'Single closing quote', hint: '' },
   { char: '“', name: 'Double opening quote', hint: '' },

@@ -74,7 +74,10 @@ import {
   KeybindingRegistry,
   perf,
 } from '@shadow-garden/bapbong-contracts';
-import { defaultCommands } from '@shadow-garden/bapbong-commands';
+import {
+  defaultCommands,
+  toggleUnicodeHex,
+} from '@shadow-garden/bapbong-commands';
 export type {
   TableSelectionPlugin,
   CellBlock,
@@ -90,6 +93,10 @@ export interface BapbongEditorOptions {
   /** The scroll viewport the page stack lives in (used for virtualization and
    *  scroll-into-view). Defaults to `stack.closest('.canvas-wrap')`. */
   viewport?: HTMLElement;
+  /** Word's symbol AutoCorrect while typing — (c) → ©, --> → →, ... → … (see
+   *  contracts AUTOCORRECT_RULES). Default on; a host preference can turn it
+   *  off. */
+  autoCorrect?: boolean;
   /** Editor plugins. Their lifecycle/event hooks are invoked by the core; they
    *  reach back through the PluginContext handed to `setup`.
    *
@@ -250,11 +257,13 @@ export class BapbongEditor {
    */
   readonly keybindings = new KeybindingRegistry(IS_MAC);
 
+  private readonly autoCorrect: boolean;
   private readonly readClipboardFallback?: BapbongEditorOptions['readClipboardFallback'];
   private readonly printFallback?: BapbongEditorOptions['printFallback'];
 
   constructor(stack: HTMLElement, opts: BapbongEditorOptions = {}) {
     this.stack = stack;
+    this.autoCorrect = opts.autoCorrect ?? true;
     this.registerCoreKeys();
     this.readClipboardFallback = opts.readClipboardFallback;
     this.printFallback = opts.printFallback;
@@ -950,6 +959,7 @@ export class BapbongEditor {
       resolveKey: this.resolveEditorKey,
       onUpdate: (state, tr) => this.refresh(state, tr),
       handlePaste: imagePasteHandler,
+      autoCorrect: this.autoCorrect,
     });
     // Hidden editor lives in the page-canvas container, so IME anchoring
     // scrolls along (positioned at the painted caret, in container coords).
@@ -1137,6 +1147,13 @@ export class BapbongEditor {
     bind('Mod-b', 'bold', 'editing text');
     bind('Mod-i', 'italic', 'editing text');
     bind('Mod-u', 'underline', 'editing text');
+    // Word's Alt+X: hex before the caret ↔ the character.
+    this.commands.add(toggleUnicodeHex());
+    bind(
+      'Alt-x',
+      'toggle-unicode-hex',
+      'hex digits or a character before the caret',
+    );
   }
 
   /** The bridge's live key lookup: a registered chord → the command's run,

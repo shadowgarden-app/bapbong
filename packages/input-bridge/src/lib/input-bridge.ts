@@ -20,6 +20,7 @@ import type {
   Command as EditorCommand,
   KeybindingRegistry,
 } from '@shadow-garden/bapbong-contracts';
+import { autoCorrectMatch } from '@shadow-garden/bapbong-contracts';
 
 // Re-exported so hosts type against ONE prosemirror-state identity (mixing
 // module resolutions across packages makes TS treat duplicates as unrelated).
@@ -271,6 +272,9 @@ export interface InputBridgeOptions {
   keys?: Record<string, Command>;
   /** Live key lookup — see {@link KeyResolver}. Checked first of all. */
   resolveKey?: KeyResolver;
+  /** Word's symbol AutoCorrect ((c) → ©, --> → →, … see AUTOCORRECT_RULES).
+   *  Default on. */
+  autoCorrect?: boolean;
   /** Called after every dispatched transaction (typing, IME composition
    *  steps, undo, selection changes). Re-layout + repaint here. */
   onUpdate: (state: EditorState, tr: Transaction) => void;
@@ -439,6 +443,34 @@ export function installWindowKeymap(opts: {
   return () => target.removeEventListener('keydown', onKeyDown);
 }
 
+/** The AutoCorrect plugin: replaces the completed sequence on text input.
+ *  Skipped mid-composition (an IME owns those keystrokes) and for
+ *  multi-character input (paste goes elsewhere). */
+export function autoCorrectPlugin(): Plugin {
+  return new Plugin({
+    props: {
+      handleTextInput(view, from, to, text) {
+        if (view.composing || text.length !== 1) return false;
+        const $from = view.state.doc.resolve(from);
+        if (!$from.parent.isTextblock) return false;
+        const before = view.state.doc.textBetween(
+          Math.max($from.start(), from - 8),
+          from,
+          '\ufffc',
+          '\ufffc',
+        );
+        const rule = autoCorrectMatch(before, text);
+        if (!rule) return false;
+        const start = from - (rule.seq.length - text.length);
+        view.dispatch(
+          view.state.tr.insertText(rule.to, start, to).scrollIntoView(),
+        );
+        return true;
+      },
+    },
+  });
+}
+
 /** Editing state with history + base keymap; exported for headless tests.
  *  `resolveKey` (the editor's keybinding registry) sits ahead of the static
  *  `keys` and the base keymap, so a registered binding wins. */
@@ -446,6 +478,7 @@ export function createEditingState(
   doc: PMNode,
   keys: Record<string, Command> = {},
   resolveKey?: KeyResolver,
+  autoCorrect = true,
 ): EditorState {
   return EditorState.create({
     doc,
@@ -456,6 +489,7 @@ export function createEditingState(
       keymap(keys),
       keymap(baseKeymap),
       markFontSeed,
+      ...(autoCorrect ? [autoCorrectPlugin()] : []),
     ],
   });
 }
@@ -670,7 +704,12 @@ export class InputBridge {
     this.view = new EditorView(this.host, {
       state:
         options.state ??
-        createEditingState(options.doc, options.keys, options.resolveKey),
+        createEditingState(
+          options.doc,
+          options.keys,
+          options.resolveKey,
+          options.autoCorrect ?? true,
+        ),
       handlePaste: options.handlePaste,
       // DOM windowing: only blocks near the selection render for real.
       decorations: windowDecorations,
