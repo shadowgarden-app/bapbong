@@ -62,6 +62,9 @@ const STYLE = `
 `;
 
 const COLS = 8;
+/** The picker's recent row is ONE row — the last eight; the panel keeps all
+ *  sixteen. Word's ribbon gallery is a single row too. */
+const RECENT_ROW = COLS;
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -212,7 +215,7 @@ export function openSymbolPopover(options: SymbolPopoverOptions): {
   const renderRecent = (): void =>
     fill(
       recentGrid,
-      recent.map((c) => ({
+      recent.slice(0, RECENT_ROW).map((c) => ({
         char: c,
         name: SYMBOL_NAMES.get(c) ?? 'Character',
       })),
