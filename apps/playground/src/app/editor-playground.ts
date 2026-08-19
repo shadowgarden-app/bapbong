@@ -11,6 +11,7 @@ import {
   type CellBlock,
   type EditorChange,
   type SelectedCell,
+  internalLinkFor,
 } from '@shadow-garden/bapbong-editor';
 import {
   activeFontFamily,
@@ -1315,27 +1316,13 @@ export class EditorPlayground implements OnDestroy {
     const anchor = editor.caretViewportRect(info ? info.from : undefined);
     if (!anchor) return;
     this.linkPanelKey = info ? `${info.from}:${info.to}` : null;
-    // An in-document anchor (`#_Toc…`, every TOC entry) shows its DESTINATION
-    // rather than the machine-generated bookmark id, and offers a jump. When
-    // the link is field output, editing it alone is meaningless — the panel
-    // drops those actions (see LinkPanelOptions.internal).
-    const link = editor.plugin('hyperlink');
-    const internal =
-      info?.href && link.isInternal(info.href)
-        ? {
-            label: link.describe(info.href),
-            generated: editor.plugin('toc').fieldAt(info.from) !== null,
-            onGo: () => {
-              link.follow(info.href as string);
-              editor.focus();
-            },
-          }
-        : null;
     this.linkPanel = showLinkPanel({
       anchor,
       key: this.linkPanelKey ?? undefined,
       existing: info?.href ? { href: info.href, text: info.text } : null,
-      internal,
+      // In-document anchors (TOC entries) show their destination + a jump,
+      // and field output loses edit/unlink — decided by the editor, once.
+      internal: internalLinkFor(editor, info),
       hasSelection: !state.selection.empty,
       onApply: (href, text) => {
         this.exec(setLink(href, text));
