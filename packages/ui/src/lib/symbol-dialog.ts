@@ -46,7 +46,7 @@ export interface SymbolDialogHandle {
 }
 
 const STYLE = `
-.bb-sd{display:flex;flex-direction:column;gap:12px;width:440px;max-width:92vw;color:var(--bb-ui-fg,#2c2c2a)}
+.bb-sd{display:flex;flex-direction:column;gap:12px;width:412px;max-width:100%;color:var(--bb-ui-fg,#2c2c2a)}
 .bb-sd *{box-sizing:border-box}
 .bb-sd-tabs{display:inline-flex;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;overflow:hidden;align-self:flex-start}
 .bb-sd-tab{height:30px;padding:0 18px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;opacity:.65;font:inherit;font-size:13px;cursor:pointer}
@@ -65,8 +65,8 @@ const STYLE = `
 .bb-sd-cell:focus{outline:none}
 .bb-sd-cell[aria-selected="true"]{background:var(--bb-ui-active-bg,#e6f1fb);box-shadow:inset 0 0 0 1.5px var(--bb-ui-active-border,#7fb2ec);color:var(--bb-ui-active-fg,#0c447c)}
 .bb-sd-empty{grid-column:1/-1;font-size:12px;opacity:.55;padding:6px 2px}
-.bb-sd-meta{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}
-.bb-sd-info{border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:8px;padding:8px 10px;display:flex;gap:12px;align-items:center;min-height:56px}
+.bb-sd-meta{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:10px;align-items:end}
+.bb-sd-info{min-width:0;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:8px;padding:8px 10px;display:flex;gap:12px;align-items:center;min-height:56px}
 .bb-sd-big{font-size:30px;line-height:1;width:44px;text-align:center;font-family:inherit,"Noto Sans Symbols 2"}
 .bb-sd-name{font-size:13px}
 .bb-sd-cp{font-size:11px;opacity:.55;font-family:ui-monospace,Menlo,Consolas,monospace}
@@ -167,7 +167,7 @@ export function createSymbolDialog(
   }
   groupCell.append(groupSel);
   const searchCell = el('div');
-  searchCell.style.width = '170px';
+  searchCell.style.width = '160px';
   searchCell.append(el('div', 'bb-sd-lbl', 'Search name'));
   const search = el('input', 'bb-sd-ctl');
   search.type = 'search';
