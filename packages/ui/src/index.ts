@@ -15,3 +15,4 @@ export * from './lib/symbol-dialog.js';
 export * from './lib/symbol-sets.js';
 export * from './lib/symbol-popover.js';
 export * from './lib/shortcuts-dialog.js';
+export * from './lib/scrollbars.js';

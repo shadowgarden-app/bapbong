@@ -37,13 +37,23 @@ const STYLE = `
 .bb-ks-search{flex:1;height:30px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font:inherit;font-size:12px;padding:0 8px}
 .bb-ks-search::placeholder{color:inherit;opacity:.45}
 .bb-ks-count{font-size:11px;opacity:.6;white-space:nowrap}
-.bb-ks-wrap{border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:8px;overflow:auto;max-height:min(60vh,420px);background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff))}
+/* No box around the list: a bordered, tinted scroller turns the scrollbar's
+   gutter into a blank column at its edge. Flat on the dialog surface, the
+   rail reads like the app's own (idle-hidden overlay on a plain ground). */
+.bb-ks-wrap{overflow:auto;max-height:min(60vh,420px);margin:0 -12px;padding:0 12px;scrollbar-gutter:stable}
 .bb-ks table{width:100%;border-collapse:collapse}
-.bb-ks th{position:sticky;top:0;text-align:left;font-size:11px;font-weight:600;opacity:.75;padding:7px 10px;border-bottom:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));cursor:pointer;user-select:none;white-space:nowrap}
-.bb-ks th[aria-sort]{color:var(--bb-ui-active-fg,#0c447c);opacity:1}
-.bb-ks td{padding:6px 10px;border-bottom:0.5px solid var(--bb-ui-border,#e3e3e0);vertical-align:middle}
+.bb-ks th{position:sticky;top:0;z-index:1;text-align:left;font-size:11px;font-weight:600;padding:7px 10px;border-bottom:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));cursor:pointer;user-select:none;white-space:nowrap;background-color:var(--bb-ui-bg,#fff);background-image:linear-gradient(var(--bb-ui-dialog-bg,transparent),var(--bb-ui-dialog-bg,transparent))}
+/* Opaque surface UNDER the dialog's own tint: a sticky header on the glass
+   alone let the rows scrolling beneath show through it. The dimming goes on
+   the text, not the cell, for the same reason. */
+.bb-ks th span{opacity:.75}
+.bb-ks th[aria-sort]{color:var(--bb-ui-active-fg,#0c447c)}
+.bb-ks th[aria-sort] span{opacity:1}
+.bb-ks td{padding:7px 10px;border-bottom:0.5px solid var(--bb-ui-border,#e3e3e0);vertical-align:middle}
 .bb-ks tr:last-child td{border-bottom:0}
 .bb-ks tbody tr:hover td{background:var(--bb-ui-hover,#f1efe8)}
+.bb-ks tbody tr:hover td:first-child{border-radius:6px 0 0 6px}
+.bb-ks tbody tr:hover td:last-child{border-radius:0 6px 6px 0}
 .bb-ks td.cmd{width:42%}
 .bb-ks td.cmd small{display:block;font-size:10px;opacity:.5;font-family:ui-monospace,Menlo,Consolas,monospace}
 .bb-ks kbd{display:inline-block;min-width:20px;padding:1px 6px;margin-right:3px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-bottom-width:1.5px;border-radius:5px;background:var(--bb-ui-bg,#fff);font:inherit;font-size:11px;text-align:center}
@@ -121,7 +131,8 @@ export function openKeyboardShortcutsDialog(
   let sortAsc = true;
   const ths = new Map<SortKey, HTMLTableCellElement>();
   for (const c of columns) {
-    const th = el('th', undefined, c.label);
+    const th = el('th');
+    th.append(el('span', undefined, c.label));
     th.addEventListener('click', () => {
       if (sortKey === c.key) sortAsc = !sortAsc;
       else {
