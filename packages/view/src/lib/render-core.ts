@@ -515,6 +515,49 @@ export class RenderCore {
     }
   }
 
+  /**
+   * Snapshot of ONE page (0-based), same contract as `pageSnapshots` but
+   * without paying for the whole document — the throwaway painter gets a
+   * viewport clamped to that page's band, so on a 300-page file a feedback
+   * screenshot renders one page, not three hundred. The painter mounts a
+   * margin's worth of neighbours too; the target is picked back out by its
+   * stack offset.
+   */
+  pageSnapshot(
+    index: number,
+  ): { png: string; width: number; height: number } | null {
+    const layout = this.resolved;
+    const page = layout?.pages[index];
+    if (!layout || !page) return null;
+    let top = 0;
+    for (let i = 0; i < index; i++)
+      top += layout.pages[i].height + this.pageGapPx;
+    const holder = document.createElement('div');
+    holder.style.cssText =
+      'position:absolute;left:-99999px;top:0;pointer-events:none;';
+    document.body.appendChild(holder);
+    try {
+      // The gap must match the top computation above — the painter's own
+      // default (24) may differ from this core's configured gap.
+      new CanvasPainter(holder).paint(layout, {
+        zoom: 1,
+        pageGap: this.pageGapPx,
+        viewport: { top, height: page.height },
+      });
+      const target = Array.from(holder.querySelectorAll('canvas')).find(
+        (c) => Math.abs(parseFloat(c.style.top || '0') - top) < 1,
+      );
+      if (!target) return null;
+      return {
+        png: target.toDataURL('image/png'),
+        width: parseFloat(target.style.width) || target.width,
+        height: parseFloat(target.style.height) || target.height,
+      };
+    } finally {
+      holder.remove();
+    }
+  }
+
   /** Print the whole document — one page snapshot per sheet via a hidden
    *  iframe (clean pagination). Hosts whose webview lacks `window.print()`
    *  (WKWebView) print through their own channel instead — see the editor's

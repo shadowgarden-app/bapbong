@@ -735,6 +735,17 @@ export class BapbongEditor {
     return this.core.getPageGap();
   }
 
+  /** Full-resolution PNG snapshot of one page (0-based) — a host's
+   *  feedback/report UI uses this for the "what Bapbong renders" side of a
+   *  comparison pair. Renders just that page with a throwaway painter;
+   *  `width`/`height` are CSS px at zoom 1. Null when the page doesn't exist
+   *  or no layout is resolved yet. */
+  pageSnapshot(
+    index: number,
+  ): { png: string; width: number; height: number } | null {
+    return this.core.pageSnapshot(index);
+  }
+
   /** Print the whole document — renders every page (not just the visible
    *  ones) and prints one image per sheet. Prefers the host's print channel
    *  (`printFallback`) when provided; falls back to the iframe +
