@@ -742,7 +742,7 @@ export class BapbongEditor {
    *  or no layout is resolved yet. */
   pageSnapshot(
     index: number,
-  ): { png: string; width: number; height: number } | null {
+  ): Promise<{ png: string; width: number; height: number } | null> {
     return this.core.pageSnapshot(index);
   }
 
@@ -754,7 +754,7 @@ export class BapbongEditor {
     if (this.printFallback) {
       // CSS px (96/in) → PDF points (72/in): the sheet keeps its physical size.
       const toPt = (px: number) => (px * 72) / 96;
-      const pages = this.core.pageSnapshots().map((p) => ({
+      const pages = (await this.core.pageSnapshots()).map((p) => ({
         png: p.png,
         widthPt: toPt(p.width),
         heightPt: toPt(p.height),

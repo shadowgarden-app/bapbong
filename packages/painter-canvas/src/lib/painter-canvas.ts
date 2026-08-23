@@ -137,6 +137,9 @@ interface PageSlot {
 export class CanvasPainter {
   private readonly createCanvas: () => HTMLCanvasElement;
   private readonly images = new Map<string, HTMLImageElement>();
+  /** Srcs whose first load hasn't finished (see whenImagesSettled). */
+  private readonly pendingImages = new Set<string>();
+  private imageWaiters: (() => void)[] = [];
   /** Sources the engine could not decode (a vector metafile, a broken data
    *  URL, an unreachable link). Painted as a placeholder box — the layout
    *  reserved the space, and an empty gap where the document has a picture
@@ -1117,6 +1120,7 @@ export class CanvasPainter {
     if (typeof Image === 'undefined') return undefined;
     const el = new Image();
     const t0 = perf.now();
+    this.pendingImages.add(src);
     el.onload = () => {
       perf.log(
         `image.load(${(src.length / 1024).toFixed(0)}KB src)`,
@@ -1131,6 +1135,10 @@ export class CanvasPainter {
           }),
         );
       }
+      // Settle AFTER the repaint: a repaint may request further images,
+      // and the settled promise must not resolve while those are in
+      // flight (the whole point is "every picture is on the canvas").
+      this.settleImage(src);
     };
     el.onerror = () => {
       // Undecodable: remember, and repaint so the placeholder replaces the
@@ -1143,9 +1151,38 @@ export class CanvasPainter {
           selection: this.lastOverlay.selection,
         });
       }
+      this.settleImage(src);
     };
     el.src = src;
     this.images.set(src, el);
     return el;
+  }
+
+  private settleImage(src: string): void {
+    this.pendingImages.delete(src);
+    if (this.pendingImages.size === 0) {
+      const waiters = this.imageWaiters;
+      this.imageWaiters = [];
+      for (const w of waiters) w();
+    }
+  }
+
+  /**
+   * Resolves once every image the last paint requested has finished
+   * loading (or failed → placeholder) AND the resulting repaints have
+   * landed. Snapshot/print paths await this before reading canvases — a
+   * fresh painter starts with an empty image cache, so its first paint
+   * leaves blanks where the pictures belong. The timeout is a safety
+   * hatch: one stuck decode must not hang a print forever.
+   */
+  whenImagesSettled(timeoutMs = 10_000): Promise<void> {
+    if (this.pendingImages.size === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      this.imageWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 }

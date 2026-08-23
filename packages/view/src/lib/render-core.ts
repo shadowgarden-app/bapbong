@@ -491,7 +491,9 @@ export class RenderCore {
    * are CSS px (layout px at zoom 1); the PNG bitmap itself is
    * devicePixelRatio-scaled for crispness.
    */
-  pageSnapshots(): { png: string; width: number; height: number }[] {
+  async pageSnapshots(): Promise<
+    { png: string; width: number; height: number }[]
+  > {
     const layout = this.resolved;
     if (!layout) return [];
     const holder = document.createElement('div');
@@ -500,7 +502,12 @@ export class RenderCore {
     document.body.appendChild(holder);
     try {
       // No viewport → the painter mounts a canvas for every page at full size.
-      new CanvasPainter(holder).paint(layout, { zoom: 1 });
+      const painter = new CanvasPainter(holder);
+      painter.paint(layout, { zoom: 1 });
+      // A fresh painter's image cache is empty; without this wait every
+      // picture serializes as a blank (the repaint its onload triggers
+      // would land on a canvas we already threw away).
+      await painter.whenImagesSettled();
       const canvases = Array.from(holder.querySelectorAll('canvas')).sort(
         (a, b) =>
           parseFloat(a.style.top || '0') - parseFloat(b.style.top || '0'),
@@ -523,9 +530,9 @@ export class RenderCore {
    * margin's worth of neighbours too; the target is picked back out by its
    * stack offset.
    */
-  pageSnapshot(
+  async pageSnapshot(
     index: number,
-  ): { png: string; width: number; height: number } | null {
+  ): Promise<{ png: string; width: number; height: number } | null> {
     const layout = this.resolved;
     const page = layout?.pages[index];
     if (!layout || !page) return null;
@@ -539,11 +546,15 @@ export class RenderCore {
     try {
       // The gap must match the top computation above — the painter's own
       // default (24) may differ from this core's configured gap.
-      new CanvasPainter(holder).paint(layout, {
+      const painter = new CanvasPainter(holder);
+      painter.paint(layout, {
         zoom: 1,
         pageGap: this.pageGapPx,
         viewport: { top, height: page.height },
       });
+      // Fresh painter, empty image cache — wait for pictures (see
+      // pageSnapshots above) or they serialize as blanks.
+      await painter.whenImagesSettled();
       const target = Array.from(holder.querySelectorAll('canvas')).find(
         (c) => Math.abs(parseFloat(c.style.top || '0') - top) < 1,
       );
@@ -563,7 +574,7 @@ export class RenderCore {
    *  (WKWebView) print through their own channel instead — see the editor's
    *  `printFallback` option. */
   async print(): Promise<void> {
-    const sources = this.pageSnapshots().map((p) => p.png);
+    const sources = (await this.pageSnapshots()).map((p) => p.png);
     await printImages(sources);
   }
 
