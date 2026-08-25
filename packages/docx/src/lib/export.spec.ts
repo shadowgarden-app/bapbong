@@ -1017,6 +1017,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
           textbox: {
             blocks: boxParas,
             inset: { l: 19, t: 10, r: 10, b: 5 },
+            anchor: 'ctr',
           },
         }),
       ]),
@@ -1026,6 +1027,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     const tb = node?.attrs['textbox'] as {
       blocks: unknown[];
       inset?: unknown;
+      anchor?: string;
     };
     expect(tb).toBeTruthy();
     expect(tb.blocks).toHaveLength(2);
@@ -1033,6 +1035,9 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(p0.textContent).toBe('Phiếu học tập: Học sinh trả lời.');
     expect(p0.child(0).marks.map((m) => m.type.name)).toContain('strong');
     expect(tb.inset).toEqual({ l: 19, t: 10, r: 10, b: 5 });
+    // Vertical anchoring must survive the save — it used to be silently
+    // dropped by the bodyPr writer and revert to top on reopen.
+    expect(tb.anchor).toBe('ctr');
   });
 
   it('round-trips a hyperlink (link mark + href)', async () => {

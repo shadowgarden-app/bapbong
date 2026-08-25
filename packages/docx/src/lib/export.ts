@@ -306,15 +306,23 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const tb = node.attrs['textbox'] as {
     blocks: unknown[];
     inset?: { l: number; t: number; r: number; b: number };
+    anchor?: 'ctr' | 'b';
   } | null;
   const txbx = tb
     ? `<wps:txbx><w:txbxContent>${tb.blocks
         .map((json) => blockXml(node.type.schema.nodeFromJSON(json), ctx))
         .join('')}</w:txbxContent></wps:txbx>`
     : '';
-  const bodyPr = tb?.inset
-    ? `<wps:bodyPr lIns="${pxToEmu(tb.inset.l)}" tIns="${pxToEmu(tb.inset.t)}" rIns="${pxToEmu(tb.inset.r)}" bIns="${pxToEmu(tb.inset.b)}"/>`
-    : '<wps:bodyPr/>';
+  // Every bodyPr field the importer reads must be re-emitted here, or the
+  // document silently reverts on the first save — anchor="ctr" used to
+  // import and render centred, then come back top-anchored.
+  const bodyPrAttrs = [
+    tb?.inset
+      ? ` lIns="${pxToEmu(tb.inset.l)}" tIns="${pxToEmu(tb.inset.t)}" rIns="${pxToEmu(tb.inset.r)}" bIns="${pxToEmu(tb.inset.b)}"`
+      : '',
+    tb?.anchor ? ` anchor="${tb.anchor}"` : '',
+  ].join('');
+  const bodyPr = `<wps:bodyPr${bodyPrAttrs}/>`;
   const graphic =
     `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr${tb ? ' txBox="1"' : ''}/>` +
     `<wps:spPr><a:xfrm${rot}${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
