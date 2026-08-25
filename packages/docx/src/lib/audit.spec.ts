@@ -413,6 +413,48 @@ describe('xml audit (import)', () => {
     expect(unknown).toContain('wps:bodyPr @compatLnSpc');
   });
 
+  it('demotes empty bodyPr, the t75 shapetype and default arrowhead sizes', async () => {
+    audit.setEnabled(true);
+    // <wps:bodyPr/> with nothing on it states the full default set — Word
+    // stamps it on every shape, text or not (one corpus file has 61 of them).
+    // v:shapetype _x0000_t75 is the stock OLE picture-frame template. And
+    // w/len on a line end with type="none" size an arrowhead that is not
+    // there ("med" is the schema default besides).
+    // The line ends ride a REAL drawn connector so applyLineProps touches
+    // them — loose in a run they'd fall under the ignored a:headEnd tag and
+    // never surface at all.
+    const connectorRun =
+      `<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="0"/>` +
+      `<a:graphic><a:graphicData><wps:wsp>` +
+      `<wps:spPr><a:prstGeom prst="line"/>` +
+      `<a:ln><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill>` +
+      `<a:headEnd type="none" w="med" len="med"/>` +
+      `<a:tailEnd type="triangle" w="lg" len="med"/>` +
+      `</a:ln></wps:spPr><wps:bodyPr/>` +
+      `</wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    const body =
+      `<?xml version="1.0"?><w:document ${NS}><w:body><w:p>` +
+      connectorRun +
+      `<w:r>` +
+      `<v:shapetype xmlns:v="urn:schemas-microsoft-com:vml" id="_x0000_t75" coordsize="21600,21600"/>` +
+      `</w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await importDocx(await makeDocx(body));
+    log.mockRestore();
+
+    const unknown = keys(audit.lastReport?.unknown ?? []);
+    const inert = keys(audit.lastReport?.inert ?? []);
+    expect(inert).toContain('wps:bodyPr');
+    expect(inert).toContain('v:shapetype');
+    expect(inert).toEqual(
+      expect.arrayContaining(['a:headEnd @w', 'a:headEnd @len']),
+    );
+    // A large head on a REAL arrow is a rendering gap, not boilerplate.
+    expect(unknown).toContain('a:tailEnd @w');
+    // "med" beside it is still the default.
+    expect(inert).toContain('a:tailEnd @len');
+  });
+
   it('demotes settings/OLE chrome and the no-op shapes of shared elements', async () => {
     audit.setEnabled(true);
     const body =

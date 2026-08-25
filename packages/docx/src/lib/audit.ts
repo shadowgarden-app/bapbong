@@ -118,6 +118,7 @@ const IGNORED_TAGS = new Set([
   'w:embedSystemFonts',
   'w:rsids',
   'w:shapeDefaults',
+  'w:hdrShapeDefaults',
   'w:themeFontLang',
   'w:listSeparator',
   'w:zoom',
@@ -422,6 +423,9 @@ const isNum = (n: number) => (v: string) => Number(v) === n;
  *  = this value is a no-op. The node is there for the handful of attributes
  *  whose effect depends on a sibling attribute (`@upright` only matters to a
  *  rotated shape); most predicates ignore it. */
+const arrowSizeInert = (v: string, n: OoxmlNode): boolean =>
+  (n.attrs['type'] ?? 'none') === 'none' || v === 'med';
+
 const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // CT_TextBodyProperties. Word stamps the whole default set onto every
   // textbox it writes. NOT listed: @anchor, which is READ now (the text block
@@ -450,6 +454,14 @@ const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // float, which is what our square-wrap already does. left/right/largest
   // pick ONE side and stay UNKNOWN.
   'wp:wrapSquare @wrapText': (v) => v === 'bothSides',
+  // Arrowhead size on a line end: meaningless without an arrowhead (@type
+  // absent or "none"), and "med" is the schema default either way. A sized
+  // head on a REAL arrow (type=triangle w="lg") stays UNKNOWN until the
+  // painter scales heads.
+  'a:headEnd @w': arrowSizeInert,
+  'a:headEnd @len': arrowSizeInert,
+  'a:tailEnd @w': arrowSizeInert,
+  'a:tailEnd @len': arrowSizeInert,
   // The same attribute on the same terms — tight and through wrap import as
   // square, so which sides they use is decided the same way.
   'wp:wrapTight @wrapText': (v) => v === 'bothSides',
@@ -462,6 +474,15 @@ const INERT_TAGS: Record<string, (n: OoxmlNode) => boolean> = {
   // CT_RelativeRect: all four insets default to 0, so an empty srcRect (what
   // Word writes on every uncropped picture) crops nothing.
   'a:srcRect': (n) => n.children.length === 0 && attrCount(n) === 0,
+  // An EMPTY body-properties element states the full schema-default set —
+  // Word stamps <wps:bodyPr/> on every shape, text or not. One carrying an
+  // attribute or an autofit child stays UNKNOWN.
+  'wps:bodyPr': (n) => n.children.length === 0 && attrCount(n) === 0,
+  // The stock VML template for a picture frame (_x0000_t75), written inside
+  // every w:object next to the v:shape that uses it. Its path/formulas only
+  // parameterise the frame's aspect maths — the shape's own imagedata is what
+  // renders. A non-t75 shapetype defines real geometry and stays UNKNOWN.
+  'v:shapetype': (n) => n.attrs['id'] === '_x0000_t75',
   // No effect children = no shadow, glow or reflection.
   'a:effectLst': (n) => n.children.length === 0,
   // The spec's explicit "this shape has no outline" state.

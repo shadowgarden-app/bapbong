@@ -3495,9 +3495,9 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
     // resolved into this row's cells (see applyRowException) and would be
     // written twice if it came back here as well. What survives is what the
     // model has nowhere else to put: w:jc, the per-row table alignment, and
-    // w:tblLook, whose flags select conditional formats defined by a table
-    // style's w:tblStylePr — a feature this converter does not implement, so
-    // preserving the flags is the honest thing to do with them.
+    // w:tblLook — the TABLE-level tblLook already drove the conditional
+    // formats at import (condTypesFor), so a row-level copy only needs to
+    // round-trip.
     const exCarry = collectCarry(
       child(tr, 'w:tblPrEx'),
       new Set(['w:tblBorders']),
