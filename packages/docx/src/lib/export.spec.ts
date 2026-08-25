@@ -1698,6 +1698,61 @@ describe('exportDocx (sections + footnotes)', () => {
     expect(xml).toContain('<w:footnoteReference w:id="2"/>');
     expect(xml).not.toContain('>1</w:t>'); // the carrier number isn't emitted as text
   });
+
+  it('writes the ORIGINAL w:id, not the display number', async () => {
+    // footnotes.xml is carried byte-for-byte, so a reference renumbered on
+    // import (display 1..N) must still point at its source id. Word reserves
+    // -1/0 for separators and reuses ids after edits, so display numbers and
+    // ids rarely coincide.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.text('text'),
+        schema.text('1', [
+          schema.marks['footnote'].create({ num: 1, id: '7' }),
+        ]),
+      ]),
+    ]);
+    const xml = await docXml(doc);
+    expect(xml).toContain('<w:footnoteReference w:id="7"/>');
+  });
+
+  it('round-trips footnote ids through import → export → import', async () => {
+    // Source file numbers its only real footnote w:id="7": display shows 1,
+    // the saved file must reference 7 again or the link dangles.
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/_rels/document.xml.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body><w:p><w:r><w:t>x</w:t></w:r><w:r><w:footnoteReference w:id="7"/></w:r></w:p></w:body></w:document>`,
+    );
+    zip.file(
+      'word/footnotes.xml',
+      `<?xml version="1.0"?><w:footnotes xmlns:w="${W_NS}"><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:id="7"><w:p><w:r><w:t>note body</w:t></w:r></w:p></w:footnote></w:footnotes>`,
+    );
+    const bytes = await zip.generateAsync({ type: 'uint8array' });
+    const first = await importDocx(bytes);
+    const saved = await exportDocx(first.doc, {
+      carry: await JSZip.loadAsync(bytes),
+    });
+    const savedXml = await (await JSZip.loadAsync(saved))
+      .file('word/document.xml')!
+      .async('string');
+    expect(savedXml).toContain('<w:footnoteReference w:id="7"/>');
+    // And the re-import still finds the body through the carried part.
+    const again = await importDocx(saved);
+    expect(again.footnotes?.[1]?.textContent ?? '').toContain('note body');
+  });
 });
 
 describe('named paragraph styles (Title/Subtitle/HeadingN) + styles.xml', () => {

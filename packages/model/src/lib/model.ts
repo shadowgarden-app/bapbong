@@ -700,28 +700,38 @@ export const schema = new Schema({
     },
     // w:footnoteReference — the carrier text is the superscript number; `num`
     // lets the layout engine match the reference to its page-bottom body.
+    // `id` is the ORIGINAL w:id from footnotes.xml: that part is carried
+    // byte-for-byte on save, so the exported reference must point at the
+    // source id, not the display number (Word reserves -1/0 and reuses ids
+    // freely — they rarely equal 1..N in document order).
     footnote: {
-      attrs: { num: {} },
+      attrs: { num: {}, id: { default: null } },
       inclusive: false,
       parseDOM: [
         {
           tag: 'sup[data-footnote]',
           // `el` is an HTMLElement at runtime; this package has no DOM lib, so
           // narrow structurally rather than naming the type.
-          getAttrs: (el) => ({
-            num:
-              Number(
-                (el as { getAttribute(n: string): string | null }).getAttribute(
-                  'data-footnote',
-                ),
-              ) || 0,
-          }),
+          getAttrs: (el) => {
+            const get = (n: string) =>
+              (el as { getAttribute(n: string): string | null }).getAttribute(
+                n,
+              );
+            return {
+              num: Number(get('data-footnote')) || 0,
+              id: get('data-footnote-id'),
+            };
+          },
         },
       ],
       toDOM(mark) {
+        const id = mark.attrs['id'] as string | null;
         return [
           'sup',
-          { 'data-footnote': String(mark.attrs['num'] as number) },
+          {
+            'data-footnote': String(mark.attrs['num'] as number),
+            ...(id != null ? { 'data-footnote-id': id } : {}),
+          },
           0,
         ];
       },

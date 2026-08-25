@@ -432,7 +432,10 @@ function inlineXml(node: PMNode, ctx: ExportCtx): string {
   if (node.isText) {
     const fn = node.marks.find((m) => m.type.name === 'footnote');
     if (fn)
-      return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${fn.attrs['num']}"/></w:r>`;
+      // footnotes.xml rides the carry package byte-for-byte, so the
+      // reference must name the ORIGINAL w:id — the display number only
+      // coincides with it when the source ids happen to be 1..N.
+      return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${(fn.attrs['id'] as string | null) ?? fn.attrs['num']}"/></w:r>`;
     return `<w:r>${runProps(node.marks)}<w:t xml:space="preserve">${esc(node.text ?? '')}</w:t></w:r>`;
   }
   return '';

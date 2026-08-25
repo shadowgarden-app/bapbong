@@ -626,7 +626,7 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
         // reference to its page-bottom body; endnotes stay plain superscripts
         // (their bodies are appended at the document end).
         if (kind === 'footnote')
-          refMarks.push(ctx.schema.marks['footnote'].create({ num }));
+          refMarks.push(ctx.schema.marks['footnote'].create({ num, id }));
         out.push(ctx.schema.text(String(num), refMarks));
       }
     } else if (node.name === 'w:br') {
