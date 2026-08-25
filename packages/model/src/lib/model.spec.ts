@@ -110,6 +110,7 @@ describe('schema', () => {
       ).toEqual({
         src: 'data:image/png;base64,AAAA',
         alt: '',
+        title: null,
         width: 120,
         height: 81,
         // No data-crop / data-outline on pasted HTML — an external <img>
@@ -122,6 +123,7 @@ describe('schema', () => {
       ).toEqual({
         src: 'data:image/jpeg;base64,BB',
         alt: 'chart',
+        title: null,
         width: null,
         height: null,
         crop: null,

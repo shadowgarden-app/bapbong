@@ -331,7 +331,8 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   // A shape's alt text had nowhere to go: its docPr carried only id + name,
   // so anything the document said about the shape was dropped on save.
   const alt = (node.attrs['alt'] as string | null) ?? '';
-  const docPr = `<wp:docPr id="${n}" name="Shape ${n}"${alt ? ` descr="${esc(alt)}"` : ''}/>`;
+  const title = (node.attrs['title'] as string | null) ?? '';
+  const docPr = `<wp:docPr id="${n}" name="Shape ${n}"${alt ? ` descr="${esc(alt)}"` : ''}${title ? ` title="${esc(title)}"` : ''}/>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
     ? anchorXml(float, cx, cy, n, graphic, docPr)
@@ -374,7 +375,10 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   // descr is where Word keeps alt text. Dropping it is silent — the image
   // still renders, so nothing looks wrong; only screen readers lose it.
   const alt = (node.attrs['alt'] as string | null) ?? '';
-  const descr = alt ? ` descr="${esc(alt)}"` : '';
+  const title = (node.attrs['title'] as string | null) ?? '';
+  const descr =
+    (alt ? ` descr="${esc(alt)}"` : '') +
+    (title ? ` title="${esc(title)}"` : '');
   // a:srcRect precedes a:stretch in CT_BlipFillProperties. Ratios go back as
   // ST_Percentage (thousandths of a percent), sign intact — a negative is
   // Word's outset, not an error.

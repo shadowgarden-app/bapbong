@@ -724,6 +724,27 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     });
   });
 
+  it('round-trips docPr alt text — @descr and @title separately', async () => {
+    // @title is the "Title" field of the alt-text pane. The importer used to
+    // reach it only when @descr was ABSENT (?? short-circuit), so a document
+    // with descr="" title="..." lost the title on save.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: 'data:image/png;base64,iVBORw0KGgo=',
+          width: 100,
+          height: 50,
+          alt: 'a chart of revenue',
+          title: 'Revenue chart',
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const img = back.child(0).child(0);
+    expect(img.attrs['alt']).toBe('a chart of revenue');
+    expect(img.attrs['title']).toBe('Revenue chart');
+  });
+
   it('round-trips a picture border (a:ln on pic:spPr)', async () => {
     // The importer reads the border; the writer used to emit a bare spPr, so
     // a framed photo lost its frame on the first save.

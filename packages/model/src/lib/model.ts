@@ -47,6 +47,7 @@ function pastedImageAttrs(el: unknown) {
   return {
     src,
     alt: e.getAttribute('alt') ?? '',
+    title: e.getAttribute('title'),
     width: dim(e.getAttribute('width')),
     height: dim(e.getAttribute('height')),
     crop: dataJson(el, 'data-crop'),
@@ -270,6 +271,9 @@ export const schema = new Schema({
       attrs: {
         src: {},
         alt: { default: '' },
+        // wp:docPr @title — the "Title" field of Word's alt-text pane, kept
+        // separate from `alt` (@descr) so both round-trip verbatim.
+        title: { default: null },
         width: { default: null },
         height: { default: null },
         // wp:anchor (floating image): { wrap: 'square'|'topAndBottom'|'none',
@@ -302,6 +306,7 @@ export const schema = new Schema({
           src: a['src'] as string,
           alt: a['alt'] as string,
         };
+        if (a['title']) attrs['title'] = a['title'] as string;
         if (a['width'] != null) attrs['width'] = String(a['width']);
         if (a['height'] != null) attrs['height'] = String(a['height']);
         if (a['crop']) attrs['data-crop'] = JSON.stringify(a['crop']);

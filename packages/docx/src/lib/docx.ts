@@ -852,6 +852,8 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
 
   const extent = findDescendant(drawing, 'wp:extent');
   const docPr = findDescendant(drawing, 'wp:docPr');
+  const picDescr = attrOf(docPr, 'descr');
+  const picTitle = attrOf(docPr, 'title');
   const float = parseAnchorFloat(drawing);
   const crop = parseSrcRect(findDescendant(drawing, 'a:srcRect'));
   // Word's "picture border": an a:ln on the picture's own spPr. Shapes have
@@ -876,7 +878,11 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     src,
     width: emuToPx(attrOf(extent, 'cx')),
     height: emuToPx(attrOf(extent, 'cy')),
-    alt: attrOf(docPr, 'descr') ?? attrOf(docPr, 'title') ?? '',
+    // Both docPr attrs are read EAGERLY: `??` used to short-circuit past
+    // @title whenever @descr existed (even empty), leaving @title unread —
+    // and dropped on save. alt is @descr; @title rides its own attr.
+    alt: picDescr ?? '',
+    ...(picTitle != null && { title: picTitle }),
     float,
     ...(crop && { crop }),
     ...(outline && { outline }),
@@ -1099,7 +1105,8 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     // the shape ("Rectangle 5"), which is no more a description than an id.
     // Both attrs are read up front (see parseVmlImage) so neither reads as a
     // gap when the other one wins.
-    alt: shapeDescr || shapeTitle || '',
+    alt: shapeDescr ?? '',
+    ...(shapeTitle != null && { title: shapeTitle }),
     float: parseAnchorFloat(drawing),
     shape,
     textbox,
