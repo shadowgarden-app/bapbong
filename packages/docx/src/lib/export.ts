@@ -316,6 +316,7 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
     blocks: unknown[];
     inset?: { l: number; t: number; r: number; b: number };
     anchor?: 'ctr' | 'b';
+    autofit?: boolean;
   } | null;
   const txbx = tb
     ? `<wps:txbx><w:txbxContent>${tb.blocks
@@ -331,7 +332,9 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
       : '',
     tb?.anchor ? ` anchor="${tb.anchor}"` : '',
   ].join('');
-  const bodyPr = `<wps:bodyPr${bodyPrAttrs}/>`;
+  const bodyPr = tb?.autofit
+    ? `<wps:bodyPr${bodyPrAttrs}><a:spAutoFit/></wps:bodyPr>`
+    : `<wps:bodyPr${bodyPrAttrs}/>`;
   const graphic =
     `<a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:cNvSpPr${tb ? ' txBox="1"' : ''}/>` +
     `<wps:spPr><a:xfrm${rot}${s.flipV ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +

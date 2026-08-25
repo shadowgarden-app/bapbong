@@ -1125,6 +1125,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
             blocks: boxParas,
             inset: { l: 19, t: 10, r: 10, b: 5 },
             anchor: 'ctr',
+            autofit: true,
           },
         }),
       ]),
@@ -1145,6 +1146,8 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     // Vertical anchoring must survive the save — it used to be silently
     // dropped by the bodyPr writer and revert to top on reopen.
     expect(tb.anchor).toBe('ctr');
+    // …and so must a:spAutoFit (Word regrows the box off this flag).
+    expect((tb as { autofit?: boolean }).autofit).toBe(true);
   });
 
   it('round-trips a hyperlink (link mark + href)', async () => {

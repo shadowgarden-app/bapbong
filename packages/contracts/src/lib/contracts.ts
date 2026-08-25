@@ -443,6 +443,11 @@ export interface FlowFloat {
   background?: string;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** wps:bodyPr a:spAutoFit — the box grows to its text. Word IGNORES the
+   *  stored extent and recomputes the height on open (measured: a probe
+   *  storing cy=14.2pt drew 105.8pt), so layout does the same: `height`
+   *  here is the stored extent, the resolved float carries the grown one. */
+  autofit?: boolean;
   wrap: 'square' | 'topAndBottom' | 'none';
   /**
    * The 'square' wrap came from wp:wrapThrough / wp:wrapTight rather than

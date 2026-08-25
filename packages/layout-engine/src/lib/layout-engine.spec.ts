@@ -2113,6 +2113,50 @@ describe('textbox floats', () => {
     expect(f?.lines?.[0].segments[0].pos).toBeUndefined();
   });
 
+  it('spAutoFit grows the box to its content, exclusion included', () => {
+    // Word IGNORES the stored extent when a:spAutoFit is set and regrows the
+    // height on open — probe B5 stored cy=14.2pt and Word drew 105.8pt. The
+    // stored 20px here fits nothing; three wrapped lines need
+    // inset.t + 3×16 + inset.b = 58px.
+    const boxPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb cccc', font: font() }],
+    };
+    const host: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 60,
+          height: 20,
+          wrap: 'square',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+          content: [boxPara],
+          autofit: true,
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([host], config());
+    const f = pages[0].floats?.[0];
+    // Interior band 60−10−10 = 40px → 'aaaa','bbbb','cccc' one per line.
+    expect(f?.lines).toHaveLength(3);
+    expect(f?.height).toBeCloseTo(5 + 3 * 16 + 5);
+    // The wrap exclusion uses the GROWN height: body text resumes below it,
+    // not inside the box it thinks is 20px tall.
+    const body = pages[0].lines.find((l) =>
+      l.segments.some((s) => s.text.includes('body')),
+    );
+    expect(body).toBeDefined();
+    // Square wrap: the body line flows BESIDE the grown box, pushed past its
+    // right edge — with the stored 20px height it would have started under
+    // y=20 at the left margin instead once past the stub box.
+    expect(body!.x).toBeGreaterThanOrEqual(f!.x + f!.width);
+  });
+
   it('lays out a table inside the box, dropped by the same inset', () => {
     // A textbox holds block content, so a table in one has to reach the page —
     // two of them were being dropped from a factsheet whose boxes are

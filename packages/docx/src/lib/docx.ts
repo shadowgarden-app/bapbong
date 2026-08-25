@@ -1196,6 +1196,7 @@ function parseTextbox(
   blocks: unknown[];
   inset?: { l: number; t: number; r: number; b: number };
   anchor?: 'ctr' | 'b';
+  autofit?: boolean;
 } | null {
   const blocks = txbxBlocks(
     child(child(wsp, 'wps:txbx'), 'w:txbxContent'),
@@ -1222,10 +1223,16 @@ function parseTextbox(
   const anchorAttr = attrOf(bodyPr, 'anchor');
   const anchor =
     anchorAttr === 'ctr' ? 'ctr' : anchorAttr === 'b' ? 'b' : undefined;
+  // a:spAutoFit: "resize shape to fit text". Word ignores the stored extent
+  // and regrows the height at render time (probe B5), so the flag rides the
+  // model and the layout engine grows the box — the stored extent stays on
+  // the node untouched, which is also exactly what Word writes back.
+  const autofit = !!child(bodyPr, 'a:spAutoFit');
   return {
     blocks,
     ...(inset && { inset }),
     ...(anchor && { anchor }),
+    ...(autofit && { autofit }),
   };
 }
 

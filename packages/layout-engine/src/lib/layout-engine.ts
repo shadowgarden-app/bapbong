@@ -312,6 +312,7 @@ function paragraphToFlow(
           blocks: unknown[];
           inset?: { l: number; t: number; r: number; b: number };
           anchor?: 'ctr' | 'b';
+          autofit?: boolean;
         } | null;
         if (tb && tb.blocks.length > 0) {
           const schema = child.type.schema;
@@ -320,6 +321,7 @@ function paragraphToFlow(
             .filter((b): b is FlowBlock => b !== null);
           if (tb.inset) f.inset = tb.inset;
           if (tb.anchor) f.anchor = tb.anchor;
+          if (tb.autofit) f.autofit = true;
         }
         floats.push(f);
       } else {
@@ -1493,10 +1495,14 @@ function resolveFloat(
     const inset = f.inset ?? TEXTBOX_INSET;
     const right = Math.max(inset.l + MIN_BAND, f.width - inset.r);
     const inner = layoutFlow(f.content, inset.l, right, ctx);
+    // a:spAutoFit: the box height is the CONTENT's, not the stored extent —
+    // Word regrows on open (probe B5: cy stored 14.2pt, drawn 105.8pt).
+    // Callers building wrap exclusions must read rf.height, not f.height.
+    if (f.autofit) rf.height = inset.t + inner.height + inset.b;
     // wps:bodyPr @anchor — the whole text block slides down the leftover
     // height. Word clamps at the top when the text overflows the box, which
     // is what a negative slack would otherwise undo.
-    const slack = Math.max(0, f.height - inset.t - inset.b - inner.height);
+    const slack = Math.max(0, rf.height - inset.t - inset.b - inner.height);
     const shift = f.anchor === 'ctr' ? slack / 2 : f.anchor === 'b' ? slack : 0;
     const lines = inner.lines.map((l) => ({ ...l, y: l.y + inset.t + shift }));
     // Tables get the same drop as the lines. They are mutated in place rather
@@ -3665,8 +3671,9 @@ function placeBlocks(
         fxEff = pin.x;
         fy = pin.y;
       }
+      const rf = resolveFloat(f, fxEff, fy, ctx);
       pageFloats.push({
-        ...resolveFloat(f, fxEff, fy, ctx),
+        ...rf,
         // Effective offsets for drag-to-move: what hOffset/vOffset would put
         // the float at exactly this spot. For an hAlign float this is the
         // alignment resolved to a number, which is what a drag pins it to.
@@ -3674,13 +3681,18 @@ function placeBlocks(
         effVOffset: f.vOffset ?? 0,
       });
       colDirty = true;
+      // Exclusions use the RESOLVED size: autofit grows the box past its
+      // stored extent, and a grown box that only excluded its stored rect
+      // would paint over the text beside it. The resolved height is a pure
+      // function of width + content, so the fixed-point key stays stable
+      // across the page replay.
       const rect: Exclusion | null =
         f.wrap === 'square'
           ? {
               left: fxEff - (f.distL ?? 0),
-              right: fxEff + f.width + (f.distR ?? 0),
+              right: fxEff + rf.width + (f.distR ?? 0),
               top: fy - (f.distT ?? 0),
-              bottom: fy + f.height + (f.distB ?? 0),
+              bottom: fy + rf.height + (f.distB ?? 0),
               ...(f.through && { through: true }),
             }
           : f.wrap === 'topAndBottom'
@@ -3688,7 +3700,7 @@ function placeBlocks(
                 left: -Infinity,
                 right: Infinity,
                 top: fy - (f.distT ?? 0),
-                bottom: fy + f.height + (f.distB ?? 0),
+                bottom: fy + rf.height + (f.distB ?? 0),
               }
             : null; // 'none' paints only
       if (rect) {
