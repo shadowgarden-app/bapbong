@@ -1072,6 +1072,14 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const spPr = child(wsp, 'wps:spPr');
   const prst = attrOf(child(spPr, 'a:prstGeom'), 'prst');
   const textbox = parseTextbox(wsp, ctx);
+  // A bodyPr on a shape with NO text configures nothing — Word still stamps
+  // the full attribute set on every connector it writes (15 per drawing in
+  // one corpus file). Consumed as a decision, not silently ignored: the
+  // moment the shape gains a txbx, parseTextbox reads it for real.
+  if (!textbox) {
+    const idleBodyPr = child(wsp, 'wps:bodyPr');
+    if (idleBodyPr) audit.markSubtree(idleBodyPr);
+  }
   // Geometry we paint natively (ShapeSpec kinds mirror the prst tokens);
   // anything else with a textbox degrades to a rect frame — the text matters
   // more than the fancy outline — and without one stays unmodelled.

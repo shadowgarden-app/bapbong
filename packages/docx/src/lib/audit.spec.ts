@@ -446,7 +446,10 @@ describe('xml audit (import)', () => {
 
     const unknown = keys(audit.lastReport?.unknown ?? []);
     const inert = keys(audit.lastReport?.inert ?? []);
-    expect(inert).toContain('wps:bodyPr');
+    // The connector's bodyPr is CONSUMED by parseShape (textless shape → the
+    // element configures nothing); it must not surface as a gap at all. The
+    // empty-element inert rule still covers bodyPr outside parsed shapes.
+    expect(unknown).not.toContain('wps:bodyPr');
     expect(inert).toContain('v:shapetype');
     expect(inert).toEqual(
       expect.arrayContaining(['a:headEnd @w', 'a:headEnd @len']),
