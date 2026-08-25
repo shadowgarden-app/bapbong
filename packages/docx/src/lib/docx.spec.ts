@@ -2331,6 +2331,35 @@ describe('importDocx', () => {
     expect(tail.join('\n')).not.toMatch(/Note alpha/);
   });
 
+  it('keeps an untyped w:id="0" footnote — Google Docs numbers from zero', async () => {
+    // Word stamps ids -1/0 on its separator chrome but always TYPES them;
+    // Google Docs exports real footnotes numbered from 0 with no separators.
+    // An id-based skip silently dropped the first footnote of such files.
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>x</w:t></w:r><w:r><w:footnoteReference w:customMarkFollows="0" w:id="0"/></w:r></w:p>
+    </w:body></w:document>`;
+    const footnotesXml = `<?xml version="1.0"?><w:footnotes xmlns:w="${W_NS}">
+      <w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>
+      <w:footnote w:id="0"><w:p><w:r><w:t>zeroth</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>`;
+    const { doc, footnotes } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/footnotes.xml': footnotesXml,
+        },
+      ),
+    );
+    const p0 = doc.child(0);
+    expect(p0.child(p0.childCount - 1).text).toBe('1');
+    expect(footnotes[1].textContent).toBe('1zeroth');
+  });
+
   it('customMarkFollows: the custom glyph is the mark, no number consumed', async () => {
     // Measured in Word's PDF: marks render 1, †, 2 — the custom-marked note
     // draws no auto number and does not advance the counter, and its body

@@ -631,13 +631,15 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     ) {
       const kind = node.name === 'w:footnoteReference' ? 'footnote' : 'endnote';
       const id = attrOf(node, 'w:id');
+      // Read OUTSIDE the body-exists guard: a dangling reference must not
+      // leave the attribute looking unread to the audit.
+      const customAttr = attrOf(node, 'w:customMarkFollows');
+      const custom = customAttr === '1' || customAttr === 'true';
       if (id && ctx.notes.bodies[kind].has(id)) {
         flush();
         // w:customMarkFollows: the glyph is the REST OF THIS RUN's text (the
         // † the author typed), no auto number is drawn and the note does not
         // consume one — measured: marks render 1, †, 2, not 1, 2†, 3.
-        const customAttr = attrOf(node, 'w:customMarkFollows');
-        const custom = customAttr === '1' || customAttr === 'true';
         const { num, display } = ctx.notes.ref(kind, id, custom);
         if (custom) {
           // The custom glyph needs the footnote mark so the layout engine
@@ -4100,7 +4102,12 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
     for (const note of children(child(parsed, root), tag)) {
       const id = attrOf(note, 'w:id');
       const type = attrOf(note, 'w:type');
-      if (id === undefined || Number(id) < 1 || (type && type !== 'normal')) {
+      // Separator/continuation chrome is identified by its TYPE, not its id:
+      // Word does stamp -1/0 on the separators, but it also always types
+      // them — while Google Docs exports number REAL footnotes from 0 with
+      // no separators at all, and an id-based guard silently ate the first
+      // footnote of every such file.
+      if (id === undefined || (type && type !== 'normal')) {
         // Separator/continuation chrome — skipped by design, subtree and all.
         audit.markSubtree(note);
         continue;
