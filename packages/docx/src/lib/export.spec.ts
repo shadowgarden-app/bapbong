@@ -745,6 +745,24 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(img.attrs['title']).toBe('Revenue chart');
   });
 
+  it('round-trips a picture background (a:solidFill on pic:spPr)', async () => {
+    // Word paints the fill BEHIND the bitmap (visible through transparent
+    // pixels) — measured in the drawing-chrome probe. It must also survive
+    // the save.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: 'data:image/png;base64,iVBORw0KGgo=',
+          width: 100,
+          height: 50,
+          background: '#FFFFFF',
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).child(0).attrs['background']).toBe('#FFFFFF');
+  });
+
   it('round-trips a picture border (a:ln on pic:spPr)', async () => {
     // The importer reads the border; the writer used to emit a bare spPr, so
     // a framed photo lost its frame on the first save.

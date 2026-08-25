@@ -862,7 +862,12 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   // are interpreted one way across the converter. Not modelled: @cmpd
   // (single / double / thickThin …), which is a second line rather than a
   // property of this one.
-  const picLn = child(findDescendant(drawing, 'pic:spPr'), 'a:ln');
+  const picSpPr = findDescendant(drawing, 'pic:spPr');
+  const picLn = child(picSpPr, 'a:ln');
+  // A fill on the picture's own spPr paints BEHIND the bitmap — visible
+  // through transparent pixels. Word draws it (measured); dropping it turns
+  // a matted logo transparent.
+  const background = solidFillColor(picSpPr, ctx) ?? null;
   // Both attributes are asked for whether or not the outline paints. Word
   // writes `<a:ln w="9525"><a:noFill/>…</a:ln>` on plenty of pictures — an
   // explicit "no border" that still states a width — and reading the element
@@ -883,6 +888,7 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     // and dropped on save. alt is @descr; @title rides its own attr.
     alt: picDescr ?? '',
     ...(picTitle != null && { title: picTitle }),
+    ...(background && { background }),
     float,
     ...(crop && { crop }),
     ...(outline && { outline }),

@@ -399,12 +399,16 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
     ? `<a:ln w="${pxToEmu(outline.width)}"><a:solidFill><a:srgbClr val="${outline.color.replace('#', '')}"/></a:solidFill>` +
       `${outline.style === 'dashed' ? '<a:prstDash val="dash"/>' : ''}</a:ln>`
     : '';
+  const background = node.attrs['background'] as string | null;
+  const bgFill = background
+    ? `<a:solidFill><a:srgbClr val="${background.replace('#', '')}"/></a:solidFill>`
+    : '';
   const graphic =
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
     `<pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
     `<pic:blipFill>${blip}${srcRect}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
     `<pic:spPr><a:xfrm${rotAttr(node)}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
-    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${ln}</pic:spPr>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${bgFill}${ln}</pic:spPr>` +
     `</pic:pic></a:graphicData></a:graphic>`;
   const docPr = `<wp:docPr id="${n}" name="Picture ${n}"${descr}/>`;
   // A floating BITMAP goes out as wp:anchor like the drawn shapes always did —

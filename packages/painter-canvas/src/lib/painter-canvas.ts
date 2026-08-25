@@ -516,6 +516,10 @@ export class CanvasPainter {
         this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
       } else {
         const el = this.requestImage(f.src);
+        if (f.background) {
+          this.ctx.fillStyle = f.background;
+          this.ctx.fillRect(f.x, yOffset + f.y, f.width, f.height);
+        }
         if (el?.complete && el.naturalWidth > 0) {
           this.drawBitmap(el, f.crop, f.x, yOffset + f.y, f.width, f.height);
         } else if (this.undecodable.has(f.src)) {
@@ -641,6 +645,15 @@ export class CanvasPainter {
             return;
           }
           const el = this.requestImage(img.src);
+          if (img.background) {
+            this.ctx.fillStyle = img.background;
+            this.ctx.fillRect(
+              img.x,
+              baselineY - img.height,
+              img.width,
+              img.height,
+            );
+          }
           if (el?.complete && el.naturalWidth > 0) {
             // The image's bottom edge sits on the baseline (matches the layout).
             this.drawBitmap(

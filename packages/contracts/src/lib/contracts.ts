@@ -368,6 +368,9 @@ export interface InlineImage {
   /** Line drawn round the picture's box (a:ln on pic:spPr) — Word's
    *  "picture border". */
   outline?: BorderSide;
+  /** Fill painted behind the bitmap (a:solidFill on pic:spPr) — visible
+   *  through transparency, and under any crop letterboxing. */
+  background?: string;
   link?: string;
   /** Present when this box is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
@@ -423,6 +426,8 @@ export interface FlowFloat {
   crop?: ImageCrop;
   /** Line drawn round the picture's box (a:ln on pic:spPr). */
   outline?: BorderSide;
+  /** Fill painted behind the bitmap (a:solidFill on pic:spPr). */
+  background?: string;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
   wrap: 'square' | 'topAndBottom' | 'none';
@@ -782,6 +787,8 @@ export interface LayoutImageSegment {
   crop?: ImageCrop;
   /** Line drawn round the picture's box (a:ln on pic:spPr). */
   outline?: BorderSide;
+  /** Fill painted behind the bitmap (a:solidFill on pic:spPr). */
+  background?: string;
   /** Clockwise degrees around the box center (paint-only). */
   rotation?: number;
   /** Absolute PM position of the image node (occupies 1 position). */
@@ -887,6 +894,8 @@ export interface ResolvedFloat {
   crop?: ImageCrop;
   /** Line drawn round the picture's box (a:ln on pic:spPr). */
   outline?: BorderSide;
+  /** Fill painted behind the bitmap (a:solidFill on pic:spPr). */
+  background?: string;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
   /** Textbox text laid out inside the shape, in BOX-LOCAL coordinates

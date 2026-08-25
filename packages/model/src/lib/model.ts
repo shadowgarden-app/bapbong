@@ -298,6 +298,9 @@ export const schema = new Schema({
         crop: { default: null },
         // a:ln on pic:spPr — Word's picture border, as a BorderSide, or null.
         outline: { default: null },
+        // a:solidFill on pic:spPr — "#RRGGBB" painted behind the bitmap
+        // (shows through transparency), or null.
+        background: { default: null },
       },
       parseDOM: [{ tag: 'img[src]', getAttrs: pastedImageAttrs }],
       toDOM(node) {
@@ -311,6 +314,8 @@ export const schema = new Schema({
         if (a['height'] != null) attrs['height'] = String(a['height']);
         if (a['crop']) attrs['data-crop'] = JSON.stringify(a['crop']);
         if (a['outline']) attrs['data-outline'] = JSON.stringify(a['outline']);
+        if (a['background'])
+          attrs['data-background'] = a['background'] as string;
         return ['img', attrs];
       },
     },
