@@ -216,6 +216,14 @@ interface CommentsRegistry {
   used: number[];
 }
 
+/** Structured-document-tag wrapper attached to its boundary blocks: the
+ *  serialized INNER XML of w:sdtPr / w:sdtEndPr rides the first block, the
+ *  end flag rides the last, and export re-wraps the range. */
+export interface SdtBoundary {
+  start?: { pr: string | null; endPr: string | null };
+  end?: boolean;
+}
+
 interface Ctx {
   styles: StyleRegistry;
   numbering: NumberingResolver;
@@ -244,6 +252,9 @@ interface Ctx {
    */
   tableStyles: { pPr: OoxmlNode[]; rPr: RunProps }[];
   notes: NotesRegistry;
+  /** SDT wrappers keyed by their boundary w:p / w:tbl nodes — filled by
+   *  unwrapContainers, read by parseParagraph / parseTable into `carry`. */
+  sdtBoundaries: WeakMap<OoxmlNode, SdtBoundary>;
   comments: CommentsRegistry;
   /** Schema the doc nodes/marks are created with (model's by default; the editor
    *  may inject a composed schema so plugin-contributed marks are imported). */
@@ -534,7 +545,10 @@ function effectiveChildren(nodes: OoxmlNode[]): OoxmlNode[] {
  *  chrome is dropped, the content (paragraphs/tables at block level, runs
  *  inline — a w14:checkbox's ☒/☐ glyph run included) survives. Recurses so
  *  nested wrappers (cover pages hold several) fully unwrap. */
-function unwrapContainers(nodes: OoxmlNode[]): OoxmlNode[] {
+function unwrapContainers(
+  nodes: OoxmlNode[],
+  sdt?: WeakMap<OoxmlNode, SdtBoundary>,
+): OoxmlNode[] {
   const out: OoxmlNode[] = [];
   for (const node of nodes) {
     if (WRAPPER_PROPS.has(node.name)) {
@@ -542,7 +556,37 @@ function unwrapContainers(nodes: OoxmlNode[]): OoxmlNode[] {
     } else if (node.name === 'w:sdt') {
       audit.mark(node);
       const content = child(node, 'w:sdtContent');
-      if (content) out.push(...unwrapContainers(content.children));
+      if (content) {
+        const inner = unwrapContainers(content.children, sdt);
+        // The wrapper's properties ride its boundary blocks so a save can
+        // re-wrap the range (page-number building blocks, TOC chrome). One
+        // flat level only — the OUTERMOST sdt wins and wipes any markers an
+        // inner one left, so export always sees balanced, non-crossing
+        // ranges. Serialized through CARRY_FILTER (w:-prefixed data only:
+        // a w14:checkbox does not survive — a flat re-emit would need the
+        // extended namespaces declared on our root).
+        if (sdt && inner.length > 0) {
+          const ser = (el: OoxmlNode | undefined): string | null => {
+            if (!el) return null;
+            audit.markSubtree(el);
+            return (
+              el.children
+                .map((c) => serializeOoxml(c, CARRY_FILTER))
+                .join('') || null
+            );
+          };
+          const pr = ser(child(node, 'w:sdtPr'));
+          const endPr = ser(child(node, 'w:sdtEndPr'));
+          if (pr !== null || endPr !== null) {
+            for (const n of inner) sdt.delete(n);
+            const first = inner[0];
+            const last = inner[inner.length - 1];
+            sdt.set(first, { start: { pr, endPr } });
+            sdt.set(last, { ...(sdt.get(last) ?? {}), end: true });
+          }
+        }
+        out.push(...inner);
+      }
     } else if (node.name === 'w:customXml') {
       audit.mark(node);
       out.push(...unwrapContainers(node.children));
@@ -2416,7 +2460,12 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       bold?: boolean;
       italic?: boolean;
     };
-    carry?: { pPr?: string; markRPr?: string };
+    carry?: {
+      pPr?: string;
+      markRPr?: string;
+      sdtStart?: SdtBoundary['start'];
+      sdtEnd?: boolean;
+    };
   } = {};
   // The paragraph mark's own font. The mark is "a physical character in the
   // document" (§17.3.1.29) and it sits on the paragraph's LAST line — Word
@@ -2455,10 +2504,13 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // w:rPr, preserved verbatim for export (see collectCarry).
   const carryPPr = collectCarry(pPr, CONSUMED_PPR);
   const carryMarkRPr = collectCarry(child(pPr, 'w:rPr'), MARK_CONSUMED_RPR);
-  if (carryPPr || carryMarkRPr) {
+  const sdtB = ctx.sdtBoundaries.get(p);
+  if (carryPPr || carryMarkRPr || sdtB) {
     attrs.carry = {
       ...(carryPPr && { pPr: carryPPr }),
       ...(carryMarkRPr && { markRPr: carryMarkRPr }),
+      ...(sdtB?.start && { sdtStart: sdtB.start }),
+      ...(sdtB?.end && { sdtEnd: true }),
     };
   }
   if (list) attrs.list = list;
@@ -3678,7 +3730,13 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
   }
   // Carry-through: tblStyle/tblW/tblLayout/tblInd/tblLook/… survive the save.
   const tblCarry = collectCarry(child(tbl, 'w:tblPr'), CONSUMED_TBLPR);
-  if (tblCarry) attrs['carry'] = { tblPr: tblCarry };
+  const tblSdt = ctx.sdtBoundaries.get(tbl);
+  if (tblCarry || tblSdt)
+    attrs['carry'] = {
+      ...(tblCarry && { tblPr: tblCarry }),
+      ...(tblSdt?.start && { sdtStart: tblSdt.start }),
+      ...(tblSdt?.end && { sdtEnd: true }),
+    };
   return ctx.schema.nodes['table'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     rows.length > 0
@@ -3751,7 +3809,7 @@ function parseBlocks(parent: OoxmlNode, ctx: Ctx): PMNode[] {
   const blocks: PMNode[] = [];
   const styleKeys: (string | null)[] = [];
   const pending: string[] = [];
-  for (const node of unwrapContainers(parent.children)) {
+  for (const node of unwrapContainers(parent.children, ctx.sdtBoundaries)) {
     if (takeBlockBookmark(node, pending)) continue;
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
@@ -4022,7 +4080,7 @@ function parseBodyBlocks(
   const sections: SectionConfig[] = [];
   let start = 0;
   const pendingBookmarks: string[] = [];
-  for (const node of unwrapContainers(body.children)) {
+  for (const node of unwrapContainers(body.children, ctx.sdtBoundaries)) {
     if (takeBlockBookmark(node, pendingBookmarks)) continue;
     if (node.name === 'w:p' || node.name === 'w:tbl') audit.mark(node);
     if (node.name === 'w:p') {
@@ -4544,6 +4602,7 @@ async function importDocxImpl(
     resolveThemeLine,
     tableStyles: [],
     notes,
+    sdtBoundaries: new WeakMap(),
     comments,
     schema: opts?.schema ?? schema,
     contentWidth,

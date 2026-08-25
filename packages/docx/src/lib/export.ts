@@ -984,6 +984,42 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
 /** A top-level block → its OOXML. A `sectPr` marks a section break ending at
  *  this block: it goes inside a paragraph's pPr, or in a trailing empty
  *  paragraph after a table. */
+/** Balance-checked SDT re-wrapping plan for one story's block sequence. A
+ *  block whose carry holds `sdtStart` opens a wrapper, `sdtEnd` closes it;
+ *  orphans (a deleted boundary block) are DROPPED rather than emitted, so
+ *  the XML stays well-formed and the wrapper degrades to plain content —
+ *  exactly what the importer did for every sdt before this existed. */
+function sdtPlan(
+  blocks: PMNode[],
+): Map<number, { open?: string; close?: boolean }> {
+  const plan = new Map<number, { open?: string; close?: boolean }>();
+  let pending: { i: number; xml: string } | null = null;
+  blocks.forEach((b, i) => {
+    const carry = b.attrs['carry'] as {
+      sdtStart?: { pr: string | null; endPr: string | null };
+      sdtEnd?: boolean;
+    } | null;
+    if (carry?.sdtStart && !pending) {
+      const pr = carry.sdtStart.pr
+        ? `<w:sdtPr>${carry.sdtStart.pr}</w:sdtPr>`
+        : '';
+      const endPr = carry.sdtStart.endPr
+        ? `<w:sdtEndPr>${carry.sdtStart.endPr}</w:sdtEndPr>`
+        : '';
+      pending = { i, xml: `<w:sdt>${pr}${endPr}<w:sdtContent>` };
+    }
+    if (carry?.sdtEnd && pending) {
+      plan.set(pending.i, {
+        ...(plan.get(pending.i) ?? {}),
+        open: pending.xml,
+      });
+      plan.set(i, { ...(plan.get(i) ?? {}), close: true });
+      pending = null;
+    }
+  });
+  return plan;
+}
+
 function blockXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
   if (node.type.name === 'paragraph') return paragraphXml(node, ctx, sectPr);
   if (node.type.name !== 'table') audit.exportUnhandled('node', node.type.name);
@@ -1518,11 +1554,18 @@ export async function exportDocx(
   // parts; their sectPr references are patched in below.
   const chromePlan = planChromeOverrides(doc, origSectPrs, ctx);
   const boundaries = sectionBoundaries(doc, origSectPrs, chromePlan?.refPatch);
+  const bodyBlocks: PMNode[] = [];
+  doc.forEach((b) => bodyBlocks.push(b));
+  const sdt = sdtPlan(bodyBlocks);
   let body = '';
   perf.span('export.body', () =>
-    doc.forEach(
-      (block, _offset, i) => (body += blockXml(block, ctx, boundaries.get(i))),
-    ),
+    doc.forEach((block, _offset, i) => {
+      const s = sdt.get(i);
+      body +=
+        (s?.open ?? '') +
+        blockXml(block, ctx, boundaries.get(i)) +
+        (s?.close ? '</w:sdtContent></w:sdt>' : '');
+    }),
   );
 
   const hasComments = comments.length > 0;
@@ -1789,9 +1832,16 @@ function chromeStoryPart(
     openComments: new Set(),
     runIdx: 0,
   };
+  const storyBlocks: PMNode[] = [];
+  node.forEach((b) => storyBlocks.push(b));
+  const sdt = sdtPlan(storyBlocks);
   let body = '';
-  node.forEach((b) => {
-    body += blockXml(b, storyCtx);
+  node.forEach((b, _o, i) => {
+    const s = sdt.get(i);
+    body +=
+      (s?.open ?? '') +
+      blockXml(b, storyCtx) +
+      (s?.close ? '</w:sdtContent></w:sdt>' : '');
   });
   ctx.nextId = storyCtx.nextId;
   const xml =

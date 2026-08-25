@@ -779,6 +779,78 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     });
   });
 
+  it('re-wraps structured document tags around their block range', async () => {
+    // The corpus shape: a page-number building block around ONE footer
+    // paragraph, and a TOC sdt around MANY body blocks. The wrapper's
+    // sdtPr/sdtEndPr ride the boundary blocks and the exporter re-wraps the
+    // range — Word keeps its "Update Table" / "Remove Page Numbers" chrome.
+    const zip = new JSZip();
+    zip.file(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    );
+    zip.file(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    zip.file(
+      'word/document.xml',
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+        <w:p><w:r><w:t>before</w:t></w:r></w:p>
+        <w:sdt>
+          <w:sdtPr><w:id w:val="557057479"/><w:docPartObj><w:docPartGallery w:val="Table of Contents"/><w:docPartUnique/></w:docPartObj></w:sdtPr>
+          <w:sdtEndPr><w:rPr><w:b/></w:rPr></w:sdtEndPr>
+          <w:sdtContent>
+            <w:p><w:r><w:t>toc line 1</w:t></w:r></w:p>
+            <w:p><w:r><w:t>toc line 2</w:t></w:r></w:p>
+          </w:sdtContent>
+        </w:sdt>
+        <w:p><w:r><w:t>after</w:t></w:r></w:p>
+      </w:body></w:document>`,
+    );
+    const bytes = await zip.generateAsync({ type: 'uint8array' });
+    const first = await importDocx(bytes);
+    const saved = await exportDocx(first.doc);
+    const savedXml = await (await JSZip.loadAsync(saved))
+      .file('word/document.xml')!
+      .async('string');
+    // One wrapper, spanning exactly the two TOC paragraphs.
+    expect(savedXml).toContain(
+      '<w:sdt><w:sdtPr><w:id w:val="557057479"/><w:docPartObj><w:docPartGallery w:val="Table of Contents"/><w:docPartUnique/></w:docPartObj></w:sdtPr><w:sdtEndPr><w:rPr><w:b/></w:rPr></w:sdtEndPr><w:sdtContent>',
+    );
+    const openAt = savedXml.indexOf('<w:sdt>');
+    const closeAt = savedXml.indexOf('</w:sdtContent></w:sdt>');
+    expect(openAt).toBeGreaterThan(savedXml.indexOf('before'));
+    expect(closeAt).toBeGreaterThan(savedXml.indexOf('toc line 2'));
+    expect(closeAt).toBeLessThan(savedXml.indexOf('after'));
+    // And it survives a SECOND round-trip intact.
+    const again = await importDocx(saved);
+    const saved2 = await exportDocx(again.doc);
+    const xml2 = await (await JSZip.loadAsync(saved2))
+      .file('word/document.xml')!
+      .async('string');
+    expect(xml2).toContain('<w:docPartGallery w:val="Table of Contents"/>');
+  });
+
+  it('drops an orphaned sdt boundary instead of emitting broken XML', async () => {
+    // A user deleting the start block must not leave a stray close tag.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', { carry: { sdtEnd: true } }, [
+        schema.text('orphan end'),
+      ]),
+      schema.node(
+        'paragraph',
+        { carry: { sdtStart: { pr: '<w:id w:val="1"/>', endPr: null } } },
+        [schema.text('orphan start')],
+      ),
+    ]);
+    const xml = await (await JSZip.loadAsync(await exportDocx(doc)))
+      .file('word/document.xml')!
+      .async('string');
+    expect(xml).not.toContain('<w:sdt>');
+    expect(xml).not.toContain('</w:sdtContent>');
+  });
+
   it('round-trips a picture background (a:solidFill on pic:spPr)', async () => {
     // Word paints the fill BEHIND the bitmap (visible through transparent
     // pixels) — measured in the drawing-chrome probe. It must also survive
