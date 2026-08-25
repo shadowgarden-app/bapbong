@@ -383,12 +383,24 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   const srcRect = crop
     ? `<a:srcRect l="${pct(crop.l)}" t="${pct(crop.t)}" r="${pct(crop.r)}" b="${pct(crop.b)}"/>`
     : '';
+  // The picture border the importer read off pic:spPr/a:ln goes back out the
+  // same way — without this a framed photo rendered framed, then lost its
+  // frame on the first save.
+  const outline = node.attrs['outline'] as {
+    width: number;
+    style: string;
+    color: string;
+  } | null;
+  const ln = outline
+    ? `<a:ln w="${pxToEmu(outline.width)}"><a:solidFill><a:srgbClr val="${outline.color.replace('#', '')}"/></a:solidFill>` +
+      `${outline.style === 'dashed' ? '<a:prstDash val="dash"/>' : ''}</a:ln>`
+    : '';
   const graphic =
     `<a:graphic><a:graphicData uri="${PIC_NS}"><pic:pic>` +
     `<pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
     `<pic:blipFill>${blip}${srcRect}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
     `<pic:spPr><a:xfrm${rotAttr(node)}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
-    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${ln}</pic:spPr>` +
     `</pic:pic></a:graphicData></a:graphic>`;
   const docPr = `<wp:docPr id="${n}" name="Picture ${n}"${descr}/>`;
   // A floating BITMAP goes out as wp:anchor like the drawn shapes always did —

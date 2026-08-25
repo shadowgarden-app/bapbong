@@ -724,6 +724,40 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     });
   });
 
+  it('round-trips a picture border (a:ln on pic:spPr)', async () => {
+    // The importer reads the border; the writer used to emit a bare spPr, so
+    // a framed photo lost its frame on the first save.
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: 'data:image/png;base64,iVBORw0KGgo=',
+          width: 100,
+          height: 50,
+          outline: { width: 4, style: 'solid', color: '#808080' },
+        }),
+      ]),
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: 'data:image/png;base64,iVBORw0KGgo=',
+          width: 100,
+          height: 50,
+          outline: { width: 3, style: 'dashed', color: '#FF0000' },
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    expect(back.child(0).child(0).attrs['outline']).toEqual({
+      width: 4,
+      style: 'solid',
+      color: '#808080',
+    });
+    expect(back.child(1).child(0).attrs['outline']).toEqual({
+      width: 3,
+      style: 'dashed',
+      color: '#FF0000',
+    });
+  });
+
   it('round-trips a row w:tblPrEx and a link target frame', async () => {
     // The importer resolves tblPrEx's w:tblBorders into the row's cells, so
     // only what the model has nowhere else to put rides the carry: w:jc and
