@@ -180,10 +180,24 @@ export interface DocxImport {
  *  endnote bodies are appended at the document end. */
 interface NotesRegistry {
   bodies: { footnote: Map<string, OoxmlNode>; endnote: Map<string, OoxmlNode> };
-  refs: { kind: 'footnote' | 'endnote'; id: string; num: number }[];
+  /** `num` keys the body (every note gets one); `display` is the VISIBLE
+   *  auto number — absent for custom-marked notes, which show their own
+   *  glyph and, per Word (measured), do not consume a number. */
+  refs: {
+    kind: 'footnote' | 'endnote';
+    id: string;
+    num: number;
+    display?: number;
+  }[];
   counter: { footnote: number; endnote: number };
-  /** Assign (and remember) the display number for a reference. */
-  ref(kind: 'footnote' | 'endnote', id: string): number;
+  display: { footnote: number; endnote: number };
+  /** Assign (and remember) the key + display number for a reference.
+   *  `custom` (w:customMarkFollows) skips the display counter. */
+  ref(
+    kind: 'footnote' | 'endnote',
+    id: string,
+    custom?: boolean,
+  ): { num: number; display?: number };
 }
 
 /** Comment bodies (w:comment) + the live set covering the text being parsed.
@@ -582,7 +596,7 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     )
       ? runFont
       : undefined;
-  const textMarks = asSymbols
+  let textMarks = asSymbols
     ? marks.filter((m) => m.type.name !== 'fontFamily')
     : marks;
   let buf = '';
@@ -619,17 +633,32 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
       const id = attrOf(node, 'w:id');
       if (id && ctx.notes.bodies[kind].has(id)) {
         flush();
-        const num = ctx.notes.ref(kind, id);
-        const refMarks = [
-          ...marks,
-          ctx.schema.marks['vertAlign'].create({ value: 'super' }),
-        ];
-        // Footnotes carry a `footnote` mark so the layout engine can match the
-        // reference to its page-bottom body; endnotes stay plain superscripts
-        // (their bodies are appended at the document end).
-        if (kind === 'footnote')
-          refMarks.push(ctx.schema.marks['footnote'].create({ num, id }));
-        out.push(ctx.schema.text(String(num), refMarks));
+        // w:customMarkFollows: the glyph is the REST OF THIS RUN's text (the
+        // † the author typed), no auto number is drawn and the note does not
+        // consume one — measured: marks render 1, †, 2, not 1, 2†, 3.
+        const customAttr = attrOf(node, 'w:customMarkFollows');
+        const custom = customAttr === '1' || customAttr === 'true';
+        const { num, display } = ctx.notes.ref(kind, id, custom);
+        if (custom) {
+          // The custom glyph needs the footnote mark so the layout engine
+          // still links it to its page-bottom body.
+          if (kind === 'footnote')
+            textMarks = [
+              ...textMarks,
+              ctx.schema.marks['footnote'].create({ num, id }),
+            ];
+        } else {
+          const refMarks = [
+            ...marks,
+            ctx.schema.marks['vertAlign'].create({ value: 'super' }),
+          ];
+          // Footnotes carry a `footnote` mark so the layout engine can match
+          // the reference to its page-bottom body; endnotes stay plain
+          // superscripts (their bodies are appended at the document end).
+          if (kind === 'footnote')
+            refMarks.push(ctx.schema.marks['footnote'].create({ num, id }));
+          out.push(ctx.schema.text(String(display), refMarks));
+        }
       }
     } else if (node.name === 'w:br') {
       // A page break is a paragraph-level property (hasPageBreak reads it);
@@ -4090,10 +4119,12 @@ async function buildNotesRegistry(zip: JSZip): Promise<NotesRegistry> {
     bodies,
     refs: [],
     counter: { footnote: 0, endnote: 0 },
-    ref(kind, id) {
+    display: { footnote: 0, endnote: 0 },
+    ref(kind, id, custom) {
       const num = ++reg.counter[kind];
-      reg.refs.push({ kind, id, num });
-      return num;
+      const display = custom ? undefined : ++reg.display[kind];
+      reg.refs.push({ kind, id, num, ...(display && { display }) });
+      return { num, display };
     },
   };
   return reg;
@@ -4245,11 +4276,20 @@ function buildCommentNodes(ctx: Ctx): CommentNode[] {
 }
 
 /** Parse one note body into blocks, prefixing the first paragraph with its
- *  display number (so "1. note text" reads naturally). Shared by the appended
- *  endnote section and the page-bottom footnote map. */
-function noteBlocks(note: OoxmlNode, num: number, ctx: Ctx): PMNode[] {
+ *  display number. The marker is the bare superscript number — measured:
+ *  Word's own body marker is just the w:footnoteRef glyph; the space that
+ *  usually follows is AUTHORED text inside the note. A custom-marked note
+ *  (display == null) gets no marker at all: its body already starts with
+ *  the author's glyph. Shared by the appended endnote section and the
+ *  page-bottom footnote map. */
+function noteBlocks(
+  note: OoxmlNode,
+  display: number | null,
+  ctx: Ctx,
+): PMNode[] {
   const blocks = parseBlocks(note, ctx);
-  const marker = ctx.schema.text(`${num}. `, [
+  if (display == null) return blocks;
+  const marker = ctx.schema.text(`${display}`, [
     ctx.schema.marks['vertAlign'].create({ value: 'super' }),
   ]);
   const first = blocks[0];
@@ -4268,10 +4308,11 @@ function noteBlocks(note: OoxmlNode, num: number, ctx: Ctx): PMNode[] {
  *  of whichever page their reference falls on. */
 function buildFootnotesMap(ctx: Ctx): Record<number, PMNode> {
   const out: Record<number, PMNode> = {};
-  for (const { kind, id, num } of ctx.notes.refs) {
+  for (const { kind, id, num, display } of ctx.notes.refs) {
     if (kind !== 'footnote') continue;
     const note = ctx.notes.bodies.footnote.get(id);
-    if (note) out[num] = storyDoc(ctx, noteBlocks(note, num, ctx), null);
+    if (note)
+      out[num] = storyDoc(ctx, noteBlocks(note, display ?? null, ctx), null);
   }
   return out;
 }
@@ -4287,9 +4328,9 @@ function buildNotesSection(ctx: Ctx): PMNode[] {
       ctx.schema.text('Ghi chú cuối', [ctx.schema.marks['strong'].create()]),
     ]),
   ];
-  for (const { id, num } of endnotes) {
+  for (const { id, display } of endnotes) {
     const note = ctx.notes.bodies.endnote.get(id);
-    if (note) out.push(...noteBlocks(note, num, ctx));
+    if (note) out.push(...noteBlocks(note, display ?? null, ctx));
   }
   return out;
 }

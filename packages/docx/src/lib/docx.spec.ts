@@ -2322,11 +2322,62 @@ describe('importDocx', () => {
     expect(markMap(ref.marks).vertAlign.value).toBe('super');
     expect(markMap(ref.marks).footnote.num).toBe(1);
     // bodies live in the footnotes map keyed by display number, NOT appended.
-    expect(footnotes[1].textContent).toMatch(/1\. Note alpha/);
-    expect(footnotes[2].textContent).toMatch(/2\. Note beta/);
+    // Marker matches Word's: the bare number (any space after it is the
+    // note's own authored text, absent in this fixture).
+    expect(footnotes[1].textContent).toMatch(/^1Note alpha/);
+    expect(footnotes[2].textContent).toMatch(/^2Note beta/);
     const tail: string[] = [];
     doc.forEach((n) => tail.push(n.textContent));
     expect(tail.join('\n')).not.toMatch(/Note alpha/);
+  });
+
+  it('customMarkFollows: the custom glyph is the mark, no number consumed', async () => {
+    // Measured in Word's PDF: marks render 1, †, 2 — the custom-marked note
+    // draws no auto number and does not advance the counter, and its body
+    // carries no synthesized marker (the author's glyph is already there).
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:p><w:r><w:t>a</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r>
+      <w:r><w:t>b</w:t></w:r><w:r><w:footnoteReference w:id="3" w:customMarkFollows="1"/><w:t>\u2020</w:t></w:r>
+      <w:r><w:t>c</w:t></w:r><w:r><w:footnoteReference w:id="4"/></w:r></w:p>
+    </w:body></w:document>`;
+    const footnotesXml = `<?xml version="1.0"?><w:footnotes xmlns:w="${W_NS}">
+      <w:footnote w:id="2"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> first</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="3"><w:p><w:r><w:t xml:space="preserve">\u2020 custom</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="4"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> second</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>`;
+    const { doc, footnotes } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          'word/footnotes.xml': footnotesXml,
+        },
+      ),
+    );
+    const texts: { text: string; note?: number }[] = [];
+    doc.child(0).forEach((n) => {
+      if (n.isText)
+        texts.push({
+          text: n.text ?? '',
+          note: n.marks.find((m) => m.type.name === 'footnote')?.attrs[
+            'num'
+          ] as number | undefined,
+        });
+    });
+    const joined = texts.map((t) => t.text).join('');
+    // Auto numbers are 1 and 2; the middle note shows only the dagger.
+    expect(joined).toBe('a1b\u2020c2');
+    // The dagger carries the footnote mark linking it to its body.
+    expect(texts.find((t) => t.text === '\u2020')?.note).toBe(2);
+    // Bodies: keys are internal; the custom note's body has NO synthesized
+    // marker, the auto ones show their display numbers.
+    expect(footnotes[1].textContent).toBe('1 first');
+    expect(footnotes[2].textContent).toBe('\u2020 custom');
+    expect(footnotes[3].textContent).toBe('2 second');
   });
 
   it('appends endnotes at the document end (not page-bottom)', async () => {
@@ -2354,7 +2405,7 @@ describe('importDocx', () => {
     const tail: string[] = [];
     doc.forEach((n) => tail.push(n.textContent));
     expect(tail).toContain('Ghi chú cuối');
-    expect(tail.join('\n')).toMatch(/1\. End gamma/);
+    expect(tail.join('\n')).toMatch(/1End gamma/);
   });
 
   it('parses w:cols + section breaks into doc.sections', async () => {
