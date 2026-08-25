@@ -745,6 +745,40 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect(img.attrs['title']).toBe('Revenue chart');
   });
 
+  it('round-trips a shape gradient fill', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: '',
+          width: 100,
+          height: 50,
+          shape: {
+            kind: 'roundRect',
+            gradient: {
+              angle: 90,
+              stops: [
+                { pos: 0, color: '#A0B4DD' },
+                { pos: 1, color: '#4472C4' },
+              ],
+            },
+          },
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    const shape = back.child(0).child(0).attrs['shape'] as Record<
+      string,
+      unknown
+    >;
+    expect(shape['gradient']).toEqual({
+      angle: 90,
+      stops: [
+        { pos: 0, color: '#A0B4DD' },
+        { pos: 1, color: '#4472C4' },
+      ],
+    });
+  });
+
   it('round-trips a picture background (a:solidFill on pic:spPr)', async () => {
     // Word paints the fill BEHIND the bitmap (visible through transparent
     // pixels) — measured in the drawing-chrome probe. It must also survive

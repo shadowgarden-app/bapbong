@@ -1337,6 +1337,72 @@ describe('importDocx', () => {
     });
   });
 
+  it('resolves gradient fills — direct a:gradFill and theme fillRef entries', async () => {
+    // The stock Office fillStyleLst entries 2/3 are gradients of the
+    // placeholder colour; measured in Word's PDF they paint as smooth
+    // vertical gradients (a:lin ang="5400000"), not the first stop.
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:clrScheme name="Office"><a:accent1><a:srgbClr val="4472C4"/></a:accent1></a:clrScheme>
+      <a:fmtScheme><a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:gradFill><a:gsLst>
+          <a:gs pos="0"><a:schemeClr val="phClr"><a:lumMod val="110000"/></a:schemeClr></a:gs>
+          <a:gs pos="100000"><a:schemeClr val="phClr"/></a:gs>
+        </a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>
+      </a:fillStyleLst></a:fmtScheme>
+    </a:themeElements></a:theme>`;
+    const shape = (spPr: string, style: string) =>
+      `<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/>
+        <a:graphic><a:graphicData><wps:wsp xmlns:wps="${WPS_NS_G}">
+          <wps:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${spPr}</wps:spPr>
+          ${style}
+        </wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    const documentXml =
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}"><w:body><w:p>` +
+      // Direct gradient on the shape's own spPr.
+      shape(
+        `<a:gradFill><a:gsLst>
+          <a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs>
+          <a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs>
+        </a:gsLst><a:lin ang="0" scaled="0"/></a:gradFill>`,
+        '',
+      ) +
+      // Theme entry 2 via fillRef, accent1 standing in for phClr.
+      shape(
+        '',
+        `<wps:style><a:fillRef idx="2"><a:schemeClr val="accent1"/></a:fillRef></wps:style>`,
+      ) +
+      `</w:p><w:sectPr/></w:body></w:document>`;
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        themeXml,
+      ),
+    );
+    const shapeOf = (i: number) =>
+      doc.child(0).child(i).attrs.shape as Record<string, unknown>;
+    expect(shapeOf(0)['gradient']).toEqual({
+      angle: 0,
+      stops: [
+        { pos: 0, color: '#FF0000' },
+        { pos: 1, color: '#0000FF' },
+      ],
+    });
+    const themed = shapeOf(1)['gradient'] as {
+      angle: number;
+      stops: { pos: number; color: string }[];
+    };
+    expect(themed.angle).toBe(90); // 5400000 / 60000 — vertical, as measured
+    expect(themed.stops).toHaveLength(2);
+    // phClr = accent1 #4472C4; last stop carries it untransformed.
+    expect(themed.stops[1]).toEqual({ pos: 1, color: '#4472C4' });
+    expect(shapeOf(1)['fill']).toBeUndefined();
+  });
+
   it('takes a shape outline width from the theme line style its lnRef names', async () => {
     // a:lnRef @idx is one-based into the theme's a:lnStyleLst. A gallery
     // shape carries only the ref, so without resolving it every such shape
@@ -3009,8 +3075,6 @@ describe('importDocx', () => {
   });
 
   it('resolves the full DrawingML colour union and its transforms', async () => {
-    const WPS_NS =
-      'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
     // accent1 at 60% luminance with +40% offset is how Word writes
     // "Accent 1, Lighter 40%" — reading only @val loses the adjustment and
     // paints the shape in the base accent.
@@ -3022,7 +3086,7 @@ describe('importDocx', () => {
     </a:themeElements></a:theme>`;
     const shape = (spPr: string, style: string) =>
       `<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="914400"/>
-        <a:graphic><a:graphicData><wps:wsp xmlns:wps="${WPS_NS}">
+        <a:graphic><a:graphicData><wps:wsp xmlns:wps="${WPS_NS_G}">
           <wps:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${spPr}</wps:spPr>
           ${style}
         </wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;

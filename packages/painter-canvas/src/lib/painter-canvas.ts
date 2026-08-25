@@ -685,6 +685,34 @@ export class CanvasPainter {
     }
   }
 
+  /** CanvasGradient for a GradientFill across the box: the gradient line
+   *  runs through the box centre along the stated angle (0° = →, 90° = ↓,
+   *  matching a:lin on a y-down canvas), spanning the box's projection so
+   *  the first and last stops land exactly on the leading/trailing edges. */
+  private linearGradient(
+    g: NonNullable<ShapeSpec['gradient']>,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): CanvasGradient {
+    const rad = (g.angle * Math.PI) / 180;
+    const dx = Math.cos(rad);
+    const dy = Math.sin(rad);
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const half = (Math.abs(w * dx) + Math.abs(h * dy)) / 2;
+    const grad = this.ctx.createLinearGradient(
+      cx - dx * half,
+      cy - dy * half,
+      cx + dx * half,
+      cy + dy * half,
+    );
+    for (const s of g.stops)
+      grad.addColorStop(Math.min(1, Math.max(0, s.pos)), s.color);
+    return grad;
+  }
+
   /** Vector shape in an image box, per ShapeSpec.kind. The path is built with
    *  primitive calls (no Path2D) and filled then stroked; strokes stay inside
    *  the box so thick outlines don't bleed into text. */
@@ -698,7 +726,10 @@ export class CanvasPainter {
     const ctx = this.ctx;
     const lw = s.strokeWidth || 1;
     const fillStroke = () => {
-      if (s.fill) {
+      if (s.gradient) {
+        ctx.fillStyle = this.linearGradient(s.gradient, x, y, w, h);
+        ctx.fill();
+      } else if (s.fill) {
         ctx.fillStyle = s.fill;
         ctx.fill();
       }

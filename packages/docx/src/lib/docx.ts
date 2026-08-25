@@ -60,6 +60,7 @@ import {
 import type {
   BorderSide,
   CellDiagonals,
+  GradientFill,
   BorderStyle,
   ColumnConfig,
   DocCompat,
@@ -73,6 +74,7 @@ import { emfBitmapDataUrl, wmfBitmapDataUrl } from './emf.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
+  parseGradient,
   buildThemeFillResolver,
   buildThemeFontResolver,
   buildThemeLineResolver,
@@ -1089,14 +1091,25 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     );
     shape['stroke'] = directStroke ?? themedStroke ?? '#000000';
   }
-  // Fill: an explicit a:noFill wins, then a direct a:solidFill, then the
-  // shape style's a:fillRef resolved through the theme's format scheme —
-  // which is how Word fills every shape inserted from the shape gallery.
-  const fill = child(spPr, 'a:noFill')
-    ? undefined
-    : (solidFillColor(spPr, ctx) ??
-      ctx.resolveThemeFill(child(style, 'a:fillRef')));
-  if (fill) shape['fill'] = fill;
+  // Fill: an explicit a:noFill wins, then the shape's own a:solidFill or
+  // a:gradFill, then the shape style's a:fillRef resolved through the
+  // theme's format scheme — which is how Word fills every shape inserted
+  // from the shape gallery. A gradient (direct or themed) carries resolved
+  // stops; anything else stays a flat colour.
+  if (!child(spPr, 'a:noFill')) {
+    let fill = solidFillColor(spPr, ctx);
+    let gradient: GradientFill | undefined;
+    const directGrad = child(spPr, 'a:gradFill');
+    if (fill === undefined && directGrad)
+      gradient = parseGradient(directGrad, ctx.resolveTheme);
+    if (fill === undefined && gradient === undefined) {
+      const themed = ctx.resolveThemeFill(child(style, 'a:fillRef'));
+      if (typeof themed === 'string') fill = themed;
+      else if (themed) gradient = themed;
+    }
+    if (fill) shape['fill'] = fill;
+    if (gradient) shape['gradient'] = gradient;
+  }
   if (attrOf(child(spPr, 'a:xfrm'), 'flipV') === '1') shape['flipV'] = true;
 
   const extent = findDescendant(drawing, 'wp:extent');

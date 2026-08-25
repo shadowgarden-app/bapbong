@@ -299,6 +299,15 @@ export interface InlineRun {
  *  Word drawing shapes (wps/VML rect + straight connector) map to this: same
  *  layout semantics as an image (atomic box, inline or anchored), different
  *  paint. Dimensions live on the carrying image; colors are CSS. */
+/** Linear gradient fill (DrawingML a:gradFill + a:lin). `angle` is degrees
+ *  clockwise from the +x axis (a:lin@ang / 60000 — 90 = top→bottom, the
+ *  direction every stock Office theme entry uses); stops are 0..1 positions
+ *  with fully resolved colours. */
+export interface GradientFill {
+  angle: number;
+  stops: { pos: number; color: string }[];
+}
+
 export interface ShapeSpec {
   /** Preset geometry. Names mirror OOXML prstGeom tokens: 'line' is a
    *  corner-to-corner straight connector; 'rightArrow' a block arrow;
@@ -316,6 +325,10 @@ export interface ShapeSpec {
   strokeWidth?: number;
   /** Rect fill; absent = transparent (outline only). */
   fill?: string;
+  /** Linear gradient fill — wins over `fill` when present. Direct
+   *  a:gradFill on the shape, or a gradient entry of the theme's
+   *  fillStyleLst reached through a:fillRef. */
+  gradient?: GradientFill;
   /** Line drawn bottom-left → top-right instead (a:xfrm flipV). */
   flipV?: boolean;
   /** Arrowheads on a 'line' connector (VML startarrow/endarrow, DrawingML

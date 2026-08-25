@@ -264,9 +264,18 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const n = ctx.nextId++;
   const cx = pxToEmu((node.attrs['width'] as number) ?? 0);
   const cy = pxToEmu((node.attrs['height'] as number) ?? 0);
-  const fill = s.fill
-    ? `<a:solidFill><a:srgbClr val="${s.fill.replace(/^#/, '')}"/></a:solidFill>`
-    : '<a:noFill/>';
+  const fill = s.gradient
+    ? `<a:gradFill><a:gsLst>${s.gradient.stops
+        .map(
+          (st) =>
+            `<a:gs pos="${Math.round(st.pos * 100000)}"><a:srgbClr val="${st.color.replace(/^#/, '')}"/></a:gs>`,
+        )
+        .join(
+          '',
+        )}</a:gsLst><a:lin ang="${Math.round(s.gradient.angle * 60000)}" scaled="0"/></a:gradFill>`
+    : s.fill
+      ? `<a:solidFill><a:srgbClr val="${s.fill.replace(/^#/, '')}"/></a:solidFill>`
+      : '<a:noFill/>';
   // Dash stops: d/sp are ST_Percentage against the line width (100000 = one
   // stroke width), which is exactly the model's unit — so the pattern writes
   // out losslessly, with no preset-name guessing. Child order inside a:ln is

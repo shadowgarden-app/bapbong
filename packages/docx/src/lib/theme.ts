@@ -1,5 +1,6 @@
+import type { GradientFill } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
-import { attrOf, child, findDescendant, OoxmlNode } from './ooxml.js';
+import { attrOf, child, children, findDescendant, OoxmlNode } from './ooxml.js';
 
 /** Resolve an OOXML `w:themeColor` (+ optional tint/shade hex) to "#RRGGBB". */
 export type ThemeResolver = (
@@ -446,11 +447,39 @@ export function buildThemeLineResolver(
   };
 }
 
+/** Parse an `a:gradFill` into resolved stops + a linear angle. Radial/path
+ *  gradients (`a:path`) are not modelled — the caller falls back to the
+ *  first stop, same as before gradients painted at all. */
+export function parseGradient(
+  gradFill: OoxmlNode,
+  resolveTheme: ThemeResolver,
+  phClr?: string,
+): GradientFill | undefined {
+  const gsLst = child(gradFill, 'a:gsLst');
+  if (!gsLst) return undefined;
+  const stops: GradientFill['stops'] = [];
+  for (const gs of children(gsLst, 'a:gs')) {
+    const color = drawingColor(gs, resolveTheme, phClr);
+    if (color === undefined) continue;
+    stops.push({ pos: Number(attrOf(gs, 'pos') ?? '0') / 100000, color });
+  }
+  if (stops.length < 2) return undefined;
+  stops.sort((a, b) => a.pos - b.pos);
+  const lin = child(gradFill, 'a:lin');
+  if (!lin) return undefined; // a:path (radial) → caller's first-stop fallback
+  // @scaled skews the angle to the shape's aspect ratio; measured against
+  // Word's PDF the stock vertical entries render identically either way, so
+  // it is read as a decision and not applied.
+  attrOf(lin, 'scaled');
+  return { angle: Number(attrOf(lin, 'ang') ?? '0') / 60000, stops };
+}
+
 /** Resolve an `a:fillRef` — a shape saying "fill me the way the theme's
- *  format scheme entry N does, using this colour as the placeholder". */
+ *  format scheme entry N does, using this colour as the placeholder". A
+ *  gradient entry resolves to a {@link GradientFill}. */
 export type ThemeFillResolver = (
   fillRef: OoxmlNode | undefined,
-) => string | undefined;
+) => string | GradientFill | undefined;
 
 export function buildThemeFillResolver(
   themeRoot: OoxmlNode | undefined,
@@ -475,8 +504,14 @@ export function buildThemeFillResolver(
     if (!entry) return phClr;
     if (entry.name === 'a:solidFill')
       return drawingColor(entry, resolveTheme, phClr) ?? phClr;
-    // Gradient and pattern entries: we paint flat, so take the first stop —
-    // closer than the bare placeholder, which ignores the scheme's tinting.
+    // Gradient entries resolve to real stops (probe-measured: Word paints
+    // the stock entries as smooth vertical gradients, ang=5400000). Pattern
+    // and radial entries still degrade to the first stop — closer than the
+    // bare placeholder, which ignores the scheme's tinting.
+    if (entry.name === 'a:gradFill') {
+      const grad = parseGradient(entry, resolveTheme, phClr);
+      if (grad) return grad;
+    }
     const firstStop = child(child(entry, 'a:gsLst'), 'a:gs');
     return drawingColor(firstStop, resolveTheme, phClr) ?? phClr;
   };
