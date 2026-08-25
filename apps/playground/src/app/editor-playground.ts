@@ -197,6 +197,21 @@ const FONT_FAMILIES = [
 ] as const;
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48] as const;
 
+/** One .docx the dev server found in `apps/playground/public`. */
+interface SampleFile {
+  name: string;
+  size: number;
+}
+
+/** Shown when `/api/samples` isn't served — a built playground has no dev
+ *  server behind it, so fall back to the names that have always been there. */
+const BUILTIN_SAMPLES: readonly SampleFile[] = [
+  { name: 'sample.docx', size: 0 },
+  { name: 'large_sample.docx', size: 0 },
+  { name: 'khtn6.docx', size: 0 },
+  { name: 'tab-stops.docx', size: 0 },
+];
+
 @Component({
   selector: 'app-editor-playground',
   templateUrl: './editor-playground.html',
@@ -209,6 +224,10 @@ export class EditorPlayground implements OnDestroy {
   protected readonly headerKeys = signal<string[]>([]);
   protected readonly footerKeys = signal<string[]>([]);
   protected readonly loading = signal(false);
+  /** The .docx files sitting in `public/`, as reported by the dev-server API
+   *  (`proxy.config.mjs`) — the sample dropdown's options. */
+  protected readonly samples = signal<readonly SampleFile[]>(BUILTIN_SAMPLES);
+  protected readonly selectedSample = signal('');
   /** Dev mode: run the XML coverage audit on every import and show its
    *  report inline (the playground's whole point is inspecting conversion —
    *  no console needed). Persisted under the audit's own localStorage key,
@@ -277,6 +296,7 @@ export class EditorPlayground implements OnDestroy {
     this.fontsReady = loadBundledFonts().then((r) => {
       this.fontRegistry = r;
     });
+    void this.loadSampleList();
   }
   // Debounced side panels.
   private panelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -287,9 +307,39 @@ export class EditorPlayground implements OnDestroy {
     await this.load(file.name, await file.arrayBuffer());
   }
 
+  /** Ask the dev server which samples `public/` holds. Any failure (no dev
+   *  server, SPA fallback serving index.html) just keeps the built-in list. */
+  private async loadSampleList(): Promise<void> {
+    try {
+      const res = await fetch('/api/samples');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { files?: SampleFile[] };
+      if (body.files?.length) this.samples.set(body.files);
+    } catch {
+      // Keep BUILTIN_SAMPLES — the dropdown still works.
+    }
+  }
+
+  protected async onSamplePick(event: Event): Promise<void> {
+    const name = (event.target as HTMLSelectElement).value;
+    if (!name) return;
+    this.selectedSample.set(name);
+    await this.loadSample(name);
+  }
+
+  /** "khtn6.docx · 961 KB" — the size only when the API reported one. */
+  protected sampleLabel(file: SampleFile): string {
+    if (!file.size) return file.name;
+    const kb = file.size / 1024;
+    const size =
+      kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
+    return `${file.name} · ${size}`;
+  }
+
   protected async loadSample(name = 'sample.docx'): Promise<void> {
     try {
-      const res = await fetch(name);
+      // Names carry spaces and parentheses — encode before fetching.
+      const res = await fetch(encodeURIComponent(name));
       if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
       await this.load(name, await res.arrayBuffer());
     } catch (err) {

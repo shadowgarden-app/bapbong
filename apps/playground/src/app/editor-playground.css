@@ -59,6 +59,10 @@ h2 {
 .sample:hover {
   background: #f4f4f6;
 }
+/* The sample dropdown: long file names must not stretch the actions row. */
+.picker {
+  max-width: 320px;
+}
 
 .canvas-layout {
   display: flex;

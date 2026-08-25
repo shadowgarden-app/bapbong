@@ -10,27 +10,18 @@
       <input type="file" accept=".docx" (change)="onFile($event)" />
       <span>Choose a .docx file…</span>
     </label>
-    <button type="button" class="sample" (click)="loadSample()">
-      Load sample
-    </button>
-    <button
-      type="button"
-      class="sample"
-      (click)="loadSample('large_sample.docx')"
+    <select
+      class="sample picker"
+      aria-label="Load a .docx from the playground's public folder"
+      title="Every .docx in apps/playground/public"
+      [value]="selectedSample()"
+      (change)="onSamplePick($event)"
     >
-      Load large sample
-    </button>
-    <button type="button" class="sample" (click)="loadSample('khtn6.docx')">
-      Load khtn6
-    </button>
-    <button
-      type="button"
-      class="sample"
-      (click)="loadSample('tab-stops.docx')"
-      title="LibreOffice-generated: right+leader, center, decimal and default tabs"
-    >
-      Load tab stops
-    </button>
+      <option value="">Load a sample…</option>
+      @for (file of samples(); track file.name) {
+      <option [value]="file.name">{{ sampleLabel(file) }}</option>
+      }
+    </select>
     <label
       class="dev-toggle"
       title="Log every OOXML tag/attribute the converter never read"

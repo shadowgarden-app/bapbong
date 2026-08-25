@@ -85,6 +85,9 @@
     "serve": {
       "continuous": true,
       "executor": "@angular/build:dev-server",
+      "options": {
+        "proxyConfig": "apps/playground/proxy.config.mjs"
+      },
       "configurations": {
         "production": {
           "buildTarget": "playground:build:production"
