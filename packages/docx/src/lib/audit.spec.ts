@@ -408,10 +408,11 @@ describe('xml audit (import)', () => {
     expect(inert).toContain('w:docGrid');
     for (const k of inert) expect(unknown).not.toContain(k);
 
-    // @compatLnSpc's default is "0" — a written "1" really does change line
-    // spacing in the shape, so it must NOT be demoted along with its
-    // neighbours just because it rode in on the same element.
-    expect(unknown).toContain('wps:bodyPr @compatLnSpc');
+    // @compatLnSpc is READ now: measured against Word's PDF it changes
+    // nothing on the page (identical 32.9pt line steps on and off), so it is
+    // carried for the round-trip rather than fed into layout — and being
+    // read, it no longer surfaces in any bucket.
+    expect(unknown).not.toContain('wps:bodyPr @compatLnSpc');
   });
 
   it('demotes empty bodyPr, the t75 shapetype and default arrowhead sizes', async () => {

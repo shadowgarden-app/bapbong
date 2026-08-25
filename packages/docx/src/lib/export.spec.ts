@@ -1127,6 +1127,7 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
             anchor: 'ctr',
             autofit: true,
             autoWidth: true,
+            compatLnSpc: true,
           },
         }),
       ]),
@@ -1151,6 +1152,8 @@ describe('exportDocx (E2: lists / tables / images / hyperlinks)', () => {
     expect((tb as { autofit?: boolean }).autofit).toBe(true);
     // …and wrap="none" (Word grows the box wide off this flag).
     expect((tb as { autoWidth?: boolean }).autoWidth).toBe(true);
+    // compatLnSpc carries verbatim (measured no-op, still Word's data).
+    expect((tb as { compatLnSpc?: boolean }).compatLnSpc).toBe(true);
   });
 
   it('round-trips a hyperlink (link mark + href)', async () => {

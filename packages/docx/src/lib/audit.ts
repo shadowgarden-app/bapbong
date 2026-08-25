@@ -428,9 +428,10 @@ const arrowSizeInert = (v: string, n: OoxmlNode): boolean =>
 
 const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   // CT_TextBodyProperties. Word stamps the whole default set onto every
-  // textbox it writes. NOT listed: @anchor, which is READ now (the text block
-  // slides to ctr/b), and @compatLnSpc, whose default is false — a written
-  // "1" really does change line spacing inside the shape.
+  // textbox it writes. NOT listed: @anchor/@wrap/@compatLnSpc, which are
+  // READ now (anchor slides the block, wrap="none" grows the box wide,
+  // compatLnSpc is carried verbatim — measured a no-op on the page, probes
+  // B6/B7).
   'wps:bodyPr @rot': isNum(0),
   'wps:bodyPr @spcFirstLastPara': isFalse,
   'wps:bodyPr @vertOverflow': (v) => v === 'overflow',

@@ -1198,6 +1198,7 @@ function parseTextbox(
   anchor?: 'ctr' | 'b';
   autofit?: boolean;
   autoWidth?: boolean;
+  compatLnSpc?: boolean;
 } | null {
   const blocks = txbxBlocks(
     child(child(wsp, 'wps:txbx'), 'w:txbxContent'),
@@ -1233,12 +1234,19 @@ function parseTextbox(
   // longest line instead (probe B9: declared 108pt, drawn 315.4pt = text +
   // both insets, height untouched).
   const autoWidth = attrOf(bodyPr, 'wrap') === 'none';
+  // @compatLnSpc ("simplified line spacing"): measured to change NOTHING —
+  // probes B6/B7 render 200% line spacing at an identical 32.9pt step with
+  // the flag on and off. Carried for the round-trip, deliberately not fed
+  // into layout.
+  const compatAttr = attrOf(bodyPr, 'compatLnSpc');
+  const compatLnSpc = compatAttr === '1' || compatAttr === 'true';
   return {
     blocks,
     ...(inset && { inset }),
     ...(anchor && { anchor }),
     ...(autofit && { autofit }),
     ...(autoWidth && { autoWidth }),
+    ...(compatLnSpc && { compatLnSpc }),
   };
 }
 
