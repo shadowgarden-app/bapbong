@@ -313,6 +313,7 @@ function paragraphToFlow(
           inset?: { l: number; t: number; r: number; b: number };
           anchor?: 'ctr' | 'b';
           autofit?: boolean;
+          autoWidth?: boolean;
         } | null;
         if (tb && tb.blocks.length > 0) {
           const schema = child.type.schema;
@@ -322,6 +323,7 @@ function paragraphToFlow(
           if (tb.inset) f.inset = tb.inset;
           if (tb.anchor) f.anchor = tb.anchor;
           if (tb.autofit) f.autofit = true;
+          if (tb.autoWidth) f.autoWidth = true;
         }
         floats.push(f);
       } else {
@@ -1493,8 +1495,28 @@ function resolveFloat(
   if (f.behind) rf.behind = true;
   if (f.content && f.content.length > 0) {
     const inset = f.inset ?? TEXTBOX_INSET;
-    const right = Math.max(inset.l + MIN_BAND, f.width - inset.r);
+    // @wrap="none": lay the text out against an unbounded right edge — no
+    // line ever wraps — then size the box to the longest line (probe B9).
+    const right = f.autoWidth
+      ? Number.MAX_SAFE_INTEGER
+      : Math.max(inset.l + MIN_BAND, f.width - inset.r);
     const inner = layoutFlow(f.content, inset.l, right, ctx);
+    if (f.autoWidth) {
+      // A line's own width is its BAND (unbounded here) — the text extent is
+      // the right edge of its last painted segment/image.
+      const lineRight = (l: LayoutLine): number =>
+        Math.max(
+          0,
+          ...l.segments.map((s) => s.x + (s.width ?? 0)),
+          ...(l.images ?? []).map((im) => im.x + im.width),
+        );
+      const maxRight = Math.max(
+        0,
+        ...inner.lines.map(lineRight),
+        ...inner.tables.map((t) => t.x + t.width),
+      );
+      rf.width = Math.max(f.width, maxRight + inset.r);
+    }
     // a:spAutoFit: the box height is the CONTENT's, not the stored extent —
     // Word regrows on open (probe B5: cy stored 14.2pt, drawn 105.8pt).
     // Callers building wrap exclusions must read rf.height, not f.height.

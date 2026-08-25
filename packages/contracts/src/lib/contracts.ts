@@ -448,6 +448,11 @@ export interface FlowFloat {
    *  storing cy=14.2pt drew 105.8pt), so layout does the same: `height`
    *  here is the stored extent, the resolved float carries the grown one. */
   autofit?: boolean;
+  /** wps:bodyPr @wrap="none" — the text never wraps; the box grows WIDE to
+   *  fit its longest line instead (measured: a probe box declared 108pt
+   *  drew 315.4pt = text + both insets, height kept as declared). Distinct
+   *  from `wrap` below, which is the ANCHOR's text-wrap mode. */
+  autoWidth?: boolean;
   wrap: 'square' | 'topAndBottom' | 'none';
   /**
    * The 'square' wrap came from wp:wrapThrough / wp:wrapTight rather than

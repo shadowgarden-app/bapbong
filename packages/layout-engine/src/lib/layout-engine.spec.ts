@@ -2157,6 +2157,40 @@ describe('textbox floats', () => {
     expect(body!.x).toBeGreaterThanOrEqual(f!.x + f!.width);
   });
 
+  it('wrap="none" grows the box wide to its longest line', () => {
+    // Probe B9: a box declared 108pt wide drew 315.4pt — text + both insets
+    // on one line, height untouched. The declared width only floors it.
+    const boxPara: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'aaaa bbbb', font: font() }],
+    };
+    const host: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 40,
+          height: 30,
+          wrap: 'none',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          shape: { kind: 'rect', stroke: '#000000', strokeWidth: 1 },
+          content: [boxPara],
+          autoWidth: true,
+        },
+      ],
+    };
+    const { pages } = layoutBlocks([host], config());
+    const f = pages[0].floats?.[0];
+    // One line, never wrapped: 'aaaa bbbb' = 9 chars.
+    expect(f?.lines).toHaveLength(1);
+    // 10 + 9 chars + 10 — the 10px/char test font makes that 10+90+10.
+    expect(f?.width).toBeCloseTo(10 + 9 * 10 + 10);
+    expect(f?.height).toBe(30); // height keeps the declared extent
+  });
+
   it('lays out a table inside the box, dropped by the same inset', () => {
     // A textbox holds block content, so a table in one has to reach the page —
     // two of them were being dropped from a factsheet whose boxes are

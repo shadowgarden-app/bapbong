@@ -1197,6 +1197,7 @@ function parseTextbox(
   inset?: { l: number; t: number; r: number; b: number };
   anchor?: 'ctr' | 'b';
   autofit?: boolean;
+  autoWidth?: boolean;
 } | null {
   const blocks = txbxBlocks(
     child(child(wsp, 'wps:txbx'), 'w:txbxContent'),
@@ -1228,11 +1229,16 @@ function parseTextbox(
   // model and the layout engine grows the box — the stored extent stays on
   // the node untouched, which is also exactly what Word writes back.
   const autofit = !!child(bodyPr, 'a:spAutoFit');
+  // @wrap="none": the text never wraps — Word grows the box WIDE to the
+  // longest line instead (probe B9: declared 108pt, drawn 315.4pt = text +
+  // both insets, height untouched).
+  const autoWidth = attrOf(bodyPr, 'wrap') === 'none';
   return {
     blocks,
     ...(inset && { inset }),
     ...(anchor && { anchor }),
     ...(autofit && { autofit }),
+    ...(autoWidth && { autoWidth }),
   };
 }
 

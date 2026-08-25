@@ -436,7 +436,6 @@ const INERT_ATTRS: Record<string, (v: string, n: OoxmlNode) => boolean> = {
   'wps:bodyPr @vertOverflow': (v) => v === 'overflow',
   'wps:bodyPr @horzOverflow': (v) => v === 'overflow',
   'wps:bodyPr @vert': (v) => v === 'horz',
-  'wps:bodyPr @wrap': (v) => v === 'square',
   'wps:bodyPr @numCol': isNum(1),
   'wps:bodyPr @spcCol': isNum(0),
   'wps:bodyPr @rtlCol': isFalse,

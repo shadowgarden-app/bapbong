@@ -399,7 +399,8 @@ describe('xml audit (import)', () => {
     // Attributes sitting at their ECMA-376 default, and elements the spec
     // defines as no-ops in exactly this state.
     expect(inert).toContain('wps:bodyPr @rot');
-    expect(inert).toContain('wps:bodyPr @wrap');
+    // @wrap is READ now (wrap="none" grows the box wide), so it no longer
+    // appears in any bucket — coverage, not demotion.
     expect(inert).toEqual(expect.arrayContaining(['a:effectLst', 'a:srcRect']));
     expect(inert).toContain('a:ln');
     expect(inert).toContain('a:prstTxWarp');
