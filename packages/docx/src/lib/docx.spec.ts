@@ -1586,6 +1586,7 @@ describe('importDocx', () => {
       <w:style w:type="table" w:styleId="Base"><w:tblPr><w:jc w:val="center"/></w:tblPr></w:style>
       <w:style w:type="table" w:styleId="Derived"><w:basedOn w:val="Base"/></w:style>
       <w:style w:type="table" w:styleId="Ends"><w:tblPr><w:jc w:val="end"/></w:tblPr></w:style>
+      <w:style w:type="table" w:styleId="TrPrOnly"><w:trPr><w:jc w:val="center"/></w:trPr></w:style>
     </w:styles>`;
     const tbl = (pr: string) =>
       `<w:tbl><w:tblPr>${pr}</w:tblPr><w:tblGrid><w:gridCol w:w="1000"/></w:tblGrid>` +
@@ -1596,6 +1597,7 @@ describe('importDocx', () => {
       ${tbl('<w:tblStyle w:val="Ends"/>')}
       ${tbl('<w:tblStyle w:val="Base"/><w:jc w:val="left"/>')}
       ${tbl('')}
+      ${tbl('<w:tblStyle w:val="TrPrOnly"/>')}
       <w:p><w:r><w:t>tail</w:t></w:r></w:p>
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
@@ -1605,6 +1607,44 @@ describe('importDocx', () => {
     expect(align(2)).toBe('right'); // ST_JcTable "end"
     expect(align(3)).toBe(null); // the table's own w:jc wins
     expect(align(4)).toBe(null); // no style alignment, no table alignment
+    // STYLE-LEVEL w:trPr/w:jc — Word centres the table off it (probe T7
+    // measured the offset at exactly (content−grid)/2).
+    expect(align(5)).toBe('center');
+  });
+
+  it('inherits table-style borders per SIDE through basedOn', async () => {
+    // A derived style overriding only w:bottom keeps the base's other five
+    // sides — whole-element replacement would silently drop the base grid.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"/>
+      <w:style w:type="table" w:styleId="Grid"><w:tblPr><w:tblBorders>
+        <w:top w:val="single" w:sz="8" w:space="0" w:color="7F7F7F"/>
+        <w:bottom w:val="single" w:sz="8" w:space="0" w:color="7F7F7F"/>
+      </w:tblBorders></w:tblPr></w:style>
+      <w:style w:type="table" w:styleId="RedBottom"><w:basedOn w:val="Grid"/><w:tblPr><w:tblBorders>
+        <w:bottom w:val="single" w:sz="16" w:space="0" w:color="FF0000"/>
+      </w:tblBorders></w:tblPr></w:style>
+    </w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl><w:tblPr><w:tblStyle w:val="RedBottom"/></w:tblPr>
+      <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+      <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+      <w:p><w:r><w:t>tail</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    const borders = doc.child(0).attrs['borders'] as Record<string, unknown>;
+    // Base grid survives… (sz is eighths of a point: 8 → 1pt → 4/3 px)
+    expect(borders['top']).toEqual({
+      width: expect.closeTo(4 / 3),
+      style: 'solid',
+      color: '#7F7F7F',
+    });
+    // …under the derived override (sz 16 → 2pt → 8/3 px).
+    expect(borders['bottom']).toEqual({
+      width: expect.closeTo(8 / 3),
+      style: 'solid',
+      color: '#FF0000',
+    });
   });
 
   it("layers a table style's w:tcPr under the conditional branches", async () => {

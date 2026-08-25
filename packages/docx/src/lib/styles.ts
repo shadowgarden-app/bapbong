@@ -185,6 +185,18 @@ export function buildStyleRegistry(
     // kind of every ordinary style unread (63 of them in one lesson plan).
     const type = attrOf(style, 'w:type') ?? 'paragraph';
     if (isDefault && !defaultIds.has(type)) defaultIds.set(type, id);
+    // Both alignment spellings are read EAGERLY (`??` would leave the loser
+    // unread and the audit noisy): w:tblPr/w:jc, and STYLE-LEVEL w:trPr/w:jc
+    // — Word honours the latter (probe T7: a style whose only alignment is
+    // <w:trPr><w:jc w:val="center"/></w:trPr> centres the table, measured at
+    // exactly (content−grid)/2 in its PDF).
+    const tblPrJc = attrOf(child(child(style, 'w:tblPr'), 'w:jc'), 'w:val');
+    const trPrJc = attrOf(child(child(style, 'w:trPr'), 'w:jc'), 'w:val');
+    // A whole-table w:shd in a table STYLE is a measured no-op: Word paints
+    // none of it (probe T7's FDE9D9 fill is absent from the PDF in both
+    // compat 12 and 15). Consumed so the audit reports a decision, not a gap.
+    const styleTblShd = child(child(style, 'w:tblPr'), 'w:shd');
+    if (styleTblShd) audit.markSubtree(styleTblShd);
     defs.set(id, {
       type,
       basedOn: attrOf(child(style, 'w:basedOn'), 'w:val'),
@@ -193,7 +205,7 @@ export function buildStyleRegistry(
       tcPr: child(style, 'w:tcPr'),
       tblBorders: child(child(style, 'w:tblPr'), 'w:tblBorders'),
       tblCellMar: child(child(style, 'w:tblPr'), 'w:tblCellMar'),
-      tblJc: attrOf(child(child(style, 'w:tblPr'), 'w:jc'), 'w:val'),
+      tblJc: tblPrJc ?? trPrJc,
       tblPr: child(style, 'w:tblPr'),
       // Filtered off node.children, not via children(): the accessor would
       // mark every branch as read, including the wholeTable one the audit is
@@ -252,16 +264,42 @@ export function buildStyleRegistry(
     return def.tcPr ? [...base, def.tcPr] : base;
   }
 
+  const BORDER_SIDES = [
+    'w:top',
+    'w:left',
+    'w:bottom',
+    'w:right',
+    'w:insideH',
+    'w:insideV',
+  ];
+
   function resolveTblBorders(
     styleId: string | undefined,
     seen: Set<string>,
   ): OoxmlNode | undefined {
-    if (!styleId || seen.has(styleId)) return undefined;
-    const def = defs.get(styleId);
-    if (!def) return undefined;
-    seen.add(styleId);
-    usedIds.add(styleId);
-    return def.tblBorders ?? resolveTblBorders(def.basedOn, seen);
+    // Word inherits table-style borders PER SIDE through basedOn — a derived
+    // style overriding only w:bottom keeps the base's other five sides. The
+    // chain is collected derived-first, then each side takes its nearest
+    // definition; with a single declaration the element passes through as-is.
+    const chain: OoxmlNode[] = [];
+    let id = styleId;
+    while (id && !seen.has(id)) {
+      const def = defs.get(id);
+      if (!def) break;
+      seen.add(id);
+      usedIds.add(id);
+      if (def.tblBorders) chain.push(def.tblBorders);
+      id = def.basedOn;
+    }
+    if (chain.length === 0) return undefined;
+    if (chain.length === 1) return chain[0];
+    const sides: OoxmlNode[] = [];
+    for (const side of BORDER_SIDES) {
+      const holder = chain.find((b) => child(b, side));
+      const el = holder && child(holder, side);
+      if (el) sides.push(el);
+    }
+    return { name: 'w:tblBorders', attrs: {}, children: sides, text: '' };
   }
 
   function resolveTblJc(
