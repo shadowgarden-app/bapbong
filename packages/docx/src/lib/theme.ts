@@ -8,20 +8,59 @@ export type ThemeResolver = (
   shade?: string,
 ) => string | undefined;
 
-// clrScheme key → the w:themeColor names that reference it.
+// clrScheme key → the fixed alias names that always reference it. The
+// mapping-DEPENDENT names (bg1/tx1/background1/text1 …) are deliberately not
+// here: those route through w:clrSchemeMapping below.
 const ALIASES: Record<string, string[]> = {
-  dk1: ['dark1', 'text1'],
-  lt1: ['light1', 'background1'],
-  dk2: ['dark2', 'text2'],
-  lt2: ['light2', 'background2'],
-  accent1: ['accent1'],
-  accent2: ['accent2'],
-  accent3: ['accent3'],
-  accent4: ['accent4'],
-  accent5: ['accent5'],
-  accent6: ['accent6'],
+  dk1: ['dark1'],
+  lt1: ['light1'],
+  dk2: ['dark2'],
+  lt2: ['light2'],
+  accent1: [],
+  accent2: [],
+  accent3: [],
+  accent4: [],
+  accent5: [],
+  accent6: [],
   hlink: ['hyperlink'],
   folHlink: ['followedHyperlink'],
+};
+
+// settings.xml w:clrSchemeMapping: each attribute names the theme slot a
+// symbolic colour resolves to. The DrawingML short names (a:schemeClr
+// val="bg1"/"tx1"/…) and the w:themeColor names ("background1"/"text1"/…)
+// both go through it — Word lets a document swap dark/light per slot, and
+// hardcoding the default mapping is exactly how "bg1 + lumMod 50%" used to
+// fail to resolve and fall back to black.
+const CLR_MAPPING_SLOTS: ReadonlyArray<[attr: string, names: string[]]> = [
+  ['bg1', ['bg1', 'background1']],
+  ['t1', ['tx1', 'text1']],
+  ['bg2', ['bg2', 'background2']],
+  ['t2', ['tx2', 'text2']],
+  ['accent1', ['accent1']],
+  ['accent2', ['accent2']],
+  ['accent3', ['accent3']],
+  ['accent4', ['accent4']],
+  ['accent5', ['accent5']],
+  ['accent6', ['accent6']],
+  ['hyperlink', ['hyperlink']],
+  ['followedHyperlink', ['followedHyperlink']],
+];
+
+/** ECMA-376 defaults when w:clrSchemeMapping (or an attribute) is absent. */
+const CLR_MAPPING_DEFAULTS: Record<string, string> = {
+  bg1: 'light1',
+  t1: 'dark1',
+  bg2: 'light2',
+  t2: 'dark2',
+  accent1: 'accent1',
+  accent2: 'accent2',
+  accent3: 'accent3',
+  accent4: 'accent4',
+  accent5: 'accent5',
+  accent6: 'accent6',
+  hyperlink: 'hyperlink',
+  followedHyperlink: 'followedHyperlink',
 };
 
 function schemeColor(el: OoxmlNode): string | undefined {
@@ -105,6 +144,7 @@ export function buildThemeFontResolver(
 
 export function buildThemeResolver(
   themeRoot: OoxmlNode | undefined,
+  clrSchemeMapping?: OoxmlNode,
 ): ThemeResolver {
   const map = new Map<string, string>();
   const scheme = findDescendant(themeRoot, 'a:clrScheme');
@@ -115,6 +155,15 @@ export function buildThemeResolver(
     if (!color) continue;
     map.set(key, color);
     for (const alias of ALIASES[key] ?? []) map.set(alias, color);
+  }
+  // Mapped names resolve through settings.xml's w:clrSchemeMapping (attribute
+  // absent → the ECMA default). Applied after the base fill so a remapped
+  // accent overrides its identity entry.
+  for (const [attr, names] of CLR_MAPPING_SLOTS) {
+    const target =
+      attrOf(clrSchemeMapping, `w:${attr}`) ?? CLR_MAPPING_DEFAULTS[attr];
+    const color = target ? map.get(target) : undefined;
+    if (color) for (const name of names) map.set(name, color);
   }
 
   return (themeColor, tint, shade) => {

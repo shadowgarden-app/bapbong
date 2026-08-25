@@ -4377,6 +4377,7 @@ async function importDocxImpl(
   const stylesXml = await readPart(zip, 'word/styles.xml');
   const numberingXml = await readPart(zip, 'word/numbering.xml');
   const themeXml = await readPart(zip, 'word/theme/theme1.xml');
+  const settingsPart = await readPart(zip, 'word/settings.xml');
 
   const parsePart = (name: string, xml: string): OoxmlNode => {
     const root = parseXml(xml);
@@ -4384,11 +4385,22 @@ async function importDocxImpl(
     return root;
   };
 
+  // Settings are read before everything else: the theme resolver needs
+  // w:clrSchemeMapping (bg1/tx1 → which theme slot) and the compat profile is
+  // consulted while the body is parsed (auto spacing, table indents).
+  const settingsEl = settingsPart
+    ? child(parsePart('word/settings.xml', settingsPart), 'w:settings')
+    : undefined;
+  const compat = parseCompat(settingsEl);
+
   // Stateless/shared pieces; numbering counters are per-story (built fresh below).
   const themeRoot = themeXml
     ? parsePart('word/theme/theme1.xml', themeXml)
     : undefined;
-  const resolveTheme = buildThemeResolver(themeRoot);
+  const resolveTheme = buildThemeResolver(
+    themeRoot,
+    child(settingsEl, 'w:clrSchemeMapping'),
+  );
   const resolveFont = buildThemeFontResolver(themeRoot);
   const resolveThemeFill = buildThemeFillResolver(themeRoot, resolveTheme);
   const resolveThemeLine = buildThemeLineResolver(themeRoot);
@@ -4417,14 +4429,6 @@ async function importDocxImpl(
   // Stateless — markers are recounted by the layout engine, so one resolver
   // serves every story (and its audit usage-tracking sees them all).
   const numbering = buildNumbering(numberingRoot, resolveTheme, resolveFont);
-  // Read here rather than with the other settings below: the compat profile
-  // is consulted while the body is parsed (auto spacing, table indents), so it
-  // has to be known before makeCtx runs.
-  const settingsPart = await readPart(zip, 'word/settings.xml');
-  const settingsEl = settingsPart
-    ? child(parsePart('word/settings.xml', settingsPart), 'w:settings')
-    : undefined;
-  const compat = parseCompat(settingsEl);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     compat,
     styles,

@@ -1263,6 +1263,80 @@ describe('importDocx', () => {
     expect(doc.child(2).child(0).attrs.outline).toBeNull();
   });
 
+  it('resolves mapped scheme names (bg1/tx1) through w:clrSchemeMapping', async () => {
+    // Word writes picture borders as schemeClr val="bg1" + lumMod — the
+    // MAPPED short names, which resolve via settings.xml's
+    // w:clrSchemeMapping (bg1→lt1 by default). Hardcoding only the long
+    // aliases made bg1 fail to resolve, so drawingColor bailed before its
+    // transform loop and the border fell back to black.
+    const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements>
+      <a:clrScheme name="Office">
+        <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+        <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+      </a:clrScheme>
+    </a:themeElements></a:theme>`;
+    const pic = (spPr: string) =>
+      `<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/>
+        <a:graphic><a:graphicData><pic:pic>
+          <pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill>
+          <pic:spPr>${spPr}</pic:spPr>
+        </pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r></w:p>`;
+    const greyLn = `<a:ln w="38100"><a:solidFill><a:schemeClr val="bg1"><a:lumMod val="50000"/></a:schemeClr></a:solidFill></a:ln>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
+      ${pic(greyLn)}
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
+    const settings = (mapping: string) =>
+      `<?xml version="1.0"?><w:settings xmlns:w="${W_NS}">${mapping}</w:settings>`;
+
+    // Default mapping (no w:clrSchemeMapping at all): bg1 → lt1 = white,
+    // lumMod 50% → mid grey. Word's PDF says #7F7F7F; the float chain here
+    // rounds the same 127.5 up, which is the same colour on screen.
+    const { doc } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        {
+          'image1.png': PNG_1x1,
+        },
+        themeXml,
+      ),
+    );
+    expect(doc.child(0).child(0).attrs.outline).toEqual({
+      width: 4,
+      style: 'solid',
+      color: '#808080',
+    });
+
+    // A document that remaps bg1 to accent1: the same border resolves
+    // through the mapping, not the hardcoded default.
+    const { doc: remapped } = await importDocx(
+      await makeDocx(
+        documentXml,
+        undefined,
+        undefined,
+        relsXml,
+        {
+          'image1.png': PNG_1x1,
+        },
+        themeXml,
+        {
+          'word/settings.xml': settings(
+            '<w:clrSchemeMapping w:bg1="accent1"/>',
+          ),
+        },
+      ),
+    );
+    expect(remapped.child(0).child(0).attrs.outline).toEqual({
+      width: 4,
+      style: 'solid',
+      color: '#203864', // accent1 #4472C4 at 50% luminance
+    });
+  });
+
   it('takes a shape outline width from the theme line style its lnRef names', async () => {
     // a:lnRef @idx is one-based into the theme's a:lnStyleLst. A gallery
     // shape carries only the ref, so without resolving it every such shape

@@ -121,7 +121,6 @@ const IGNORED_TAGS = new Set([
   'w:themeFontLang',
   'w:listSeparator',
   'w:zoom',
-  'w:clrSchemeMapping',
   'w:embedTrueTypeFonts',
   'w:proofState',
   // The document's list of smart-tag recognisers. Same subject as the
