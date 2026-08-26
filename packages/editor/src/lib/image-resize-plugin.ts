@@ -2,6 +2,7 @@ import type {
   EditorPlugin,
   EditorPointerEvent,
   OverlayFrame,
+  OverlayFrameAction,
   PluginContext,
   ResolvedLayout,
   ResolvedTable,
@@ -530,8 +531,12 @@ export function imageResizePlugin(): EditorPlugin {
     const node = imageAt(c.state, pos);
     const float = node?.attrs['float'] as Record<string, unknown> | null;
     const mode = wrapModeOf(float ?? null);
-    const acts = WRAP_ACTIONS.map((a) => ({ ...a, active: a.id === mode }));
+    const acts: OverlayFrameAction[] = WRAP_ACTIONS.map((a) => ({
+      ...a,
+      active: a.id === mode,
+    }));
     if (node && mode === 'inline') {
+      acts.push({ id: 'sep-pos', title: '', svg: '', separator: true });
       acts.push(...POSITION_ACTIONS.map((a) => ({ ...a, active: false })));
       const vector = node.attrs['vector'] as VectorImageSpec | null;
       const target = vector

@@ -113,6 +113,10 @@ export interface OverlayFrameAction {
   svg: string;
   /** Render highlighted (the mode currently in effect). */
   active?: boolean;
+  /** Render as a thin group divider instead of a button — `title`/`svg` are
+   *  unused and clicks never fire (the id still keys the rebuild signature,
+   *  so keep it unique). */
+  separator?: boolean;
 }
 
 /** A selection frame around an object (image resize): border + 8 resize

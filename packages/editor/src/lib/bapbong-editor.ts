@@ -1501,6 +1501,13 @@ export class BapbongEditor {
         strip.dataset['sig'] = sig;
         strip.replaceChildren();
         for (const a of acts) {
+          if (a.separator) {
+            const d = document.createElement('div');
+            d.style.cssText =
+              'align-self:center;width:1px;height:16px;background:#d0d4da;margin:0 3px;flex:none;';
+            strip.appendChild(d);
+            continue;
+          }
           const b = document.createElement('button');
           b.type = 'button';
           b.dataset['action'] = a.id;
