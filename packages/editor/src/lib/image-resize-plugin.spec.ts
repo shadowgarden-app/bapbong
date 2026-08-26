@@ -1,5 +1,6 @@
 import { schema } from '@shadow-garden/bapbong-model';
 import {
+  alignRaiseFor,
   cursorFor,
   imageAt,
   resizeRect,
@@ -301,5 +302,43 @@ describe('imageAt (stale-position guard)', () => {
 
   it('returns null when the position holds a non-image node', () => {
     expect(imageAt(mk(2), 1)).toBeNull(); // inside a paragraph's text
+  });
+});
+
+describe('alignRaiseFor (seat an equation on the line)', () => {
+  const vec = (
+    height: number,
+    ops: { kind: string; y?: number; vAlign?: string }[],
+  ) => ({ width: 400, height, ops }) as never;
+
+  it('lowers the box by the internal descent, scaled to the display size', () => {
+    // Baseline at 352 of 416 logical units: descent 64/416 of a 20px box.
+    const v = vec(416, [{ kind: 'text', y: 352 }]);
+    expect(alignRaiseFor(v, 20)).toBeCloseTo(-(64 / 416) * 20, 2);
+  });
+
+  it('uses the LOWEST baseline when runs stack (fractions)', () => {
+    const v = vec(416, [
+      { kind: 'text', y: 160 },
+      { kind: 'text', y: 352 },
+    ]);
+    expect(alignRaiseFor(v, 41.6)).toBeCloseTo(-6.4, 2);
+  });
+
+  it('ignores top/bottom-anchored runs and non-text ops', () => {
+    const v = vec(416, [
+      { kind: 'line' },
+      { kind: 'text', y: 400, vAlign: 'top' },
+      { kind: 'text', y: 352 },
+    ]);
+    expect(alignRaiseFor(v, 41.6)).toBeCloseTo(-6.4, 2);
+  });
+
+  it('returns null with nothing to align to, 0 when already seated', () => {
+    expect(alignRaiseFor(vec(416, [{ kind: 'line' }]), 20)).toBeNull();
+    expect(alignRaiseFor(vec(416, []), 20)).toBeNull();
+    expect(alignRaiseFor(vec(0, [{ kind: 'text', y: 0 }]), 20)).toBeNull();
+    // Baseline on the box's bottom edge: descent 0, nothing to sink.
+    expect(alignRaiseFor(vec(416, [{ kind: 'text', y: 416 }]), 20)).toBe(0);
   });
 });

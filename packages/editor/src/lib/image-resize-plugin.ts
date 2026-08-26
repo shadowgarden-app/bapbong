@@ -5,6 +5,7 @@ import type {
   PluginContext,
   ResolvedLayout,
   ResolvedTable,
+  VectorImageSpec,
 } from '@shadow-garden/bapbong-contracts';
 import { imageAtPoint } from '@shadow-garden/bapbong-selection';
 import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
@@ -294,6 +295,51 @@ const WRAP_ACTIONS: { id: string; title: string; svg: string }[] = [
   },
 ];
 
+/** Baseline-position controls on the strip: nudge the image off the line's
+ *  baseline (w:position on the object's run — `raise` attr, px positive UP),
+ *  plus, for equations, a one-click seat onto the line. */
+const POSITION_ACTIONS: { id: string; title: string; svg: string }[] = [
+  {
+    id: 'posLower',
+    title: 'Hạ xuống (½ pt)',
+    svg: '<path d="M2 13.5h12"/><path d="M8 3v7"/><path d="M5.5 7.5 8 10l2.5-2.5"/>',
+  },
+  {
+    id: 'posRaise',
+    title: 'Nâng lên (½ pt)',
+    svg: '<path d="M2 13.5h12"/><path d="M8 10V3"/><path d="M5.5 5.5 8 3l2.5 2.5"/>',
+  },
+];
+const ALIGN_ACTION = {
+  id: 'posAlign',
+  title: 'Đặt công thức lên dòng',
+  svg: '<path d="M2 12.5h12"/><path d="M4.5 3.5h4"/><path d="M6.5 3.5V10"/><path d="M4.5 8.5 6.5 10.5 8.5 8.5"/>',
+};
+
+/** The stepper's increment: half a point, the unit Word's Position spinner
+ *  moves in. The attr itself is px (InlineRun.raise's convention). */
+export const RAISE_STEP_PX = (0.5 * 96) / 72;
+
+/** The `raise` that seats a vector equation's INTERNAL baseline on the
+ *  line's: MathType previews carry descent space below their glyph baseline,
+ *  so the box must sink by that much (scaled to the displayed height).
+ *  Negative = down. Null when the spec draws no baseline-positioned text
+ *  (nothing to align to). */
+export function alignRaiseFor(
+  vector: VectorImageSpec,
+  heightPx: number,
+): number | null {
+  if (vector.height <= 0 || heightPx <= 0) return null;
+  let base = -Infinity;
+  for (const op of vector.ops)
+    if (op.kind === 'text' && op.vAlign === undefined)
+      base = Math.max(base, op.y);
+  if (!Number.isFinite(base)) return null;
+  const descent = vector.height - base;
+  if (descent <= 0) return 0;
+  return -Math.round((descent / vector.height) * heightPx * 100) / 100;
+}
+
 /** Which strip id is in effect for an image's float attr. */
 export function wrapModeOf(float: Record<string, unknown> | null): string {
   if (!float) return 'inline';
@@ -477,14 +523,26 @@ export function imageResizePlugin(): EditorPlugin {
     hoverCursor = cursor !== null;
   };
 
-  /** The wrap strip for the image at `pos`, with the current mode lit. */
+  /** The wrap strip for the image at `pos`, with the current mode lit —
+   *  plus the baseline-position group for inline images (floats are anchored
+   *  to the page; a baseline shift means nothing to them). */
   const actionsFor = (c: PluginContext, pos: number) => {
-    const float = imageAt(c.state, pos)?.attrs['float'] as Record<
-      string,
-      unknown
-    > | null;
+    const node = imageAt(c.state, pos);
+    const float = node?.attrs['float'] as Record<string, unknown> | null;
     const mode = wrapModeOf(float ?? null);
-    return WRAP_ACTIONS.map((a) => ({ ...a, active: a.id === mode }));
+    const acts = WRAP_ACTIONS.map((a) => ({ ...a, active: a.id === mode }));
+    if (node && mode === 'inline') {
+      acts.push(...POSITION_ACTIONS.map((a) => ({ ...a, active: false })));
+      const vector = node.attrs['vector'] as VectorImageSpec | null;
+      const target = vector
+        ? alignRaiseFor(vector, Number(node.attrs['height']) || 0)
+        : null;
+      if (target !== null) {
+        const raise = Number(node.attrs['raise']) || 0;
+        acts.push({ ...ALIGN_ACTION, active: Math.abs(raise - target) < 0.3 });
+      }
+    }
+    return acts;
   };
 
   const refresh = (c: PluginContext): void => {
@@ -659,6 +717,26 @@ export function imageResizePlugin(): EditorPlugin {
     onFrameAction(id) {
       const c = ctx;
       if (!c || !sel || !imageNodeAt(c.state, sel.pos)) return false;
+      if (id === 'posRaise' || id === 'posLower' || id === 'posAlign') {
+        const node = imageAt(c.state, sel.pos);
+        if (!node) return false;
+        const cur = Number(node.attrs['raise']) || 0;
+        let next: number | null;
+        if (id === 'posAlign') {
+          const vector = node.attrs['vector'] as VectorImageSpec | null;
+          next = vector
+            ? alignRaiseFor(vector, Number(node.attrs['height']) || 0)
+            : null;
+        } else {
+          next = cur + (id === 'posRaise' ? RAISE_STEP_PX : -RAISE_STEP_PX);
+        }
+        if (next === null) return false;
+        next = Math.round(next * 100) / 100;
+        if (Math.abs(next) < 0.005) next = 0;
+        c.dispatch(c.state.tr.setNodeAttribute(sel.pos, 'raise', next));
+        refresh(c);
+        return true;
+      }
       if (!WRAP_ACTIONS.some((a) => a.id === id)) return false;
       const node = imageAt(c.state, sel.pos);
       const float = node?.attrs['float'] as Record<string, unknown> | null;
