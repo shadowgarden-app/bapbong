@@ -21,6 +21,11 @@
  * Offsets are from the start of a record's parameter bytes (after the 6-byte
  * Size+Function prefix) unless said otherwise.
  */
+import type {
+  VectorImageSpec,
+  VectorOp,
+} from '@shadow-garden/bapbong-contracts';
+import { decodeWmfText } from './wmf-charmap.js';
 
 /** One glyph run: EXTTEXTOUT plus the graphics state it was issued under. */
 export interface WmfTextOp {
@@ -364,7 +369,7 @@ export function wmfVectorImage(bytes: Uint8Array): WmfVectorImage | null {
         const len = view.getInt16(p + 4, true);
         const fwOpts = view.getUint16(p + 6, true);
         // ETO_OPAQUE (0x0002) | ETO_CLIPPED (0x0004) insert the rectangle.
-        let strAt = p + 8 + (fwOpts & 0x0006 ? 8 : 0);
+        const strAt = p + 8 + (fwOpts & 0x0006 ? 8 : 0);
         if (len < 0 || strAt + len > off + size) return null;
         const text = bytes.slice(strAt, strAt + len);
         const dxAt = strAt + len + (len & 1);
@@ -410,4 +415,85 @@ export function wmfVectorImage(bytes: Uint8Array): WmfVectorImage | null {
 
   if (!sawEof || extX <= 0 || extY <= 0) return null;
   return { width: extX, height: extY, unitsPerInch, ops };
+}
+
+/** The registry family a WMF facename paints with. Symbol and MT Extra runs
+ *  are already decoded to Unicode, so they render from the same serif face
+ *  as the surrounding formula text. */
+function familyOf(face: string): string {
+  return face === 'Symbol' || face === 'MT Extra' || face === 'System'
+    ? 'Times New Roman'
+    : face;
+}
+
+const cssColor = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
+
+export interface WmfVectorResult {
+  spec: VectorImageSpec;
+  /** Physical size in CSS px from the placeable header, when it has one —
+   *  the size fallback for markup that states none. */
+  pxWidth: number | null;
+  pxHeight: number | null;
+}
+
+/**
+ * Parse a vector WMF and resolve it to the renderer-facing contract: bytes
+ * decoded to Unicode per facename, colours to CSS, LogFont height to an em
+ * size, TA flags to a vertical alignment. Null when {@link wmfVectorImage}
+ * rejects the file.
+ */
+export function wmfVectorSpec(bytes: Uint8Array): WmfVectorResult | null {
+  const image = wmfVectorImage(bytes);
+  if (!image) return null;
+  const ops: VectorOp[] = image.ops.map((op) => {
+    if (op.kind === 'line')
+      return {
+        kind: 'line',
+        x1: op.x1,
+        y1: op.y1,
+        x2: op.x2,
+        y2: op.y2,
+        width: op.width,
+        color: cssColor(op.color),
+      };
+    if (op.kind === 'polygon')
+      return {
+        kind: 'polygon',
+        points: op.points.map((pt) => ({ x: pt.x, y: pt.y })),
+        ...(op.fill !== null ? { fill: cssColor(op.fill) } : {}),
+        stroke: cssColor(op.strokeColor),
+        strokeWidth: op.strokeWidth,
+      };
+    // TA_BASELINE is both bits (24); TA_BOTTOM is 8 alone; else top. The
+    // contract's default is baseline, so only the others are stated.
+    const vertical = op.align & 24;
+    return {
+      kind: 'text',
+      x: op.x,
+      y: op.y,
+      text: decodeWmfText(op.bytes, op.face),
+      ...(op.dx ? { dx: [...op.dx] } : {}),
+      // Negative LogFont height is the em size; positive is the cell height
+      // (em + internal leading), taken as-is — slightly large, and MathType
+      // always writes the negative form.
+      size: Math.abs(op.fontHeight),
+      family: familyOf(op.face),
+      ...(op.weight >= 600 ? { bold: true } : {}),
+      ...(op.italic ? { italic: true } : {}),
+      ...(op.underline ? { underline: true } : {}),
+      color: cssColor(op.color),
+      ...(vertical !== 24
+        ? { vAlign: vertical === 8 ? ('bottom' as const) : ('top' as const) }
+        : {}),
+    };
+  });
+  const px = (units: number): number | null =>
+    image.unitsPerInch > 0
+      ? Math.round((units / image.unitsPerInch) * 96)
+      : null;
+  return {
+    spec: { width: image.width, height: image.height, ops },
+    pxWidth: px(image.width),
+    pxHeight: px(image.height),
+  };
 }

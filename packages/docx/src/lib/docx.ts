@@ -71,6 +71,7 @@ import { audit } from './audit.js';
 import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
 import { parseCompat } from './compat.js';
 import { emfBitmapDataUrl, wmfBitmapDataUrl } from './emf.js';
+import { wmfVectorSpec, WmfVectorResult } from './wmf-vector.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
@@ -229,6 +230,9 @@ interface Ctx {
   numbering: NumberingResolver;
   rels: Map<string, Relationship>;
   media: Map<string, string>; // zip path → data URL
+  /** Vector WMFs (MathType equation previews) resolved to display lists,
+   *  keyed like `media`. The media entry keeps the original bytes. */
+  vectorMedia: Map<string, WmfVectorResult>;
   resolveTheme: ThemeResolver;
   resolveFont: ThemeFontResolver;
   /** Shape fill from an `a:fillRef` (theme format scheme + placeholder). */
@@ -1054,8 +1058,12 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const rel = rid ? ctx.rels.get(rid) : undefined;
   if (!rel) return null;
   const target = rel.target.replace(/^\/+/, '');
-  const src = ctx.media.get(`word/${target}`) ?? ctx.media.get(target);
+  const mediaKey = ctx.media.has(`word/${target}`) ? `word/${target}` : target;
+  const src = ctx.media.get(mediaKey);
   if (!src) return null;
+  // Equation previews (vector WMF) resolved at extract time: the node keeps
+  // the original bytes in `src` and carries the display list beside them.
+  const vector = ctx.vectorMedia.get(mediaKey);
 
   const vshape = findDescendant(holder, 'v:shape');
   const style = attrOf(vshape, 'style') ?? '';
@@ -1080,12 +1088,12 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     ptToPx(/(?:^|;)width:([\d.]+)pt/.exec(style)) ??
     (Number(attrOf(holder, 'w:dxaOrig'))
       ? twipsToPx(Number(attrOf(holder, 'w:dxaOrig')))
-      : null);
+      : (vector?.pxWidth ?? null));
   const height =
     ptToPx(/(?:^|;)height:([\d.]+)pt/.exec(style)) ??
     (Number(attrOf(holder, 'w:dyaOrig'))
       ? twipsToPx(Number(attrOf(holder, 'w:dyaOrig')))
-      : null);
+      : (vector?.pxHeight ?? null));
 
   return ctx.schema.nodes['image'].create({
     src,
@@ -1093,6 +1101,7 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     height,
     alt: vmlAltText,
     float: null,
+    vector: vector?.spec ?? null,
   });
 }
 
@@ -4434,15 +4443,22 @@ function storyDoc(
   );
 }
 
-async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
+async function extractMedia(zip: JSZip): Promise<{
+  media: Map<string, string>;
+  vectorMedia: Map<string, WmfVectorResult>;
+}> {
   const media = new Map<string, string>();
+  const vectorMedia = new Map<string, WmfVectorResult>();
   for (const path of Object.keys(zip.files)) {
     if (!path.startsWith('word/media/')) continue;
     const entry = zip.file(path);
     if (!entry || entry.dir) continue;
     // A metafile no browser can decode — but the kind Word writes most, a
     // single bitmap in EMF clothing, is re-framed as the .bmp it really is
-    // (see emf.ts). Anything else keeps its bytes for the export.
+    // (see emf.ts). Vector WMFs of the MathType-preview shape resolve to a
+    // display list the painter replays (wmf-vector.ts) — the media entry
+    // still keeps the original bytes, for the export. Anything else keeps
+    // its bytes and paints as the placeholder.
     const lower = path.toLowerCase();
     if (lower.endsWith('.emf') || lower.endsWith('.wmf')) {
       const bytes = await entry.async('uint8array');
@@ -4453,13 +4469,17 @@ async function extractMedia(zip: JSZip): Promise<Map<string, string>> {
         media.set(path, bmp);
         continue;
       }
+      if (lower.endsWith('.wmf')) {
+        const vector = wmfVectorSpec(bytes);
+        if (vector) vectorMedia.set(path, vector);
+      }
     }
     media.set(
       path,
       `data:${mimeOf(path)};base64,${await entry.async('base64')}`,
     );
   }
-  return media;
+  return { media, vectorMedia };
 }
 
 /**
@@ -4573,7 +4593,7 @@ async function importDocxImpl(
   const numberingRoot = numberingXml
     ? parsePart('word/numbering.xml', numberingXml)
     : undefined;
-  const media = await extractMedia(zip);
+  const { media, vectorMedia } = await extractMedia(zip);
   const notes = await buildNotesRegistry(zip);
   const comments = await buildCommentsRegistry(zip);
   // Page geometry up front: pct-based table widths need the content width
@@ -4596,6 +4616,7 @@ async function importDocxImpl(
     numbering,
     rels,
     media,
+    vectorMedia,
     resolveTheme,
     resolveFont,
     resolveThemeFill,

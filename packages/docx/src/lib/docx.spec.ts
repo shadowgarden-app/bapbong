@@ -3399,6 +3399,113 @@ describe('importDocx', () => {
     expect(img.attrs.alt).toBe('hinh 1');
   });
 
+  it('resolves a MathType-style vector WMF object to a display list', async () => {
+    // A minimal MathType-shaped WMF: placeable header (1440 units/inch),
+    // window 1200×400, a Symbol font selected, TA_BASELINE|TA_UPDATECP,
+    // MOVETO then one glyph run ("w" = ω) with a Dx advance.
+    const rec = (fn: number, params: number[]): number[] => {
+      const out = [...le32((6 + params.length * 2) / 2), fn & 0xff, fn >> 8];
+      for (const v of params) out.push(v & 0xff, (v >> 8) & 0xff);
+      return out;
+    };
+    const le32 = (v: number): number[] => [
+      v & 0xff,
+      (v >> 8) & 0xff,
+      (v >> 16) & 0xff,
+      (v >> 24) & 0xff,
+    ];
+    const logFont = [
+      ...[-384, 0, 0, 0, 400].flatMap((v) => [v & 0xff, (v >> 8) & 0xff]),
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0, // italic..pitch
+      ...[...'Symbol'].map((c) => c.charCodeAt(0)),
+      0,
+      0, // NUL + pad to even
+    ];
+    const body = [
+      ...rec(0x020b, [0, 0]), // SETWINDOWORG
+      ...rec(0x020c, [400, 1200]), // SETWINDOWEXT (y, x)
+      ...rec(0x012e, [25]), // SETTEXTALIGN baseline | updateCP
+      ...[...le32((6 + logFont.length) / 2), 0xfb, 0x02, ...logFont],
+      ...rec(0x012d, [0]), // SELECTOBJECT font
+      ...rec(0x0214, [300, 100]), // MOVETO y=300 x=100
+      ...rec(0x0a32, [0, 0, 1, 0, 0x77, 768]), // EXTTEXTOUT "w" dx=[768]
+      ...rec(0x0000, []), // EOF
+    ];
+    const header = [
+      ...le32(0x9ac6cdd7),
+      0,
+      0, // magic + hWmf
+      ...[0, 0, 1200, 400].flatMap((v) => [v & 0xff, (v >> 8) & 0xff]), // bbox
+      ...[1440 & 0xff, 1440 >> 8], // units per inch
+      ...le32(0),
+      0,
+      0, // reserved + checksum
+      1,
+      0,
+      9,
+      0,
+      0,
+      0, // META_HEADER: memory, 9 words, version lo
+      ...le32(0),
+      0,
+      0,
+      ...le32(0),
+      0,
+      0, // rest of META_HEADER
+    ];
+    const wmfB64 = btoa(String.fromCharCode(...header, ...body));
+
+    const V_NS = 'urn:schemas-microsoft-com:vml';
+    const O_NS = 'urn:schemas-microsoft-com:office:office';
+    // No style size and no dxaOrig: the placeable header's physical size is
+    // the fallback (1200/1440 in × 96 = 80px, 400/1440 × 96 ≈ 27px).
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:v="${V_NS}" xmlns:o="${O_NS}"><w:body>
+      <w:p><w:r><w:object>
+        <v:shape id="_x0000_i1026" type="#_x0000_t75">
+          <v:imagedata r:id="rId9" o:title=""/>
+        </v:shape>
+        <o:OLEObject Type="Embed" ProgID="Equation.DSMT4" ShapeID="_x0000_i1026" DrawAspect="Content" ObjectID="_1" r:id="rId10"/>
+      </w:object></w:r></w:p>
+    </w:body></w:document>`;
+    const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId9" Type="${R_NS}/image" Target="media/image1.wmf"/></Relationships>`;
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, undefined, relsXml, {
+        'image1.wmf': wmfB64,
+      }),
+    );
+
+    const img = doc.child(0).child(0);
+    expect(img.type.name).toBe('image');
+    // The original bytes stay in src for the export…
+    expect(img.attrs.src).toBe(`data:image/wmf;base64,${wmfB64}`);
+    // …and the display list rides beside them, decoded and CSS-resolved.
+    expect(img.attrs.vector).toEqual({
+      width: 1200,
+      height: 400,
+      ops: [
+        {
+          kind: 'text',
+          x: 100,
+          y: 300,
+          text: 'ω',
+          dx: [768],
+          size: 384,
+          family: 'Times New Roman',
+          color: '#000000',
+        },
+      ],
+    });
+    expect(img.attrs.width).toBe(80);
+    expect(img.attrs.height).toBe(27);
+  });
+
   it('resolves theme colors (w:themeColor) via theme1.xml, incl. shade', async () => {
     const themeXml = `<?xml version="1.0"?><a:theme xmlns:a="${A_NS}"><a:themeElements><a:clrScheme name="Office">
       <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
