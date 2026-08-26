@@ -196,9 +196,10 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(xml));
 
-    // Subscripted digits become Unicode subscripts; the run is formatted like
-    // the equation's first math run (italic here).
-    expect(doc.child(0).textContent).toBe('t₁');
+    // Subscripted digits become Unicode subscripts; letters take their math
+    // letterform (OMML defaults to italic) via the Unicode math alphabets;
+    // the run is formatted like the equation's first math run (italic here).
+    expect(doc.child(0).textContent).toBe('𝑡₁');
     expect(
       doc
         .child(0)
@@ -207,8 +208,27 @@ describe('importDocx', () => {
     ).toContain('em');
 
     // Inline equation after plain text: sup, fractions (multi-term numerator
-    // gets parens), radical, delimiter.
-    expect(doc.child(1).textContent).toBe('S = x²+a/b+(a+b)/c+√(y)+(u+v)');
+    // gets parens), radical, delimiter. Operators and digits stay upright.
+    expect(doc.child(1).textContent).toBe('S = 𝑥²+𝑎/𝑏+(𝑎+𝑏)/𝑐+√(𝑦)+(𝑢+𝑣)');
+  });
+
+  it('honours OMML math styles: m:scr variants, m:sty p, m:nor', async () => {
+    const M_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+    const mr = (t: string, mPr = '') =>
+      `<m:r>${mPr ? `<m:rPr>${mPr}</m:rPr>` : ''}<m:t>${t}</m:t></m:r>`;
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:m="${M_NS}"><w:body>
+      <w:p><m:oMath>
+        ${mr('P=', '<m:scr m:val="script"/>')}
+        ${mr('R', '<m:scr m:val="double-struck"/>')}
+        ${mr('sin', '<m:sty m:val="p"/>')}
+        ${mr('b', '<m:sty m:val="b"/>')}
+        ${mr('nor', '<m:nor/>')}
+      </m:oMath></w:p>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(xml));
+    // 𝒫 (script, = stays upright), ℝ (double-struck), sin (plain via
+    // m:sty p), 𝐛 (bold), nor (m:nor: normal text).
+    expect(doc.child(0).textContent).toBe('𝒫=ℝsin𝐛nor');
   });
 
   it('treats a toggle disabled via w:val="false" as off', async () => {
