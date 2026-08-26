@@ -2083,3 +2083,30 @@ describe('exportDocx (image baseline shift)', () => {
     expect(raise).toBeCloseTo(-2.67, 1);
   });
 });
+
+describe('exportDocx (equations)', () => {
+  it('round-trips math-marked text as a real m:oMath', async () => {
+    const math = schema.marks['math'].create();
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.text('bằng '),
+        schema.text('𝜔=2𝜋𝑓', [math]),
+        schema.text(' rad/s'),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const xml = await (await JSZip.loadAsync(bytes))
+      .file('word/document.xml')!
+      .async('string');
+    // One equation, its runs inside m:oMath — not plain w:r text.
+    expect(xml).toContain('<m:oMath><m:r><m:t xml:space="preserve">𝜔=2𝜋𝑓');
+    expect(xml).toContain('xmlns:m=');
+
+    const { doc: back } = await importDocx(bytes);
+    const para = back.child(0);
+    expect(para.textContent).toBe('bằng 𝜔=2𝜋𝑓 rad/s');
+    // The equation text comes back math-marked (importer restamps it).
+    const mid = para.child(1);
+    expect(mid.marks.some((m) => m.type.name === 'math')).toBe(true);
+  });
+});

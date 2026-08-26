@@ -2426,8 +2426,12 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       const text = flattenOmml(node);
       if (text.length > 0) {
         const first = findDescendant(node, 'm:r');
+        const marks = runMarks(first, paraBase, ctx, null);
+        // The math mark keeps the run addressable as an equation — and the
+        // exporter rebuilds m:oMath from it, so the region survives a save.
+        const math = ctx.schema.marks['math'];
         inline.push(
-          ctx.schema.text(text, runMarks(first, paraBase, ctx, null)),
+          ctx.schema.text(text, math ? [...marks, math.create()] : marks),
         );
       }
     } else if (node.name === 'w:commentRangeStart') {

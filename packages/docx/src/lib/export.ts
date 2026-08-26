@@ -32,6 +32,7 @@ const WP_NS =
   'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+const M_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
 const WPS_NS =
   'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const W14_NS = 'http://schemas.microsoft.com/office/word/2010/wordml';
@@ -148,6 +149,7 @@ const KNOWN_MARKS = new Set([
   'kern',
   'link',
   'comment',
+  'math',
   'footnote',
   'carryRPr',
 ]);
@@ -510,28 +512,62 @@ function inlineUnit(node: PMNode, ctx: ExportCtx): string {
  *  w:commentReference) emitted as runs transition across comment ids. */
 function inlineContent(node: PMNode, ctx: ExportCtx): string {
   let out = '';
-  node.forEach((child) => {
-    if (!isInlineLeaf(child)) {
-      // An inline type the writer has no branch for — dropped from the body.
-      audit.exportUnhandled('node', child.type.name);
-      return;
-    }
+  const kids: PMNode[] = [];
+  node.forEach((child) => kids.push(child));
+  const isMathText = (c: PMNode): boolean =>
+    c.isText && c.marks.some((m) => m.type.name === 'math');
+  const openStarts = (child: PMNode): string => {
+    let s = '';
     const ids = commentIdsOf(child).filter((id) => ctx.knownComments.has(id));
     for (const id of ids) {
       if (!ctx.openComments.has(id)) {
-        out += `<w:commentRangeStart w:id="${id}"/>`;
+        s += `<w:commentRangeStart w:id="${id}"/>`;
         ctx.openComments.add(id);
       }
     }
-    out += inlineUnit(child, ctx);
-    const here = ctx.runIdx++;
+    return s;
+  };
+  const closeEnds = (here: number): string => {
+    let s = '';
     for (const id of [...ctx.openComments]) {
       if (ctx.lastRun.get(id) === here) {
-        out += `<w:commentRangeEnd w:id="${id}"/><w:r><w:commentReference w:id="${id}"/></w:r>`;
+        s += `<w:commentRangeEnd w:id="${id}"/><w:r><w:commentReference w:id="${id}"/></w:r>`;
         ctx.openComments.delete(id);
       }
     }
-  });
+    return s;
+  };
+  let i = 0;
+  while (i < kids.length) {
+    const child = kids[i];
+    if (!isInlineLeaf(child)) {
+      // An inline type the writer has no branch for — dropped from the body.
+      audit.exportUnhandled('node', child.type.name);
+      i++;
+      continue;
+    }
+    if (isMathText(child)) {
+      // A maximal run of math-marked text becomes ONE m:oMath: comment range
+      // markers may not sit between m:* children, so starts go before the
+      // equation and ends after it — the range wraps the whole group.
+      let j = i;
+      while (j < kids.length && isMathText(kids[j])) j++;
+      for (let k = i; k < j; k++) out += openStarts(kids[k]);
+      out += '<m:oMath>';
+      for (let k = i; k < j; k++)
+        out +=
+          `<m:r>${runProps(kids[k].marks)}` +
+          `<m:t xml:space="preserve">${esc(kids[k].text ?? '')}</m:t></m:r>`;
+      out += '</m:oMath>';
+      for (let k = i; k < j; k++) out += closeEnds(ctx.runIdx++);
+      i = j;
+      continue;
+    }
+    out += openStarts(child);
+    out += inlineUnit(child, ctx);
+    out += closeEnds(ctx.runIdx++);
+    i++;
+  }
   return out;
 }
 
@@ -1679,7 +1715,7 @@ export async function exportDocx(
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wps="${WPS_NS}">` +
+    `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wps="${WPS_NS}" xmlns:m="${M_NS}">` +
     `<w:body>${body}${sectPr}</w:body></w:document>`;
   zip.file('word/document.xml', documentXml);
   if (hasComments) {
@@ -1860,7 +1896,7 @@ function chromeStoryPart(
   ctx.nextId = storyCtx.nextId;
   const xml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    `<${tag} xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wps="${WPS_NS}">${body}</${tag}>`;
+    `<${tag} xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}" xmlns:wps="${WPS_NS}" xmlns:m="${M_NS}">${body}</${tag}>`;
   const rels =
     storyCtx.rels.length > 0
       ? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PR_NS}">${storyCtx.rels.join('')}</Relationships>`
