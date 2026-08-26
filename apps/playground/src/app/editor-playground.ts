@@ -1073,6 +1073,7 @@ export class EditorPlayground implements OnDestroy {
             label: 'Symbol…',
             run: () => this.symbolDialog?.open(),
           },
+          { command: 'insert-equation', label: 'Equation' },
           {
             label: 'Remove link',
             isEnabled: () => {
