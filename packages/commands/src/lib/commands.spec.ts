@@ -19,6 +19,8 @@ import {
 import { setAlign, activeAlign, toggleHeading } from './paragraph.js';
 import { cellAt, setCellBackground, setCellsAttrs } from './table.js';
 import {
+  EQUATION_PLACEHOLDER,
+  insertEquation,
   insertImage,
   insertTable,
   insertText,
@@ -129,6 +131,7 @@ const schema = new Schema({
     letterSpacing: { attrs: { twips: {} }, toDOM: () => ['span', 0] },
     charScale: { attrs: { percent: {} }, toDOM: () => ['span', 0] },
     position: { attrs: { halfPoints: {} }, toDOM: () => ['span', 0] },
+    math: { toDOM: () => ['span', 0] },
   },
 });
 
@@ -1139,5 +1142,38 @@ describe('section-scoped commands (section-break marker menus)', () => {
     expect(sectionsOf(s)[0].page).toBeTruthy();
     s = apply(s, setSectionOrientation(0, 'portrait'));
     expect(sectionsOf(s)[0].page).toBeUndefined(); // back to inherit
+  });
+});
+
+describe('insertEquation (linear equations)', () => {
+  const para = (content?: unknown) =>
+    n('doc', null, [n('paragraph', null, content)]);
+
+  it('caret: inserts a selected placeholder slot, math-marked', () => {
+    const doc = para([schema.text('bằng ')]);
+    let state = EditorState.create({ schema, doc });
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 6)),
+    );
+    const next = apply(state, insertEquation());
+    expect(next.doc.textContent).toBe(`bằng ${EQUATION_PLACEHOLDER}`);
+    const slot = next.doc.child(0).child(1);
+    expect(slot.marks.map((m) => m.type.name)).toContain('math');
+    // Selected, so the first keystroke replaces it.
+    expect(next.selection.from).toBe(6);
+    expect(next.selection.to).toBe(6 + EQUATION_PLACEHOLDER.length);
+  });
+
+  it('selection: restyles letters through the math-italic alphabet and marks the range', () => {
+    const doc = para([schema.text('P=UI2')]);
+    let state = EditorState.create({ schema, doc });
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 1, 6)),
+    );
+    const next = apply(state, insertEquation());
+    // Letters italicize (𝑃, 𝑈, 𝐼); '=' and digits stay upright.
+    expect(next.doc.textContent).toBe('𝑃=𝑈𝐼2');
+    const run = next.doc.child(0).child(0);
+    expect(run.marks.map((m) => m.type.name)).toContain('math');
   });
 });

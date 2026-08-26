@@ -1,5 +1,7 @@
 import type { EditorState } from 'prosemirror-state';
+import type { Mark as Mark0, Node as PMNode0 } from 'prosemirror-model';
 import type { Command } from '@shadow-garden/bapbong-contracts';
+import { MATH_ALPHABETS, mathLetters } from '@shadow-garden/bapbong-contracts';
 import { isMarkActive } from './marks.js';
 
 /** Toggle "start on a new page" (`w:pageBreakBefore`) on the paragraph(s) the
@@ -228,5 +230,90 @@ export function setLink(href: string | null, label?: string): Command {
     },
     isActive: (state) => isMarkActive(state, 'link'),
     isEnabled: (state) => !!state.schema.marks['link'],
+  };
+}
+
+/** The empty-slot glyph a fresh equation starts with — inserted SELECTED, so
+ *  the first keystroke replaces it (Word's dotted placeholder box). */
+export const EQUATION_PLACEHOLDER = '□';
+
+/**
+ * Insert ▸ Equation (Word's Alt+=), linear v1.
+ *
+ * With a selection: the range becomes an equation — letters restyle through
+ * the math-italic alphabet (a → 𝑎, the OMML default letterform) and the
+ * whole range takes the math mark, exactly what the importer produces for an
+ * OMML equation, so the exporter turns it back into m:oMath.
+ *
+ * With a caret: a placeholder slot is inserted math-marked and selected;
+ * typing replaces it and — the mark being inclusive — keeps extending the
+ * equation until the caret leaves it.
+ */
+export function insertEquation(): Command {
+  return {
+    name: 'insert-equation',
+    run(state, dispatch) {
+      const math = state.schema.marks['math'];
+      if (!math) return false;
+      const { from, to, empty } = state.selection;
+      if (!state.selection.$from.parent.isTextblock) return false;
+      if (!dispatch) return true;
+      const tr = state.tr;
+      if (empty) {
+        tr.insertText(EQUATION_PLACEHOLDER, from);
+        tr.addMark(from, from + EQUATION_PLACEHOLDER.length, math.create());
+        const Sel = state.selection.constructor as unknown as {
+          create(
+            doc: PMNode0,
+            from: number,
+            to: number,
+          ): typeof state.selection;
+        };
+        tr.setSelection(
+          Sel.create(tr.doc, from, from + EQUATION_PLACEHOLDER.length),
+        );
+        dispatch(tr.scrollIntoView());
+        return true;
+      }
+      // Restyle end → start so earlier positions stay valid; letter → math
+      // italic changes UTF-16 lengths (𝑎 is a surrogate pair).
+      const italic = MATH_ALPHABETS['italic'];
+      const pieces: {
+        a: number;
+        b: number;
+        text: string;
+        marks: readonly Mark0[];
+      }[] = [];
+      state.doc.nodesBetween(from, to, (node, pos) => {
+        if (!node.isText) return;
+        const a = Math.max(from, pos);
+        const b = Math.min(to, pos + node.nodeSize);
+        const slice = (node.text ?? '').slice(a - pos, b - pos);
+        pieces.push({
+          a,
+          b,
+          text: mathLetters(slice, italic),
+          marks: node.marks,
+        });
+      });
+      let end = to;
+      for (const p of [...pieces].reverse()) {
+        if (
+          p.text.length !== p.b - p.a ||
+          p.text !== state.doc.textBetween(p.a, p.b)
+        ) {
+          tr.replaceWith(
+            p.a,
+            p.b,
+            state.schema.text(p.text, p.marks as Mark0[]),
+          );
+          end += p.text.length - (p.b - p.a);
+        }
+      }
+      tr.addMark(from, end, math.create());
+      dispatch(tr.scrollIntoView());
+      return true;
+    },
+    isActive: (state) => isMarkActive(state, 'math'),
   };
 }

@@ -41,10 +41,12 @@ import {
   type ListInfo,
   type NumberingDefs,
   type Spacing,
+} from '@shadow-garden/bapbong-model';
+import {
   MATH_ALPHABETS,
   mathLetters,
   type MathAlphabet,
-} from '@shadow-garden/bapbong-model';
+} from '@shadow-garden/bapbong-contracts';
 import {
   attrOf,
   child,

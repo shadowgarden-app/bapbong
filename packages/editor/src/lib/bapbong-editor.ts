@@ -76,6 +76,7 @@ import {
 } from '@shadow-garden/bapbong-contracts';
 import {
   defaultCommands,
+  insertEquation,
   toggleUnicodeHex,
 } from '@shadow-garden/bapbong-commands';
 export type {
@@ -1165,6 +1166,9 @@ export class BapbongEditor {
       'toggle-unicode-hex',
       'hex digits or a character before the caret',
     );
+    // Word's Alt+=: insert (or convert the selection into) an equation.
+    this.commands.add(insertEquation());
+    bind('Alt-=', 'insert-equation', 'editing text');
   }
 
   /** The bridge's live key lookup: a registered chord → the command's run,
