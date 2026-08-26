@@ -1,4 +1,5 @@
 import { Schema } from 'prosemirror-model';
+import { astToLinear, isEqRow } from '@shadow-garden/bapbong-contracts';
 
 /** Structural view of a DOM element — this package has no DOM lib, so parseDOM
  *  getAttrs callbacks narrow structurally (same idiom as the footnote mark). */
@@ -260,6 +261,43 @@ export const schema = new Schema({
       selectable: false,
       parseDOM: [{ tag: 'br.column-break' }],
       toDOM: () => ['br', { class: 'column-break' }],
+    },
+
+    // An equation with 2D structure — the AST (EqNode[], contracts) rides
+    // `ast`. An inline ATOM: the layout engine typesets it into a vector box
+    // sized by `sizePt`; editing goes through the equation plugin's slot
+    // editor, never the hidden text editor. toDOM carries the linear
+    // spelling as text, so the a11y mirror and copy read the math.
+    equation: {
+      inline: true,
+      group: 'inline',
+      atom: true,
+      attrs: { ast: {}, sizePt: { default: 12 } },
+      parseDOM: [
+        {
+          tag: 'span[data-eq]',
+          getAttrs: (el) => {
+            const ast = dataJson(el, 'data-eq');
+            if (!isEqRow(ast)) return false;
+            const size = Number((el as DomEl).getAttribute('data-eq-size'));
+            return {
+              ast,
+              sizePt: Number.isFinite(size) && size > 0 ? size : 12,
+            };
+          },
+        },
+      ],
+      toDOM(node) {
+        const ast = node.attrs['ast'];
+        return [
+          'span',
+          {
+            'data-eq': JSON.stringify(ast),
+            'data-eq-size': String(node.attrs['sizePt']),
+          },
+          astToLinear(isEqRow(ast) ? ast : []),
+        ];
+      },
     },
 
     // Inline image. `src` is typically a data URL (the importer inlines the

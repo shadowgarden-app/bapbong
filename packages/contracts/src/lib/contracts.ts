@@ -419,6 +419,23 @@ export interface VectorImageSpec {
   ops: VectorOp[];
 }
 
+/** One editable slot of a laid-out equation, in IMAGE-LOCAL px: where a
+ *  row of the AST renders, with the caret stops inside it. The equation
+ *  plugin maps clicks and arrow keys through these. */
+export interface EqSlotRect {
+  /** Path into the AST: child index, then row name, alternating — e.g.
+   *  [2, 'num', 0, 'body'] addresses nested rows. Ends at a ROW. */
+  path: (number | string)[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Caret x offsets inside the slot (length = item count + 1). */
+  caretXs: number[];
+  /** The em size this slot renders at, px. */
+  em: number;
+}
+
 /** `a:srcRect` — the part of the bitmap the box shows, as ratios of the
  *  bitmap's own size measured inward from each edge. Positive crops in;
  *  NEGATIVE outsets, reaching past the bitmap so the overhang renders as
@@ -449,6 +466,8 @@ export interface InlineImage {
   shape?: ShapeSpec;
   /** Present when this box replays a metafile (equation previews). */
   vector?: VectorImageSpec;
+  /** Editable slots when this box is a typeset equation node. */
+  eqSlots?: EqSlotRect[];
   /** Baseline shift in px, positive UP (w:position on the object's run) —
    *  paint-only, like InlineRun.raise: MathType lowers each equation so its
    *  own baseline meets the line's. */
@@ -876,6 +895,8 @@ export interface LayoutImageSegment {
   shape?: ShapeSpec;
   /** Present when this box replays a metafile (equation previews). */
   vector?: VectorImageSpec;
+  /** Editable slots of a laid-out equation node (image-local px). */
+  eqSlots?: EqSlotRect[];
   /** Baseline shift in px, positive UP — see InlineImage.raise. */
   raise?: number;
   /** Visible sub-rectangle of the bitmap (a:srcRect). */

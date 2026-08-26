@@ -364,6 +364,9 @@ importers:
 
   packages/model:
     dependencies:
+      '@shadow-garden/bapbong-contracts':
+        specifier: workspace:^
+        version: link:../contracts
       prosemirror-model:
         specifier: ^1.25.7
         version: 1.25.8

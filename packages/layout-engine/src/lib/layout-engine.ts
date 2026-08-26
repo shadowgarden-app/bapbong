@@ -1,5 +1,7 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
 import { glyphKey, perf, sameGlyphRun } from '@shadow-garden/bapbong-contracts';
+import { layoutEquation } from './equation-layout.js';
+import { isEqRow } from '@shadow-garden/bapbong-contracts';
 import {
   createNumberingCounter,
   type NumberingCounter,
@@ -223,6 +225,39 @@ function resolveField(node: PMNode, base: FontSpec, pos: number): InlineField {
 
 /** Resolve an image node into an InlineImage. Missing dimensions become 0
  *  (the image then takes no space until real sizing is available). */
+/** The measurer the CURRENT layout call typesets equations with. The flow
+ *  builders run deep under many call sites, so the entry points park the
+ *  ctx here (single-threaded per call) instead of threading a parameter
+ *  through every block/paragraph conversion. */
+let eqCtx: { measure: MeasureText; metrics?: MeasureMetrics } | null = null;
+function setEquationCtx(ctx: Ctx): void {
+  eqCtx = {
+    measure: ctx.measure,
+    ...(ctx.metrics && { metrics: ctx.metrics }),
+  };
+}
+
+/** An equation node typeset into an inline vector box: the painter replays
+ *  its ops, `raise` seats its internal baseline on the line's, and the slot
+ *  rects ride along for the equation plugin. */
+function resolveEquation(node: PMNode, pos: number): InlineImage {
+  const ast = node.attrs['ast'];
+  const sizePt = Number(node.attrs['sizePt']) || 12;
+  if (!eqCtx || !isEqRow(ast)) {
+    return { src: '', width: 24, height: 16, pos };
+  }
+  const eq = layoutEquation(ast, sizePt, eqCtx.measure, eqCtx.metrics);
+  return {
+    src: '',
+    width: eq.width,
+    height: eq.height,
+    vector: { width: eq.width, height: eq.height, ops: eq.ops },
+    eqSlots: eq.slots,
+    raise: -(eq.height - eq.ascent),
+    pos,
+  };
+}
+
 function resolveImage(node: PMNode, pos: number): InlineImage {
   const a = node.attrs;
   const link = findMark(node.marks, 'link');
@@ -334,6 +369,8 @@ function paragraphToFlow(
       } else {
         runs.push(resolveImage(child, contentStart + offset));
       }
+    } else if (child.type.name === 'equation') {
+      runs.push(resolveEquation(child, contentStart + offset));
     } else if (child.type.name === 'page_field')
       runs.push(resolveField(child, runBase, contentStart + offset));
     else if (child.type.name === 'hard_break')
@@ -1078,6 +1115,7 @@ function wrapParagraph(
           link: t.link,
           ...(t.image.shape ? { shape: t.image.shape } : {}),
           ...(t.image.vector ? { vector: t.image.vector } : {}),
+          ...(t.image.eqSlots ? { eqSlots: t.image.eqSlots } : {}),
           ...(t.image.raise ? { raise: t.image.raise } : {}),
           ...(t.image.crop ? { crop: t.image.crop } : {}),
           ...(t.image.outline ? { outline: t.image.outline } : {}),
@@ -4680,6 +4718,7 @@ export function layoutBlocks(
 ): ResolvedLayout {
   config = sanitizeConfig(config);
   const ctx = buildCtx(config);
+  setEquationCtx(ctx);
   const left = contentLeftOf(config.page);
   const right = config.page.width - config.page.margin.right;
   // Whole-document column flow: lay every block at the column content width.
@@ -5156,6 +5195,7 @@ export function layout(
 ): ResolvedLayout {
   config = sanitizeConfig(config);
   const ctx = buildCtx(config, doc.attrs['compat'] as DocCompat | null);
+  setEquationCtx(ctx);
   const { page } = config;
   const left = contentLeftOf(page);
   const right = page.width - page.margin.right;

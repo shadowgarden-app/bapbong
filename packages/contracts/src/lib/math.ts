@@ -123,3 +123,135 @@ export function mathAutoCorrectMatch(
   const to = MATH_AUTOCORRECT[m[1]];
   return to ? { length: m[0].length, to } : null;
 }
+
+// ── Equation AST (2D typesetting) ───────────────────────────────────
+//
+// The structured form of an equation — what OMML and MTEF both map onto.
+// Deliberately small: every node is JSON-serializable (it rides a
+// ProseMirror node attr), rows are plain arrays, and characters carry their
+// letterform IN the character (math-italic applied when the tree is built),
+// so a renderer never needs style context.
+
+/** One character of an equation. The glyph is already letterformed. */
+export interface EqChr {
+  t: 'chr';
+  ch: string;
+}
+/** A fraction: numerator over denominator. */
+export interface EqFrac {
+  t: 'frac';
+  num: EqNode[];
+  den: EqNode[];
+}
+/** A radical; `deg` is empty for a plain square root. */
+export interface EqRad {
+  t: 'rad';
+  deg: EqNode[];
+  body: EqNode[];
+}
+/** Scripts on a base: either list may be empty. */
+export interface EqScr {
+  t: 'scr';
+  base: EqNode[];
+  sub: EqNode[];
+  sup: EqNode[];
+}
+/** A fenced group; `l`/`r` may be '' for a one-sided fence. */
+export interface EqFence {
+  t: 'fence';
+  l: string;
+  r: string;
+  body: EqNode[];
+}
+/** A big operator (∑ ∫ ∏ …) with optional limits, then its operand. */
+export interface EqBig {
+  t: 'big';
+  op: string;
+  lo: EqNode[];
+  hi: EqNode[];
+  body: EqNode[];
+}
+
+export type EqNode = EqChr | EqFrac | EqRad | EqScr | EqFence | EqBig;
+
+const SUB_DIGIT = '₀₁₂₃₄₅₆₇₈₉';
+const SUP_DIGIT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+const digitsVia = (s: string, alphabet: string): string | null =>
+  /^[0-9]+$/.test(s) ? [...s].map((d) => alphabet[Number(d)]).join('') : null;
+
+/** The linear spelling of an equation tree — the same shape the OMML
+ *  flattener and Insert ▸ Equation type: it is the equation's plain-text
+ *  identity (a11y mirror, search, the linear editing mode). */
+export function astToLinear(row: EqNode[]): string {
+  const paren = (s: string): string =>
+    s.length <= 1 || (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
+  const sub = (s: string): string =>
+    digitsVia(s, SUB_DIGIT) ?? (s.length > 1 ? `_(${s})` : `_${s}`);
+  const sup = (s: string): string =>
+    digitsVia(s, SUP_DIGIT) ?? (s.length > 1 ? `^(${s})` : `^${s}`);
+  const one = (n: EqNode): string => {
+    switch (n.t) {
+      case 'chr':
+        return n.ch;
+      case 'frac':
+        return `${paren(astToLinear(n.num))}/${paren(astToLinear(n.den))}`;
+      case 'rad': {
+        const deg = astToLinear(n.deg);
+        return `${deg ? sup(deg) : ''}√(${astToLinear(n.body)})`;
+      }
+      case 'scr': {
+        const lo = astToLinear(n.sub);
+        const hi = astToLinear(n.sup);
+        return astToLinear(n.base) + (lo ? sub(lo) : '') + (hi ? sup(hi) : '');
+      }
+      case 'fence':
+        return n.l + astToLinear(n.body) + n.r;
+      case 'big': {
+        const lo = astToLinear(n.lo);
+        const hi = astToLinear(n.hi);
+        return (
+          n.op +
+          (lo ? sub(lo) : '') +
+          (hi ? sup(hi) : '') +
+          paren(astToLinear(n.body))
+        );
+      }
+    }
+  };
+  return row.map(one).join('');
+}
+
+/** A structural guard for AST data deserialized from a node attr — the attr
+ *  is JSON from a document, not a trusted value. */
+export function isEqRow(v: unknown): v is EqNode[] {
+  if (!Array.isArray(v)) return false;
+  return v.every((n) => {
+    if (typeof n !== 'object' || n === null) return false;
+    const t = (n as { t?: unknown }).t;
+    if (t === 'chr') return typeof (n as EqChr).ch === 'string';
+    if (t === 'frac')
+      return isEqRow((n as EqFrac).num) && isEqRow((n as EqFrac).den);
+    if (t === 'rad')
+      return isEqRow((n as EqRad).deg) && isEqRow((n as EqRad).body);
+    if (t === 'scr')
+      return (
+        isEqRow((n as EqScr).base) &&
+        isEqRow((n as EqScr).sub) &&
+        isEqRow((n as EqScr).sup)
+      );
+    if (t === 'fence')
+      return (
+        typeof (n as EqFence).l === 'string' &&
+        typeof (n as EqFence).r === 'string' &&
+        isEqRow((n as EqFence).body)
+      );
+    if (t === 'big')
+      return (
+        typeof (n as EqBig).op === 'string' &&
+        isEqRow((n as EqBig).lo) &&
+        isEqRow((n as EqBig).hi) &&
+        isEqRow((n as EqBig).body)
+      );
+    return false;
+  });
+}
