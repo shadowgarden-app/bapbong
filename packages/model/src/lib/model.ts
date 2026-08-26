@@ -659,6 +659,15 @@ export const schema = new Schema({
         0,
       ],
     },
+    // m:oMath — the run belongs to an equation. Linear v1: the letterforms
+    // live in the TEXT as Unicode math alphanumerics (𝑥, 𝒫, ℝ — see
+    // math.ts), so the mark is semantic, not visual: it scopes math
+    // autocorrect, keeps the region addressable for the coming in-place
+    // editor, and tells the exporter to wrap these runs back into m:oMath.
+    math: {
+      parseDOM: [{ tag: 'span[data-math]' }],
+      toDOM: () => ['span', { 'data-math': '1' }, 0],
+    },
     // w:highlight / w:shd w:fill — run background color ("#RRGGBB")
     highlight: {
       attrs: { color: {} },
