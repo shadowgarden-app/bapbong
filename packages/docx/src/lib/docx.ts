@@ -1121,6 +1121,7 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     alt: vmlAltText,
     float: null,
     vector: vector?.spec ?? null,
+    equation: vector?.linear ?? null,
     raise,
   });
 }

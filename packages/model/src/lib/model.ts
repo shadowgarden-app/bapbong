@@ -290,6 +290,10 @@ export const schema = new Schema({
         // data URL for export; the painter draws the ops instead. Null for
         // bitmaps and preset shapes.
         vector: { default: null },
+        // The equation's LINEAR text recovered from the metafile's embedded
+        // MTEF (MathType semantics) — what "Convert to editable equation"
+        // replaces the picture with. Null when the picture carries none.
+        equation: { default: null },
         // w:position on the run holding a legacy object — baseline shift in
         // px, positive UP (same convention as InlineRun.raise). MathType
         // lowers every equation so its baseline meets the text line's.
