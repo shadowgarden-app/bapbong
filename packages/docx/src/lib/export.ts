@@ -103,6 +103,10 @@ const MIME_EXT: Record<string, string> = {
   'image/svg+xml': 'svg',
   'image/tiff': 'tiff',
   'image/avif': 'avif',
+  // Metafiles keep their bytes through import (equation previews) — without
+  // these they exported as .png-named WMF bytes Word shows as broken.
+  'image/wmf': 'wmf',
+  'image/emf': 'emf',
 };
 
 /** [Content_Types].xml Default per media extension (inverse of MIME_EXT). */
@@ -115,6 +119,9 @@ const EXT_MIME: Record<string, string> = {
   svg: 'image/svg+xml',
   tiff: 'image/tiff',
   avif: 'image/avif',
+  // Word's own content types for metafiles are the x- forms.
+  wmf: 'image/x-wmf',
+  emf: 'image/x-emf',
 };
 
 // ── runs ────────────────────────────────────────────────────────────
@@ -435,7 +442,14 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
     ? anchorXml(float, cx, cy, n, graphic, docPr)
     : `<wp:inline distT="0" distB="0" distL="0" distR="0">` +
       `<wp:extent cx="${cx}" cy="${cy}"/>${docPr}${graphic}</wp:inline>`;
-  return `<w:r><w:drawing>${body}</w:drawing></w:r>`;
+  // Baseline shift (`raise`, px positive UP) rides the RUN as w:position in
+  // half-points — the same place MathType puts it, so a re-import (ours or
+  // Word's) seats the object exactly where the user left it.
+  const raise = Number(node.attrs['raise']) || 0;
+  const rPr = raise
+    ? `<w:rPr><w:position w:val="${Math.round((raise * 72) / 96 / 0.5)}"/></w:rPr>`
+    : '';
+  return `<w:r>${rPr}<w:drawing>${body}</w:drawing></w:r>`;
 }
 
 /** One inline node → its run XML (excluding the link wrapper). */

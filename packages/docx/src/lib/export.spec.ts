@@ -2061,3 +2061,25 @@ describe('exportDocx (section chrome overrides — page-number toggle)', () => {
     expect(hasField(back.sectionChrome?.[1]?.headers['default'])).toBe(true);
   });
 });
+
+describe('exportDocx (image baseline shift)', () => {
+  it('round-trips an image baseline shift (raise → w:position)', async () => {
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [
+        schema.node('image', {
+          src: `data:image/png;base64,${PNG_1PX}`,
+          width: 10,
+          height: 10,
+          raise: -2.67, // ≈ −2pt: MathType's usual seat-on-the-line shift
+        }),
+      ]),
+    ]);
+    const { doc: back } = await importDocx(await exportDocx(doc));
+    let raise: unknown = null;
+    back.descendants((n) => {
+      if (n.type.name === 'image') raise = n.attrs['raise'];
+    });
+    // −2.67px → −4 half-points → back to −2.67px (rounded through hp).
+    expect(raise).toBeCloseTo(-2.67, 1);
+  });
+});

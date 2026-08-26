@@ -960,10 +960,16 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     picLn && !child(picLn, 'a:noFill')
       ? pictureOutline(picLn, picW, ctx)
       : null;
+  // w:position on the picture's run — same baseline shift the legacy object
+  // path reads (see parseVmlImage); our own export writes it back here.
+  const posHp = Number(
+    attrOf(child(child(run, 'w:rPr'), 'w:position'), 'w:val'),
+  );
   return ctx.schema.nodes['image'].create({
     src,
     width: emuToPx(attrOf(extent, 'cx')),
     height: emuToPx(attrOf(extent, 'cy')),
+    raise: Number.isFinite(posHp) ? (posHp / 2) * (96 / 72) : 0,
     // Both docPr attrs are read EAGERLY: `??` used to short-circuit past
     // @title whenever @descr existed (even empty), leaving @title unread —
     // and dropped on save. alt is @descr; @title rides its own attr.
