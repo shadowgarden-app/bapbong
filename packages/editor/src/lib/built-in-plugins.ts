@@ -1,4 +1,5 @@
 import type { EditorPlugin } from '@shadow-garden/bapbong-contracts';
+import { equationPlugin } from './equation-plugin';
 import { findPlugin } from './find-plugin';
 import { imageResizePlugin } from './image-resize-plugin';
 import { tableResizePlugin } from './table-resize-plugin';
@@ -24,6 +25,7 @@ export function createBuiltins(): EditorPlugin[] {
   return [
     hyperlinkPlugin(),
     tocPlugin(),
+    equationPlugin(),
     findPlugin(),
     tableResizePlugin(),
     imageResizePlugin(),
