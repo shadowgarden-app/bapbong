@@ -20,7 +20,10 @@ import type {
   Command as EditorCommand,
   KeybindingRegistry,
 } from '@shadow-garden/bapbong-contracts';
-import { autoCorrectMatch } from '@shadow-garden/bapbong-contracts';
+import {
+  autoCorrectMatch,
+  mathAutoCorrectMatch,
+} from '@shadow-garden/bapbong-contracts';
 
 // Re-exported so hosts type against ONE prosemirror-state identity (mixing
 // module resolutions across packages makes TS treat duplicates as unrelated).
@@ -445,14 +448,55 @@ export function installWindowKeymap(opts: {
 
 /** The AutoCorrect plugin: replaces the completed sequence on text input.
  *  Skipped mid-composition (an IME owns those keystrokes) and for
- *  multi-character input (paste goes elsewhere). */
+ *  multi-character input (paste goes elsewhere). Inside an equation (the
+ *  math mark), a SPACE first tries Word's Math AutoCorrect: `\omega ` \u2192 \u03c9,
+ *  the space consumed as the trigger. */
 export function autoCorrectPlugin(): Plugin {
   return new Plugin({
     props: {
       handleTextInput(view, from, to, text) {
-        if (view.composing || text.length !== 1) return false;
+        if (view.composing || text.length === 0) return false;
         const $from = view.state.doc.resolve(from);
         if (!$from.parent.isTextblock) return false;
+        // Math AutoCorrect fires on the trigger SPACE \u2014 which Chromium's DOM
+        // observer does not always deliver alone or verbatim: the diff often
+        // widens to a neighbouring character (one keystroke arrives as
+        // "a "), and a space typed at the end of a text node arrives as the
+        // NBSP contenteditable writes to keep it visible. So the branch
+        // normalizes NBSP and takes any input ENDING in the trigger,
+        // re-deriving what belongs to the `\name` from the joined text.
+        const norm = text.replace(/\u00a0/g, ' ');
+        if (norm.endsWith(' ') && !norm.slice(0, -1).includes(' ')) {
+          const inMath = (view.state.storedMarks ?? $from.marks()).some(
+            (m) => m.type.name === 'math',
+          );
+          if (inMath) {
+            const tail = norm.slice(0, -1);
+            const before = view.state.doc.textBetween(
+              Math.max($from.start(), from - 32),
+              from,
+              '\ufffc',
+              '\ufffc',
+            );
+            const math = mathAutoCorrectMatch(before + tail);
+            if (math) {
+              // The `\name` may straddle the doc and the typed text: replace
+              // its doc-side part, keep any typed prefix, drop the trigger.
+              const fromDoc = Math.max(0, math.length - tail.length);
+              const keep = tail.slice(
+                0,
+                Math.max(0, tail.length - math.length),
+              );
+              view.dispatch(
+                view.state.tr
+                  .insertText(keep + math.to, from - fromDoc, to)
+                  .scrollIntoView(),
+              );
+              return true;
+            }
+          }
+        }
+        if (text.length !== 1) return false;
         const before = view.state.doc.textBetween(
           Math.max($from.start(), from - 8),
           from,

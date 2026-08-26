@@ -63,3 +63,63 @@ export function mathLetters(text: string, alphabet: MathAlphabet): string {
     })
     .join('');
 }
+
+/**
+ * Word's Math AutoCorrect, the symbol part: inside an equation, `\name`
+ * becomes its character the moment a space completes it (the space is the
+ * trigger and is consumed — Word and Google Docs both work this way).
+ * Names and mappings follow Word's list — `\epsilon` is the lunate ϵ with
+ * `\varepsilon` for ε, `\phi` is ϕ with `\varphi` for φ — so habits carry
+ * over unchanged.
+ */
+/* prettier-ignore */
+export const MATH_AUTOCORRECT: Record<string, string> = {
+  // Greek, lowercase.
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ϵ',
+  varepsilon: 'ε', zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ',
+  iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ',
+  omicron: 'ο', pi: 'π', varpi: 'ϖ', rho: 'ρ', varrho: 'ϱ',
+  sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'ϕ',
+  varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  // Greek, uppercase.
+  Alpha: 'Α', Beta: 'Β', Gamma: 'Γ', Delta: 'Δ', Epsilon: 'Ε', Zeta: 'Ζ',
+  Eta: 'Η', Theta: 'Θ', Iota: 'Ι', Kappa: 'Κ', Lambda: 'Λ', Mu: 'Μ',
+  Nu: 'Ν', Xi: 'Ξ', Omicron: 'Ο', Pi: 'Π', Rho: 'Ρ', Sigma: 'Σ',
+  Tau: 'Τ', Upsilon: 'Υ', Phi: 'Φ', Chi: 'Χ', Psi: 'Ψ', Omega: 'Ω',
+  // Operators and relations.
+  pm: '±', mp: '∓', times: '×', div: '÷', cdot: '⋅', ast: '∗',
+  leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠', ne: '≠',
+  approx: '≈', equiv: '≡', sim: '∼', simeq: '≃', cong: '≅',
+  propto: '∝', ll: '≪', gg: '≫', perp: '⊥', parallel: '∥',
+  // Calculus and big operators.
+  infty: '∞', partial: '∂', nabla: '∇', sqrt: '√', cbrt: '∛',
+  int: '∫', iint: '∬', iiint: '∭', oint: '∮', sum: '∑', prod: '∏',
+  // Sets and logic.
+  in: '∈', notin: '∉', ni: '∋', subset: '⊂', supset: '⊃',
+  subseteq: '⊆', supseteq: '⊇', cup: '∪', cap: '∩', emptyset: '∅',
+  forall: '∀', exists: '∃', nexists: '∄', wedge: '∧', vee: '∨',
+  neg: '¬', therefore: '∴', because: '∵',
+  // Arrows.
+  to: '→', rightarrow: '→', leftarrow: '←', uparrow: '↑', downarrow: '↓',
+  leftrightarrow: '↔', mapsto: '↦', Rightarrow: '⇒', Leftarrow: '⇐',
+  Leftrightarrow: '⇔',
+  // Letterlike and blackboard.
+  ell: 'ℓ', hbar: 'ℏ', Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ', wp: '℘',
+  doubleN: 'ℕ', doubleZ: 'ℤ', doubleQ: 'ℚ', doubleR: 'ℝ', doubleC: 'ℂ',
+  // Miscellany the exam corpus leans on.
+  degree: '°', prime: '′', pprime: '″', angle: '∠', triangle: '△',
+  ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', bullet: '∙',
+  oplus: '⊕', otimes: '⊗', circ: '∘',
+};
+
+/** The `\name` immediately before the caret that a typed space completes —
+ *  `{ length, to }` (length = characters to replace, backslash included) or
+ *  null. Only for text inside an equation; the caller checks the mark. */
+export function mathAutoCorrectMatch(
+  before: string,
+): { length: number; to: string } | null {
+  const m = /\\([A-Za-z]+)$/.exec(before);
+  if (!m) return null;
+  const to = MATH_AUTOCORRECT[m[1]];
+  return to ? { length: m[0].length, to } : null;
+}

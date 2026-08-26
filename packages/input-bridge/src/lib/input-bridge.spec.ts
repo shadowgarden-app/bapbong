@@ -1,7 +1,8 @@
 import { Schema } from 'prosemirror-model';
-import { TextSelection } from 'prosemirror-state';
+import { EditorState, TextSelection } from 'prosemirror-state';
 import { undo } from 'prosemirror-history';
 import {
+  autoCorrectPlugin,
   backspaceOutdent,
   createEditingState,
   moveCaretCommand,
@@ -359,5 +360,123 @@ describe('paragraph mark (¶) behaviour', () => {
         .setStoredMarks([]),
     );
     expect(s2.storedMarks).toEqual([]);
+  });
+});
+
+describe('autoCorrectPlugin (math branch)', () => {
+  const mathSchema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'inline*' },
+      text: { group: 'inline' },
+    },
+    marks: { math: {} },
+  });
+  const math = mathSchema.marks['math'].create();
+
+  /** A state whose paragraph holds plain `lead` then math-marked `eq`,
+   *  caret at the end, plus a mock view for the plugin prop. */
+  const setup = (lead: string, eq: string) => {
+    const children = [
+      ...(lead ? [mathSchema.text(lead)] : []),
+      ...(eq ? [mathSchema.text(eq, [math])] : []),
+    ];
+    const doc = mathSchema.node('doc', null, [
+      mathSchema.node('paragraph', null, children),
+    ]);
+    let state = EditorState.create({ doc, plugins: [autoCorrectPlugin()] });
+    const caret = 1 + lead.length + eq.length;
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, caret)),
+    );
+    let applied = state;
+    const view = {
+      state,
+      composing: false,
+      dispatch(tr: Parameters<typeof state.apply>[0]) {
+        applied = state.apply(tr);
+      },
+    };
+    const input = (text: string) =>
+      state.plugins[0].props.handleTextInput!.call(
+        state.plugins[0],
+        view as never,
+        caret,
+        caret,
+        text,
+        () => state.tr,
+      );
+    return { input, text: () => applied.doc.textContent };
+  };
+
+  it('converts \\name on the trigger space, consuming the space', () => {
+    const s = setup('x = ', '\\omega');
+    expect(s.input(' ')).toBe(true);
+    expect(s.text()).toBe('x = ω');
+  });
+
+  it('handles Chromium delivering the space merged with a neighbour', () => {
+    // One keystroke arrives as "a " — the \name straddles doc and input.
+    const s = setup('', '\\omeg');
+    expect(s.input('a ')).toBe(true);
+    expect(s.text()).toBe('ω');
+  });
+
+  it('handles a fully-typed name in one input, keeping any prefix', () => {
+    const s = setup('', '\\x');
+    // "\x" in the doc is dead; typed remainder completes nothing — no-op…
+    expect(s.input('y ')).toBe(false);
+    // …while a complete name inside the input converts, prefix kept.
+    const s2 = setup('', 'k');
+    expect(s2.input('\\pi ')).toBe(true);
+    expect(s2.text()).toBe('kπ');
+  });
+
+  it('stays quiet outside math, on unknown names, and mid-word input', () => {
+    const plain = setup('\\omega', '');
+    expect(plain.input(' ')).toBe(false);
+    const unknown = setup('', '\\banana');
+    expect(unknown.input(' ')).toBe(false);
+    const midword = setup('', '\\omega');
+    expect(midword.input(' q')).toBe(false);
+  });
+});
+
+describe('autoCorrectPlugin (NBSP trigger)', () => {
+  it('accepts the NBSP contenteditable writes for a trailing space', () => {
+    const mathSchema = new Schema({
+      nodes: {
+        doc: { content: 'block+' },
+        paragraph: { group: 'block', content: 'inline*' },
+        text: { group: 'inline' },
+      },
+      marks: { math: {} },
+    });
+    const math = mathSchema.marks['math'].create();
+    const doc = mathSchema.node('doc', null, [
+      mathSchema.node('paragraph', null, [mathSchema.text('\\tau', [math])]),
+    ]);
+    let state = EditorState.create({ doc, plugins: [autoCorrectPlugin()] });
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 5)),
+    );
+    let applied = state;
+    const view = {
+      state,
+      composing: false,
+      dispatch(tr: Parameters<typeof state.apply>[0]) {
+        applied = state.apply(tr);
+      },
+    };
+    const handled = state.plugins[0].props.handleTextInput!.call(
+      state.plugins[0],
+      view as never,
+      5,
+      5,
+      ' ',
+      () => state.tr,
+    );
+    expect(handled).toBe(true);
+    expect(applied.doc.textContent).toBe('τ');
   });
 });
