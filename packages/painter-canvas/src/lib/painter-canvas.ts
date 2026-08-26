@@ -13,6 +13,7 @@ import type {
   ResolvedTable,
   SelectionRect,
   ShapeSpec,
+  VectorImageSpec,
 } from '@shadow-garden/bapbong-contracts';
 import { perf } from '@shadow-garden/bapbong-contracts';
 
@@ -514,6 +515,8 @@ export class CanvasPainter {
     this.withRotation(f.rotation, f.x, yOffset + f.y, f.width, f.height, () => {
       if (f.shape) {
         this.drawShape(f.shape, f.x, yOffset + f.y, f.width, f.height);
+      } else if (f.vector) {
+        this.drawVector(f.vector, f.x, yOffset + f.y, f.width, f.height);
       } else {
         const el = this.requestImage(f.src);
         if (f.background) {
@@ -637,6 +640,16 @@ export class CanvasPainter {
             // Same box the bitmap would occupy: bottom edge on the baseline.
             this.drawShape(
               img.shape,
+              img.x,
+              baselineY - img.height,
+              img.width,
+              img.height,
+            );
+            return;
+          }
+          if (img.vector) {
+            this.drawVector(
+              img.vector,
               img.x,
               baselineY - img.height,
               img.width,
@@ -883,6 +896,89 @@ export class CanvasPainter {
         return;
       }
     }
+  }
+
+  /**
+   * Replay a metafile display list (equation previews) into the image box.
+   * Ops are in the spec's logical units; both axes scale independently to
+   * the box, so the drawing fills it exactly like Word stretching the
+   * picture. Vector all the way down: sharp at every zoom, no bitmap cache.
+   */
+  private drawVector(
+    v: VectorImageSpec,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
+    if (v.width <= 0 || v.height <= 0) return;
+    const ctx = this.ctx;
+    const sx = w / v.width;
+    const sy = h / v.height;
+    const px = (lx: number) => x + lx * sx;
+    const py = (ly: number) => y + ly * sy;
+    ctx.save();
+    // Runs kern by their own dx arrays — engine spacing must not add to it.
+    ctx.letterSpacing = '0px';
+    ctx.fontKerning = 'none';
+    for (const op of v.ops) {
+      switch (op.kind) {
+        case 'text': {
+          const size = op.size * sy;
+          ctx.font = `${op.italic ? 'italic ' : ''}${op.bold ? 'bold ' : ''}${size}px "${op.family}", serif`;
+          ctx.fillStyle = op.color;
+          ctx.textBaseline =
+            op.vAlign === 'top'
+              ? 'top'
+              : op.vAlign === 'bottom'
+                ? 'bottom'
+                : 'alphabetic';
+          if (op.dx) {
+            // Place every character by the source's own advances — the
+            // metafile positioned each glyph; our font's metrics differ and
+            // free-running text would drift off the bars and radicals.
+            let cx = op.x;
+            const chars = [...op.text];
+            for (let i = 0; i < chars.length; i++) {
+              ctx.fillText(chars[i], px(cx), py(op.y));
+              cx += op.dx[i] ?? 0;
+            }
+          } else {
+            ctx.fillText(op.text, px(op.x), py(op.y));
+          }
+          break;
+        }
+        case 'line': {
+          ctx.strokeStyle = op.color;
+          // Pen widths are logical; a 0-width pen is GDI's hairline. Never
+          // thinner than a device-visible line.
+          ctx.lineWidth = Math.max(op.width * sy, 0.75);
+          ctx.beginPath();
+          ctx.moveTo(px(op.x1), py(op.y1));
+          ctx.lineTo(px(op.x2), py(op.y2));
+          ctx.stroke();
+          break;
+        }
+        case 'polygon': {
+          if (op.points.length < 2) break;
+          ctx.beginPath();
+          ctx.moveTo(px(op.points[0].x), py(op.points[0].y));
+          for (const pt of op.points.slice(1)) ctx.lineTo(px(pt.x), py(pt.y));
+          ctx.closePath();
+          if (op.fill) {
+            ctx.fillStyle = op.fill;
+            ctx.fill();
+          }
+          if (op.stroke) {
+            ctx.strokeStyle = op.stroke;
+            ctx.lineWidth = Math.max((op.strokeWidth ?? 0) * sy, 0.75);
+            ctx.stroke();
+          }
+          break;
+        }
+      }
+    }
+    ctx.restore();
   }
 
   private paintTable(
