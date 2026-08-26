@@ -311,6 +311,14 @@ const POSITION_ACTIONS: { id: string; title: string; svg: string }[] = [
     svg: '<path d="M2 13.5h12"/><path d="M8 10V3"/><path d="M5.5 5.5 8 3l2.5 2.5"/>',
   },
 ];
+/** MathType pictures whose MTEF decoded: one click swaps the bitmap for a
+ *  live, math-marked text equation — the thing Word cannot do without
+ *  MathType installed. */
+const CONVERT_ACTION = {
+  id: 'convertEq',
+  title: 'Chuyển thành công thức sửa được',
+  svg: '<rect x="1.5" y="4.5" width="6" height="7" rx="1" stroke-dasharray="2 1.5"/><path d="M9.5 8h3"/><path d="M11 6.5 12.5 8 11 9.5"/><path d="M12 5.5l3 5M15 5.5l-3 5"/>',
+};
 const ALIGN_ACTION = {
   id: 'posAlign',
   title: 'Đặt công thức lên dòng',
@@ -546,6 +554,8 @@ export function imageResizePlugin(): EditorPlugin {
         const raise = Number(node.attrs['raise']) || 0;
         acts.push({ ...ALIGN_ACTION, active: Math.abs(raise - target) < 0.3 });
       }
+      if (typeof node.attrs['equation'] === 'string' && node.attrs['equation'])
+        acts.push({ ...CONVERT_ACTION, active: false });
     }
     return acts;
   };
@@ -722,6 +732,32 @@ export function imageResizePlugin(): EditorPlugin {
     onFrameAction(id) {
       const c = ctx;
       if (!c || !sel || !imageNodeAt(c.state, sel.pos)) return false;
+      if (id === 'convertEq') {
+        const node = imageAt(c.state, sel.pos);
+        const linear = node?.attrs['equation'];
+        if (!node || typeof linear !== 'string' || !linear) return false;
+        const math = c.state.schema.marks['math'];
+        const text = c.state.schema.text(
+          linear,
+          math ? [math.create()] : undefined,
+        );
+        const tr = c.state.tr.replaceWith(
+          sel.pos,
+          sel.pos + node.nodeSize,
+          text,
+        );
+        const Sel = c.state.selection.constructor as unknown as {
+          create(
+            doc: unknown,
+            pos: number,
+          ): Parameters<State['tr']['setSelection']>[0];
+        };
+        tr.setSelection(Sel.create(tr.doc, sel.pos + linear.length));
+        c.dispatch(tr.scrollIntoView());
+        sel = null;
+        c.setFrame(null);
+        return true;
+      }
       if (id === 'posRaise' || id === 'posLower' || id === 'posAlign') {
         const node = imageAt(c.state, sel.pos);
         if (!node) return false;
