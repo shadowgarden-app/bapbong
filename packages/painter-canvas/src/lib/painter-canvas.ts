@@ -629,69 +629,38 @@ export class CanvasPainter {
       }
     }
     for (const img of line.images ?? []) {
+      // The box's bottom edge sits on the baseline, shifted by any w:position
+      // on the object's run (raise > 0 lifts, MathType's negatives lower the
+      // equation onto the line). Paint-only, like a raised text run.
+      const imgTop = baselineY - img.height - (img.raise ?? 0);
       this.withRotation(
         img.rotation,
         img.x,
-        baselineY - img.height,
+        imgTop,
         img.width,
         img.height,
         () => {
           if (img.shape) {
             // Same box the bitmap would occupy: bottom edge on the baseline.
-            this.drawShape(
-              img.shape,
-              img.x,
-              baselineY - img.height,
-              img.width,
-              img.height,
-            );
+            this.drawShape(img.shape, img.x, imgTop, img.width, img.height);
             return;
           }
           if (img.vector) {
-            this.drawVector(
-              img.vector,
-              img.x,
-              baselineY - img.height,
-              img.width,
-              img.height,
-            );
+            this.drawVector(img.vector, img.x, imgTop, img.width, img.height);
             return;
           }
           const el = this.requestImage(img.src);
           if (img.background) {
             this.ctx.fillStyle = img.background;
-            this.ctx.fillRect(
-              img.x,
-              baselineY - img.height,
-              img.width,
-              img.height,
-            );
+            this.ctx.fillRect(img.x, imgTop, img.width, img.height);
           }
           if (el?.complete && el.naturalWidth > 0) {
             // The image's bottom edge sits on the baseline (matches the layout).
-            this.drawBitmap(
-              el,
-              img.crop,
-              img.x,
-              baselineY - img.height,
-              img.width,
-              img.height,
-            );
+            this.drawBitmap(el, img.crop, img.x, imgTop, img.width, img.height);
             if (img.outline)
-              this.strokeBox(
-                img.outline,
-                img.x,
-                baselineY - img.height,
-                img.width,
-                img.height,
-              );
+              this.strokeBox(img.outline, img.x, imgTop, img.width, img.height);
           } else if (this.undecodable.has(img.src)) {
-            this.drawPlaceholder(
-              img.x,
-              baselineY - img.height,
-              img.width,
-              img.height,
-            );
+            this.drawPlaceholder(img.x, imgTop, img.width, img.height);
           }
         },
       );

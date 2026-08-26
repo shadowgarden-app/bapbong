@@ -1084,6 +1084,14 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   attrOf(vshape, 'type');
   const ptToPx = (m: RegExpExecArray | null) =>
     m ? Math.round((parseFloat(m[1]) * 96) / 72) : null;
+  // MathType aligns the equation's baseline with the text line by LOWERING
+  // the object run (w:position, half-points, negative = down) — without it
+  // every formula floats above the line. Same convention as InlineRun.raise:
+  // px, positive UP, paint-only (Word does not grow the line box).
+  const posHp = Number(
+    attrOf(child(child(run, 'w:rPr'), 'w:position'), 'w:val'),
+  );
+  const raise = Number.isFinite(posHp) ? (posHp / 2) * (96 / 72) : 0;
   const width =
     ptToPx(/(?:^|;)width:([\d.]+)pt/.exec(style)) ??
     (Number(attrOf(holder, 'w:dxaOrig'))
@@ -1102,6 +1110,7 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     alt: vmlAltText,
     float: null,
     vector: vector?.spec ?? null,
+    raise,
   });
 }
 

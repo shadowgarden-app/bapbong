@@ -449,6 +449,10 @@ export interface InlineImage {
   shape?: ShapeSpec;
   /** Present when this box replays a metafile (equation previews). */
   vector?: VectorImageSpec;
+  /** Baseline shift in px, positive UP (w:position on the object's run) —
+   *  paint-only, like InlineRun.raise: MathType lowers each equation so its
+   *  own baseline meets the line's. */
+  raise?: number;
   /** Clockwise degrees around the box center — paint-only: the layout box
    *  stays axis-aligned (Word re-wraps only on commit, not live). */
   rotation?: number;
@@ -872,6 +876,8 @@ export interface LayoutImageSegment {
   shape?: ShapeSpec;
   /** Present when this box replays a metafile (equation previews). */
   vector?: VectorImageSpec;
+  /** Baseline shift in px, positive UP — see InlineImage.raise. */
+  raise?: number;
   /** Visible sub-rectangle of the bitmap (a:srcRect). */
   crop?: ImageCrop;
   /** Line drawn round the picture's box (a:ln on pic:spPr). */
