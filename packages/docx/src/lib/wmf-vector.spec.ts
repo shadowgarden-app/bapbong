@@ -165,6 +165,24 @@ describe('wmfVectorImage', () => {
     expect(image!.unitsPerInch).toBe(0);
   });
 
+  it('draws at the current position under TA_UPDATECP, advancing by Dx', () => {
+    const image = wmfVectorImage(
+      wmf([
+        ...SET_WINDOW,
+        rec(0x012e, [25]), // TA_BASELINE | TA_UPDATECP
+        rec(0x0214, [300, 40]), // MOVETO y=300 x=40
+        extTextOut(0, 0, 'ab', [30, 20]), // record X/Y are ignored
+        extTextOut(0, 0, 'c', [10]), // chains off the advanced position
+        rec(0x0213, [300, 200]), // LINETO shares the same position
+      ]),
+    );
+    const [ab, c, tail] = image!.ops as [WmfTextOp, WmfTextOp, WmfLineOp];
+    // MOVETO (40, 300) minus window origin (-100, -40) → (140, 340).
+    expect([ab.x, ab.y]).toEqual([140, 340]);
+    expect([c.x, c.y]).toEqual([190, 340]); // 140 + 30 + 20
+    expect([tail.x1, tail.y1]).toEqual([200, 340]); // 190 + 10
+  });
+
   it('tolerates Escape records (MathType embeds MTEF there)', () => {
     const image = wmfVectorImage(
       wmf([

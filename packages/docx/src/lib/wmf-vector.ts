@@ -359,8 +359,8 @@ export function wmfVectorImage(bytes: Uint8Array): WmfVectorImage | null {
         // Y(i16) X(i16) StringLength(i16) fwOpts(u16) [Rectangle(8) when
         // opaque/clipped] String (padded to even) [Dx: StringLength × i16].
         if (paramLen < 8) return null;
-        const y = view.getInt16(p, true) - orgY;
-        const x = view.getInt16(p + 2, true) - orgX;
+        let y = view.getInt16(p, true) - orgY;
+        let x = view.getInt16(p + 2, true) - orgX;
         const len = view.getInt16(p + 4, true);
         const fwOpts = view.getUint16(p + 6, true);
         // ETO_OPAQUE (0x0002) | ETO_CLIPPED (0x0004) insert the rectangle.
@@ -374,6 +374,16 @@ export function wmfVectorImage(bytes: Uint8Array): WmfVectorImage | null {
                 view.getInt16(dxAt + i * 2, true),
               )
             : null;
+        // TA_UPDATECP (bit 0): the record's X/Y are IGNORED — text draws at
+        // the current position, which then advances by the string's extent
+        // (the Dx sum). MathType always draws this way: a MOVETO seeds the
+        // position and consecutive runs (base, then Symbol, then MT Extra
+        // marks) chain off each other.
+        if (textAlign & 0x0001) {
+          x = posX;
+          y = posY;
+          if (dx) posX += dx.reduce((s, d) => s + d, 0);
+        }
         ops.push({
           kind: 'text',
           x,
