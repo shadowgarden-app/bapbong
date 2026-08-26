@@ -736,15 +736,19 @@ export function imageResizePlugin(): EditorPlugin {
         const node = imageAt(c.state, sel.pos);
         const linear = node?.attrs['equation'];
         if (!node || typeof linear !== 'string' || !linear) return false;
+        // The 2D form when the MTEF decoded to a tree and the schema has the
+        // node; the linear math-marked run otherwise.
+        const ast = node.attrs['equationAst'];
+        const eqType = c.state.schema.nodes['equation'];
         const math = c.state.schema.marks['math'];
-        const text = c.state.schema.text(
-          linear,
-          math ? [math.create()] : undefined,
-        );
+        const replacement =
+          eqType && Array.isArray(ast) && ast.length
+            ? eqType.create({ ast, sizePt: 12 })
+            : c.state.schema.text(linear, math ? [math.create()] : undefined);
         const tr = c.state.tr.replaceWith(
           sel.pos,
           sel.pos + node.nodeSize,
-          text,
+          replacement,
         );
         const Sel = c.state.selection.constructor as unknown as {
           create(
@@ -752,7 +756,7 @@ export function imageResizePlugin(): EditorPlugin {
             pos: number,
           ): Parameters<State['tr']['setSelection']>[0];
         };
-        tr.setSelection(Sel.create(tr.doc, sel.pos + linear.length));
+        tr.setSelection(Sel.create(tr.doc, sel.pos + replacement.nodeSize));
         c.dispatch(tr.scrollIntoView());
         sel = null;
         c.setFrame(null);
