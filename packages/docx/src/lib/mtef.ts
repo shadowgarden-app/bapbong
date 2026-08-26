@@ -20,35 +20,12 @@
  * Anything unexpected — unknown record, unknown template — returns null:
  * the caller keeps the picture and the editor simply offers no conversion.
  */
-import { MATH_ALPHABETS, mathLetters } from '@shadow-garden/bapbong-contracts';
-
-const SUB_DIGITS: Record<string, string> = {
-  '0': '₀',
-  '1': '₁',
-  '2': '₂',
-  '3': '₃',
-  '4': '₄',
-  '5': '₅',
-  '6': '₆',
-  '7': '₇',
-  '8': '₈',
-  '9': '₉',
-};
-const SUP_DIGITS: Record<string, string> = {
-  '0': '⁰',
-  '1': '¹',
-  '2': '²',
-  '3': '³',
-  '4': '⁴',
-  '5': '⁵',
-  '6': '⁶',
-  '7': '⁷',
-  '8': '⁸',
-  '9': '⁹',
-  '+': '⁺',
-  '-': '⁻',
-  '−': '⁻',
-};
+import {
+  MATH_ALPHABETS,
+  astToLinear,
+  mathLetters,
+  type EqNode,
+} from '@shadow-garden/bapbong-contracts';
 
 /** The MTEF payload of MathType's WMF comment, or null. */
 export function mtefFromWmf(bytes: Uint8Array): Uint8Array | null {
@@ -132,24 +109,11 @@ class Reader {
   }
 }
 
-const scriptDigits = (
-  s: string,
-  table: Record<string, string>,
-): string | null =>
-  [...s].every((c) => table[c]) ? [...s].map((c) => table[c]).join('') : null;
-
-const subScript = (s: string): string =>
-  scriptDigits(s, SUB_DIGITS) ?? (s.length > 1 ? `_(${s})` : `_${s}`);
-const supScript = (s: string): string =>
-  scriptDigits(s, SUP_DIGITS) ?? (s.length > 1 ? `^(${s})` : `^${s}`);
-const paren = (s: string): string =>
-  s.length <= 1 || (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
-
 /**
- * Parse an MTEF v5 payload into linear equation text, or null when the
- * stream is not MTEF v5 or uses a construct this walker does not model.
+ * Parse an MTEF v5 payload into the equation AST, or null when the stream
+ * is not MTEF v5 or uses a construct this walker does not model.
  */
-export function mtefToLinear(mtef: Uint8Array): string | null {
+export function mtefToAst(mtef: Uint8Array): EqNode[] | null {
   try {
     const p = new Reader(mtef);
     if (p.u8() !== 5) return null;
@@ -201,49 +165,53 @@ export function mtefToLinear(mtef: Uint8Array): string | null {
       for (let i = 0; i < n; i++) if (p.u8() !== 0) p.u8();
     };
 
-    type Item = { kind: 'line' | 'chr' | 'emb'; text: string };
+    type Item =
+      | { kind: 'line'; row: EqNode[] }
+      | { kind: 'chr'; row: EqNode[] }
+      | { kind: 'emb'; text: string };
 
-    const template = (sel: number, variation: number, k: string[]): string => {
-      const slot = (i: number): string => k[i] ?? '';
-      if (sel === 11) return `${paren(slot(0))}/${paren(slot(1))}`;
-      if (sel === 10) {
-        const deg = slot(1);
-        return `${deg ? supScript(deg) : ''}√(${slot(0)})`;
-      }
+    const template = (
+      sel: number,
+      variation: number,
+      k: EqNode[][],
+    ): EqNode[] => {
+      const slot = (i: number): EqNode[] => k[i] ?? [];
+      const chrs = (t: string): EqNode[] =>
+        [...t].map((ch) => ({ t: 'chr', ch }));
+      if (sel === 11) return [{ t: 'frac', num: slot(0), den: slot(1) }];
+      if (sel === 10) return [{ t: 'rad', deg: slot(1), body: slot(0) }];
       // Script templates: two fixed slots, [subscript, superscript] — the
-      // unused one is a NULL line (verified on the corpus).
-      if (sel === 27 || sel === 28 || sel === 29) {
-        const lo = slot(0);
-        const hi = slot(1);
-        return (lo ? subScript(lo) : '') + (hi ? supScript(hi) : '');
-      }
+      // unused one is a NULL line (verified on the corpus). The base is the
+      // preceding content; the walker attaches it.
+      if (sel === 27 || sel === 28 || sel === 29)
+        return [{ t: 'scr', base: [], sub: slot(0), sup: slot(1) }];
       if (sel in FENCES) {
         let [l, r] = FENCES[sel];
         if (sel !== 9) {
           if (!(variation & 1)) l = '';
           if (!(variation & 2)) r = '';
         }
-        return l + slot(0) + r;
+        return [{ t: 'fence', l, r, body: slot(0) }];
       }
-      if (sel === 15) {
-        const lo = slot(1);
-        const hi = slot(2);
-        return `∫${lo ? subScript(lo) : ''}${hi ? supScript(hi) : ''}${paren(slot(0))}`;
-      }
-      if (sel >= 16 && sel <= 22) {
-        const lo = slot(1);
-        const hi = slot(2);
-        return `${BIG_OPS[sel]}${lo ? subScript(lo) : ''}${hi ? supScript(hi) : ''}${paren(slot(0))}`;
-      }
-      if (sel === 23) {
-        const under = slot(1);
-        return slot(0) + (under ? `_(${under})` : '');
-      }
-      if (sel === 12) return `${slot(0)}̲`;
-      if (sel === 13) return `${slot(0)}̅`;
-      if (sel === 31) return `${slot(0)}⃗`;
+      if (sel === 15)
+        return [{ t: 'big', op: '∫', lo: slot(1), hi: slot(2), body: slot(0) }];
+      if (sel >= 16 && sel <= 22)
+        return [
+          {
+            t: 'big',
+            op: BIG_OPS[sel],
+            lo: slot(1),
+            hi: slot(2),
+            body: slot(0),
+          },
+        ];
+      if (sel === 23)
+        return [{ t: 'scr', base: slot(0), sub: slot(1), sup: [] }];
+      if (sel === 12) return [...slot(0), ...chrs('̲')];
+      if (sel === 13) return [...slot(0), ...chrs('̅')];
+      if (sel === 31) return [...slot(0), ...chrs('⃗')];
       if (sel >= 32 && sel <= 35)
-        return slot(0) + ({ 32: '̂', 33: '̃', 34: '̑' }[sel] ?? '');
+        return [...slot(0), ...chrs({ 32: '̂', 33: '̃', 34: '̑' }[sel] ?? '')];
       throw new Error(`template ${sel}`);
     };
 
@@ -258,10 +226,7 @@ export function mtefToLinear(mtef: Uint8Array): string | null {
           skipNudge(o);
           if (o & 0x04) p.u16();
           if (o & 0x02) skipRuler();
-          items.push({
-            kind: 'line',
-            text: o & 0x01 ? '' : flatten(objects()),
-          });
+          items.push({ kind: 'line', row: o & 0x01 ? [] : rowOf(objects()) });
         } else if (tag === 2) {
           // CHAR
           const o = p.u8();
@@ -277,7 +242,11 @@ export function mtefToLinear(mtef: Uint8Array): string | null {
           // Typeface 3 is MathType's "variable" style — the italic Word
           // renders math letters in. Same alphabet the OMML flattener uses.
           if (typeface === 3) ch = mathLetters(ch, MATH_ALPHABETS['italic']);
-          items.push({ kind: 'chr', text: ch + embell });
+          const row: EqNode[] = [...(ch + embell)].map((c) => ({
+            t: 'chr',
+            ch: c,
+          }));
+          items.push({ kind: 'chr', row });
         } else if (tag === 3) {
           // TMPL
           const o = p.u8();
@@ -287,9 +256,11 @@ export function mtefToLinear(mtef: Uint8Array): string | null {
           if (variation & 0x80) variation = (variation & 0x7f) | (p.u8() << 8);
           p.u8(); // template options
           const kids = objects()
-            .filter((i) => i.kind === 'line')
-            .map((i) => i.text);
-          items.push({ kind: 'chr', text: template(sel, variation, kids) });
+            .filter(
+              (i): i is { kind: 'line'; row: EqNode[] } => i.kind === 'line',
+            )
+            .map((i) => i.row);
+          items.push({ kind: 'chr', row: template(sel, variation, kids) });
         } else if (tag === 4) {
           // PILE — vertical stack of lines, joined the way prose reads them.
           const o = p.u8();
@@ -298,9 +269,16 @@ export function mtefToLinear(mtef: Uint8Array): string | null {
           p.u8();
           if (o & 0x02) skipRuler();
           const kids = objects()
-            .filter((i) => i.kind === 'line')
-            .map((i) => i.text);
-          items.push({ kind: 'chr', text: kids.join('; ') });
+            .filter(
+              (i): i is { kind: 'line'; row: EqNode[] } => i.kind === 'line',
+            )
+            .map((i) => i.row);
+          const joined: EqNode[] = [];
+          kids.forEach((k, i) => {
+            if (i) joined.push({ t: 'chr', ch: ';' }, { t: 'chr', ch: ' ' });
+            joined.push(...k);
+          });
+          items.push({ kind: 'chr', row: joined });
         } else if (tag === 6) {
           // EMBELL
           const o = p.u8();
@@ -339,17 +317,36 @@ export function mtefToLinear(mtef: Uint8Array): string | null {
         }
       }
     };
-    const flatten = (items: Item[]): string =>
-      items
-        .filter((i) => i.kind === 'chr' || i.kind === 'line')
-        .map((i) => i.text)
-        .join('');
-
-    const text = flatten(objects()).trim();
-    return text.length ? text : null;
+    /** Items → one row. A bare script template (empty base) adopts the item
+     *  right before it — MathType writes "x" then SUP("2"). */
+    const rowOf = (items: Item[]): EqNode[] => {
+      const row: EqNode[] = [];
+      for (const it of items) {
+        if (it.kind === 'emb') continue;
+        for (const n of it.row) {
+          if (n.t === 'scr' && n.base.length === 0 && row.length > 0) {
+            const prev = row.pop() as EqNode;
+            row.push({ ...n, base: [prev] });
+          } else {
+            row.push(n);
+          }
+        }
+      }
+      return row;
+    };
+    const ast = rowOf(objects());
+    return ast.length ? ast : null;
   } catch {
     return null;
   }
+}
+
+/** Parse an MTEF v5 payload into linear equation text, or null. */
+export function mtefToLinear(mtef: Uint8Array): string | null {
+  const ast = mtefToAst(mtef);
+  if (!ast) return null;
+  const text = astToLinear(ast).trim();
+  return text.length ? text : null;
 }
 
 /** The linear equation text of a MathType WMF preview, or null. */

@@ -8,6 +8,7 @@ import {
   schema,
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
+import { astToLinear } from '@shadow-garden/bapbong-contracts';
 import { importDocx } from './docx';
 import { exportDocx } from './export';
 import { DocxImportError, IMPORT_ERROR_MESSAGES, sniffDocx } from './sniff';
@@ -196,20 +197,21 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(xml));
 
-    // Subscripted digits become Unicode subscripts; letters take their math
-    // letterform (OMML defaults to italic) via the Unicode math alphabets;
-    // the run is formatted like the equation's first math run (italic here).
-    expect(doc.child(0).textContent).toBe('𝑡₁');
-    expect(
-      doc
-        .child(0)
-        .child(0)
-        .marks.map((m) => m.type.name),
-    ).toContain('em');
+    // Modelled OMML now becomes a real 2D equation node; its AST spells the
+    // same linear text the old flatten produced (letters math-italic,
+    // digits/operators upright).
+    const eq0 = doc.child(0).child(0);
+    expect(eq0.type.name).toBe('equation');
+    expect(astToLinear(eq0.attrs['ast'] as never)).toBe('𝑡₁');
 
     // Inline equation after plain text: sup, fractions (multi-term numerator
-    // gets parens), radical, delimiter. Operators and digits stay upright.
-    expect(doc.child(1).textContent).toBe('S = 𝑥²+𝑎/𝑏+(𝑎+𝑏)/𝑐+√(𝑦)+(𝑢+𝑣)');
+    // gets parens), radical, delimiter.
+    const eq1 = doc.child(1).child(1);
+    expect(eq1.type.name).toBe('equation');
+    expect(astToLinear(eq1.attrs['ast'] as never)).toBe(
+      '𝑥²+𝑎/𝑏+(𝑎+𝑏)/𝑐+√(𝑦)+(𝑢+𝑣)',
+    );
+    expect(doc.child(1).child(0).text).toBe('S = ');
   });
 
   it('honours OMML math styles: m:scr variants, m:sty p, m:nor', async () => {
@@ -227,8 +229,11 @@ describe('importDocx', () => {
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(xml));
     // 𝒫 (script, = stays upright), ℝ (double-struck), sin (plain via
-    // m:sty p), 𝐛 (bold), nor (m:nor: normal text).
-    expect(doc.child(0).textContent).toBe('𝒫=ℝsin𝐛nor');
+    // m:sty p), 𝐛 (bold), nor (m:nor: normal text) — carried by the
+    // equation node's AST characters.
+    const eq = doc.child(0).child(0);
+    expect(eq.type.name).toBe('equation');
+    expect(astToLinear(eq.attrs['ast'] as never)).toBe('𝒫=ℝsin𝐛nor');
   });
 
   it('treats a toggle disabled via w:val="false" as off', async () => {

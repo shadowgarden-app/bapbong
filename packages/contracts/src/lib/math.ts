@@ -183,12 +183,15 @@ const digitsVia = (s: string, alphabet: string): string | null =>
  *  flattener and Insert ▸ Equation type: it is the equation's plain-text
  *  identity (a11y mirror, search, the linear editing mode). */
 export function astToLinear(row: EqNode[]): string {
+  // Char counts, not UTF-16 lengths: a math-italic letter is a surrogate
+  // pair and must still count as ONE character.
+  const count = (s: string): number => [...s].length;
   const paren = (s: string): string =>
-    s.length <= 1 || (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
+    count(s) <= 1 || (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
   const sub = (s: string): string =>
-    digitsVia(s, SUB_DIGIT) ?? (s.length > 1 ? `_(${s})` : `_${s}`);
+    digitsVia(s, SUB_DIGIT) ?? (count(s) > 1 ? `_(${s})` : `_${s}`);
   const sup = (s: string): string =>
-    digitsVia(s, SUP_DIGIT) ?? (s.length > 1 ? `^(${s})` : `^${s}`);
+    digitsVia(s, SUP_DIGIT) ?? (count(s) > 1 ? `^(${s})` : `^${s}`);
   const one = (n: EqNode): string => {
     switch (n.t) {
       case 'chr':

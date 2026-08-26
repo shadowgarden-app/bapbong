@@ -45,6 +45,7 @@ import {
 import {
   MATH_ALPHABETS,
   mathLetters,
+  type EqNode,
   type MathAlphabet,
 } from '@shadow-garden/bapbong-contracts';
 import {
@@ -1122,6 +1123,7 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     float: null,
     vector: vector?.spec ?? null,
     equation: vector?.linear ?? null,
+    equationAst: vector?.ast ?? null,
     raise,
   });
 }
@@ -2075,6 +2077,118 @@ function mathVariantOf(run: OoxmlNode): MathAlphabet | null {
   return MATH_ALPHABETS['italic'];
 }
 
+/** OMML → equation AST, for the constructs the 2D typesetter models. Null
+ *  the moment anything else appears — the caller falls back to the linear
+ *  flatten, so nothing is dropped, only rendered flat. */
+function ommlToAst(node: OoxmlNode): EqNode[] | null {
+  try {
+    return ommlRow(node);
+  } catch {
+    return null;
+  }
+}
+
+function ommlRow(node: OoxmlNode): EqNode[] {
+  const rowOfChild = (name: string, parent: OoxmlNode): EqNode[] => {
+    const c = child(parent, name);
+    return c ? ommlRow(c) : [];
+  };
+  switch (node.name) {
+    case 'm:oMath':
+    case 'm:oMathPara':
+    case 'm:e':
+    case 'm:num':
+    case 'm:den':
+    case 'm:deg':
+    case 'm:sub':
+    case 'm:sup':
+      return node.children.flatMap((c) => ommlRow(c));
+    case 'm:r': {
+      const variant = mathVariantOf(node);
+      const text = children(node, 'm:t')
+        .map((t) => t.text)
+        .join('');
+      const styled = variant ? mathLetters(text, variant) : text;
+      return [...styled].map((ch) => ({ t: 'chr', ch }));
+    }
+    case 'm:f':
+      return [
+        {
+          t: 'frac',
+          num: rowOfChild('m:num', node),
+          den: rowOfChild('m:den', node),
+        },
+      ];
+    case 'm:sSub':
+      return [
+        {
+          t: 'scr',
+          base: rowOfChild('m:e', node),
+          sub: rowOfChild('m:sub', node),
+          sup: [],
+        },
+      ];
+    case 'm:sSup':
+      return [
+        {
+          t: 'scr',
+          base: rowOfChild('m:e', node),
+          sub: [],
+          sup: rowOfChild('m:sup', node),
+        },
+      ];
+    case 'm:sSubSup':
+      return [
+        {
+          t: 'scr',
+          base: rowOfChild('m:e', node),
+          sub: rowOfChild('m:sub', node),
+          sup: rowOfChild('m:sup', node),
+        },
+      ];
+    case 'm:rad':
+      return [
+        {
+          t: 'rad',
+          deg: rowOfChild('m:deg', node),
+          body: rowOfChild('m:e', node),
+        },
+      ];
+    case 'm:d': {
+      const pr = child(node, 'm:dPr');
+      const chr = (name: string, dflt: string): string =>
+        attrOf(child(pr, name), 'm:val') ?? dflt;
+      const parts = children(node, 'm:e').map((e) => ommlRow(e));
+      const sep = chr('m:sepChr', ',');
+      const body: EqNode[] = [];
+      parts.forEach((part, i) => {
+        if (i) body.push(...[...sep].map((ch) => ({ t: 'chr' as const, ch })));
+        body.push(...part);
+      });
+      return [
+        { t: 'fence', l: chr('m:begChr', '('), r: chr('m:endChr', ')'), body },
+      ];
+    }
+    case 'm:nary': {
+      const pr = child(node, 'm:naryPr');
+      const op = attrOf(child(pr, 'm:chr'), 'm:val') ?? '∫';
+      return [
+        {
+          t: 'big',
+          op,
+          lo: rowOfChild('m:sub', node),
+          hi: rowOfChild('m:sup', node),
+          body: rowOfChild('m:e', node),
+        },
+      ];
+    }
+    default:
+      // Property containers configure, never contribute content.
+      if (node.name.startsWith('m:') && node.name.endsWith('Pr')) return [];
+      throw new Error(node.name);
+  }
+}
+
 /** OMML (`m:oMath`) flattened to readable plain text — v1 keeps the equation's
  *  CONTENT, not its typesetting: `t` sub `1` → "t₁", `x` sup `2` → "x²",
  *  fractions → "num/den", radicals → "√(…)", delimiters → "(…)". Letters keep
@@ -2422,20 +2536,34 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
         handleRun(c, href, tgtFrame);
       }
     } else if (node.name === 'm:oMath' || node.name === 'm:oMathPara') {
-      // OMML equations, flattened to a plain-text run (v1: content over
-      // typesetting — see flattenOmml). Formatted like the first math run.
-      // Deliberate wholesale flattening — the whole subtree counts consumed.
+      // OMML equations. The constructs the 2D typesetter models become a
+      // real equation node (typeset fractions, scripts, radicals …);
+      // anything else falls back to the linear flatten so nothing drops.
+      // Deliberate wholesale consumption — the whole subtree counts.
       audit.markSubtree(node);
-      const text = flattenOmml(node);
-      if (text.length > 0) {
-        const first = findDescendant(node, 'm:r');
-        const marks = runMarks(first, paraBase, ctx, null);
-        // The math mark keeps the run addressable as an equation — and the
-        // exporter rebuilds m:oMath from it, so the region survives a save.
-        const math = ctx.schema.marks['math'];
-        inline.push(
-          ctx.schema.text(text, math ? [...marks, math.create()] : marks),
+      const first = findDescendant(node, 'm:r');
+      const ast = ctx.schema.nodes['equation'] ? ommlToAst(node) : null;
+      if (ast && ast.length > 0) {
+        const szHp = Number(
+          attrOf(child(child(first, 'w:rPr'), 'w:sz'), 'w:val'),
         );
+        inline.push(
+          ctx.schema.nodes['equation'].create({
+            ast,
+            sizePt: Number.isFinite(szHp) && szHp > 0 ? szHp / 2 : 12,
+          }),
+        );
+      } else {
+        const text = flattenOmml(node);
+        if (text.length > 0) {
+          const marks = runMarks(first, paraBase, ctx, null);
+          // The math mark keeps the run addressable as an equation — and the
+          // exporter rebuilds m:oMath from it, so the region survives a save.
+          const math = ctx.schema.marks['math'];
+          inline.push(
+            ctx.schema.text(text, math ? [...marks, math.create()] : marks),
+          );
+        }
       }
     } else if (node.name === 'w:commentRangeStart') {
       const id = Number(attrOf(node, 'w:id'));

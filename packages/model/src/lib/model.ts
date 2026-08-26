@@ -332,6 +332,9 @@ export const schema = new Schema({
         // MTEF (MathType semantics) — what "Convert to editable equation"
         // replaces the picture with. Null when the picture carries none.
         equation: { default: null },
+        // The same equation as an AST (EqNode[]) — what conversion turns
+        // into a real 2D equation node. Null when undecodable.
+        equationAst: { default: null },
         // w:position on the run holding a legacy object — baseline shift in
         // px, positive UP (same convention as InlineRun.raise). MathType
         // lowers every equation so its baseline meets the text line's.

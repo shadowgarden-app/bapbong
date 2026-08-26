@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { Schema } from 'prosemirror-model';
 import { schema } from '@shadow-garden/bapbong-model';
+import { astToLinear } from '@shadow-garden/bapbong-contracts';
 import { importDocx } from './docx';
 import { exportDocx } from './export';
 
@@ -2104,9 +2105,12 @@ describe('exportDocx (equations)', () => {
 
     const { doc: back } = await importDocx(bytes);
     const para = back.child(0);
-    expect(para.textContent).toBe('bằng 𝜔=2𝜋𝑓 rad/s');
-    // The equation text comes back math-marked (importer restamps it).
+    // The re-import now models the equation as a 2D node; its AST keeps the
+    // exact linear spelling.
     const mid = para.child(1);
-    expect(mid.marks.some((m) => m.type.name === 'math')).toBe(true);
+    expect(mid.type.name).toBe('equation');
+    expect(astToLinear(mid.attrs['ast'] as never)).toBe('𝜔=2𝜋𝑓');
+    expect(para.child(0).text).toBe('bằng ');
+    expect(para.child(2).text).toBe(' rad/s');
   });
 });

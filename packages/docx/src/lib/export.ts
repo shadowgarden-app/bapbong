@@ -76,6 +76,7 @@ const commentIdsOf = (node: PMNode): number[] =>
 const isInlineLeaf = (node: PMNode): boolean =>
   node.isText ||
   node.type.name === 'image' ||
+  node.type.name === 'equation' ||
   node.type.name === 'hard_break' ||
   node.type.name === 'column_break' ||
   // Without this, inlineContent skips page_field entirely and PAGE/NUMPAGES
@@ -455,8 +456,63 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
 }
 
 /** One inline node → its run XML (excluding the link wrapper). */
+/** An equation AST row → structured OMML children. Chars coalesce into one
+ *  m:r; structures map onto their m:* elements, so Word round-trips them as
+ *  native equations. */
+function astOmml(
+  row: import('@shadow-garden/bapbong-contracts').EqNode[],
+): string {
+  let out = '';
+  let pending = '';
+  const flush = (): void => {
+    if (!pending) return;
+    out += `<m:r><m:t xml:space="preserve">${esc(pending)}</m:t></m:r>`;
+    pending = '';
+  };
+  for (const n of row) {
+    if (n.t === 'chr') {
+      pending += n.ch;
+      continue;
+    }
+    flush();
+    if (n.t === 'frac')
+      out += `<m:f><m:num>${astOmml(n.num)}</m:num><m:den>${astOmml(n.den)}</m:den></m:f>`;
+    else if (n.t === 'scr') {
+      const e = `<m:e>${astOmml(n.base)}</m:e>`;
+      if (n.sub.length && n.sup.length)
+        out += `<m:sSubSup>${e}<m:sub>${astOmml(n.sub)}</m:sub><m:sup>${astOmml(n.sup)}</m:sup></m:sSubSup>`;
+      else if (n.sup.length)
+        out += `<m:sSup>${e}<m:sup>${astOmml(n.sup)}</m:sup></m:sSup>`;
+      else out += `<m:sSub>${e}<m:sub>${astOmml(n.sub)}</m:sub></m:sSub>`;
+    } else if (n.t === 'rad')
+      out +=
+        `<m:rad>` +
+        (n.deg.length
+          ? `<m:deg>${astOmml(n.deg)}</m:deg>`
+          : `<m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/>`) +
+        `<m:e>${astOmml(n.body)}</m:e></m:rad>`;
+    else if (n.t === 'fence')
+      out +=
+        `<m:d><m:dPr><m:begChr m:val="${esc(n.l)}"/><m:endChr m:val="${esc(n.r)}"/></m:dPr>` +
+        `<m:e>${astOmml(n.body)}</m:e></m:d>`;
+    else if (n.t === 'big')
+      out +=
+        `<m:nary><m:naryPr><m:chr m:val="${esc(n.op)}"/></m:naryPr>` +
+        `<m:sub>${astOmml(n.lo)}</m:sub><m:sup>${astOmml(n.hi)}</m:sup>` +
+        `<m:e>${astOmml(n.body)}</m:e></m:nary>`;
+  }
+  flush();
+  return out;
+}
+
 function inlineXml(node: PMNode, ctx: ExportCtx): string {
   if (node.type.name === 'hard_break') return '<w:r><w:br/></w:r>';
+  if (node.type.name === 'equation') {
+    const ast = node.attrs['ast'];
+    return Array.isArray(ast)
+      ? `<m:oMath>${astOmml(ast as never)}</m:oMath>`
+      : '';
+  }
   // Back out where it sits, not at the paragraph's head: the run order is
   // what decides which column the content before it stays in.
   if (node.type.name === 'column_break')

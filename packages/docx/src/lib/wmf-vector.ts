@@ -26,7 +26,7 @@ import type {
   VectorOp,
 } from '@shadow-garden/bapbong-contracts';
 import { decodeWmfText } from './wmf-charmap.js';
-import { mtefLinearFromWmf } from './mtef.js';
+import { mtefFromWmf, mtefLinearFromWmf, mtefToAst } from './mtef.js';
 
 /** One glyph run: EXTTEXTOUT plus the graphics state it was issued under. */
 export interface WmfTextOp {
@@ -434,6 +434,8 @@ export interface WmfVectorResult {
   /** Linear equation text recovered from the embedded MTEF, or null — what
    *  "Convert to editable equation" inserts. */
   linear: string | null;
+  /** The equation AST from the same MTEF — the 2D form conversion prefers. */
+  ast: import('@shadow-garden/bapbong-contracts').EqNode[] | null;
   /** Physical size in CSS px from the placeable header, when it has one —
    *  the size fallback for markup that states none. */
   pxWidth: number | null;
@@ -498,6 +500,10 @@ export function wmfVectorSpec(bytes: Uint8Array): WmfVectorResult | null {
   return {
     spec: { width: image.width, height: image.height, ops },
     linear: mtefLinearFromWmf(bytes),
+    ast: (() => {
+      const m = mtefFromWmf(bytes);
+      return m ? mtefToAst(m) : null;
+    })(),
     pxWidth: px(image.width),
     pxHeight: px(image.height),
   };
