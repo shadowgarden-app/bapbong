@@ -359,6 +359,66 @@ export interface ShapeSpec {
   cornerRatio?: number;
 }
 
+/** One glyph run of a {@link VectorImageSpec}. Coordinates and sizes are in
+ *  the spec's own logical units; the painter scales them to the image box. */
+export interface VectorTextOp {
+  kind: 'text';
+  x: number;
+  /** Vertical reference: the alphabetic BASELINE unless `vAlign` says
+   *  otherwise — metafile text records state which edge they position by. */
+  y: number;
+  /** Decoded Unicode (symbol-font bytes already mapped). */
+  text: string;
+  /** Per-character advances in logical units. When present the painter MUST
+   *  place each character by these — the source kerned by hand (MathType
+   *  positions every glyph), its own measurement would drift. */
+  dx?: number[];
+  /** Em size in logical units. */
+  size: number;
+  family: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  color: string;
+  vAlign?: 'top' | 'bottom' | 'baseline';
+}
+
+/** One stroked segment (fraction bars, radical vinculums). */
+export interface VectorLineOp {
+  kind: 'line';
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** Stroke width in logical units; 0 = hairline (1 device px). */
+  width: number;
+  color: string;
+}
+
+/** One filled polygon (arrowheads). */
+export interface VectorPolygonOp {
+  kind: 'polygon';
+  points: { x: number; y: number }[];
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+}
+
+export type VectorOp = VectorTextOp | VectorLineOp | VectorPolygonOp;
+
+/** A metafile replayed as vector ops — how MathType/OLE equation previews
+ *  (WMF) paint. Rides an image box like {@link ShapeSpec} does, but as a
+ *  display list rather than a preset geometry: ops in z-order over a
+ *  `width`×`height` logical canvas the painter scales to the box, so the
+ *  drawing stays sharp at every zoom. The image node keeps the original
+ *  metafile bytes in `src` for export; a painter that sees `vector` never
+ *  decodes `src`. */
+export interface VectorImageSpec {
+  width: number;
+  height: number;
+  ops: VectorOp[];
+}
+
 /** `a:srcRect` — the part of the bitmap the box shows, as ratios of the
  *  bitmap's own size measured inward from each edge. Positive crops in;
  *  NEGATIVE outsets, reaching past the bitmap so the overhang renders as
@@ -387,6 +447,8 @@ export interface InlineImage {
   link?: string;
   /** Present when this box is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** Present when this box replays a metafile (equation previews). */
+  vector?: VectorImageSpec;
   /** Clockwise degrees around the box center — paint-only: the layout box
    *  stays axis-aligned (Word re-wraps only on commit, not live). */
   rotation?: number;
@@ -443,6 +505,8 @@ export interface FlowFloat {
   background?: string;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** Present when this float replays a metafile (equation previews). */
+  vector?: VectorImageSpec;
   /** wps:bodyPr a:spAutoFit — the box grows to its text. Word IGNORES the
    *  stored extent and recomputes the height on open (measured: a probe
    *  storing cy=14.2pt drew 105.8pt), so layout does the same: `height`
@@ -806,6 +870,8 @@ export interface LayoutImageSegment {
   link?: string;
   /** Present when this box is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** Present when this box replays a metafile (equation previews). */
+  vector?: VectorImageSpec;
   /** Visible sub-rectangle of the bitmap (a:srcRect). */
   crop?: ImageCrop;
   /** Line drawn round the picture's box (a:ln on pic:spPr). */
@@ -921,6 +987,8 @@ export interface ResolvedFloat {
   background?: string;
   /** Present when this float is a drawn vector shape instead of a bitmap. */
   shape?: ShapeSpec;
+  /** Present when this float replays a metafile (equation previews). */
+  vector?: VectorImageSpec;
   /** Textbox text laid out inside the shape, in BOX-LOCAL coordinates
    *  (origin at the float's top-left) — the painter translates by (x, y).
    *  Never caret-addressable; PM positions are stripped. */

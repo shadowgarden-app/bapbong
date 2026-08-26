@@ -236,6 +236,7 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
     height: Number(a['height']) || fallback,
     link: link ? String(link.attrs['href']) : undefined,
     ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
+    ...(a['vector'] ? { vector: a['vector'] as InlineImage['vector'] } : {}),
     ...(a['crop'] ? { crop: a['crop'] as ImageCrop } : {}),
     ...(a['outline'] ? { outline: a['outline'] as BorderSide } : {}),
     ...(a['background'] ? { background: a['background'] as string } : {}),
@@ -290,6 +291,9 @@ function paragraphToFlow(
           pos: contentStart + offset,
           ...(child.attrs['shape']
             ? { shape: child.attrs['shape'] as FlowFloat['shape'] }
+            : {}),
+          ...(child.attrs['vector']
+            ? { vector: child.attrs['vector'] as FlowFloat['vector'] }
             : {}),
           ...(child.attrs['crop']
             ? { crop: child.attrs['crop'] as ImageCrop }
@@ -1072,6 +1076,7 @@ function wrapParagraph(
           height: t.image.height,
           link: t.link,
           ...(t.image.shape ? { shape: t.image.shape } : {}),
+          ...(t.image.vector ? { vector: t.image.vector } : {}),
           ...(t.image.crop ? { crop: t.image.crop } : {}),
           ...(t.image.outline ? { outline: t.image.outline } : {}),
           ...(t.image.background ? { background: t.image.background } : {}),
@@ -1492,6 +1497,7 @@ function resolveFloat(
   if (f.outline) rf.outline = f.outline;
   if (f.background) rf.background = f.background;
   if (f.shape) rf.shape = f.shape;
+  if (f.vector) rf.vector = f.vector;
   if (f.behind) rf.behind = true;
   if (f.content && f.content.length > 0) {
     const inset = f.inset ?? TEXTBOX_INSET;

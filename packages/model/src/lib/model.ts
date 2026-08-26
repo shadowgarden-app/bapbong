@@ -285,6 +285,11 @@ export const schema = new Schema({
         // { kind: 'rect'|'line', stroke?, strokeWidth?, fill?, flipV? } — src
         // is then '' and the box paints as vector. Null for real bitmaps.
         shape: { default: null },
+        // Replayed metafile (VectorImageSpec) — how MathType/OLE equation
+        // previews (vector WMF) paint. `src` keeps the original metafile
+        // data URL for export; the painter draws the ops instead. Null for
+        // bitmaps and preset shapes.
+        vector: { default: null },
         // Textbox (wps:txbx) content riding a shape: { paragraphs: <paragraph
         // node JSON>[], inset?: {l,t,r,b} px }. The layout engine flows the
         // paragraphs inside the shape's box (paint-only, not editable v1).
