@@ -365,8 +365,9 @@ export function imageAtPoint(
   for (const line of allLines(page)) {
     for (const img of line.images ?? []) {
       if (img.pos == null) continue;
-      // The image's bottom edge sits on the baseline (matches the painter).
-      const top = line.y + line.baseline - img.height;
+      // The image's bottom edge sits on the baseline, shifted by any
+      // baseline raise (matches the painter).
+      const top = line.y + line.baseline - img.height - (img.raise ?? 0);
       if (!inside(img.x, top, img.width, img.height, img.rotation)) continue;
       return {
         pos: img.pos,

@@ -232,7 +232,9 @@ function frameForPos(
         return {
           pageIndex: page.index,
           x: img.x,
-          y: line.y + line.baseline - img.height,
+          // Bottom edge on the baseline, shifted by any baseline raise —
+          // the same placement the painter draws.
+          y: line.y + line.baseline - img.height - (img.raise ?? 0),
           width: img.width,
           height: img.height,
           ...(img.rotation ? { rotation: img.rotation } : {}),
