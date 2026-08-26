@@ -4,6 +4,7 @@ import type {
   NumberingLevelDef,
 } from '@shadow-garden/bapbong-model';
 import { audit } from './audit.js';
+import { symbolFontText } from './symbol-fonts.js';
 import {
   attrOf,
   child,
@@ -54,6 +55,17 @@ function parseLvl(
     start: Number(attrOf(child(lvl, 'w:start'), 'w:val') ?? '1') || 1,
     pPr: child(lvl, 'w:pPr'),
   };
+  // A bullet's glyph is a PICTURE in a symbol font: Word's default bullet is
+  // U+F0B7 in Symbol, the second level U+F0A7 in Wingdings. Those code points
+  // are private-use — without the font installed they render as tofu, which
+  // is exactly what every bulleted list came out as. Translate the label to
+  // real Unicode here, the same way run text and w:sym already are (the
+  // level's own w:rPr names the font). The marker's family stays on the
+  // level so an untranslated glyph still uses it, and export writes the
+  // original XML back from the carried numbering part.
+  const lvlFont = attrOf(child(child(lvl, 'w:rPr'), 'w:rFonts'), 'w:ascii');
+  const mapped = symbolFontText(entry.lvlText, lvlFont);
+  if (mapped !== null) entry.lvlText = mapped;
   // Label alignment (w:lvlJc). left/start is the default — omitted.
   const jc = attrOf(child(lvl, 'w:lvlJc'), 'w:val');
   if (jc === 'right' || jc === 'end') entry.jc = 'right';

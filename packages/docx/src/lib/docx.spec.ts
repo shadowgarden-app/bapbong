@@ -585,6 +585,45 @@ describe('importDocx', () => {
     expect(marker(2)).toBe('II)');
   });
 
+  it('translates symbol-font bullets out of the private-use area', async () => {
+    // Word's own default bullets: U+F0B7 in Symbol, U+F0A7 in Wingdings —
+    // private-use code points that render as tofu without those fonts.
+    const numberingXml = `<?xml version="1.0"?><w:numbering xmlns:w="${W_NS}">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="\uF0B7"/>
+          <w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol"/></w:rPr></w:lvl>
+        <w:lvl w:ilvl="1"><w:numFmt w:val="bullet"/><w:lvlText w:val="\uF0A7"/>
+          <w:rPr><w:rFonts w:ascii="Wingdings" w:hAnsi="Wingdings"/></w:rPr></w:lvl>
+        <w:lvl w:ilvl="2"><w:numFmt w:val="bullet"/><w:lvlText w:val="o"/>
+          <w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/></w:rPr></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${listP('1', 0, 'first')}
+      ${listP('1', 1, 'second')}
+      ${listP('1', 2, 'third')}
+    </w:body></w:document>`;
+
+    const { doc } = await importDocx(
+      await makeDocx(documentXml, undefined, numberingXml),
+    );
+    const counter = createNumberingCounter(
+      doc.attrs.numbering as NumberingDefs,
+    );
+    const marker = (i: number) => {
+      const list = doc.child(i).attrs.list as { numId: string; level: number };
+      return counter.next(list.numId, list.level);
+    };
+    expect(marker(0)).toBe('\u2022'); // • — a real bullet, not U+F0B7
+    expect(marker(1)).toBe('\u25AA'); // ▪
+    // A non-symbol font passes through untouched.
+    expect(marker(2)).toBe('o');
+    // The level keeps its font for anything the table doesn't map.
+    const defs = doc.attrs.numbering as NumberingDefs;
+    expect(defs['1'].levels['0'].rPr?.family).toBe('Symbol');
+  });
+
   it('imports tables in document order with colspan and column widths', async () => {
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
       <w:p><w:r><w:t>before</w:t></w:r></w:p>
