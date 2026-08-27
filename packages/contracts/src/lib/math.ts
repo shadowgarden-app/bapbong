@@ -241,6 +241,15 @@ export interface EqLim {
   below: boolean;
 }
 
+/** A grid (m:m). Cells are stored FLAT in reading order — cell (r, c) is at
+ *  `r * cols + c` — because a slot path addresses one row of nodes at a time
+ *  and a two-index address would not fit that scheme. */
+export interface EqMat {
+  t: 'mat';
+  cols: number;
+  cells: EqNode[][];
+}
+
 export type EqNode =
   | EqChr
   | EqFrac
@@ -250,7 +259,16 @@ export type EqNode =
   | EqBig
   | EqFunc
   | EqAcc
-  | EqLim;
+  | EqLim
+  | EqMat;
+
+/** The row name addressing a matrix cell in a slot path. */
+export const eqCellName = (index: number): string => `c${index}`;
+/** The cell index a row name addresses, or null when it is not a cell. */
+export function eqCellIndex(name: string): number | null {
+  const m = /^c(\d+)$/.exec(name);
+  return m ? Number(m[1]) : null;
+}
 
 /**
  * The rows of a node that form a VERTICAL stack, top to bottom — what up and
@@ -307,6 +325,9 @@ export function eqRowNames(n: EqNode): readonly string[] {
       return ['body'];
     case 'lim':
       return ['base', 'lim'];
+    case 'mat':
+      // Reading order, row by row — the same order Tab walks a table.
+      return n.cells.map((_, i) => eqCellName(i));
     default:
       return [];
   }
@@ -365,6 +386,18 @@ export function astToLinear(row: EqNode[]): string {
         const l = astToLinear(n.lim);
         return astToLinear(n.base) + (l ? (n.below ? sub(l) : sup(l)) : '');
       }
+      case 'mat': {
+        // Word's linear matrix spelling: cells joined by &, rows by @.
+        const lines: string[] = [];
+        for (let i = 0; i < n.cells.length; i += n.cols)
+          lines.push(
+            n.cells
+              .slice(i, i + n.cols)
+              .map((c) => astToLinear(c))
+              .join('&'),
+          );
+        return `(${lines.join('@')})`;
+      }
     }
   };
   return row.map(one).join('');
@@ -411,6 +444,15 @@ export function isEqRow(v: unknown): v is EqNode[] {
         isEqRow((n as EqLim).base) &&
         isEqRow((n as EqLim).lim)
       );
+    if (t === 'mat') {
+      const m = n as EqMat;
+      return (
+        typeof m.cols === 'number' &&
+        m.cols > 0 &&
+        Array.isArray(m.cells) &&
+        m.cells.every((c) => isEqRow(c))
+      );
+    }
     return false;
   });
 }

@@ -5,6 +5,7 @@
  * alternating, ending at a row.
  */
 import {
+  eqCellIndex,
   eqRowNames,
   eqVerticalRows,
   MATH_ALPHABETS,
@@ -28,6 +29,34 @@ function unstyled(ch: string): string {
   return ch;
 }
 
+/** One named row of a node. Matrix cells live in a flat `cells` array rather
+ *  than in fields, so their names are read back to an index here — the one
+ *  place that knows, so paths stay the plain index/name pairs everything
+ *  else walks. */
+function rowField(node: unknown, name: string): EqNode[] | null {
+  const n = node as Record<string, unknown> | undefined;
+  if (!n) return null;
+  const cell = eqCellIndex(name);
+  if (cell !== null && Array.isArray(n['cells'])) {
+    const row = (n['cells'] as EqNode[][])[cell];
+    return Array.isArray(row) ? row : null;
+  }
+  const v = n[name];
+  return Array.isArray(v) ? (v as EqNode[]) : null;
+}
+
+/** `node` with one named row replaced — the write side of rowField. */
+function withRowField(node: EqNode, name: string, row: EqNode[]): EqNode {
+  const n = node as unknown as Record<string, unknown>;
+  const cell = eqCellIndex(name);
+  if (cell !== null && Array.isArray(n['cells']))
+    return {
+      ...n,
+      cells: (n['cells'] as EqNode[][]).map((c, i) => (i === cell ? row : c)),
+    } as unknown as EqNode;
+  return { ...n, [name]: row } as unknown as EqNode;
+}
+
 /** The row a slot path addresses, or null when the path no longer fits. */
 export function rowAt(ast: EqNode[], path: Path): EqNode[] | null {
   let row: EqNode[] = ast;
@@ -35,10 +64,9 @@ export function rowAt(ast: EqNode[], path: Path): EqNode[] | null {
     const idx = path[i];
     const name = path[i + 1];
     if (typeof idx !== 'number' || typeof name !== 'string') return null;
-    const node = row[idx] as unknown as Record<string, unknown> | undefined;
-    const next = node?.[name];
-    if (!Array.isArray(next)) return null;
-    row = next as EqNode[];
+    const next = rowField(row[idx], name);
+    if (!next) return null;
+    row = next;
   }
   return row;
 }
@@ -54,11 +82,9 @@ export function withRow(
   const name = path[1] as string;
   return ast.map((n, i) => {
     if (i !== idx) return n;
-    const node = n as unknown as Record<string, unknown>;
-    return {
-      ...node,
-      [name]: withRow(node[name] as EqNode[], path.slice(2), fn),
-    } as unknown as EqNode;
+    const inner = rowField(n, name);
+    if (!inner) return n;
+    return withRowField(n, name, withRow(inner, path.slice(2), fn));
   });
 }
 

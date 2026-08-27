@@ -23,6 +23,7 @@ import type {
 } from '@shadow-garden/bapbong-contracts';
 import {
   bigLimits,
+  eqCellName,
   radShowDeg,
   scrSlots,
 } from '@shadow-garden/bapbong-contracts';
@@ -513,6 +514,59 @@ export function layoutEquation(
             ...shiftSlots(lim.slots, (w - lim.w) / 2, limBase),
           ],
           caretXs: [0, w],
+        };
+      }
+      case 'mat': {
+        const cells = n.cells.map((c, i) =>
+          row(c, pt, [...path, eqCellName(i)]),
+        );
+        const rows = Math.ceil(cells.length / n.cols) || 1;
+        const colW: number[] = new Array(n.cols).fill(0);
+        const rowAsc: number[] = new Array(rows).fill(0);
+        const rowDesc: number[] = new Array(rows).fill(0);
+        cells.forEach((cell, i) => {
+          const r = Math.floor(i / n.cols);
+          const c = i % n.cols;
+          colW[c] = Math.max(colW[c], cell.w);
+          rowAsc[r] = Math.max(rowAsc[r], cell.asc);
+          rowDesc[r] = Math.max(rowDesc[r], cell.desc);
+        });
+        const colGap = em * 0.55;
+        const rowGap = em * 0.3;
+        const colX: number[] = [];
+        let cx = 0;
+        for (let c = 0; c < n.cols; c++) {
+          colX[c] = cx;
+          cx += colW[c] + colGap;
+        }
+        const totalW = Math.max(0, cx - colGap);
+        const rowBase: number[] = [];
+        let cy = 0;
+        for (let r = 0; r < rows; r++) {
+          rowBase[r] = cy + rowAsc[r];
+          cy += rowAsc[r] + rowDesc[r] + rowGap;
+        }
+        const totalH = Math.max(0, cy - rowGap);
+        // The grid straddles the math axis, the way a fraction does — so a
+        // one-row matrix sits on the line like ordinary text.
+        const top = -AXIS * em - totalH / 2;
+        const ops: VectorOp[] = [];
+        const slots: EqSlotRect[] = [];
+        cells.forEach((cell, i) => {
+          const r = Math.floor(i / n.cols);
+          const c = i % n.cols;
+          const dx = colX[c] + (colW[c] - cell.w) / 2;
+          const dy = top + rowBase[r];
+          ops.push(...shift(cell.ops, dx, dy));
+          slots.push(...shiftSlots(cell.slots, dx, dy));
+        });
+        return {
+          w: totalW,
+          asc: -top,
+          desc: top + totalH,
+          ops,
+          slots,
+          caretXs: [0, totalW],
         };
       }
     }

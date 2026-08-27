@@ -2089,6 +2089,18 @@ function ommlRow(node: OoxmlNode): EqNode[] {
           body: rowOfChild('m:e', node),
         },
       ];
+    case 'm:m': {
+      // Rows carry their own cells; a ragged matrix is padded so the flat
+      // store stays rectangular and (r, c) keeps meaning what it says.
+      const rows = children(node, 'm:mr').map((mr) =>
+        children(mr, 'm:e').map((e) => ommlRow(e)),
+      );
+      const cols = Math.max(1, ...rows.map((r) => r.length));
+      const cells: EqNode[][] = [];
+      for (const r of rows)
+        for (let c = 0; c < cols; c++) cells.push(r[c] ?? []);
+      return [{ t: 'mat', cols, cells }];
+    }
     case 'm:limLow':
     case 'm:limUpp':
       return [

@@ -299,7 +299,7 @@ export function equationPlugin(): EquationPlugin {
       const node = JSON.parse(JSON.stringify(st.node));
       commit(c, insertAt(at.ast, at.path, at.caret, node), {
         caret: at.caret + 1,
-        pendingPath: JSON.stringify([...at.path, at.caret, st.focus]),
+        pendingPath: JSON.stringify([...at.path, at.caret, ...st.focus]),
       });
       return true;
     },

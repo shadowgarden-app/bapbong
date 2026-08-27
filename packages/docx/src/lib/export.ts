@@ -517,7 +517,18 @@ function astOmml(
       out +=
         `<m:acc><m:accPr><m:chr m:val="${esc(n.chr)}"/></m:accPr>` +
         `<m:e>${astOmml(n.body)}</m:e></m:acc>`;
-    else if (n.t === 'lim') {
+    else if (n.t === 'mat') {
+      let rows = '';
+      for (let i = 0; i < n.cells.length; i += n.cols)
+        rows +=
+          '<m:mr>' +
+          n.cells
+            .slice(i, i + n.cols)
+            .map((c) => `<m:e>${astOmml(c)}</m:e>`)
+            .join('') +
+          '</m:mr>';
+      out += `<m:m>${rows}</m:m>`;
+    } else if (n.t === 'lim') {
       const tag = n.below ? 'm:limLow' : 'm:limUpp';
       out +=
         `<${tag}><m:e>${astOmml(n.base)}</m:e>` +

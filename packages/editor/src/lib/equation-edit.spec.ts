@@ -377,3 +377,66 @@ describe('walking a bracket and a big operator', () => {
     expect(verticalStep(ast, slots, LO, 0, -1)).toEqual({ slot: HI, caret: 0 });
   });
 });
+
+describe('walking a matrix', () => {
+  // A 2×2 grid. Cells live in a flat store, so the path names them c0..c3.
+  const ast: EqNode[] = [
+    {
+      t: 'mat',
+      cols: 2,
+      cells: [[chr('𝑎')], [chr('𝑏')], [chr('𝑐')], [chr('𝑑')]],
+    },
+  ];
+  const cell = (i: number, x: number, y: number): EqSlotRect => ({
+    path: [0, `c${i}`],
+    x,
+    y,
+    width: 10,
+    height: 10,
+    caretXs: [0, 10],
+    em: 16,
+  });
+  const slots: EqSlotRect[] = [
+    { path: [], x: 0, y: -14, width: 30, height: 26, caretXs: [0, 30], em: 16 },
+    cell(0, 0, -12),
+    cell(1, 16, -12),
+    cell(2, 0, 2),
+    cell(3, 16, 2),
+  ];
+  const [OUTER, C0, C1, C2, C3] = [0, 1, 2, 3, 4];
+
+  it('addresses a cell by path and edits it immutably', () => {
+    expect(rowAt(ast, [0, 'c3'])).toEqual([chr('𝑑')]);
+    const next = withRow(ast, [0, 'c3'], (r) => [...r, chr('!')]);
+    expect(rowAt(next, [0, 'c3'])).toHaveLength(2);
+    expect(rowAt(ast, [0, 'c3'])).toHaveLength(1); // original untouched
+    expect(rowAt(next, [0, 'c0'])).toEqual([chr('𝑎')]); // siblings untouched
+  });
+
+  it('reads the cells in reading order, then leaves the grid', () => {
+    expect(horizontalStep(ast, slots, OUTER, 0, 1)).toEqual({
+      slot: C0,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, C0, 1, 1)).toEqual({
+      slot: C1,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, C1, 1, 1)).toEqual({
+      slot: C2,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, C3, 1, 1)).toEqual({
+      slot: OUTER,
+      caret: 1,
+    });
+  });
+
+  it('moves down a column, not to the next cell across', () => {
+    // A grid declares no vertical stack: geometry is the right answer here,
+    // and it keeps the column.
+    expect(verticalStep(ast, slots, C0, 0, 1)).toEqual({ slot: C2, caret: 0 });
+    expect(verticalStep(ast, slots, C1, 0, 1)).toEqual({ slot: C3, caret: 0 });
+    expect(verticalStep(ast, slots, C3, 0, -1)).toEqual({ slot: C1, caret: 0 });
+  });
+});

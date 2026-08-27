@@ -65,8 +65,11 @@ export interface EqStructure {
   /** The node to insert. Every row inside is empty, so the layout draws its
    *  dotted placeholder boxes and the user sees where to type. */
   node: EqNode;
-  /** The slot of the new node that takes the caret — a row name on `node`. */
-  focus: string;
+  /** Where the caret lands inside the new node: the path from it to the row
+   *  that takes the caret. Usually one row name, but a template can nest —
+   *  a bracketed matrix puts the caret in the grid's first cell, two levels
+   *  down from the fence that was inserted. */
+  focus: readonly (string | number)[];
 }
 
 const frac = (): EqNode => ({ t: 'frac', num: [], den: [] });
@@ -99,6 +102,19 @@ const func = (name: string): EqNode => ({
   body: [],
 });
 const acc = (chr: string): EqNode => ({ t: 'acc', chr, body: [] });
+const mat = (rows: number, cols: number): EqNode => ({
+  t: 'mat',
+  cols,
+  cells: Array.from({ length: rows * cols }, () => [] as EqNode[]),
+});
+/** A grid inside a fence — a bracketed matrix, or the brace a system of
+ *  equations is written with. */
+const braced = (l: string, r: string, rows: number, cols: number): EqNode => ({
+  t: 'fence',
+  l,
+  r,
+  body: [mat(rows, cols)],
+});
 const lim = (name: string, below = true): EqNode => ({
   t: 'lim',
   base: upright(name),
@@ -126,82 +142,123 @@ const big = (op: string, limits = false): EqNode => ({
  * the layout cannot draw.
  */
 export const EQ_STRUCTURES: readonly EqStructure[] = [
-  { group: 'Fraction', name: 'Stacked', node: frac(), focus: 'num' },
+  { group: 'Fraction', name: 'Stacked', node: frac(), focus: ['num'] },
 
-  { group: 'Script', name: 'Superscript', node: scr('sup'), focus: 'sup' },
-  { group: 'Script', name: 'Subscript', node: scr('sub'), focus: 'sub' },
-  { group: 'Script', name: 'Sub and super', node: scr('both'), focus: 'sub' },
+  { group: 'Script', name: 'Superscript', node: scr('sup'), focus: ['sup'] },
+  { group: 'Script', name: 'Subscript', node: scr('sub'), focus: ['sub'] },
+  { group: 'Script', name: 'Sub and super', node: scr('both'), focus: ['sub'] },
 
-  { group: 'Radical', name: 'Square root', node: rad(false), focus: 'body' },
-  { group: 'Radical', name: 'Nth root', node: rad(true), focus: 'deg' },
+  { group: 'Radical', name: 'Square root', node: rad(false), focus: ['body'] },
+  { group: 'Radical', name: 'Nth root', node: rad(true), focus: ['deg'] },
 
-  { group: 'Integral', name: 'Integral', node: big('∫'), focus: 'body' },
-  { group: 'Integral', name: 'Definite', node: big('∫', true), focus: 'lo' },
-  { group: 'Integral', name: 'Double', node: big('∬'), focus: 'body' },
-  { group: 'Integral', name: 'Contour', node: big('∮'), focus: 'body' },
+  { group: 'Integral', name: 'Integral', node: big('∫'), focus: ['body'] },
+  { group: 'Integral', name: 'Definite', node: big('∫', true), focus: ['lo'] },
+  { group: 'Integral', name: 'Double', node: big('∬'), focus: ['body'] },
+  { group: 'Integral', name: 'Contour', node: big('∮'), focus: ['body'] },
 
-  { group: 'Large operator', name: 'Summation', node: big('∑'), focus: 'body' },
+  {
+    group: 'Large operator',
+    name: 'Summation',
+    node: big('∑'),
+    focus: ['body'],
+  },
   {
     group: 'Large operator',
     name: 'Sum with limits',
     node: big('∑', true),
-    focus: 'lo',
+    focus: ['lo'],
   },
-  { group: 'Large operator', name: 'Product', node: big('∏'), focus: 'body' },
+  { group: 'Large operator', name: 'Product', node: big('∏'), focus: ['body'] },
   {
     group: 'Large operator',
     name: 'Product with limits',
     node: big('∏', true),
-    focus: 'lo',
+    focus: ['lo'],
   },
-  { group: 'Large operator', name: 'Union', node: big('⋃'), focus: 'body' },
+  { group: 'Large operator', name: 'Union', node: big('⋃'), focus: ['body'] },
   {
     group: 'Large operator',
     name: 'Intersection',
     node: big('⋂'),
-    focus: 'body',
+    focus: ['body'],
   },
 
   {
     group: 'Bracket',
     name: 'Parentheses',
     node: fence('(', ')'),
-    focus: 'body',
+    focus: ['body'],
   },
-  { group: 'Bracket', name: 'Brackets', node: fence('[', ']'), focus: 'body' },
-  { group: 'Bracket', name: 'Braces', node: fence('{', '}'), focus: 'body' },
+  {
+    group: 'Bracket',
+    name: 'Brackets',
+    node: fence('[', ']'),
+    focus: ['body'],
+  },
+  { group: 'Bracket', name: 'Braces', node: fence('{', '}'), focus: ['body'] },
   {
     group: 'Bracket',
     name: 'Absolute value',
     node: fence('|', '|'),
-    focus: 'body',
+    focus: ['body'],
   },
-  { group: 'Bracket', name: 'Norm', node: fence('‖', '‖'), focus: 'body' },
-  { group: 'Bracket', name: 'Angle', node: fence('⟨', '⟩'), focus: 'body' },
-  { group: 'Bracket', name: 'Floor', node: fence('⌊', '⌋'), focus: 'body' },
-  { group: 'Bracket', name: 'Ceiling', node: fence('⌈', '⌉'), focus: 'body' },
+  { group: 'Bracket', name: 'Norm', node: fence('‖', '‖'), focus: ['body'] },
+  { group: 'Bracket', name: 'Angle', node: fence('⟨', '⟩'), focus: ['body'] },
+  { group: 'Bracket', name: 'Floor', node: fence('⌊', '⌋'), focus: ['body'] },
+  { group: 'Bracket', name: 'Ceiling', node: fence('⌈', '⌉'), focus: ['body'] },
 
-  { group: 'Function', name: 'sin', node: func('sin'), focus: 'body' },
-  { group: 'Function', name: 'cos', node: func('cos'), focus: 'body' },
-  { group: 'Function', name: 'tan', node: func('tan'), focus: 'body' },
-  { group: 'Function', name: 'cot', node: func('cot'), focus: 'body' },
-  { group: 'Function', name: 'ln', node: func('ln'), focus: 'body' },
-  { group: 'Function', name: 'log', node: func('log'), focus: 'body' },
-  { group: 'Function', name: 'exp', node: func('exp'), focus: 'body' },
+  { group: 'Function', name: 'sin', node: func('sin'), focus: ['body'] },
+  { group: 'Function', name: 'cos', node: func('cos'), focus: ['body'] },
+  { group: 'Function', name: 'tan', node: func('tan'), focus: ['body'] },
+  { group: 'Function', name: 'cot', node: func('cot'), focus: ['body'] },
+  { group: 'Function', name: 'ln', node: func('ln'), focus: ['body'] },
+  { group: 'Function', name: 'log', node: func('log'), focus: ['body'] },
+  { group: 'Function', name: 'exp', node: func('exp'), focus: ['body'] },
   // The name is empty and editable — for anything the list does not carry.
-  { group: 'Function', name: 'Custom', node: func(''), focus: 'name' },
+  { group: 'Function', name: 'Custom', node: func(''), focus: ['name'] },
 
-  { group: 'Accent', name: 'Bar', node: acc('\u0305'), focus: 'body' },
-  { group: 'Accent', name: 'Vector', node: acc('\u20d7'), focus: 'body' },
-  { group: 'Accent', name: 'Hat', node: acc('\u0302'), focus: 'body' },
-  { group: 'Accent', name: 'Tilde', node: acc('\u0303'), focus: 'body' },
-  { group: 'Accent', name: 'Dot', node: acc('\u0307'), focus: 'body' },
-  { group: 'Accent', name: 'Double dot', node: acc('\u0308'), focus: 'body' },
+  { group: 'Accent', name: 'Bar', node: acc('\u0305'), focus: ['body'] },
+  { group: 'Accent', name: 'Vector', node: acc('\u20d7'), focus: ['body'] },
+  { group: 'Accent', name: 'Hat', node: acc('\u0302'), focus: ['body'] },
+  { group: 'Accent', name: 'Tilde', node: acc('\u0303'), focus: ['body'] },
+  { group: 'Accent', name: 'Dot', node: acc('\u0307'), focus: ['body'] },
+  { group: 'Accent', name: 'Double dot', node: acc('\u0308'), focus: ['body'] },
 
-  { group: 'Limit', name: 'Limit', node: lim('lim'), focus: 'lim' },
-  { group: 'Limit', name: 'Maximum', node: lim('max'), focus: 'lim' },
-  { group: 'Limit', name: 'Minimum', node: lim('min'), focus: 'lim' },
-  { group: 'Limit', name: 'Over', node: lim('', false), focus: 'base' },
+  { group: 'Limit', name: 'Limit', node: lim('lim'), focus: ['lim'] },
+  { group: 'Limit', name: 'Maximum', node: lim('max'), focus: ['lim'] },
+  { group: 'Limit', name: 'Minimum', node: lim('min'), focus: ['lim'] },
+  { group: 'Limit', name: 'Over', node: lim('', false), focus: ['base'] },
+
+  { group: 'Matrix', name: '1×2', node: mat(1, 2), focus: ['c0'] },
+  { group: 'Matrix', name: '2×1', node: mat(2, 1), focus: ['c0'] },
+  { group: 'Matrix', name: '2×2', node: mat(2, 2), focus: ['c0'] },
+  { group: 'Matrix', name: '3×3', node: mat(3, 3), focus: ['c0'] },
+  {
+    group: 'Matrix',
+    name: 'Bracketed 2×2',
+    node: braced('[', ']', 2, 2),
+    focus: ['body', 0, 'c0'],
+  },
+  {
+    group: 'Matrix',
+    name: 'Determinant 2×2',
+    node: braced('|', '|', 2, 2),
+    focus: ['body', 0, 'c0'],
+  },
+  // Two and three equations under one brace — how a system is set in
+  // Vietnamese exam papers, and awkward to build out of the pieces.
+  {
+    group: 'Matrix',
+    name: 'System of 2',
+    node: braced('{', '', 2, 1),
+    focus: ['body', 0, 'c0'],
+  },
+  {
+    group: 'Matrix',
+    name: 'System of 3',
+    node: braced('{', '', 3, 1),
+    focus: ['body', 0, 'c0'],
+  },
 ];
 
 /** The groups in palette order, each with its templates. */
