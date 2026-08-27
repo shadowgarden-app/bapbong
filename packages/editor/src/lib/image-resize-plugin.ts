@@ -6,7 +6,6 @@ import type {
   PluginContext,
   ResolvedLayout,
   ResolvedTable,
-  VectorImageSpec,
 } from '@shadow-garden/bapbong-contracts';
 import { imageAtPoint } from '@shadow-garden/bapbong-selection';
 import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
@@ -122,8 +121,15 @@ export function snapAngle(deg: number, shift: boolean): number {
   return d;
 }
 
-/** The handle under a page point, testing each handle's center on `rect`. */
-function handleAt(rect: Rect, x: number, y: number): Handle | null {
+/** The handle under a page point, testing each handle's center on `rect`.
+ *  `cornersOnly` drops the four edge handles, so the box can only be scaled
+ *  proportionally (embedded objects — see OverlayFrame.handles). */
+function handleAt(
+  rect: Rect,
+  x: number,
+  y: number,
+  cornersOnly = false,
+): Handle | null {
   const xs: Record<'w' | 'c' | 'e', number> = {
     w: rect.x,
     c: rect.x + rect.width / 2,
@@ -145,6 +151,7 @@ function handleAt(rect: Rect, x: number, y: number): Handle | null {
     ['se', xs.e, ys.s],
   ];
   for (const [h, hx, hy] of H) {
+    if (cornersOnly && h.length === 1) continue; // 'n' | 'e' | 's' | 'w'
     if (Math.abs(x - hx) <= HANDLE_TOL && Math.abs(y - hy) <= HANDLE_TOL)
       return h;
   }
@@ -296,21 +303,6 @@ const WRAP_ACTIONS: { id: string; title: string; svg: string }[] = [
   },
 ];
 
-/** Baseline-position controls on the strip: nudge the image off the line's
- *  baseline (w:position on the object's run — `raise` attr, px positive UP),
- *  plus, for equations, a one-click seat onto the line. */
-const POSITION_ACTIONS: { id: string; title: string; svg: string }[] = [
-  {
-    id: 'posLower',
-    title: 'Hạ xuống (½ pt)',
-    svg: '<path d="M2 13.5h12"/><path d="M8 3v7"/><path d="M5.5 7.5 8 10l2.5-2.5"/>',
-  },
-  {
-    id: 'posRaise',
-    title: 'Nâng lên (½ pt)',
-    svg: '<path d="M2 13.5h12"/><path d="M8 10V3"/><path d="M5.5 5.5 8 3l2.5 2.5"/>',
-  },
-];
 /** MathType pictures whose MTEF decoded: one click swaps the bitmap for a
  *  live, math-marked text equation — the thing Word cannot do without
  *  MathType installed. */
@@ -319,36 +311,6 @@ const CONVERT_ACTION = {
   title: 'Chuyển thành công thức sửa được',
   svg: '<rect x="1.5" y="4.5" width="6" height="7" rx="1" stroke-dasharray="2 1.5"/><path d="M9.5 8h3"/><path d="M11 6.5 12.5 8 11 9.5"/><path d="M12 5.5l3 5M15 5.5l-3 5"/>',
 };
-const ALIGN_ACTION = {
-  id: 'posAlign',
-  title: 'Đặt công thức lên dòng',
-  svg: '<path d="M2 12.5h12"/><path d="M4.5 3.5h4"/><path d="M6.5 3.5V10"/><path d="M4.5 8.5 6.5 10.5 8.5 8.5"/>',
-};
-
-/** The stepper's increment: half a point, the unit Word's Position spinner
- *  moves in. The attr itself is px (InlineRun.raise's convention). */
-export const RAISE_STEP_PX = (0.5 * 96) / 72;
-
-/** The `raise` that seats a vector equation's INTERNAL baseline on the
- *  line's: MathType previews carry descent space below their glyph baseline,
- *  so the box must sink by that much (scaled to the displayed height).
- *  Negative = down. Null when the spec draws no baseline-positioned text
- *  (nothing to align to). */
-export function alignRaiseFor(
-  vector: VectorImageSpec,
-  heightPx: number,
-): number | null {
-  if (vector.height <= 0 || heightPx <= 0) return null;
-  let base = -Infinity;
-  for (const op of vector.ops)
-    if (op.kind === 'text' && op.vAlign === undefined)
-      base = Math.max(base, op.y);
-  if (!Number.isFinite(base)) return null;
-  const descent = vector.height - base;
-  if (descent <= 0) return 0;
-  return -Math.round((descent / vector.height) * heightPx * 100) / 100;
-}
-
 /** Which strip id is in effect for an image's float attr. */
 export function wrapModeOf(float: Record<string, unknown> | null): string {
   if (!float) return 'inline';
@@ -543,21 +505,39 @@ export function imageResizePlugin(): EditorPlugin {
       ...a,
       active: a.id === mode,
     }));
-    if (node && mode === 'inline') {
-      acts.push({ id: 'sep-pos', title: '', svg: '', separator: true });
-      acts.push(...POSITION_ACTIONS.map((a) => ({ ...a, active: false })));
-      const vector = node.attrs['vector'] as VectorImageSpec | null;
-      const target = vector
-        ? alignRaiseFor(vector, Number(node.attrs['height']) || 0)
-        : null;
-      if (target !== null) {
-        const raise = Number(node.attrs['raise']) || 0;
-        acts.push({ ...ALIGN_ACTION, active: Math.abs(raise - target) < 0.3 });
-      }
-      if (typeof node.attrs['equation'] === 'string' && node.attrs['equation'])
-        acts.push({ ...CONVERT_ACTION, active: false });
-    }
+    // Converting a MathType picture into a live equation is the one thing
+    // Word cannot do without MathType installed — the rest of an embedded
+    // object's tools are Word's (see frameFlags for what it does NOT get).
+    if (
+      node &&
+      typeof node.attrs['equation'] === 'string' &&
+      node.attrs['equation']
+    )
+      acts.push({ ...CONVERT_ACTION, active: false, separator: false });
     return acts;
+  };
+
+  /**
+   * How the selection frame behaves for this box, following Word:
+   *  - an EMBEDDED OBJECT (`o:OLEObject` — MathType equations) scales only
+   *    from its corners: the bitmap is a preview of content a free-axis
+   *    stretch would distort, which is exactly the "equations randomly
+   *    re-sized" damage Word users hit;
+   *  - nothing rotates while it flows INLINE with text — Word greys the
+   *    rotate command out until the wrapping leaves "In Line With Text".
+   */
+  const frameFlags = (
+    c: PluginContext,
+    pos: number,
+  ): { handles?: 'corners'; rotatable?: boolean } => {
+    const node = imageAt(c.state, pos);
+    if (!node) return {};
+    const isOle = typeof node.attrs['oleProgId'] === 'string';
+    const inline = !node.attrs['float'];
+    return {
+      ...(isOle && { handles: 'corners' as const }),
+      ...((inline || isOle) && { rotatable: false }),
+    };
   };
 
   const refresh = (c: PluginContext): void => {
@@ -567,7 +547,15 @@ export function imageResizePlugin(): EditorPlugin {
       return;
     }
     const frame = frameForPos(c.layout, sel.pos);
-    c.setFrame(frame ? { ...frame, actions: actionsFor(c, sel.pos) } : null);
+    c.setFrame(
+      frame
+        ? {
+            ...frame,
+            actions: actionsFor(c, sel.pos),
+            ...frameFlags(c, sel.pos),
+          }
+        : null,
+    );
   };
 
   /** Commit the drag's final size — ONE transaction, the gesture's only touch
@@ -762,26 +750,6 @@ export function imageResizePlugin(): EditorPlugin {
         c.setFrame(null);
         return true;
       }
-      if (id === 'posRaise' || id === 'posLower' || id === 'posAlign') {
-        const node = imageAt(c.state, sel.pos);
-        if (!node) return false;
-        const cur = Number(node.attrs['raise']) || 0;
-        let next: number | null;
-        if (id === 'posAlign') {
-          const vector = node.attrs['vector'] as VectorImageSpec | null;
-          next = vector
-            ? alignRaiseFor(vector, Number(node.attrs['height']) || 0)
-            : null;
-        } else {
-          next = cur + (id === 'posRaise' ? RAISE_STEP_PX : -RAISE_STEP_PX);
-        }
-        if (next === null) return false;
-        next = Math.round(next * 100) / 100;
-        if (Math.abs(next) < 0.005) next = 0;
-        c.dispatch(c.state.tr.setNodeAttribute(sel.pos, 'raise', next));
-        refresh(c);
-        return true;
-      }
       if (!WRAP_ACTIONS.some((a) => a.id === id)) return false;
       const node = imageAt(c.state, sel.pos);
       const float = node?.attrs['float'] as Record<string, unknown> | null;
@@ -946,14 +914,21 @@ export function imageResizePlugin(): EditorPlugin {
               height: frame.height,
             };
             const local = toLocal(ev.point.x, ev.point.y, base, rotation);
+            const flags = frameFlags(c, sel.pos);
             if (
+              flags.rotatable !== false &&
               Math.abs(local.x - (base.x + base.width / 2)) <= KNOB_TOL &&
               Math.abs(local.y - (base.y - KNOB_OFFSET)) <= KNOB_TOL
             ) {
               setCursor(c, 'grab');
               return false;
             }
-            const handle = handleAt(base, local.x, local.y);
+            const handle = handleAt(
+              base,
+              local.x,
+              local.y,
+              flags.handles === 'corners',
+            );
             const inside =
               local.x >= base.x &&
               local.x <= base.x + base.width &&
@@ -985,9 +960,11 @@ export function imageResizePlugin(): EditorPlugin {
               height: frame.height,
             };
             const local = toLocal(ev.point.x, ev.point.y, base, rotation);
+            const flags = frameFlags(c, sel.pos);
             const knobX = base.x + base.width / 2;
             const knobY = base.y - KNOB_OFFSET;
             if (
+              flags.rotatable !== false &&
               Math.abs(local.x - knobX) <= KNOB_TOL &&
               Math.abs(local.y - knobY) <= KNOB_TOL
             ) {
@@ -1000,7 +977,12 @@ export function imageResizePlugin(): EditorPlugin {
               setCursor(c, 'grabbing');
               return true;
             }
-            const handle = handleAt(base, local.x, local.y);
+            const handle = handleAt(
+              base,
+              local.x,
+              local.y,
+              flags.handles === 'corners',
+            );
             if (handle) {
               drag = {
                 handle,
@@ -1029,6 +1011,7 @@ export function imageResizePlugin(): EditorPlugin {
               ? { rotation: rotationAt(c.state, hit.pos) }
               : {}),
             actions: actionsFor(c, hit.pos),
+            ...frameFlags(c, hit.pos),
           });
           mv = {
             pos: hit.pos,

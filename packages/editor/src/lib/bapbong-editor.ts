@@ -1415,8 +1415,9 @@ export class BapbongEditor {
       border.style.cssText =
         'position:absolute;inset:-1px;border:1.5px solid #378add;';
       el.appendChild(border);
-      const handle = (left: string, top: string) => {
+      const handle = (left: string, top: string, kind: 'corner' | 'edge') => {
         const h = document.createElement('div');
+        h.dataset['handle'] = kind;
         h.style.cssText =
           `position:absolute;width:7px;height:7px;background:#fff;border:1.5px solid #378add;` +
           `left:${left};top:${top};transform:translate(-50%,-50%);`;
@@ -1425,13 +1426,16 @@ export class BapbongEditor {
       for (const lx of ['0%', '50%', '100%'])
         for (const ty of ['0%', '50%', '100%']) {
           if (lx === '50%' && ty === '50%') continue;
-          handle(lx, ty);
+          const mid = lx === '50%' || ty === '50%';
+          handle(lx, ty, mid ? 'edge' : 'corner');
         }
       const stem = document.createElement('div');
+      stem.dataset['role'] = 'rotate';
       stem.style.cssText =
         'position:absolute;left:50%;top:-20px;width:1.5px;height:19px;background:#378add;transform:translateX(-50%);';
       el.appendChild(stem);
       const knob = document.createElement('div');
+      knob.dataset['role'] = 'rotate';
       knob.style.cssText =
         'position:absolute;left:50%;top:-27px;width:13px;height:13px;border-radius:50%;' +
         'background:#fff;border:1.5px solid #378add;transform:translate(-50%,-50%);';
@@ -1489,6 +1493,16 @@ export class BapbongEditor {
     el.style.width = `${br.x - tl.x}px`;
     el.style.height = `${br.y - tl.y}px`;
     el.style.transform = frame.rotation ? `rotate(${frame.rotation}deg)` : '';
+    // Handle set and rotate knob per frame: an embedded object scales only
+    // from its corners and never rotates inline (see OverlayFrame).
+    const corners = frame.handles === 'corners';
+    el.querySelectorAll<HTMLDivElement>('[data-handle]').forEach((h) => {
+      h.style.display = corners && h.dataset['handle'] === 'edge' ? 'none' : '';
+    });
+    const rotatable = frame.rotatable !== false;
+    el.querySelectorAll<HTMLDivElement>('[data-role="rotate"]').forEach((r) => {
+      r.style.display = rotatable ? '' : 'none';
+    });
     const label = el.querySelector<HTMLDivElement>('[data-role="label"]');
     if (label) {
       label.style.display = frame.label ? 'block' : 'none';
