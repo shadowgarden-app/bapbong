@@ -87,6 +87,8 @@ import {
   panelAnchor,
   type SymbolDialogHandle,
   equationGallery,
+  equationPanel,
+  type EquationPanel,
   mountMenubar,
   mountToolbar,
   openCellProperties,
@@ -476,6 +478,9 @@ export class EditorPlayground implements OnDestroy {
     editor.onPlugin('table-selection', (p) =>
       p.onAction((block) => this.openCellPropsForBlock(block)),
     );
+    // The equation palette. Built once (it holds the open tab and the chosen
+    // symbol set) and re-handed to each document's plugin instance.
+    editor.onPlugin('equation', (p) => p.usePanel(this.equationPanel().el));
     // Menubar / toolbar / find-bar: hand bapbong-ui the host elements + the
     // editor; it renders from editor.commands / editor.find and wires everything
     // itself. The menubar tree mixes registry commands with host actions (open
@@ -956,6 +961,20 @@ export class EditorPlayground implements OnDestroy {
   /** Typeset an equation the way the page does — the gallery previews are
    *  the engine's own display list, measured with this editor's measurer, so
    *  a preview is the drawing the document will show. */
+  private eqPanel: EquationPanel | null = null;
+
+  /** The equation palette, built on first use. It floats over the canvas —
+   *  the editor positions it against the equation being edited. */
+  private equationPanel(): EquationPanel {
+    if (this.eqPanel) return this.eqPanel;
+    this.eqPanel = equationPanel({
+      layout: (ast, sizePt) => this.typesetEquation(ast, sizePt),
+      onSymbol: (ch) => this.editor?.plugin('equation').insertSymbol(ch),
+      onStructure: (st) => this.editor?.plugin('equation').insertStructure(st),
+    });
+    return this.eqPanel;
+  }
+
   private typesetEquation(
     ast: EqNode[],
     sizePt: number,
