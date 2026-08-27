@@ -32,17 +32,17 @@ const subsup = (base: EqNode[], lo: string, hi: string): EqNode => ({
  * The built-in equations Insert ▸ Equation offers, the way Word's gallery
  * does. Chosen for the documents bapbong is actually used on — Vietnamese
  * exam papers — so the list is the secondary-school canon, not Word's
- * (Fourier series has no place in a lớp 12 paper). Each is a real AST: what
+ * (Fourier series has no place in a year-12 paper). Each is a real AST: what
  * lands in the document is editable, exports as m:oMath, and needs no
  * conversion.
  */
 export const BUILT_IN_EQUATIONS: readonly BuiltInEquation[] = [
   {
-    name: 'Diện tích hình tròn',
+    name: 'Area of a circle',
     ast: [...c('𝐴 = 𝜋'), sup(c('𝑟'), '2')],
   },
   {
-    name: 'Định lý Pythagore',
+    name: 'Pythagorean theorem',
     ast: [
       sup(c('𝑎'), '2'),
       ...c(' + '),
@@ -52,7 +52,7 @@ export const BUILT_IN_EQUATIONS: readonly BuiltInEquation[] = [
     ],
   },
   {
-    name: 'Nghiệm phương trình bậc hai',
+    name: 'Quadratic formula',
     ast: [
       ...c('𝑥 = '),
       {
@@ -70,7 +70,7 @@ export const BUILT_IN_EQUATIONS: readonly BuiltInEquation[] = [
     ],
   },
   {
-    name: 'Định lý cosin',
+    name: 'Law of cosines',
     ast: [
       sup(c('𝑎'), '2'),
       ...c(' = '),
@@ -81,7 +81,7 @@ export const BUILT_IN_EQUATIONS: readonly BuiltInEquation[] = [
     ],
   },
   {
-    name: 'Nhị thức Newton',
+    name: 'Binomial theorem',
     ast: [
       // The exponent belongs ON the bracket: a script with an empty base
       // would render its own empty slot — the dotted placeholder box.
@@ -233,7 +233,7 @@ export function equationGallery(options: EquationGalleryOptions): HTMLElement {
 
   const head = document.createElement('div');
   head.className = 'bb-eqg-head';
-  head.textContent = 'Công thức có sẵn';
+  head.textContent = 'Built-in';
   root.append(head);
 
   const list = document.createElement('div');
@@ -273,7 +273,7 @@ export function equationGallery(options: EquationGalleryOptions): HTMLElement {
   neu.type = 'button';
   neu.className = 'bb-eqg-new';
   const label = document.createElement('span');
-  label.textContent = 'Chèn công thức mới';
+  label.textContent = 'Insert new equation';
   neu.append(label);
   if (options.newShortcut) {
     const key = document.createElement('span');

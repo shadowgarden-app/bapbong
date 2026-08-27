@@ -4466,7 +4466,7 @@ function buildNotesSection(ctx: Ctx): PMNode[] {
   if (endnotes.length === 0) return [];
   const out: PMNode[] = [
     ctx.schema.nodes['paragraph'].create({ spacing: { before: 12 } }, [
-      ctx.schema.text('Ghi chú cuối', [ctx.schema.marks['strong'].create()]),
+      ctx.schema.text('Endnotes', [ctx.schema.marks['strong'].create()]),
     ]),
   ];
   for (const { id, display } of endnotes) {

@@ -2497,7 +2497,7 @@ describe('importDocx', () => {
     expect(Object.keys(footnotes)).toHaveLength(0); // endnotes aren't footnotes
     const tail: string[] = [];
     doc.forEach((n) => tail.push(n.textContent));
-    expect(tail).toContain('Ghi chú cuối');
+    expect(tail).toContain('Endnotes');
     expect(tail.join('\n')).toMatch(/1End gamma/);
   });
 

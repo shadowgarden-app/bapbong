@@ -177,13 +177,14 @@ export function showLinkPanel(opts: LinkPanelOptions): LinkPanelHandle {
       row.appendChild(icon);
       const label = document.createElement('span');
       label.className = 'bb-linkpanel-href';
-      label.textContent = internal.label ?? 'Vị trí không còn trong tài liệu';
+      label.textContent =
+        internal.label ?? 'This place is no longer in the document';
       label.title = internal.label ?? existing.href;
       if (!internal.label) label.classList.add('bb-linkpanel-stale');
       row.appendChild(label);
       if (internal.label) {
         row.appendChild(
-          iconBtn(ICONS.goTo, 'Đi tới vị trí này', () => {
+          iconBtn(ICONS.goTo, 'Go to this place', () => {
             closeCurrent();
             internal.onGo();
           }),

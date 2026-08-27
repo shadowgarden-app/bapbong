@@ -278,27 +278,27 @@ function imageNodeAt(state: State, pos: number): boolean {
 const WRAP_ACTIONS: { id: string; title: string; svg: string }[] = [
   {
     id: 'inline',
-    title: 'Nội dòng',
+    title: 'In line with text',
     svg: '<path d="M2 3.5h12M2 12.5h12M2 8h2.5M11.5 8h2.5"/><rect x="6" y="5.5" width="4" height="5"/>',
   },
   {
     id: 'square',
-    title: 'Chữ bao quanh',
+    title: 'Square',
     svg: '<path d="M2 3.5h12M2 6.5h4M2 9.5h4M2 12.5h12"/><rect x="8.5" y="5" width="5.5" height="6"/>',
   },
   {
     id: 'topAndBottom',
-    title: 'Ngắt trên–dưới',
+    title: 'Top and bottom',
     svg: '<path d="M2 2.5h12M2 13.5h12"/><rect x="5" y="5" width="6" height="6"/>',
   },
   {
     id: 'front',
-    title: 'Nổi trên chữ',
+    title: 'In front of text',
     svg: '<path d="M2 3.5h12M2 8h1.5M12.5 8h1.5M2 12.5h1.5M12.5 12.5h1.5"/><rect x="5" y="6" width="6" height="6" fill="currentColor" stroke="none" opacity="0.55"/><rect x="5" y="6" width="6" height="6"/>',
   },
   {
     id: 'behind',
-    title: 'Sau lưng chữ',
+    title: 'Behind text',
     svg: '<rect x="5" y="6" width="6" height="6" opacity="0.45"/><path d="M2 3.5h12M2 8h12M2 12.5h12"/>',
   },
 ];
@@ -308,7 +308,7 @@ const WRAP_ACTIONS: { id: string; title: string; svg: string }[] = [
  *  MathType installed. */
 const CONVERT_ACTION = {
   id: 'convertEq',
-  title: 'Chuyển thành công thức sửa được',
+  title: 'Convert to an editable equation',
   svg: '<rect x="1.5" y="4.5" width="6" height="7" rx="1" stroke-dasharray="2 1.5"/><path d="M9.5 8h3"/><path d="M11 6.5 12.5 8 11 9.5"/><path d="M12 5.5l3 5M15 5.5l-3 5"/>',
 };
 /** Which strip id is in effect for an image's float attr. */
