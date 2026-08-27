@@ -218,15 +218,19 @@ export function equationPlugin(): EquationPlugin {
     `${c.state.selection.from}:${c.state.selection.to}`;
 
   const enter = (c: PluginContext, next: EqSel): void => {
+    const first = eq === null || eq.pos !== next.pos;
     eq = next;
     enteredOn = selKey(c);
     showCaret(c);
+    if (first) c.requestPaint(); // the region tint appears
   };
 
   const leave = (c: PluginContext): void => {
+    const had = eq !== null;
     eq = null;
     c.setGuide(null);
     hidePanel(c);
+    if (had) c.requestPaint(); // the region tint goes away
   };
 
   const astOf = (c: PluginContext): EqNode[] | null => {
@@ -346,23 +350,50 @@ export function equationPlugin(): EquationPlugin {
       if (changed) ctx.requestPaint();
     },
     decorations(c): RangeDecoration[] {
+      const out: RangeDecoration[] = [];
+      // The equation being edited wears the same region tint the linear form
+      // does. It cannot ride ProseMirror's node selection: that exists only
+      // in the moment after inserting one, so the frame used to vanish the
+      // instant the caret moved inside — exactly when it is most wanted.
+      // Skipped while the node selection IS on it, or the two would stack
+      // into a darker blue than a clicked-into equation gets.
+      const sel = c.state.selection as { node?: { type: { name: string } } };
+      const selected =
+        sel.node?.type.name === 'equation' &&
+        c.state.selection.from === eq?.pos;
+      if (eq && !selected && nodeAt(c, eq.pos))
+        out.push(
+          {
+            from: eq.pos,
+            to: eq.pos + 1,
+            kind: 'background',
+            color: REGION_TINT,
+          },
+          {
+            from: eq.pos,
+            to: eq.pos + 1,
+            kind: 'underline',
+            color: REGION_EDGE,
+          },
+        );
       const range = rangeFor(c.state);
       last = range;
-      if (!range) return [];
-      return [
-        {
-          from: range.from,
-          to: range.to,
-          kind: 'background',
-          color: REGION_TINT,
-        },
-        {
-          from: range.from,
-          to: range.to,
-          kind: 'underline',
-          color: REGION_EDGE,
-        },
-      ];
+      if (range)
+        out.push(
+          {
+            from: range.from,
+            to: range.to,
+            kind: 'background',
+            color: REGION_TINT,
+          },
+          {
+            from: range.from,
+            to: range.to,
+            kind: 'underline',
+            color: REGION_EDGE,
+          },
+        );
+      return out;
     },
     onPointer(ev) {
       const c = ctx;
