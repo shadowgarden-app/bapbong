@@ -16,10 +16,12 @@ import { isEqRow } from '@shadow-garden/bapbong-contracts';
 import {
   autoCorrectAt,
   eqChar,
+  horizontalStep,
   insertAt,
   removeBefore,
   rowAt,
   structureFor,
+  verticalStep,
 } from './equation-edit';
 
 /** The editor state type, taken from the plugin context (no direct PM dep). */
@@ -419,8 +421,30 @@ export function equationPlugin(): EquationPlugin {
     },
     onKey(ev) {
       const c = ctx;
-      if (!c || !eq) return false;
+      if (!c) return false;
       if (ev.metaKey || ev.ctrlKey) return false; // shortcuts stay global
+      // Step INTO an equation the document caret is standing beside. Without
+      // this the keyboard has no way in at all — a caret arrowing along the
+      // line hops over the whole equation, and only a click can open it.
+      if (!eq) {
+        if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return false;
+        if (!c.state.selection.empty) return false;
+        const rightwards = ev.key === 'ArrowRight';
+        const pos = rightwards
+          ? c.state.selection.from
+          : c.state.selection.from - 1;
+        if (!nodeAt(c, pos)) return false;
+        const outer = hitFor(c, pos)?.seg.eqSlots?.[0];
+        if (!outer) return false;
+        // The outer row, at the edge the caret came from: one more press then
+        // descends into whatever structure is there.
+        enter(c, {
+          pos,
+          slot: 0,
+          caret: rightwards ? 0 : Math.max(0, outer.caretXs.length - 1),
+        });
+        return true;
+      }
       const ast = astOf(c);
       const slot = slotOf(c);
       if (!ast || !slot) {
@@ -442,27 +466,31 @@ export function equationPlugin(): EquationPlugin {
         showCaret(c);
         return true;
       }
-      if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-        const d = ev.key === 'ArrowRight' ? 1 : -1;
-        const target = caret + d;
-        if (target >= 0 && target < slot.caretXs.length) {
-          eq = { pos: eq.pos, slot: eq.slot, caret: target };
-        } else {
-          const next = eq.slot + d;
-          if (next < 0 || next >= slots.length) {
-            // Out of the equation, the way Word does it: the document caret
-            // reappears on the side the arrow was heading.
-            const at = d > 0 ? eq.pos + 1 : eq.pos;
-            leave(c);
-            c.setSelection(at);
-            return true;
-          }
-          eq = {
-            pos: eq.pos,
-            slot: next,
-            caret: d > 0 ? 0 : slots[next].caretXs.length - 1,
-          };
+      const arrow =
+        ev.key === 'ArrowRight'
+          ? 1
+          : ev.key === 'ArrowLeft'
+            ? -1
+            : ev.key === 'ArrowDown'
+              ? 1
+              : ev.key === 'ArrowUp'
+                ? -1
+                : 0;
+      if (arrow !== 0) {
+        const vertical = ev.key === 'ArrowUp' || ev.key === 'ArrowDown';
+        const step = vertical
+          ? verticalStep(slots, eq.slot, caret, arrow)
+          : horizontalStep(ast, slots, eq.slot, caret, arrow);
+        // Nothing above or below inside the equation — the document's own
+        // line motion is the right answer, so don't claim the key.
+        if (step === null) return false;
+        if (step === 'out-left' || step === 'out-right') {
+          const at = step === 'out-right' ? eq.pos + 1 : eq.pos;
+          leave(c);
+          c.setSelection(at);
+          return true;
         }
+        eq = { pos: eq.pos, slot: step.slot, caret: step.caret };
         showCaret(c);
         return true;
       }

@@ -1,10 +1,12 @@
-import type { EqNode } from '@shadow-garden/bapbong-contracts';
+import type { EqNode, EqSlotRect } from '@shadow-garden/bapbong-contracts';
 import {
   autoCorrectAt,
   eqChar,
   insertAt,
+  horizontalStep,
   removeBefore,
   rowAt,
+  verticalStep,
   withRow,
 } from './equation-edit';
 
@@ -50,5 +52,99 @@ describe('equation slot edits', () => {
     expect(fixed.caret).toBe(2);
     // No match → null (the space inserts normally).
     expect(autoCorrectAt(ast, [1, 'num'], 1)).toBeNull();
+  });
+});
+
+describe('walking the caret through a fraction', () => {
+  // 𝑥 = 𝑎/𝑏𝑐, laid out the way the engine emits slots: the outer row first,
+  // then each child row it drew, each carrying its path and caret stops.
+  const ast: EqNode[] = [
+    chr('𝑥'),
+    chr('='),
+    { t: 'frac', num: [chr('𝑎')], den: [chr('𝑏'), chr('𝑐')] },
+  ];
+  const slots: EqSlotRect[] = [
+    {
+      path: [],
+      x: 0,
+      y: -14,
+      width: 40,
+      height: 22,
+      caretXs: [0, 8, 16, 40],
+      em: 16,
+    },
+    {
+      path: [2, 'num'],
+      x: 20,
+      y: -14,
+      width: 12,
+      height: 9,
+      caretXs: [0, 12],
+      em: 11,
+    },
+    {
+      path: [2, 'den'],
+      x: 20,
+      y: -2,
+      width: 18,
+      height: 9,
+      caretXs: [0, 9, 18],
+      em: 11,
+    },
+  ];
+  const OUTER = 0;
+  const NUM = 1;
+  const DEN = 2;
+
+  it('steps right INTO the numerator rather than over the fraction', () => {
+    // Caret in the outer row, just before the fraction (after "𝑥=").
+    expect(horizontalStep(ast, slots, OUTER, 2, 1)).toEqual({
+      slot: NUM,
+      caret: 0,
+    });
+  });
+
+  it('falls from the end of the numerator into the denominator', () => {
+    expect(horizontalStep(ast, slots, NUM, 1, 1)).toEqual({
+      slot: DEN,
+      caret: 0,
+    });
+  });
+
+  it('climbs out past the fraction at the end of the denominator', () => {
+    expect(horizontalStep(ast, slots, DEN, 2, 1)).toEqual({
+      slot: OUTER,
+      caret: 3,
+    });
+  });
+
+  it('mirrors going left: into the denominator, then the numerator', () => {
+    expect(horizontalStep(ast, slots, OUTER, 3, -1)).toEqual({
+      slot: DEN,
+      caret: 2,
+    });
+    expect(horizontalStep(ast, slots, DEN, 0, -1)).toEqual({
+      slot: NUM,
+      caret: 1,
+    });
+  });
+
+  it('leaves the equation at its edges', () => {
+    expect(horizontalStep(ast, slots, OUTER, 3, 1)).toBe('out-right');
+    expect(horizontalStep(ast, slots, OUTER, 0, -1)).toBe('out-left');
+  });
+
+  it('takes the short way down and up, keeping the caret x', () => {
+    // End of the numerator sits at x = 32; the denominator stops are at
+    // 20 / 29 / 38, so the caret lands on 29 — the same place across, not
+    // the start of the row.
+    expect(verticalStep(slots, NUM, 1, 1)).toEqual({ slot: DEN, caret: 1 });
+    expect(verticalStep(slots, DEN, 0, -1)).toEqual({ slot: NUM, caret: 0 });
+  });
+
+  it('does not offer the row it is drawn inside as the row below', () => {
+    // The outer row encloses both; from the denominator there is nothing
+    // below, so the document's own line motion should take over.
+    expect(verticalStep(slots, DEN, 0, 1)).toBeNull();
   });
 });

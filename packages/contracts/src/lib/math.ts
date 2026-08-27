@@ -189,6 +189,33 @@ export interface EqBig {
 
 export type EqNode = EqChr | EqFrac | EqRad | EqScr | EqFence | EqBig;
 
+/**
+ * A node's editable rows in CARET order — the order the caret walks them
+ * stepping right, which is reading order: a fraction's numerator before its
+ * denominator, a radical's degree before its body.
+ *
+ * Not the same as the order the layout emits slot rects in (that is a drawing
+ * order), and not derivable from the node's field order either. Callers
+ * filter this against the rows the layout actually drew, so a script that
+ * carries only a subscript never offers a superscript to step into.
+ */
+export function eqRowNames(n: EqNode): readonly string[] {
+  switch (n.t) {
+    case 'frac':
+      return ['num', 'den'];
+    case 'rad':
+      return ['deg', 'body'];
+    case 'scr':
+      return ['base', 'sub', 'sup'];
+    case 'fence':
+      return ['body'];
+    case 'big':
+      return ['lo', 'hi', 'body'];
+    default:
+      return [];
+  }
+}
+
 const SUB_DIGIT = '₀₁₂₃₄₅₆₇₈₉';
 const SUP_DIGIT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
 const digitsVia = (s: string, alphabet: string): string | null =>

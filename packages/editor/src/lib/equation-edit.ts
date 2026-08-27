@@ -5,10 +5,12 @@
  * alternating, ending at a row.
  */
 import {
+  eqRowNames,
   MATH_ALPHABETS,
   MATH_AUTOCORRECT,
   mathLetters,
   type EqNode,
+  type EqSlotRect,
 } from '@shadow-garden/bapbong-contracts';
 
 type Path = readonly (number | string)[];
@@ -133,4 +135,150 @@ export function structureFor(key: string): EqNode | null {
   if (key === '_')
     return { t: 'scr', base: [], sub: [], sup: [], slots: 'sub' };
   return null;
+}
+
+// ── Caret walking ─────────────────────────────────────────────────────
+//
+// The layout gives every editable row a rect with the caret X for each
+// boundary in it. A row treats a child structure as ONE step, which is right
+// for drawing and wrong for editing: stepping right past a fraction should go
+// INTO its numerator, not over the whole thing. These functions turn the flat
+// slot list back into the tree it came from (each rect carries its path) and
+// walk it.
+
+/** Where a step landed: a slot and a caret in it, the equation's left or
+ *  right edge, or null for "not mine — let the document move the caret". */
+export type SlotStep =
+  | { slot: number; caret: number }
+  | 'out-left'
+  | 'out-right'
+  | null;
+
+const key = (p: readonly (number | string)[]): string => JSON.stringify(p);
+
+const isPrefix = (
+  a: readonly (number | string)[],
+  b: readonly (number | string)[],
+): boolean => a.length < b.length && a.every((v, i) => v === b[i]);
+
+function slotAt(
+  slots: readonly EqSlotRect[],
+  path: readonly (number | string)[],
+): number {
+  const k = key(path);
+  return slots.findIndex((s) => key(s.path) === k);
+}
+
+/** The rows of `node` in caret order, minus any the layout did not draw. */
+function rowsOf(
+  node: EqNode,
+  base: readonly (number | string)[],
+  index: number,
+  slots: readonly EqSlotRect[],
+): string[] {
+  return eqRowNames(node).filter(
+    (n) => slotAt(slots, [...base, index, n]) >= 0,
+  );
+}
+
+const lastCaret = (s: EqSlotRect): number => Math.max(0, s.caretXs.length - 1);
+
+/** Out of the row at `path` in direction `dir`: the next row of the same
+ *  structure (numerator → denominator), or back up to the parent, landing
+ *  just past the structure we were inside. */
+function ascend(
+  ast: EqNode[],
+  slots: readonly EqSlotRect[],
+  path: readonly (number | string)[],
+  dir: 1 | -1,
+): SlotStep {
+  const edge: SlotStep = dir > 0 ? 'out-right' : 'out-left';
+  if (path.length < 2) return edge;
+  const parent = path.slice(0, -2);
+  const index = path[path.length - 2] as number;
+  const rowName = path[path.length - 1] as string;
+  const node = (rowAt(ast, parent) ?? [])[index];
+  if (!node) return edge;
+  const names = rowsOf(node, parent, index, slots);
+  const next = names.indexOf(rowName) + dir;
+  if (next >= 0 && next < names.length) {
+    const i = slotAt(slots, [...parent, index, names[next]]);
+    if (i >= 0) return { slot: i, caret: dir > 0 ? 0 : lastCaret(slots[i]) };
+  }
+  const up = slotAt(slots, parent);
+  if (up < 0) return edge;
+  return { slot: up, caret: dir > 0 ? index + 1 : index };
+}
+
+/** One step left or right, descending into structures and climbing out of
+ *  them — the caret visits every position a user can type at, in reading
+ *  order. */
+export function horizontalStep(
+  ast: EqNode[],
+  slots: readonly EqSlotRect[],
+  slot: number,
+  caret: number,
+  dir: 1 | -1,
+): SlotStep {
+  const cur = slots[slot];
+  if (!cur) return null;
+  const row = rowAt(ast, cur.path) ?? [];
+  const at = dir > 0 ? caret : caret - 1;
+  const node = row[at];
+  if (dir > 0 ? caret >= row.length : caret <= 0)
+    return ascend(ast, slots, cur.path, dir);
+  if (node && node.t !== 'chr') {
+    const names = rowsOf(node, cur.path, at, slots);
+    const name = dir > 0 ? names[0] : names[names.length - 1];
+    const i = name ? slotAt(slots, [...cur.path, at, name]) : -1;
+    if (i >= 0) return { slot: i, caret: dir > 0 ? 0 : lastCaret(slots[i]) };
+  }
+  return { slot, caret: caret + dir };
+}
+
+/** Straight up or down to the nearest row on that side, keeping the caret's
+ *  horizontal place — the shortcut from a numerator to its denominator
+ *  without walking to the end of it first.
+ *
+ *  Ancestors and descendants are not candidates: the row you are in is drawn
+ *  inside its parent's box, so "the row below" would otherwise always find
+ *  the enclosing row it is already part of. */
+export function verticalStep(
+  slots: readonly EqSlotRect[],
+  slot: number,
+  caret: number,
+  dir: 1 | -1,
+): SlotStep {
+  const cur = slots[slot];
+  if (!cur) return null;
+  const x = cur.x + (cur.caretXs[Math.min(caret, lastCaret(cur))] ?? 0);
+  const from = cur.y + cur.height / 2;
+  let best = -1;
+  let bestScore = Infinity;
+  slots.forEach((s, i) => {
+    if (i === slot || isPrefix(s.path, cur.path) || isPrefix(cur.path, s.path))
+      return;
+    const mid = s.y + s.height / 2;
+    if (dir > 0 ? mid <= from + 0.5 : mid >= from - 0.5) return;
+    const dx = x < s.x ? s.x - x : x > s.x + s.width ? x - (s.x + s.width) : 0;
+    // Vertical nearness decides; horizontal distance only breaks ties, so a
+    // row directly below wins over one that is closer across the page.
+    const score = Math.abs(mid - from) * 4 + dx;
+    if (score < bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  });
+  if (best < 0) return null;
+  const s = slots[best];
+  let caretOut = 0;
+  let nearest = Infinity;
+  s.caretXs.forEach((cx, i) => {
+    const d = Math.abs(s.x + cx - x);
+    if (d < nearest) {
+      nearest = d;
+      caretOut = i;
+    }
+  });
+  return { slot: best, caret: caretOut };
 }
