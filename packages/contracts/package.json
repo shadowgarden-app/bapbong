@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-contracts",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "bapbong — shared layout + plugin contracts/types (type-only deps)",
   "license": "MIT",
   "repository": {
