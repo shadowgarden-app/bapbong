@@ -148,3 +148,102 @@ describe('walking the caret through a fraction', () => {
     expect(verticalStep(slots, DEN, 0, 1)).toBeNull();
   });
 });
+
+describe('walking a radical and a script', () => {
+  // ⁿ√𝑥 followed by 𝑎 with a superscript: the two shapes whose rows are not
+  // side by side, so the geometry has to carry the up/down moves.
+  const ast: EqNode[] = [
+    { t: 'rad', deg: [chr('𝑛')], body: [chr('𝑥')], showDeg: true },
+    { t: 'scr', base: [chr('𝑎')], sub: [], sup: [chr('2')], slots: 'sup' },
+  ];
+  const slots: EqSlotRect[] = [
+    {
+      path: [],
+      x: 0,
+      y: -16,
+      width: 60,
+      height: 24,
+      caretXs: [0, 30, 60],
+      em: 16,
+    },
+    {
+      path: [0, 'deg'],
+      x: 0,
+      y: -16,
+      width: 6,
+      height: 7,
+      caretXs: [0, 6],
+      em: 9,
+    },
+    {
+      path: [0, 'body'],
+      x: 10,
+      y: -10,
+      width: 12,
+      height: 12,
+      caretXs: [0, 12],
+      em: 16,
+    },
+    {
+      path: [1, 'base'],
+      x: 34,
+      y: -10,
+      width: 10,
+      height: 12,
+      caretXs: [0, 10],
+      em: 16,
+    },
+    {
+      path: [1, 'sup'],
+      x: 44,
+      y: -16,
+      width: 6,
+      height: 7,
+      caretXs: [0, 6],
+      em: 11,
+    },
+  ];
+  const [OUTER, DEG, BODY, BASE, SUP] = [0, 1, 2, 3, 4];
+
+  it('reads a radical degree-first, then its body', () => {
+    expect(horizontalStep(ast, slots, OUTER, 0, 1)).toEqual({
+      slot: DEG,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, DEG, 1, 1)).toEqual({
+      slot: BODY,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, BODY, 1, 1)).toEqual({
+      slot: OUTER,
+      caret: 1,
+    });
+  });
+
+  it('reads a script base-first, then the script it carries', () => {
+    expect(horizontalStep(ast, slots, OUTER, 1, 1)).toEqual({
+      slot: BASE,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, BASE, 1, 1)).toEqual({
+      slot: SUP,
+      caret: 0,
+    });
+  });
+
+  it('offers no subscript to step into when the script has none', () => {
+    // A superscript-only script must not strand the caret in a row the
+    // layout never drew.
+    expect(horizontalStep(ast, slots, SUP, 1, 1)).toEqual({
+      slot: OUTER,
+      caret: 2,
+    });
+  });
+
+  it('takes the degree and the exponent with up, the row under with down', () => {
+    expect(verticalStep(slots, BODY, 0, -1)).toEqual({ slot: DEG, caret: 1 });
+    expect(verticalStep(slots, DEG, 0, 1)).toEqual({ slot: BODY, caret: 0 });
+    expect(verticalStep(slots, BASE, 1, -1)).toEqual({ slot: SUP, caret: 0 });
+    expect(verticalStep(slots, SUP, 0, 1)).toEqual({ slot: BASE, caret: 1 });
+  });
+});

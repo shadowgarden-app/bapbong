@@ -21,7 +21,7 @@ import type {
   MeasureText,
   VectorOp,
 } from '@shadow-garden/bapbong-contracts';
-import { scrSlots } from '@shadow-garden/bapbong-contracts';
+import { radShowDeg, scrSlots } from '@shadow-garden/bapbong-contracts';
 
 export interface EquationLayoutResult {
   width: number;
@@ -284,7 +284,7 @@ export function layoutEquation(
       }
       case 'rad': {
         const body = row(n.body, pt, [...path, 'body']);
-        const deg = n.deg.length
+        const deg = radShowDeg(n)
           ? row(n.deg, pt * 0.55, [...path, 'deg'])
           : null;
         const h = body.asc + body.desc;

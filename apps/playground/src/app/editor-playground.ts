@@ -48,7 +48,6 @@ import {
   setHighlight,
   setLink,
   setTextColor,
-  insertEquation,
   insertEquationNode,
 } from '@shadow-garden/bapbong-commands';
 import type {
@@ -1126,7 +1125,10 @@ export class EditorPlayground implements OnDestroy {
                   close();
                 },
                 onNew: () => {
-                  this.exec(insertEquation());
+                  // An empty equation NODE, not the linear placeholder: the
+                  // caret lands in its slot, the palette opens, and the
+                  // structures are reachable. The linear form has no slots.
+                  this.exec(insertEquationNode([]));
                   close();
                 },
                 newShortcut: '⌥=',

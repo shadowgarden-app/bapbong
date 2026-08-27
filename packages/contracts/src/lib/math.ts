@@ -148,6 +148,17 @@ export interface EqRad {
   t: 'rad';
   deg: EqNode[];
   body: EqNode[];
+  /** Whether this radical HAS a degree, as OOXML's m:degHide records. Same
+   *  reason EqScr carries `slots`: emptiness cannot tell a fresh nth-root
+   *  template (waiting for its index) from a plain square root. Optional so
+   *  equations stored before this still read correctly. */
+  showDeg?: boolean;
+}
+
+/** Whether a radical shows a degree row — its own answer when it has one,
+ *  read off emptiness otherwise. */
+export function radShowDeg(n: EqRad): boolean {
+  return n.showDeg ?? n.deg.length > 0;
 }
 /** Scripts on a base: either list may be empty. */
 export interface EqScr {

@@ -2037,6 +2037,8 @@ function ommlRow(node: OoxmlNode): EqNode[] {
           t: 'rad',
           deg: rowOfChild('m:deg', node),
           body: rowOfChild('m:e', node),
+          showDeg:
+            attrOf(child(child(node, 'm:radPr'), 'm:degHide'), 'm:val') !== '1',
         },
       ];
     case 'm:d': {

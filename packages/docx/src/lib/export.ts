@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
-import { perf, scrSlots } from '@shadow-garden/bapbong-contracts';
+import { perf, radShowDeg, scrSlots } from '@shadow-garden/bapbong-contracts';
 import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderSide,
@@ -488,7 +488,7 @@ function astOmml(
     } else if (n.t === 'rad')
       out +=
         `<m:rad>` +
-        (n.deg.length
+        (radShowDeg(n)
           ? `<m:deg>${astOmml(n.deg)}</m:deg>`
           : `<m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/>`) +
         `<m:e>${astOmml(n.body)}</m:e></m:rad>`;

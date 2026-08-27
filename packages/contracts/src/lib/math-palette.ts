@@ -77,7 +77,12 @@ const scr = (slots: 'sub' | 'sup' | 'both'): EqNode => ({
   sup: [],
   slots,
 });
-const rad = (): EqNode => ({ t: 'rad', deg: [], body: [] });
+const rad = (showDeg: boolean): EqNode => ({
+  t: 'rad',
+  deg: [],
+  body: [],
+  showDeg,
+});
 const fence = (l: string, r: string): EqNode => ({
   t: 'fence',
   l,
@@ -108,8 +113,8 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Script', name: 'Subscript', node: scr('sub'), focus: 'sub' },
   { group: 'Script', name: 'Sub and super', node: scr('both'), focus: 'sub' },
 
-  { group: 'Radical', name: 'Square root', node: rad(), focus: 'body' },
-  { group: 'Radical', name: 'Nth root', node: rad(), focus: 'deg' },
+  { group: 'Radical', name: 'Square root', node: rad(false), focus: 'body' },
+  { group: 'Radical', name: 'Nth root', node: rad(true), focus: 'deg' },
 
   { group: 'Integral', name: 'Integral', node: big('∫'), focus: 'body' },
   { group: 'Integral', name: 'Definite', node: big('∫'), focus: 'lo' },
