@@ -88,6 +88,7 @@ export type {
 export type { FindPlugin, FindState } from './find-plugin';
 export type { HyperlinkPlugin } from './hyperlink-plugin';
 export type { ActiveField, TocPlugin } from './toc-plugin';
+export type { EquationPlugin } from './equation-plugin';
 
 const CARET_BLINK_MS = 530;
 
@@ -300,6 +301,7 @@ export class BapbongEditor {
     // Window-level capture: keys must reach plugins even mid-gesture, when a
     // claimed pointerdown left focus outside the hidden editor (see onKeyDown).
     window.addEventListener('keydown', this.onKeyDown, true);
+    window.addEventListener('beforeinput', this.onBeforeInput, true);
 
     // Plugins are document-scoped: this first build serves the empty editor,
     // and every loadDocx rebuilds (see buildPlugins).
@@ -947,6 +949,7 @@ export class BapbongEditor {
     this.stopBlink();
     this.offFonts();
     window.removeEventListener('keydown', this.onKeyDown, true);
+    window.removeEventListener('beforeinput', this.onBeforeInput, true);
     this.stack.removeEventListener('pointerdown', this.onPointerDown);
     this.stack.removeEventListener('pointermove', this.onPointerMove);
     this.stack.removeEventListener('pointerup', this.onPointerUp);
@@ -1253,6 +1256,27 @@ export class BapbongEditor {
     perf.span('pointer.focus', () => this.bridge!.focus());
     for (const cb of this.caretPickListeners) cb(pos);
     for (const p of this.plugins) p.onCaretPick?.(pos);
+  };
+
+  /** Offer inserted text to plugins when it arrives with no usable keydown —
+   *  an IME commit, a plain-text paste, a tool driving `insertText`. Runs on
+   *  the same capture phase as `onKeyDown`, before ProseMirror sees it. */
+  private onBeforeInput = (ev: InputEvent): void => {
+    const kind = ev.inputType;
+    if (kind !== 'insertText' && kind !== 'insertCompositionText') return;
+    const text = ev.data ?? '';
+    if (!text) return;
+    const node = ev.target instanceof Node ? ev.target : null;
+    const mine = node !== null && this.stack.contains(node);
+    if (!mine && lastInteracted !== null && lastInteracted !== this) return;
+    if (node !== null && node !== document.body && !mine) return;
+    for (const p of this.plugins) {
+      if (p.onTextInput?.(text)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+    }
   };
 
   /** Offer a key to plugins (before the hidden editor's keymaps). Only when
@@ -1589,24 +1613,39 @@ export class BapbongEditor {
    *  table-cell block. Reuses a pool of divs in the canvas stack. */
   /** Gap between an equation and its palette, in canvas px. */
   private static readonly PANEL_GAP = 6;
+  /** Panels already taught not to leak pointer events into the canvas. */
+  private static readonly armedPanels = new WeakSet<HTMLElement>();
 
   /** Position a plugin's floating panel against a page rect. Below the rect
    *  when the panel fits on screen there, above it otherwise — the same flip
    *  a menu does, so the palette never hangs off the bottom of the view. */
   private setPanel(el: HTMLElement | null, at?: OverlayRect): void {
-    if (this.panelEl && this.panelEl !== el) {
-      this.panelEl.style.display = 'none';
-      this.panelEl = null;
-    }
+    // Only ever hide an element still parented HERE. A host may share one
+    // panel across split panes, and the pane that just took it must not have
+    // it hidden by the pane that is letting go.
+    const prev = this.panelEl;
+    if (prev && prev !== el && prev.parentElement === this.stack)
+      prev.style.display = 'none';
     if (!el || !at) {
-      if (el) el.style.display = 'none';
       this.panelEl = null;
+      if (el && (el as HTMLElement).parentElement === this.stack)
+        el.style.display = 'none';
       return;
     }
     if (el.parentElement !== this.stack) {
       el.style.position = 'absolute';
       el.style.zIndex = '7';
       this.stack.appendChild(el);
+    }
+    // A panel sits INSIDE the canvas stack, so without this the editor's own
+    // pointer handling reads a press on it as a click on the page — moving
+    // the caret and ending the very edit the panel exists to serve. Armed
+    // once per element: a shared panel can move between panes.
+    if (!BapbongEditor.armedPanels.has(el)) {
+      BapbongEditor.armedPanels.add(el);
+      const stop = (e: Event) => e.stopPropagation();
+      el.addEventListener('pointerdown', stop);
+      el.addEventListener('mousedown', stop);
     }
     this.panelEl = el;
     const below = this.core.pageToCanvas({

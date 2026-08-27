@@ -273,6 +273,14 @@ export interface EditorPlugin {
    *  arrows) — e.g. Escape cancelling an in-flight drag gesture. Return true
    *  to claim (the editor preventDefaults and stops the event). */
   onKey?(ev: EditorKeyEvent): boolean;
+
+  /** Text arriving WITHOUT a usable keydown: an IME committing a composed
+   *  syllable, a plain-text paste, a `beforeinput` from an automation tool.
+   *  Return true to claim it. A plugin that owns the caret must handle this
+   *  as well as `onKey` — otherwise the hidden editor applies the insertion
+   *  against its own selection, which for a selected atom means REPLACING the
+   *  very object being edited. */
+  onTextInput?(text: string): boolean;
   /** A click on one of the frame's action-strip buttons (the plugin put them
    *  there via setFrame's `actions`). Return true to claim. */
   onFrameAction?(id: string): boolean;

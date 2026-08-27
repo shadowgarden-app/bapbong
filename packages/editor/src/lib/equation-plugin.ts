@@ -401,6 +401,22 @@ export function equationPlugin(): EquationPlugin {
       if (eq) leave(c);
       return false;
     },
+    onTextInput(text) {
+      const c = ctx;
+      if (!c || !eq) return false;
+      const at = atCaret(c);
+      if (!at) return false;
+      // One transaction for the whole run: an IME commits a syllable at a
+      // time, and a paste can arrive as a word.
+      let ast = at.ast;
+      let caret = at.caret;
+      for (const ch of text) {
+        ast = insertAt(ast, at.path, caret, eqChar(ch));
+        caret += 1;
+      }
+      commit(c, ast, { caret });
+      return true;
+    },
     onKey(ev) {
       const c = ctx;
       if (!c || !eq) return false;
