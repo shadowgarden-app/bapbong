@@ -6,6 +6,7 @@
  */
 import {
   eqRowNames,
+  eqVerticalRows,
   MATH_ALPHABETS,
   MATH_AUTOCORRECT,
   mathLetters,
@@ -243,7 +244,22 @@ export function horizontalStep(
  *  Ancestors and descendants are not candidates: the row you are in is drawn
  *  inside its parent's box, so "the row below" would otherwise always find
  *  the enclosing row it is already part of. */
+/** The caret stop in `s` nearest to the absolute x the caret came from. */
+function nearestCaret(s: EqSlotRect, x: number): number {
+  let out = 0;
+  let nearest = Infinity;
+  s.caretXs.forEach((cx, i) => {
+    const d = Math.abs(s.x + cx - x);
+    if (d < nearest) {
+      nearest = d;
+      out = i;
+    }
+  });
+  return out;
+}
+
 export function verticalStep(
+  ast: EqNode[],
   slots: readonly EqSlotRect[],
   slot: number,
   caret: number,
@@ -287,22 +303,38 @@ export function verticalStep(
     return best;
   };
 
-  // Inside a structure, up and down mean the rows of THAT structure: from a
-  // sum's upper limit, down is its operand — never a bracket that happens to
-  // sit closer across the page. Only when the structure has nothing that way
-  // does the search widen to the whole equation.
-  let best = pick(sibling);
-  if (best < 0) best = pick(() => true);
-  if (best < 0) return null;
-  const s = slots[best];
-  let caretOut = 0;
-  let nearest = Infinity;
-  s.caretXs.forEach((cx, i) => {
-    const d = Math.abs(s.x + cx - x);
-    if (d < nearest) {
-      nearest = d;
-      caretOut = i;
+  // A row that belongs to its structure's vertical stack steps along that
+  // stack, one entry at a time — the structure's own order beats geometry,
+  // so a sum's upper limit goes to its LOWER limit and not to the operand
+  // sitting nearer below.
+  let inStack = false;
+  if (cur.path.length >= 2) {
+    const parent = cur.path.slice(0, -2);
+    const index = cur.path[cur.path.length - 2] as number;
+    const rowName = cur.path[cur.path.length - 1] as string;
+    const node = (rowAt(ast, parent) ?? [])[index];
+    if (node) {
+      const stack = eqVerticalRows(node).filter(
+        (n) => slotAt(slots, [...parent, index, n]) >= 0,
+      );
+      const at = stack.indexOf(rowName);
+      if (at >= 0) {
+        inStack = true;
+        const next = at + dir;
+        const i =
+          next >= 0 && next < stack.length
+            ? slotAt(slots, [...parent, index, stack[next]])
+            : -1;
+        if (i >= 0) return { slot: i, caret: nearestCaret(slots[i], x) };
+      }
     }
-  });
-  return { slot: best, caret: caretOut };
+  }
+
+  // Off the end of the stack — or never on it. Look wider, but never back at
+  // rows the stack already ruled on, or leaving a denominator would land in
+  // the numerator it just came from.
+  let best = inStack ? -1 : pick(sibling);
+  if (best < 0) best = pick((s) => !inStack || !sibling(s));
+  if (best < 0) return null;
+  return { slot: best, caret: nearestCaret(slots[best], x) };
 }

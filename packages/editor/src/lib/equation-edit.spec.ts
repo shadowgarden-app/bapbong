@@ -138,14 +138,20 @@ describe('walking the caret through a fraction', () => {
     // End of the numerator sits at x = 32; the denominator stops are at
     // 20 / 29 / 38, so the caret lands on 29 — the same place across, not
     // the start of the row.
-    expect(verticalStep(slots, NUM, 1, 1)).toEqual({ slot: DEN, caret: 1 });
-    expect(verticalStep(slots, DEN, 0, -1)).toEqual({ slot: NUM, caret: 0 });
+    expect(verticalStep(ast, slots, NUM, 1, 1)).toEqual({
+      slot: DEN,
+      caret: 1,
+    });
+    expect(verticalStep(ast, slots, DEN, 0, -1)).toEqual({
+      slot: NUM,
+      caret: 0,
+    });
   });
 
   it('does not offer the row it is drawn inside as the row below', () => {
     // The outer row encloses both; from the denominator there is nothing
     // below, so the document's own line motion should take over.
-    expect(verticalStep(slots, DEN, 0, 1)).toBeNull();
+    expect(verticalStep(ast, slots, DEN, 0, 1)).toBeNull();
   });
 });
 
@@ -241,10 +247,22 @@ describe('walking a radical and a script', () => {
   });
 
   it('takes the degree and the exponent with up, the row under with down', () => {
-    expect(verticalStep(slots, BODY, 0, -1)).toEqual({ slot: DEG, caret: 1 });
-    expect(verticalStep(slots, DEG, 0, 1)).toEqual({ slot: BODY, caret: 0 });
-    expect(verticalStep(slots, BASE, 1, -1)).toEqual({ slot: SUP, caret: 0 });
-    expect(verticalStep(slots, SUP, 0, 1)).toEqual({ slot: BASE, caret: 1 });
+    expect(verticalStep(ast, slots, BODY, 0, -1)).toEqual({
+      slot: DEG,
+      caret: 1,
+    });
+    expect(verticalStep(ast, slots, DEG, 0, 1)).toEqual({
+      slot: BODY,
+      caret: 0,
+    });
+    expect(verticalStep(ast, slots, BASE, 1, -1)).toEqual({
+      slot: SUP,
+      caret: 0,
+    });
+    expect(verticalStep(ast, slots, SUP, 0, 1)).toEqual({
+      slot: BASE,
+      caret: 1,
+    });
   });
 });
 
@@ -341,9 +359,21 @@ describe('walking a bracket and a big operator', () => {
     });
   });
 
-  it('reaches the limits stacked on the operator with up and down', () => {
-    expect(verticalStep(slots, BODY, 0, -1)).toEqual({ slot: HI, caret: 1 });
-    expect(verticalStep(slots, BODY, 0, 1)).toEqual({ slot: LO, caret: 1 });
-    expect(verticalStep(slots, HI, 0, 1)).toEqual({ slot: BODY, caret: 0 });
+  it('reaches the limits stacked on the operator from the operand', () => {
+    expect(verticalStep(ast, slots, BODY, 0, -1)).toEqual({
+      slot: HI,
+      caret: 1,
+    });
+    expect(verticalStep(ast, slots, BODY, 0, 1)).toEqual({
+      slot: LO,
+      caret: 1,
+    });
+  });
+
+  it('steps between the two limits, not through the operand', () => {
+    // The operand is the nearest row below the upper limit, but the limits
+    // are one stack on the operator sign: down means the other limit.
+    expect(verticalStep(ast, slots, HI, 0, 1)).toEqual({ slot: LO, caret: 0 });
+    expect(verticalStep(ast, slots, LO, 0, -1)).toEqual({ slot: HI, caret: 0 });
   });
 });

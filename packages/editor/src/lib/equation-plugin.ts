@@ -510,7 +510,7 @@ export function equationPlugin(): EquationPlugin {
       if (arrow !== 0) {
         const vertical = ev.key === 'ArrowUp' || ev.key === 'ArrowDown';
         const step = vertical
-          ? verticalStep(slots, eq.slot, caret, arrow)
+          ? verticalStep(ast, slots, eq.slot, caret, arrow)
           : horizontalStep(ast, slots, eq.slot, caret, arrow);
         // Nothing above or below inside the equation — the document's own
         // line motion is the right answer, so don't claim the key.

@@ -217,6 +217,31 @@ export function bigLimits(n: EqBig): { lo: boolean; hi: boolean } {
 export type EqNode = EqChr | EqFrac | EqRad | EqScr | EqFence | EqBig;
 
 /**
+ * The rows of a node that form a VERTICAL stack, top to bottom — what up and
+ * down step through inside that structure.
+ *
+ * Not every row belongs: a big operator stacks its two limits on the operator
+ * sign, while the operand sits beside it, so down from the upper limit is the
+ * LOWER limit even though the operand is nearer. Rows left out here are still
+ * reachable by up and down; they are just found by geometry instead of by
+ * this order.
+ */
+export function eqVerticalRows(n: EqNode): readonly string[] {
+  switch (n.t) {
+    case 'frac':
+      return ['num', 'den'];
+    case 'rad':
+      return ['deg', 'body'];
+    case 'scr':
+      return ['sup', 'base', 'sub'];
+    case 'big':
+      return ['hi', 'lo'];
+    default:
+      return [];
+  }
+}
+
+/**
  * A node's editable rows in CARET order — the order the caret walks them
  * stepping right, which is reading order: a fraction's numerator before its
  * denominator, a radical's degree before its body.
