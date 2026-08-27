@@ -257,6 +257,11 @@ export function equationGallery(options: EquationGalleryOptions): HTMLElement {
     name.className = 'bb-eqg-name';
     name.textContent = item.name;
     btn.append(prev, name);
+    // Keep focus where it is: the menubar rebuilds a widget flyout on
+    // `focusin`, so letting the press focus this button would replace the
+    // element between mousedown and mouseup — and no click would ever fire.
+    // Same guard the table-size and page-setup pickers use.
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', () => options.onPick(item.ast));
     list.append(btn);
   }
@@ -276,6 +281,7 @@ export function equationGallery(options: EquationGalleryOptions): HTMLElement {
     key.textContent = options.newShortcut;
     neu.append(key);
   }
+  neu.addEventListener('mousedown', (e) => e.preventDefault());
   neu.addEventListener('click', () => options.onNew());
   foot.append(neu);
   root.append(foot);
