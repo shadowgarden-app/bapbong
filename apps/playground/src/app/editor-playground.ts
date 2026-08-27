@@ -48,6 +48,8 @@ import {
   setHighlight,
   setLink,
   setTextColor,
+  insertEquation,
+  insertEquationNode,
 } from '@shadow-garden/bapbong-commands';
 import type {
   BorderSide,
@@ -55,6 +57,7 @@ import type {
   EditorPointerEvent,
   PageConfig,
   SectionConfig,
+  EqNode,
 } from '@shadow-garden/bapbong-contracts';
 import {
   Collection,
@@ -81,6 +84,7 @@ import {
   openSymbolPopover,
   panelAnchor,
   type SymbolDialogHandle,
+  equationGallery,
   mountMenubar,
   mountToolbar,
   openCellProperties,
@@ -1073,7 +1077,21 @@ export class EditorPlayground implements OnDestroy {
             label: 'Symbol…',
             run: () => this.symbolDialog?.open(),
           },
-          { command: 'insert-equation', label: 'Equation' },
+          {
+            label: 'Equation',
+            widget: (close) =>
+              equationGallery({
+                onPick: (ast: EqNode[]) => {
+                  this.exec(insertEquationNode(ast));
+                  close();
+                },
+                onNew: () => {
+                  this.exec(insertEquation());
+                  close();
+                },
+                newShortcut: '⌥=',
+              }),
+          },
           {
             label: 'Remove link',
             isEnabled: () => {

@@ -211,6 +211,15 @@ export function equationPlugin(): EditorPlugin {
     },
     onChange() {
       if (!ctx) return;
+      // A freshly inserted equation arrives selected as a node (the gallery
+      // and Insert ▸ Equation both do this): step straight into its first
+      // slot, so typing continues inside the equation instead of replacing
+      // it — what Word does when it drops the caret into a new equation.
+      const sel = ctx.state.selection as { node?: { type: { name: string } } };
+      if (sel.node?.type.name === 'equation') {
+        const pos = ctx.state.selection.from;
+        if (!eq || eq.pos !== pos) eq = { pos, slot: 0, caret: 0 };
+      }
       // The typeset editor: re-anchor after every layout (slots move on each
       // reflow; a structural edit lands in its pending path).
       if (eq) {

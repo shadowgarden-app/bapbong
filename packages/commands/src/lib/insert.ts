@@ -1,4 +1,4 @@
-import type { EditorState } from 'prosemirror-state';
+import { NodeSelection, type EditorState } from 'prosemirror-state';
 import type { Mark as Mark0, Node as PMNode0 } from 'prosemirror-model';
 import type { Command } from '@shadow-garden/bapbong-contracts';
 import { MATH_ALPHABETS, mathLetters } from '@shadow-garden/bapbong-contracts';
@@ -315,5 +315,30 @@ export function insertEquation(): Command {
       return true;
     },
     isActive: (state) => isMarkActive(state, 'math'),
+  };
+}
+
+/**
+ * Insert a 2D equation carrying `ast` at the selection — what the built-in
+ * gallery does. The node is selected afterwards so the equation plugin can
+ * open its slot editor on it (Word drops the caret into a new equation too).
+ */
+export function insertEquationNode(ast: unknown): Command {
+  return {
+    name: 'insert-equation-node',
+    run(state, dispatch) {
+      const type = state.schema.nodes['equation'];
+      if (!type) return false;
+      if (!state.selection.$from.parent.isTextblock) return false;
+      if (!dispatch) return true;
+      const from = state.selection.from;
+      const node = type.create({ ast, sizePt: 12 });
+      const tr = state.tr.replaceSelectionWith(node, false);
+      // A NodeSelection over the fresh equation: the plugin picks it up and
+      // opens its slot editor, so typing continues inside the equation.
+      tr.setSelection(NodeSelection.create(tr.doc, from));
+      dispatch(tr.scrollIntoView());
+      return true;
+    },
   };
 }
