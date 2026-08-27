@@ -36,6 +36,22 @@ export interface EquationLayoutResult {
   slots: EqSlotRect[];
 }
 
+/** Combining accent marks paint as their spacing lookalikes: a canvas draws
+ *  a lone combining mark inconsistently, and the tree keeps the combining
+ *  codepoint so the document still round-trips. */
+const ACCENT_PAINT: Record<string, string> = {
+  '\u0300': '`',
+  '\u0301': '\u00b4',
+  '\u0302': '^',
+  '\u0303': '\u02dc',
+  '\u0304': '\u00af',
+  '\u0305': '\u00af',
+  '\u0307': '\u02d9',
+  '\u0308': '\u00a8',
+  '\u030c': '\u02c7',
+  '\u20d7': '\u2192',
+};
+
 /** Script (sub/sup, fraction parts) size, as Word scales them. */
 const SCRIPT = 0.66;
 /** The math axis (fraction bar center) above the baseline, in em. */
@@ -430,6 +446,73 @@ export function layoutEquation(
           ops,
           slots,
           caretXs: [0, bodyX + body.w],
+        };
+      }
+      case 'func': {
+        // The name is a row of its own so `log` can carry a base; a thin
+        // space separates it from the argument, as Word sets it.
+        const name = row(n.name, pt, [...path, 'name']);
+        const body = row(n.body, pt, [...path, 'body']);
+        const gap = em * 0.14;
+        const bx = name.w + gap;
+        return {
+          w: bx + body.w,
+          asc: Math.max(name.asc, body.asc),
+          desc: Math.max(name.desc, body.desc),
+          ops: [...name.ops, ...shift(body.ops, bx, 0)],
+          slots: [...name.slots, ...shiftSlots(body.slots, bx, 0)],
+          caretXs: [0, bx + body.w],
+        };
+      }
+      case 'acc': {
+        const body = row(n.body, pt, [...path, 'body']);
+        // A lone combining mark draws unreliably on a canvas, so paint the
+        // spacing lookalike and keep the combining codepoint in the tree —
+        // that is what round-trips to Word.
+        const glyph = ACCENT_PAINT[n.chr] ?? n.chr;
+        const gw = measure(glyph, font(pt));
+        const rise = em * 0.1;
+        return {
+          w: body.w,
+          asc: body.asc + em * 0.34,
+          desc: body.desc,
+          ops: [
+            ...body.ops,
+            {
+              kind: 'text',
+              x: Math.max(0, (body.w - gw) / 2),
+              y: -body.asc - rise,
+              text: glyph,
+              size: em,
+              family: FAMILY,
+              color: '#000000',
+            },
+          ],
+          slots: body.slots,
+          caretXs: [0, body.w],
+        };
+      }
+      case 'lim': {
+        const base = row(n.base, pt, [...path, 'base']);
+        const lim = row(n.lim, spt, [...path, 'lim']);
+        const w = Math.max(base.w, lim.w);
+        const gap = em * 0.12;
+        const limBase = n.below
+          ? base.desc + gap + lim.asc
+          : -(base.asc + gap + lim.desc);
+        return {
+          w,
+          asc: base.asc + (n.below ? 0 : gap + lim.asc + lim.desc),
+          desc: base.desc + (n.below ? gap + lim.asc + lim.desc : 0),
+          ops: [
+            ...shift(base.ops, (w - base.w) / 2, 0),
+            ...shift(lim.ops, (w - lim.w) / 2, limBase),
+          ],
+          slots: [
+            ...shiftSlots(base.slots, (w - base.w) / 2, 0),
+            ...shiftSlots(lim.slots, (w - lim.w) / 2, limBase),
+          ],
+          caretXs: [0, w],
         };
       }
     }

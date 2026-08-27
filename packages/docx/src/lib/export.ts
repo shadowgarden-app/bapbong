@@ -509,6 +509,20 @@ function astOmml(
         `</m:naryPr>` +
         `<m:sub>${astOmml(n.lo)}</m:sub><m:sup>${astOmml(n.hi)}</m:sup>` +
         `<m:e>${astOmml(n.body)}</m:e></m:nary>`;
+    else if (n.t === 'func')
+      out +=
+        `<m:func><m:fName>${astOmml(n.name)}</m:fName>` +
+        `<m:e>${astOmml(n.body)}</m:e></m:func>`;
+    else if (n.t === 'acc')
+      out +=
+        `<m:acc><m:accPr><m:chr m:val="${esc(n.chr)}"/></m:accPr>` +
+        `<m:e>${astOmml(n.body)}</m:e></m:acc>`;
+    else if (n.t === 'lim') {
+      const tag = n.below ? 'm:limLow' : 'm:limUpp';
+      out +=
+        `<${tag}><m:e>${astOmml(n.base)}</m:e>` +
+        `<m:lim>${astOmml(n.lim)}</m:lim></${tag}>`;
+    }
   }
   flush();
   return out;

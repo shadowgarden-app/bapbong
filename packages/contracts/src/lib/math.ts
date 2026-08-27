@@ -214,7 +214,43 @@ export function bigLimits(n: EqBig): { lo: boolean; hi: boolean } {
   };
 }
 
-export type EqNode = EqChr | EqFrac | EqRad | EqScr | EqFence | EqBig;
+/** A named function applied to an argument (m:func): `sin 𝑥`. The name is a
+ *  row of its own so `log` can carry a base and the caret can edit it. */
+export interface EqFunc {
+  t: 'func';
+  name: EqNode[];
+  body: EqNode[];
+}
+
+/** A mark over a base (m:acc) — a vector arrow, a bar, a hat. `chr` is the
+ *  COMBINING codepoint OOXML stores; the layout paints a spacing lookalike,
+ *  since a lone combining mark draws unreliably on a canvas. */
+export interface EqAcc {
+  t: 'acc';
+  chr: string;
+  body: EqNode[];
+}
+
+/** An operator with a limit written under (m:limLow) or over (m:limUpp) it —
+ *  `lim` with `𝑛→∞` beneath, `max` over a set. */
+export interface EqLim {
+  t: 'lim';
+  base: EqNode[];
+  lim: EqNode[];
+  /** The limit sits under the base (m:limLow). False puts it over. */
+  below: boolean;
+}
+
+export type EqNode =
+  | EqChr
+  | EqFrac
+  | EqRad
+  | EqScr
+  | EqFence
+  | EqBig
+  | EqFunc
+  | EqAcc
+  | EqLim;
 
 /**
  * The rows of a node that form a VERTICAL stack, top to bottom — what up and
@@ -236,6 +272,8 @@ export function eqVerticalRows(n: EqNode): readonly string[] {
       return ['sup', 'base', 'sub'];
     case 'big':
       return ['hi', 'lo'];
+    case 'lim':
+      return n.below ? ['base', 'lim'] : ['lim', 'base'];
     default:
       return [];
   }
@@ -263,6 +301,12 @@ export function eqRowNames(n: EqNode): readonly string[] {
       return ['body'];
     case 'big':
       return ['lo', 'hi', 'body'];
+    case 'func':
+      return ['name', 'body'];
+    case 'acc':
+      return ['body'];
+    case 'lim':
+      return ['base', 'lim'];
     default:
       return [];
   }
@@ -313,6 +357,14 @@ export function astToLinear(row: EqNode[]): string {
           paren(astToLinear(n.body))
         );
       }
+      case 'func':
+        return `${astToLinear(n.name)}\u2061${paren(astToLinear(n.body))}`;
+      case 'acc':
+        return astToLinear(n.body) + n.chr;
+      case 'lim': {
+        const l = astToLinear(n.lim);
+        return astToLinear(n.base) + (l ? (n.below ? sub(l) : sup(l)) : '');
+      }
     }
   };
   return row.map(one).join('');
@@ -348,6 +400,16 @@ export function isEqRow(v: unknown): v is EqNode[] {
         isEqRow((n as EqBig).lo) &&
         isEqRow((n as EqBig).hi) &&
         isEqRow((n as EqBig).body)
+      );
+    if (t === 'func')
+      return isEqRow((n as EqFunc).name) && isEqRow((n as EqFunc).body);
+    if (t === 'acc')
+      return typeof (n as EqAcc).chr === 'string' && isEqRow((n as EqAcc).body);
+    if (t === 'lim')
+      return (
+        typeof (n as EqLim).below === 'boolean' &&
+        isEqRow((n as EqLim).base) &&
+        isEqRow((n as EqLim).lim)
       );
     return false;
   });

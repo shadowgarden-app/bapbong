@@ -2071,6 +2071,34 @@ function ommlRow(node: OoxmlNode): EqNode[] {
         },
       ];
     }
+    case 'm:func':
+      return [
+        {
+          t: 'func',
+          name: rowOfChild('m:fName', node),
+          body: rowOfChild('m:e', node),
+        },
+      ];
+    case 'm:acc':
+      return [
+        {
+          t: 'acc',
+          // Word's default accent when m:chr is absent is a combining bar.
+          chr:
+            attrOf(child(child(node, 'm:accPr'), 'm:chr'), 'm:val') ?? '\u0305',
+          body: rowOfChild('m:e', node),
+        },
+      ];
+    case 'm:limLow':
+    case 'm:limUpp':
+      return [
+        {
+          t: 'lim',
+          base: rowOfChild('m:e', node),
+          lim: rowOfChild('m:lim', node),
+          below: node.name === 'm:limLow',
+        },
+      ];
     default:
       // Property containers configure, never contribute content.
       if (node.name.startsWith('m:') && node.name.endsWith('Pr')) return [];

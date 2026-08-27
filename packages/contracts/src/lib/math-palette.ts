@@ -89,6 +89,23 @@ const fence = (l: string, r: string): EqNode => ({
   r,
   body: [],
 });
+/** Plain, upright characters — a function name is not a variable, so it must
+ *  not be letterformed into math italic the way typed letters are. */
+const upright = (s: string): EqNode[] =>
+  [...s].map((ch) => ({ t: 'chr', ch }) as EqNode);
+const func = (name: string): EqNode => ({
+  t: 'func',
+  name: upright(name),
+  body: [],
+});
+const acc = (chr: string): EqNode => ({ t: 'acc', chr, body: [] });
+const lim = (name: string, below = true): EqNode => ({
+  t: 'lim',
+  base: upright(name),
+  lim: [],
+  below,
+});
+
 const big = (op: string, limits = false): EqNode => ({
   t: 'big',
   op,
@@ -163,6 +180,28 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Bracket', name: 'Angle', node: fence('⟨', '⟩'), focus: 'body' },
   { group: 'Bracket', name: 'Floor', node: fence('⌊', '⌋'), focus: 'body' },
   { group: 'Bracket', name: 'Ceiling', node: fence('⌈', '⌉'), focus: 'body' },
+
+  { group: 'Function', name: 'sin', node: func('sin'), focus: 'body' },
+  { group: 'Function', name: 'cos', node: func('cos'), focus: 'body' },
+  { group: 'Function', name: 'tan', node: func('tan'), focus: 'body' },
+  { group: 'Function', name: 'cot', node: func('cot'), focus: 'body' },
+  { group: 'Function', name: 'ln', node: func('ln'), focus: 'body' },
+  { group: 'Function', name: 'log', node: func('log'), focus: 'body' },
+  { group: 'Function', name: 'exp', node: func('exp'), focus: 'body' },
+  // The name is empty and editable — for anything the list does not carry.
+  { group: 'Function', name: 'Custom', node: func(''), focus: 'name' },
+
+  { group: 'Accent', name: 'Bar', node: acc('\u0305'), focus: 'body' },
+  { group: 'Accent', name: 'Vector', node: acc('\u20d7'), focus: 'body' },
+  { group: 'Accent', name: 'Hat', node: acc('\u0302'), focus: 'body' },
+  { group: 'Accent', name: 'Tilde', node: acc('\u0303'), focus: 'body' },
+  { group: 'Accent', name: 'Dot', node: acc('\u0307'), focus: 'body' },
+  { group: 'Accent', name: 'Double dot', node: acc('\u0308'), focus: 'body' },
+
+  { group: 'Limit', name: 'Limit', node: lim('lim'), focus: 'lim' },
+  { group: 'Limit', name: 'Maximum', node: lim('max'), focus: 'lim' },
+  { group: 'Limit', name: 'Minimum', node: lim('min'), focus: 'lim' },
+  { group: 'Limit', name: 'Over', node: lim('', false), focus: 'base' },
 ];
 
 /** The groups in palette order, each with its templates. */
