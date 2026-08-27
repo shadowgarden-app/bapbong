@@ -162,6 +162,7 @@ export function equationPlugin(): EditorPlugin {
     }
     const caret = Math.min(eq.caret, slot.caretXs.length - 1);
     c.setGuide({
+      kind: 'caret',
       pageIndex: hit.pageIndex,
       x: hit.x + slot.x + slot.caretXs[caret],
       y: hit.top + slot.y,

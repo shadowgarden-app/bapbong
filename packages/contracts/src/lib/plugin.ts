@@ -94,13 +94,18 @@ export interface EditorKeyEvent {
   altKey: boolean;
 }
 
-/** A transient vertical guide line shown during a drag (page-local geometry) —
- *  e.g. a column-resize preview. The editor positions it on the canvas. */
+/** A vertical line the editor draws on the canvas (page-local geometry).
+ *  `drag` is the transient preview of a gesture — a column-resize position;
+ *  `caret` is a real insertion point inside an object the hidden text editor
+ *  does not own (an equation slot), so it is drawn and blinked like the
+ *  document's own caret rather than like a drag guide. */
 export interface OverlayGuide {
   pageIndex: number;
   x: number;
   y: number;
   height: number;
+  /** Default `drag`. */
+  kind?: 'drag' | 'caret';
 }
 
 /** One button on the frame's floating action strip. `svg` is inner SVG markup

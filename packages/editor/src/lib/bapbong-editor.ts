@@ -204,6 +204,9 @@ export class BapbongEditor {
   private lastSelection: SelectionRect[] = [];
   private caretVisible = true;
   private blinkTimer: ReturnType<typeof setInterval> | null = null;
+  /** What the guide element currently shows, so the blink knows whether it
+   *  owns it (a drag preview must never blink). */
+  private guideKind: 'drag' | 'caret' = 'drag';
   // While dragging, the visual selection leads (painted straight from
   // hit-testing, same frame); the PM model commits once on pointerup.
   private dragAnchor: number | null = null;
@@ -1087,9 +1090,14 @@ export class BapbongEditor {
   private restartBlink(): void {
     this.stopBlink();
     this.caretVisible = true;
+    if (this.guideEl) this.guideEl.style.opacity = '1';
     this.blinkTimer = setInterval(() => {
       this.caretVisible = !this.caretVisible;
       this.repaintOverlay();
+      // An equation-slot caret lives in the guide element, outside the
+      // painted overlay — blink it in the same phase.
+      if (this.guideEl && this.guideKind === 'caret')
+        this.guideEl.style.opacity = this.caretVisible ? '1' : '0';
     }, CARET_BLINK_MS);
   }
 
@@ -1375,9 +1383,18 @@ export class BapbongEditor {
     if (!this.guideEl) {
       this.guideEl = document.createElement('div');
       this.guideEl.style.cssText =
-        'position:absolute;width:0;border-left:2px dashed #378add;pointer-events:none;z-index:5;';
+        'position:absolute;width:0;pointer-events:none;z-index:5;';
       this.stack.appendChild(this.guideEl);
     }
+    // A caret is a caret: thin, solid, in the caret colour, blinking with
+    // the document's own. A drag guide stays the dashed preview line.
+    const caret = guide.kind === 'caret';
+    this.guideEl.style.borderLeft = caret
+      ? '1.5px solid #1a1a1a' // the painter's caret colour
+      : '2px dashed #378add';
+    this.guideKind = guide.kind ?? 'drag';
+    // Solid on every move, like the caret restarting its blink phase.
+    this.guideEl.style.opacity = '1';
     const top = this.core.pageToCanvas({
       pageIndex: guide.pageIndex,
       x: guide.x,
