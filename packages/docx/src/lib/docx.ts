@@ -2066,6 +2066,8 @@ function ommlRow(node: OoxmlNode): EqNode[] {
           lo: rowOfChild('m:sub', node),
           hi: rowOfChild('m:sup', node),
           body: rowOfChild('m:e', node),
+          showLo: attrOf(child(pr, 'm:subHide'), 'm:val') !== '1',
+          showHi: attrOf(child(pr, 'm:supHide'), 'm:val') !== '1',
         },
       ];
     }

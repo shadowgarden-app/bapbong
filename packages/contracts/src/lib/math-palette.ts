@@ -89,12 +89,14 @@ const fence = (l: string, r: string): EqNode => ({
   r,
   body: [],
 });
-const big = (op: string): EqNode => ({
+const big = (op: string, limits = false): EqNode => ({
   t: 'big',
   op,
   lo: [],
   hi: [],
   body: [],
+  showLo: limits,
+  showHi: limits,
 });
 
 /**
@@ -117,7 +119,7 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Radical', name: 'Nth root', node: rad(true), focus: 'deg' },
 
   { group: 'Integral', name: 'Integral', node: big('∫'), focus: 'body' },
-  { group: 'Integral', name: 'Definite', node: big('∫'), focus: 'lo' },
+  { group: 'Integral', name: 'Definite', node: big('∫', true), focus: 'lo' },
   { group: 'Integral', name: 'Double', node: big('∬'), focus: 'body' },
   { group: 'Integral', name: 'Contour', node: big('∮'), focus: 'body' },
 
@@ -125,10 +127,16 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   {
     group: 'Large operator',
     name: 'Sum with limits',
-    node: big('∑'),
+    node: big('∑', true),
     focus: 'lo',
   },
   { group: 'Large operator', name: 'Product', node: big('∏'), focus: 'body' },
+  {
+    group: 'Large operator',
+    name: 'Product with limits',
+    node: big('∏', true),
+    focus: 'lo',
+  },
   { group: 'Large operator', name: 'Union', node: big('⋃'), focus: 'body' },
   {
     group: 'Large operator',

@@ -21,7 +21,11 @@ import type {
   MeasureText,
   VectorOp,
 } from '@shadow-garden/bapbong-contracts';
-import { radShowDeg, scrSlots } from '@shadow-garden/bapbong-contracts';
+import {
+  bigLimits,
+  radShowDeg,
+  scrSlots,
+} from '@shadow-garden/bapbong-contracts';
 
 export interface EquationLayoutResult {
   width: number;
@@ -385,10 +389,11 @@ export function layoutEquation(
         const hi = row(n.hi, spt, [...path, 'hi']);
         const body = row(n.body, pt, [...path, 'body']);
         const opBase = em * 0.06; // big glyphs sit slightly low
-        const scriptW = Math.max(
-          n.lo.length ? lo.w : 0,
-          n.hi.length ? hi.w : 0,
-        );
+        // A limit the operator does not HAVE is neither drawn nor offered
+        // to the caret; an empty one it does have draws its placeholder box
+        // like any other row.
+        const lim = bigLimits(n);
+        const scriptW = Math.max(lim.lo ? lo.w : 0, lim.hi ? hi.w : 0);
         const supBase = -SUP_RISE * em * 1.25;
         const subBase = SUB_DROP * em * 2.2;
         const ops: VectorOp[] = [
@@ -403,21 +408,25 @@ export function layoutEquation(
           },
         ];
         const slots: EqSlotRect[] = [];
-        if (n.hi.length) {
+        if (lim.hi) {
           ops.push(...shift(hi.ops, opW, supBase));
+          slots.push(...shiftSlots(hi.slots, opW, supBase));
         }
-        slots.push(...shiftSlots(hi.slots, opW, supBase));
-        if (n.lo.length) {
+        if (lim.lo) {
           ops.push(...shift(lo.ops, opW, subBase));
+          slots.push(...shiftSlots(lo.slots, opW, subBase));
         }
-        slots.push(...shiftSlots(lo.slots, opW, subBase));
         const bodyX = opW + scriptW + em * 0.08;
         ops.push(...shift(body.ops, bodyX, 0));
         slots.push(...shiftSlots(body.slots, bodyX, 0));
         return {
           w: bodyX + body.w,
-          asc: Math.max(opEm * 0.85, -(supBase - hi.asc), body.asc),
-          desc: Math.max(opEm * 0.3, subBase + lo.desc, body.desc),
+          asc: Math.max(
+            opEm * 0.85,
+            lim.hi ? -(supBase - hi.asc) : 0,
+            body.asc,
+          ),
+          desc: Math.max(opEm * 0.3, lim.lo ? subBase + lo.desc : 0, body.desc),
           ops,
           slots,
           caretXs: [0, bodyX + body.w],

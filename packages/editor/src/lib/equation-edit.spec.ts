@@ -247,3 +247,103 @@ describe('walking a radical and a script', () => {
     expect(verticalStep(slots, SUP, 0, 1)).toEqual({ slot: BASE, caret: 1 });
   });
 });
+
+describe('walking a bracket and a big operator', () => {
+  // (𝑎) followed by a ∑ carrying both limits: one row and three rows.
+  const ast: EqNode[] = [
+    { t: 'fence', l: '(', r: ')', body: [chr('𝑎')] },
+    {
+      t: 'big',
+      op: '∑',
+      lo: [chr('0')],
+      hi: [chr('𝑛')],
+      body: [chr('𝑘')],
+      showLo: true,
+      showHi: true,
+    },
+  ];
+  const slots: EqSlotRect[] = [
+    {
+      path: [],
+      x: 0,
+      y: -20,
+      width: 80,
+      height: 34,
+      caretXs: [0, 24, 80],
+      em: 16,
+    },
+    {
+      path: [0, 'body'],
+      x: 6,
+      y: -10,
+      width: 12,
+      height: 12,
+      caretXs: [0, 12],
+      em: 16,
+    },
+    {
+      path: [1, 'lo'],
+      x: 30,
+      y: 4,
+      width: 8,
+      height: 8,
+      caretXs: [0, 8],
+      em: 11,
+    },
+    {
+      path: [1, 'hi'],
+      x: 30,
+      y: -20,
+      width: 8,
+      height: 8,
+      caretXs: [0, 8],
+      em: 11,
+    },
+    {
+      path: [1, 'body'],
+      x: 46,
+      y: -10,
+      width: 12,
+      height: 12,
+      caretXs: [0, 12],
+      em: 16,
+    },
+  ];
+  const [OUTER, FENCE, LO, HI, BODY] = [0, 1, 2, 3, 4];
+
+  it('steps inside a bracket and back out past it', () => {
+    expect(horizontalStep(ast, slots, OUTER, 0, 1)).toEqual({
+      slot: FENCE,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, FENCE, 1, 1)).toEqual({
+      slot: OUTER,
+      caret: 1,
+    });
+  });
+
+  it('reads a big operator lower limit, upper limit, then operand', () => {
+    expect(horizontalStep(ast, slots, OUTER, 1, 1)).toEqual({
+      slot: LO,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, LO, 1, 1)).toEqual({
+      slot: HI,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, HI, 1, 1)).toEqual({
+      slot: BODY,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, BODY, 1, 1)).toEqual({
+      slot: OUTER,
+      caret: 2,
+    });
+  });
+
+  it('reaches the limits stacked on the operator with up and down', () => {
+    expect(verticalStep(slots, BODY, 0, -1)).toEqual({ slot: HI, caret: 1 });
+    expect(verticalStep(slots, BODY, 0, 1)).toEqual({ slot: LO, caret: 1 });
+    expect(verticalStep(slots, HI, 0, 1)).toEqual({ slot: BODY, caret: 0 });
+  });
+});

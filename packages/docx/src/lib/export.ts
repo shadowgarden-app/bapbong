@@ -1,6 +1,11 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
-import { perf, radShowDeg, scrSlots } from '@shadow-garden/bapbong-contracts';
+import {
+  bigLimits,
+  perf,
+  radShowDeg,
+  scrSlots,
+} from '@shadow-garden/bapbong-contracts';
 import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderSide,
@@ -498,7 +503,10 @@ function astOmml(
         `<m:e>${astOmml(n.body)}</m:e></m:d>`;
     else if (n.t === 'big')
       out +=
-        `<m:nary><m:naryPr><m:chr m:val="${esc(n.op)}"/></m:naryPr>` +
+        `<m:nary><m:naryPr><m:chr m:val="${esc(n.op)}"/>` +
+        (bigLimits(n).lo ? '' : '<m:subHide m:val="1"/>') +
+        (bigLimits(n).hi ? '' : '<m:supHide m:val="1"/>') +
+        `</m:naryPr>` +
         `<m:sub>${astOmml(n.lo)}</m:sub><m:sup>${astOmml(n.hi)}</m:sup>` +
         `<m:e>${astOmml(n.body)}</m:e></m:nary>`;
   }

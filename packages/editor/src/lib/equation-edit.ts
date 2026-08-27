@@ -253,22 +253,46 @@ export function verticalStep(
   if (!cur) return null;
   const x = cur.x + (cur.caretXs[Math.min(caret, lastCaret(cur))] ?? 0);
   const from = cur.y + cur.height / 2;
-  let best = -1;
-  let bestScore = Infinity;
-  slots.forEach((s, i) => {
-    if (i === slot || isPrefix(s.path, cur.path) || isPrefix(cur.path, s.path))
-      return;
-    const mid = s.y + s.height / 2;
-    if (dir > 0 ? mid <= from + 0.5 : mid >= from - 0.5) return;
-    const dx = x < s.x ? s.x - x : x > s.x + s.width ? x - (s.x + s.width) : 0;
-    // Vertical nearness decides; horizontal distance only breaks ties, so a
-    // row directly below wins over one that is closer across the page.
-    const score = Math.abs(mid - from) * 4 + dx;
-    if (score < bestScore) {
-      bestScore = score;
-      best = i;
-    }
-  });
+  // Rows of the SAME structure — a fraction's other half, an operator's
+  // other limit. They share everything but the row name.
+  const family = key(cur.path.slice(0, -1));
+  const sibling = (s: EqSlotRect): boolean =>
+    cur.path.length >= 2 &&
+    s.path.length === cur.path.length &&
+    key(s.path.slice(0, -1)) === family;
+
+  const pick = (only: (s: EqSlotRect) => boolean): number => {
+    let best = -1;
+    let bestScore = Infinity;
+    slots.forEach((s, i) => {
+      if (
+        i === slot ||
+        isPrefix(s.path, cur.path) ||
+        isPrefix(cur.path, s.path)
+      )
+        return;
+      if (!only(s)) return;
+      const mid = s.y + s.height / 2;
+      if (dir > 0 ? mid <= from + 0.5 : mid >= from - 0.5) return;
+      const dx =
+        x < s.x ? s.x - x : x > s.x + s.width ? x - (s.x + s.width) : 0;
+      // Vertical nearness decides; horizontal distance only breaks ties, so a
+      // row directly below wins over one that is closer across the page.
+      const score = Math.abs(mid - from) * 4 + dx;
+      if (score < bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    });
+    return best;
+  };
+
+  // Inside a structure, up and down mean the rows of THAT structure: from a
+  // sum's upper limit, down is its operand — never a bracket that happens to
+  // sit closer across the page. Only when the structure has nothing that way
+  // does the search widen to the whole equation.
+  let best = pick(sibling);
+  if (best < 0) best = pick(() => true);
   if (best < 0) return null;
   const s = slots[best];
   let caretOut = 0;

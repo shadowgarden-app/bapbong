@@ -196,6 +196,22 @@ export interface EqBig {
   lo: EqNode[];
   hi: EqNode[];
   body: EqNode[];
+  /** Whether this operator SHOWS a lower / upper limit, as OOXML's
+   *  m:subHide / m:supHide record. Same reason EqScr carries `slots` and
+   *  EqRad carries `showDeg`: a fresh "sum with limits" has both rows empty
+   *  and still needs them, while a plain ∑ must not offer rows that are not
+   *  there. Optional so equations stored before this still read. */
+  showLo?: boolean;
+  showHi?: boolean;
+}
+
+/** Which limit rows a big operator shows — its own answer when it has one,
+ *  read off emptiness otherwise. */
+export function bigLimits(n: EqBig): { lo: boolean; hi: boolean } {
+  return {
+    lo: n.showLo ?? n.lo.length > 0,
+    hi: n.showHi ?? n.hi.length > 0,
+  };
 }
 
 export type EqNode = EqChr | EqFrac | EqRad | EqScr | EqFence | EqBig;
