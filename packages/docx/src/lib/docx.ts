@@ -950,6 +950,31 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   // Read so the shape is fully accounted for — the registry has already
   // recorded the definition it points at.
   attrOf(vshape, 'type');
+  // An EMBEDDED OBJECT, not a picture: `w:object` carries an `o:OLEObject`
+  // naming the server that owns the content (Equation.DSMT4 for MathType).
+  // The WMF behind `v:imagedata` is only its preview, so the editor must
+  // not hand it the picture toolkit — Word doesn't either (no picture tab,
+  // no free-axis stretch, no rotation while inline).
+  const oleObject = findDescendant(holder, 'o:OLEObject');
+  const oleProgId = attrOf(oleObject, 'ProgID') ?? null;
+  // The rest of the OLE descriptor is read as a DECISION, not modelled:
+  //   @Type        Embed | Link — a linked object's content lives outside the
+  //                package; either way the preview is what we render.
+  //   @DrawAspect  Content | Icon — Word can show an object as its program's
+  //                icon instead of its content; the preview metafile already
+  //                IS whichever was chosen, so nothing here changes.
+  //   @r:id        the embeddings/*.bin part (the server's own data). The
+  //                equation's semantics come from the MTEF inside the WMF
+  //                comment instead (see mtef.ts), so the bin is not read.
+  //   @ShapeID / @ObjectID  Word's internal handles, regenerated on save.
+  attrOf(oleObject, 'Type');
+  attrOf(oleObject, 'DrawAspect');
+  attrOf(oleObject, 'r:id');
+  attrOf(oleObject, 'ShapeID');
+  attrOf(oleObject, 'ObjectID');
+  // `o:ole` on the v:shape marks it as an object placeholder — same fact as
+  // the descriptor above, read so the attribute isn't reported as a gap.
+  attrOf(vshape, 'o:ole');
   const ptToPx = (m: RegExpExecArray | null) =>
     m ? Math.round((parseFloat(m[1]) * 96) / 72) : null;
   // MathType aligns the equation's baseline with the text line by LOWERING
@@ -980,6 +1005,7 @@ function parseVmlImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     vector: vector?.spec ?? null,
     equation: vector?.linear ?? null,
     equationAst: vector?.ast ?? null,
+    oleProgId,
     raise,
   });
 }

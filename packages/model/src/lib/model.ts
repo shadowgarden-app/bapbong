@@ -335,6 +335,11 @@ export const schema = new Schema({
         // The same equation as an AST (EqNode[]) — what conversion turns
         // into a real 2D equation node. Null when undecodable.
         equationAst: { default: null },
+        // `o:OLEObject/@ProgID` when this box is an EMBEDDED OBJECT rather
+        // than a picture ("Equation.DSMT4" for MathType). The bitmap is only
+        // the object's preview, so the editor offers object tools, not the
+        // picture toolkit. Null for real pictures.
+        oleProgId: { default: null },
         // w:position on the run holding a legacy object — baseline shift in
         // px, positive UP (same convention as InlineRun.raise). MathType
         // lowers every equation so its baseline meets the text line's.

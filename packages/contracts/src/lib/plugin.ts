@@ -137,6 +137,18 @@ export interface OverlayFrame {
    *  come back through {@link EditorPlugin.onFrameAction}. Omit during drag
    *  previews — the strip is for the resting selection. */
   actions?: OverlayFrameAction[];
+  /**
+   * Which resize handles the frame offers. `'all'` (the default) is the
+   * eight-handle picture frame; `'corners'` draws only the four corner
+   * handles, so the box can only scale PROPORTIONALLY — what an embedded
+   * object wants, since stretching one axis distorts the content it is a
+   * preview of (Word's own equation objects behave this way).
+   */
+  handles?: 'all' | 'corners';
+  /** Draw the rotate knob and accept rotation gestures. Default true; false
+   *  for boxes rotation would be wrong on (Word blocks it while an object
+   *  flows inline with text). */
+  rotatable?: boolean;
 }
 
 /** A page-local rect the editor fills as a translucent highlight (e.g. a
