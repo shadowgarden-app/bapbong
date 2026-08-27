@@ -58,6 +58,7 @@ import type {
   PageConfig,
   SectionConfig,
   EqNode,
+  VectorOp,
 } from '@shadow-garden/bapbong-contracts';
 import {
   Collection,
@@ -75,6 +76,7 @@ import {
   type FontRegistry,
 } from '@shadow-garden/bapbong-measuring';
 import { audit, type AuditEntry } from '@shadow-garden/bapbong-docx';
+import { layoutEquation } from '@shadow-garden/bapbong-layout-engine';
 import { loadBundledFonts } from './fonts';
 import {
   createFindDialog,
@@ -951,6 +953,24 @@ export class EditorPlayground implements OnDestroy {
   /** The full menu tree handed to bapbong-ui. Registry commands are referenced
    *  by name; everything else (open file, find, image/link/table, shortcuts)
    *  is a host action the shell owns. */
+  /** Typeset an equation the way the page does — the gallery previews are
+   *  the engine's own display list, measured with this editor's measurer, so
+   *  a preview is the drawing the document will show. */
+  private typesetEquation(
+    ast: EqNode[],
+    sizePt: number,
+  ): { width: number; height: number; ops: VectorOp[] } | null {
+    const reg = this.fontRegistry;
+    if (!reg) return null;
+    const eq = layoutEquation(
+      ast,
+      sizePt,
+      createFontRegistryMeasurer(reg, createCanvasMeasurer()),
+      createFontRegistryMetrics(reg, createCanvasMetrics()),
+    );
+    return { width: eq.width, height: eq.height, ops: eq.ops };
+  }
+
   private buildMenus(): Menu[] {
     return [
       {
@@ -1081,6 +1101,7 @@ export class EditorPlayground implements OnDestroy {
             label: 'Equation',
             widget: (close) =>
               equationGallery({
+                layout: (ast, sizePt) => this.typesetEquation(ast, sizePt),
                 onPick: (ast: EqNode[]) => {
                   this.exec(insertEquationNode(ast));
                   close();

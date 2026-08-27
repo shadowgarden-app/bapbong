@@ -1,4 +1,8 @@
-import type { EqNode } from '@shadow-garden/bapbong-contracts';
+import type {
+  EqNode,
+  VectorImageSpec,
+  VectorOp,
+} from '@shadow-garden/bapbong-contracts';
 import { astToLinear } from '@shadow-garden/bapbong-contracts';
 import { injectStyle } from './internal.js';
 
@@ -97,9 +101,89 @@ export const BUILT_IN_EQUATIONS: readonly BuiltInEquation[] = [
   },
 ];
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * A typeset equation drawn as inline SVG — the SAME display list the canvas
+ * painter replays, so a preview is the drawing the page will show rather
+ * than an approximation of it. Pure geometry from contracts: this package
+ * still knows nothing about the layout engine (the caller typesets and
+ * hands the spec over).
+ */
+export function equationPreviewSvg(
+  spec: VectorImageSpec,
+  opts: { maxWidth?: number } = {},
+): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${spec.width} ${spec.height}`);
+  // Scale to fit the menu, never up: a short equation keeps its real size,
+  // a long one shrinks the way it would in a narrower column.
+  const max = opts.maxWidth ?? spec.width;
+  const scale = Math.min(1, max / Math.max(1, spec.width));
+  svg.setAttribute('width', String(Math.round(spec.width * scale)));
+  svg.setAttribute('height', String(Math.round(spec.height * scale)));
+  svg.setAttribute('aria-hidden', 'true');
+  for (const op of spec.ops) svg.append(opElement(op));
+  return svg;
+}
+
+function opElement(op: VectorOp): SVGElement {
+  if (op.kind === 'line') {
+    const el = document.createElementNS(SVG_NS, 'line');
+    el.setAttribute('x1', String(op.x1));
+    el.setAttribute('y1', String(op.y1));
+    el.setAttribute('x2', String(op.x2));
+    el.setAttribute('y2', String(op.y2));
+    el.setAttribute('stroke', op.color);
+    el.setAttribute('stroke-width', String(Math.max(op.width, 0.75)));
+    return el;
+  }
+  if (op.kind === 'polygon') {
+    const el = document.createElementNS(SVG_NS, 'polygon');
+    el.setAttribute('points', op.points.map((p) => `${p.x},${p.y}`).join(' '));
+    el.setAttribute('fill', op.fill ?? 'none');
+    if (op.stroke) {
+      el.setAttribute('stroke', op.stroke);
+      el.setAttribute('stroke-width', String(op.strokeWidth ?? 1));
+    }
+    return el;
+  }
+  const el = document.createElementNS(SVG_NS, 'text');
+  el.setAttribute('x', String(op.x));
+  el.setAttribute('y', String(op.y));
+  el.setAttribute('font-size', String(op.size));
+  el.setAttribute('font-family', op.family);
+  el.setAttribute('fill', op.color);
+  if (op.bold) el.setAttribute('font-weight', 'bold');
+  if (op.italic) el.setAttribute('font-style', 'italic');
+  if (op.vAlign === 'top') el.setAttribute('dominant-baseline', 'hanging');
+  // Per-character advances: the source kerned by hand, so place each glyph
+  // rather than letting the browser measure the run.
+  if (op.dx) {
+    let x = op.x;
+    for (const [i, ch] of [...op.text].entries()) {
+      const t = document.createElementNS(SVG_NS, 'tspan');
+      t.setAttribute('x', String(x));
+      t.textContent = ch;
+      el.append(t);
+      x += op.dx[i] ?? 0;
+    }
+  } else {
+    el.textContent = op.text;
+  }
+  return el;
+}
+
 export interface EquationGalleryOptions {
   /** Entries to offer. Defaults to {@link BUILT_IN_EQUATIONS}. */
   items?: readonly BuiltInEquation[];
+  /**
+   * Typesets one entry the way the document does — hosts pass the layout
+   * engine bound to the editor's own measurer, so a preview matches the
+   * page exactly. Without it the preview falls back to the equation's
+   * linear spelling.
+   */
+  layout?: (ast: EqNode[], sizePt: number) => VectorImageSpec | null;
   /** A gallery entry was chosen — insert this equation. */
   onPick: (ast: EqNode[]) => void;
   /** The footer action: start an empty equation instead. */
@@ -115,10 +199,11 @@ const STYLE = `
 .bb-eqg-item{display:flex;flex-direction:column;gap:3px;align-items:flex-start;width:100%;padding:7px 9px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .bb-eqg-item:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-eqg-name{font-size:11px;opacity:.6}
-/* The preview is the equation's own plain-text spelling, set in the document
-   face — the same characters the insert produces, so nothing is promised
-   that the document will not show. */
-.bb-eqg-prev{font-family:"Times New Roman",Tinos,serif;font-size:15px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* The preview is the equation TYPESET — the same display list the canvas
+   paints. The text form is the fallback for a host that cannot lay out. */
+.bb-eqg-prev{display:flex;align-items:center;min-height:22px;max-width:100%;overflow:hidden}
+.bb-eqg-prev svg{display:block}
+.bb-eqg-prev-text{font-family:"Times New Roman",Tinos,serif;font-size:15px;line-height:1.35;white-space:nowrap;text-overflow:ellipsis}
 .bb-eqg-foot{margin-top:4px;padding-top:5px;border-top:1px solid var(--bb-ui-border,#e3e3e0)}
 .bb-eqg-new{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;text-align:left;cursor:pointer}
 .bb-eqg-new:hover{background:var(--bb-ui-hover,#f1efe8)}
@@ -131,6 +216,10 @@ const STYLE = `
  * for it. Picking an entry inserts a real equation node; the footer runs the
  * host's insert command.
  */
+/** Preview type size and the width the menu allows before scaling down. */
+const PREVIEW_PT = 11;
+const PREVIEW_MAX_W = 264;
+
 export function equationGallery(options: EquationGalleryOptions): HTMLElement {
   injectStyle('bb-ui-eqg-styles', STYLE);
   const root = document.createElement('div');
@@ -149,7 +238,15 @@ export function equationGallery(options: EquationGalleryOptions): HTMLElement {
     btn.className = 'bb-eqg-item';
     const prev = document.createElement('div');
     prev.className = 'bb-eqg-prev';
-    prev.textContent = astToLinear(item.ast);
+    // Typeset when the host can (identical to the page), the linear
+    // spelling when it cannot.
+    const spec = options.layout?.(item.ast, PREVIEW_PT) ?? null;
+    if (spec && spec.ops.length)
+      prev.append(equationPreviewSvg(spec, { maxWidth: PREVIEW_MAX_W }));
+    else {
+      prev.classList.add('bb-eqg-prev-text');
+      prev.textContent = astToLinear(item.ast);
+    }
     const name = document.createElement('div');
     name.className = 'bb-eqg-name';
     name.textContent = item.name;
