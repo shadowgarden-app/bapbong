@@ -229,12 +229,26 @@ export function selectionRects(
       if (e <= s) continue;
       const x1 = caretXOnLine(line, s, measure);
       const x2 = caretXOnLine(line, e, measure);
+      // An inline object can be taller than the line it sits on — an
+      // equation hangs above and below its own line box. A rect stopping at
+      // the line would cover only its middle, so grow to enclose whatever
+      // objects the range actually covers.
+      let top = line.y;
+      let bottom = line.y + line.height;
+      const baseline = line.y + line.baseline;
+      for (const img of line.images ?? []) {
+        const at = img.pos;
+        if (at === undefined || at < s || at >= e) continue;
+        const imgTop = baseline - img.height - (img.raise ?? 0);
+        top = Math.min(top, imgTop);
+        bottom = Math.max(bottom, imgTop + img.height);
+      }
       rects.push({
         pageIndex: page.index,
         x: x1,
-        y: line.y,
+        y: top,
         width: Math.max(x2 - x1, 2),
-        height: line.height,
+        height: bottom - top,
       });
     }
   }

@@ -384,3 +384,38 @@ describe('tableHitPath / commonTableAt', () => {
     expect(commonTableAt(lay, at(30, 45), at(30, 45, 1))).toBeNull();
   });
 });
+
+describe('selection over a tall inline object', () => {
+  // One line of text carrying an equation that hangs above and below it.
+  const line = {
+    x: 0,
+    y: 100,
+    width: 200,
+    height: 20,
+    baseline: 16,
+    segments: [
+      { text: 'ab', x: 0, width: 20, font: { family: 'X', size: 12 } },
+    ],
+    images: [{ x: 20, src: '', width: 30, height: 40, raise: 5, pos: 3 }],
+    from: 1,
+    to: 4,
+  };
+  const layout = {
+    pages: [{ index: 0, lines: [line] }],
+  } as unknown as Parameters<typeof selectionRects>[0];
+  const measure = () => 10;
+
+  it('grows the rect to cover an object taller than its line', () => {
+    const [r] = selectionRects(layout, 3, 4, measure);
+    // baseline 116, image 40 tall raised 5 → top 71, bottom 111. The line
+    // runs 100..120, so the union is 71..120.
+    expect(r.y).toBe(71);
+    expect(r.height).toBe(49);
+  });
+
+  it('leaves a range that does not reach the object on the line box', () => {
+    const [r] = selectionRects(layout, 1, 3, measure);
+    expect(r.y).toBe(100);
+    expect(r.height).toBe(20);
+  });
+});
