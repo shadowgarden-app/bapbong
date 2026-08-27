@@ -8,6 +8,10 @@ import type {
   ResolvedLayout,
   ResolvedTable,
 } from '@shadow-garden/bapbong-contracts';
+import type {
+  EqStructure,
+  OverlayPanelElement,
+} from '@shadow-garden/bapbong-contracts';
 import { isEqRow } from '@shadow-garden/bapbong-contracts';
 import {
   autoCorrectAt,
@@ -127,10 +131,29 @@ interface EqSel {
  *    structures, `\name`+space autocorrects, arrows/Tab walk slots, Esc
  *    leaves. Every edit is one ProseMirror transaction (one undo step).
  */
-export function equationPlugin(): EditorPlugin {
+/** What a host can drive from outside: the palette. */
+export interface EquationPlugin extends EditorPlugin {
+  /** The element to float beside the equation being edited — the host builds
+   *  it (bapbong-ui knows nothing about the editor) and hands it over once.
+   *  Pass null to stop showing one. */
+  usePanel(el: OverlayPanelElement | null): void;
+  /** Insert a character at the slot caret. False when no slot is active. */
+  insertSymbol(ch: string): boolean;
+  /** Insert a template at the slot caret, caret landing in its focus slot. */
+  insertStructure(s: EqStructure): boolean;
+}
+
+declare module '@shadow-garden/bapbong-contracts' {
+  interface EditorPluginHandles {
+    equation: EquationPlugin;
+  }
+}
+
+export function equationPlugin(): EquationPlugin {
   let ctx: PluginContext | null = null;
   let last: { from: number; to: number } | null = null;
   let eq: EqSel | null = null;
+  let panel: OverlayPanelElement | null = null;
   /** The document selection the slot editor was entered on. While it owns the
    *  caret the document's own selection never moves (every key is claimed), so
    *  a selection that HAS moved means something else took over — ⌘A, find, a
@@ -154,18 +177,32 @@ export function equationPlugin(): EditorPlugin {
   const hitFor = (c: PluginContext, pos: number): EqHit | null =>
     eqSegments(c.layout).find((h) => h.seg.pos === pos) ?? null;
 
+  const hidePanel = (c: PluginContext): void => {
+    if (panel) c.setPanel(null);
+  };
+
   const showCaret = (c: PluginContext): void => {
     if (!eq) {
       c.setGuide(null);
+      hidePanel(c);
       return;
     }
     const hit = hitFor(c, eq.pos);
     const slot = hit?.seg.eqSlots?.[eq.slot];
     if (!hit || !slot) {
       c.setGuide(null);
+      hidePanel(c);
       return;
     }
     const caret = Math.min(eq.caret, slot.caretXs.length - 1);
+    if (panel)
+      c.setPanel(panel, {
+        pageIndex: hit.pageIndex,
+        x: hit.x,
+        y: hit.top,
+        width: hit.seg.width,
+        height: hit.seg.height,
+      });
     c.setGuide({
       kind: 'caret',
       pageIndex: hit.pageIndex,
@@ -187,6 +224,7 @@ export function equationPlugin(): EditorPlugin {
   const leave = (c: PluginContext): void => {
     eq = null;
     c.setGuide(null);
+    hidePanel(c);
   };
 
   const astOf = (c: PluginContext): EqNode[] | null => {
@@ -215,8 +253,50 @@ export function equationPlugin(): EditorPlugin {
     return hitFor(c, eq.pos)?.seg.eqSlots?.[eq.slot] ?? null;
   };
 
+  /** What the slot caret is sitting on, or null when no slot is active. */
+  const atCaret = (c: PluginContext) => {
+    const ast = astOf(c);
+    const slot = slotOf(c);
+    if (!eq || !ast || !slot) return null;
+    return {
+      ast,
+      path: slot.path,
+      caret: Math.min(eq.caret, slot.caretXs.length - 1),
+    };
+  };
+
   return {
     name: 'equation',
+    usePanel(el) {
+      panel = el;
+      if (!ctx) return;
+      if (el && eq) showCaret(ctx);
+      else if (!el) ctx.setPanel(null);
+    },
+    insertSymbol(ch) {
+      const c = ctx;
+      if (!c) return false;
+      const at = atCaret(c);
+      if (!at) return false;
+      commit(c, insertAt(at.ast, at.path, at.caret, eqChar(ch)), {
+        caret: at.caret + 1,
+      });
+      return true;
+    },
+    insertStructure(st) {
+      const c = ctx;
+      if (!c) return false;
+      const at = atCaret(c);
+      if (!at) return false;
+      // Copy: the template is shared data, and one object appearing twice in
+      // a tree that edits by path would make the two copies move together.
+      const node = JSON.parse(JSON.stringify(st.node));
+      commit(c, insertAt(at.ast, at.path, at.caret, node), {
+        caret: at.caret + 1,
+        pendingPath: JSON.stringify([...at.path, at.caret, st.focus]),
+      });
+      return true;
+    },
     setup(c) {
       ctx = c;
       return () => {

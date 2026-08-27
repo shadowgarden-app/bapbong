@@ -34,6 +34,7 @@ import type {
   EditorKeyEvent,
   OverlayFrame,
   OverlayGuide,
+  OverlayPanelElement,
   OverlayRect,
   PagePoint,
   PluginContext,
@@ -207,6 +208,8 @@ export class BapbongEditor {
   /** What the guide element currently shows, so the blink knows whether it
    *  owns it (a drag preview must never blink). */
   private guideKind: 'drag' | 'caret' = 'drag';
+  /** The plugin panel currently floating on the canvas, if any. */
+  private panelEl: HTMLElement | null = null;
   /** A plugin is drawing the caret itself (the equation slot editor), so the
    *  document must not paint a second one at its own selection. */
   private caretOwned = false;
@@ -371,6 +374,8 @@ export class BapbongEditor {
       },
       setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
       setHighlight: (rects: OverlayRect[] | null) => this.setHighlight(rects),
+      setPanel: (el: OverlayPanelElement | null, at?: OverlayRect) =>
+        this.setPanel((el as HTMLElement) ?? null, at),
       setActionButton: (at: PagePoint | null, onActivate?: () => void) =>
         this.setActionButton(at, onActivate),
       setFrame: (frame: OverlayFrame | null) => this.setFrame(frame),
@@ -1582,6 +1587,57 @@ export class BapbongEditor {
 
   /** Fill (or clear, with null) translucent highlight rects — e.g. a selected
    *  table-cell block. Reuses a pool of divs in the canvas stack. */
+  /** Gap between an equation and its palette, in canvas px. */
+  private static readonly PANEL_GAP = 6;
+
+  /** Position a plugin's floating panel against a page rect. Below the rect
+   *  when the panel fits on screen there, above it otherwise — the same flip
+   *  a menu does, so the palette never hangs off the bottom of the view. */
+  private setPanel(el: HTMLElement | null, at?: OverlayRect): void {
+    if (this.panelEl && this.panelEl !== el) {
+      this.panelEl.style.display = 'none';
+      this.panelEl = null;
+    }
+    if (!el || !at) {
+      if (el) el.style.display = 'none';
+      this.panelEl = null;
+      return;
+    }
+    if (el.parentElement !== this.stack) {
+      el.style.position = 'absolute';
+      el.style.zIndex = '7';
+      this.stack.appendChild(el);
+    }
+    this.panelEl = el;
+    const below = this.core.pageToCanvas({
+      pageIndex: at.pageIndex,
+      x: at.x,
+      y: at.y + at.height,
+    });
+    const above = this.core.pageToCanvas({
+      pageIndex: at.pageIndex,
+      x: at.x,
+      y: at.y,
+    });
+    if (!below || !above) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = '';
+    const gap = BapbongEditor.PANEL_GAP;
+    el.style.left = `${below.x}px`;
+    el.style.top = `${below.y + gap}px`;
+    // Measured AFTER the first placement: the panel sizes itself from its
+    // contents, and a collapsed one is a fraction of the height of an open
+    // one, so a cached number would flip at the wrong times.
+    const rect = el.getBoundingClientRect();
+    const view = (
+      this.stack.closest('.canvas-wrap') ?? document.documentElement
+    ).getBoundingClientRect();
+    if (rect.bottom > view.bottom - gap && rect.height + gap < above.y)
+      el.style.top = `${above.y - rect.height - gap}px`;
+  }
+
   private setHighlight(rects: OverlayRect[] | null): void {
     const list = rects ?? [];
     while (this.highlightEls.length < list.length) {

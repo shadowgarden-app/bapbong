@@ -94,6 +94,12 @@ export interface EditorKeyEvent {
   altKey: boolean;
 }
 
+/** A host-built DOM element the editor mounts into the canvas overlay.
+ *  Typed opaquely because this package builds WITHOUT the DOM lib — it has to
+ *  compile in a Node context — so an HTMLElement satisfies it and the editor
+ *  narrows at the boundary. */
+export type OverlayPanelElement = object;
+
 /** A vertical line the editor draws on the canvas (page-local geometry).
  *  `drag` is the transient preview of a gesture — a column-resize position;
  *  `caret` is a real insertion point inside an object the hidden text editor
@@ -201,6 +207,12 @@ export interface PluginContext {
   /** Fill these page-local rects as a translucent highlight (e.g. a selected
    *  table-cell block), or null to clear. The editor renders them on the canvas. */
   setHighlight(rects: OverlayRect[] | null): void;
+
+  /** Float a host-built element beside a page rect, below it when there is
+   *  room and above it otherwise — the equation palette. The element belongs
+   *  to whoever passed it; the editor only positions and shows it. Pass null
+   *  to take it away. */
+  setPanel(el: OverlayPanelElement | null, at?: OverlayRect): void;
   /** Show an object-selection frame (border + resize handles + rotate knob),
    *  or null to clear. Page-local geometry; the editor renders it as DOM
    *  overlay in the canvas stack — no canvas repaint. */
