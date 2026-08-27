@@ -128,7 +128,9 @@ export function autoCorrectAt(
 /** Structures the editor builds from a keystroke inside a slot. */
 export function structureFor(key: string): EqNode | null {
   if (key === '/') return { t: 'frac', num: [], den: [] };
-  if (key === '^') return { t: 'scr', base: [], sub: [], sup: [] };
-  if (key === '_') return { t: 'scr', base: [], sub: [], sup: [] };
+  if (key === '^')
+    return { t: 'scr', base: [], sub: [], sup: [], slots: 'sup' };
+  if (key === '_')
+    return { t: 'scr', base: [], sub: [], sup: [], slots: 'sub' };
   return null;
 }

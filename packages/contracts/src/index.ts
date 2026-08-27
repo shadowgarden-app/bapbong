@@ -7,3 +7,4 @@ export * from './lib/perf.js';
 export * from './lib/keybinding.js';
 export * from './lib/autocorrect.js';
 export * from './lib/math.js';
+export * from './lib/math-palette.js';

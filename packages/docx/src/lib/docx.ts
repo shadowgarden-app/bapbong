@@ -2008,6 +2008,7 @@ function ommlRow(node: OoxmlNode): EqNode[] {
           base: rowOfChild('m:e', node),
           sub: rowOfChild('m:sub', node),
           sup: [],
+          slots: 'sub',
         },
       ];
     case 'm:sSup':
@@ -2017,6 +2018,7 @@ function ommlRow(node: OoxmlNode): EqNode[] {
           base: rowOfChild('m:e', node),
           sub: [],
           sup: rowOfChild('m:sup', node),
+          slots: 'sup',
         },
       ];
     case 'm:sSubSup':
@@ -2026,6 +2028,7 @@ function ommlRow(node: OoxmlNode): EqNode[] {
           base: rowOfChild('m:e', node),
           sub: rowOfChild('m:sub', node),
           sup: rowOfChild('m:sup', node),
+          slots: 'both',
         },
       ];
     case 'm:rad':

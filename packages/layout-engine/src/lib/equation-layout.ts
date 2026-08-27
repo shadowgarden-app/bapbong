@@ -21,6 +21,7 @@ import type {
   MeasureText,
   VectorOp,
 } from '@shadow-garden/bapbong-contracts';
+import { scrSlots } from '@shadow-garden/bapbong-contracts';
 
 export interface EquationLayoutResult {
   width: number;
@@ -250,11 +251,15 @@ export function layoutEquation(
       }
       case 'scr': {
         const base = row(n.base, pt, [...path, 'base']);
-        const hasSub = true; // slots exist even when empty (Word's boxes)
         const sub = row(n.sub, spt, [...path, 'sub']);
         const sup = row(n.sup, spt, [...path, 'sup']);
-        const showSub = n.sub.length > 0 || n.sup.length === 0;
-        const showSup = n.sup.length > 0;
+        // A script shows the rows it HAS, empty or not — an empty one is the
+        // placeholder box the user types into. Reading this off emptiness
+        // instead would make a fresh superscript template indistinguishable
+        // from a fresh subscript one.
+        const kind = scrSlots(n);
+        const showSub = kind !== 'sup';
+        const showSup = kind !== 'sub';
         const supBase = -SUP_RISE * em;
         const subBase = SUB_DROP * em;
         const scriptW = Math.max(showSub ? sub.w : 0, showSup ? sup.w : 0);
@@ -264,11 +269,10 @@ export function layoutEquation(
           ops.push(...shift(sup.ops, base.w, supBase));
           slots.push(...shiftSlots(sup.slots, base.w, supBase));
         }
-        if (showSub && (n.sub.length > 0 || !showSup)) {
+        if (showSub) {
           ops.push(...shift(sub.ops, base.w, subBase));
           slots.push(...shiftSlots(sub.slots, base.w, subBase));
         }
-        void hasSub;
         return {
           w: base.w + scriptW,
           asc: Math.max(base.asc, showSup ? -(supBase - sup.asc) : 0),

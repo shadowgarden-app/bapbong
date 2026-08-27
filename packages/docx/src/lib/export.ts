@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
-import { perf } from '@shadow-garden/bapbong-contracts';
+import { perf, scrSlots } from '@shadow-garden/bapbong-contracts';
 import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderSide,
@@ -479,9 +479,10 @@ function astOmml(
       out += `<m:f><m:num>${astOmml(n.num)}</m:num><m:den>${astOmml(n.den)}</m:den></m:f>`;
     else if (n.t === 'scr') {
       const e = `<m:e>${astOmml(n.base)}</m:e>`;
-      if (n.sub.length && n.sup.length)
+      const kind = scrSlots(n);
+      if (kind === 'both')
         out += `<m:sSubSup>${e}<m:sub>${astOmml(n.sub)}</m:sub><m:sup>${astOmml(n.sup)}</m:sup></m:sSubSup>`;
-      else if (n.sup.length)
+      else if (kind === 'sup')
         out += `<m:sSup>${e}<m:sup>${astOmml(n.sup)}</m:sup></m:sSup>`;
       else out += `<m:sSub>${e}<m:sub>${astOmml(n.sub)}</m:sub></m:sSub>`;
     } else if (n.t === 'rad')

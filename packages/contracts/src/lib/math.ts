@@ -155,6 +155,21 @@ export interface EqScr {
   base: EqNode[];
   sub: EqNode[];
   sup: EqNode[];
+  /** Which scripts this node HAS, as OOXML distinguishes m:sSub / m:sSup /
+   *  m:sSubSup. Without it the shape is read off emptiness, which is right
+   *  for a finished equation but cannot express a FRESH one: a template with
+   *  both rows still empty has to know whether it is waiting for a subscript,
+   *  a superscript, or both. Optional so equations stored before this stay
+   *  valid. */
+  slots?: 'sub' | 'sup' | 'both';
+}
+
+/** Which script rows a node carries — its own answer when it has one, read
+ *  off emptiness otherwise. */
+export function scrSlots(n: EqScr): 'sub' | 'sup' | 'both' {
+  if (n.slots) return n.slots;
+  if (n.sup.length) return n.sub.length ? 'both' : 'sup';
+  return 'sub';
 }
 /** A fenced group; `l`/`r` may be '' for a one-sided fence. */
 export interface EqFence {
