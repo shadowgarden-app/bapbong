@@ -83,8 +83,14 @@ export const BUILT_IN_EQUATIONS: readonly BuiltInEquation[] = [
   {
     name: 'Nhị thức Newton',
     ast: [
-      { t: 'fence', l: '(', r: ')', body: c('𝑎 + 𝑏') },
-      { t: 'scr', base: [], sub: [], sup: c('𝑛') },
+      // The exponent belongs ON the bracket: a script with an empty base
+      // would render its own empty slot — the dotted placeholder box.
+      {
+        t: 'scr',
+        base: [{ t: 'fence', l: '(', r: ')', body: c('𝑎 + 𝑏') }],
+        sub: [],
+        sup: c('𝑛'),
+      },
       ...c(' = '),
       {
         t: 'big',
