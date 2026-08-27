@@ -207,6 +207,9 @@ export class BapbongEditor {
   /** What the guide element currently shows, so the blink knows whether it
    *  owns it (a drag preview must never blink). */
   private guideKind: 'drag' | 'caret' = 'drag';
+  /** A plugin is drawing the caret itself (the equation slot editor), so the
+   *  document must not paint a second one at its own selection. */
+  private caretOwned = false;
   // While dragging, the visual selection leads (painted straight from
   // hit-testing, same frame); the PM model commits once on pointerup.
   private dragAnchor: number | null = null;
@@ -1054,9 +1057,17 @@ export class BapbongEditor {
     selection: SelectionRect[];
   } {
     return {
-      caret: this.caretVisible ? this.lastCaret : null,
+      caret: this.caretVisible && !this.caretOwned ? this.lastCaret : null,
       selection: this.lastSelection,
     };
+  }
+
+  /** Hand the caret to a plugin, or take it back — repainting so the change
+   *  is visible without waiting for the next blink tick. */
+  private setCaretOwned(owned: boolean): void {
+    if (this.caretOwned === owned) return;
+    this.caretOwned = owned;
+    this.repaintOverlay();
   }
 
   /** Each plugin's doc-range decorations (the core resolves them to rects). */
@@ -1378,8 +1389,10 @@ export class BapbongEditor {
   private setGuide(guide: OverlayGuide | null): void {
     if (!guide) {
       if (this.guideEl) this.guideEl.style.display = 'none';
+      this.setCaretOwned(false);
       return;
     }
+    this.setCaretOwned(guide.kind === 'caret');
     if (!this.guideEl) {
       this.guideEl = document.createElement('div');
       this.guideEl.style.cssText =

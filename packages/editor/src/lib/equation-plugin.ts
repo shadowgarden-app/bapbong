@@ -131,6 +131,11 @@ export function equationPlugin(): EditorPlugin {
   let ctx: PluginContext | null = null;
   let last: { from: number; to: number } | null = null;
   let eq: EqSel | null = null;
+  /** The document selection the slot editor was entered on. While it owns the
+   *  caret the document's own selection never moves (every key is claimed), so
+   *  a selection that HAS moved means something else took over — ⌘A, find, a
+   *  host command — and the slot editor must let go of the caret. */
+  let enteredOn = '';
 
   const rangeFor = (state: State) => {
     const { selection } = state;
@@ -168,6 +173,15 @@ export function equationPlugin(): EditorPlugin {
       y: hit.top + slot.y,
       height: slot.height,
     });
+  };
+
+  const selKey = (c: PluginContext): string =>
+    `${c.state.selection.from}:${c.state.selection.to}`;
+
+  const enter = (c: PluginContext, next: EqSel): void => {
+    eq = next;
+    enteredOn = selKey(c);
+    showCaret(c);
   };
 
   const leave = (c: PluginContext): void => {
@@ -219,7 +233,9 @@ export function equationPlugin(): EditorPlugin {
       const sel = ctx.state.selection as { node?: { type: { name: string } } };
       if (sel.node?.type.name === 'equation') {
         const pos = ctx.state.selection.from;
-        if (!eq || eq.pos !== pos) eq = { pos, slot: 0, caret: 0 };
+        if (!eq || eq.pos !== pos) enter(ctx, { pos, slot: 0, caret: 0 });
+      } else if (eq && selKey(ctx) !== enteredOn) {
+        leave(ctx);
       }
       // The typeset editor: re-anchor after every layout (slots move on each
       // reflow; a structural edit lands in its pending path).
@@ -299,8 +315,7 @@ export function equationPlugin(): EditorPlugin {
             Math.abs(lx - s.x - s.caretXs[caret])
           )
             caret = i;
-        eq = { pos: hit.seg.pos!, slot, caret };
-        showCaret(c);
+        enter(c, { pos: hit.seg.pos!, slot, caret });
         return true;
       }
       if (eq) leave(c);
@@ -339,7 +354,11 @@ export function equationPlugin(): EditorPlugin {
         } else {
           const next = eq.slot + d;
           if (next < 0 || next >= slots.length) {
+            // Out of the equation, the way Word does it: the document caret
+            // reappears on the side the arrow was heading.
+            const at = d > 0 ? eq.pos + 1 : eq.pos;
             leave(c);
+            c.setSelection(at);
             return true;
           }
           eq = {
