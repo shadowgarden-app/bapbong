@@ -123,11 +123,13 @@ const braced = (l: string, r: string, rows: number, cols: number): EqNode => ({
   r,
   body: [mat(rows, cols)],
 });
-const lim = (name: string, below = true): EqNode => ({
-  t: 'lim',
-  base: upright(name),
-  lim: [],
-  below,
+/** An operator that carries a limit AND takes an argument — `lim` under a
+ *  condition, applied to an expression. Two empty slots, which is what Word
+ *  offers: the node under the name, then the expression after it. */
+const limFunc = (name: string): EqNode => ({
+  t: 'func',
+  name: [{ t: 'lim', base: upright(name), lim: [], below: true }],
+  body: [],
 });
 
 const big = (op: string, limits = false): EqNode => ({
@@ -233,16 +235,6 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Function', name: 'sinh', node: func('sinh'), focus: ['body'] },
   { group: 'Function', name: 'cosh', node: func('cosh'), focus: ['body'] },
   { group: 'Function', name: 'tanh', node: func('tanh'), focus: ['body'] },
-  { group: 'Function', name: 'ln', node: func('ln'), focus: ['body'] },
-  { group: 'Function', name: 'log', node: func('log'), focus: ['body'] },
-  // The base rides the NAME, not the argument, and the caret opens on it —
-  // it is the part you came to this entry to type.
-  {
-    group: 'Function',
-    name: 'log base',
-    node: funcSub('log'),
-    focus: ['name', 0, 'sub'],
-  },
   { group: 'Function', name: 'exp', node: func('exp'), focus: ['body'] },
   // The name is empty and editable — for anything the list does not carry.
   { group: 'Function', name: 'Custom', node: func(''), focus: ['name'] },
@@ -254,10 +246,37 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Accent', name: 'Dot', node: acc('\u0307'), focus: ['body'] },
   { group: 'Accent', name: 'Double dot', node: acc('\u0308'), focus: ['body'] },
 
-  { group: 'Limit', name: 'Limit', node: lim('lim'), focus: ['lim'] },
-  { group: 'Limit', name: 'Maximum', node: lim('max'), focus: ['lim'] },
-  { group: 'Limit', name: 'Minimum', node: lim('min'), focus: ['lim'] },
-  { group: 'Limit', name: 'Over', node: lim('', false), focus: ['base'] },
+  // Word keeps the logarithms and the limit operators in ONE gallery, and so
+  // do we: they are the same shape — a name that may carry something under
+  // or beside it, applied to an expression.
+  // The base rides the NAME, not the argument, and the caret opens on it —
+  // it is the part you came to this entry to type.
+  {
+    group: 'Limit and log',
+    name: 'log base',
+    node: funcSub('log'),
+    focus: ['name', 0, 'sub'],
+  },
+  { group: 'Limit and log', name: 'log', node: func('log'), focus: ['body'] },
+  {
+    group: 'Limit and log',
+    name: 'lim',
+    node: limFunc('lim'),
+    focus: ['name', 0, 'lim'],
+  },
+  {
+    group: 'Limit and log',
+    name: 'min',
+    node: limFunc('min'),
+    focus: ['name', 0, 'lim'],
+  },
+  {
+    group: 'Limit and log',
+    name: 'max',
+    node: limFunc('max'),
+    focus: ['name', 0, 'lim'],
+  },
+  { group: 'Limit and log', name: 'ln', node: func('ln'), focus: ['body'] },
 
   { group: 'Matrix', name: '1×2', node: mat(1, 2), focus: ['c0'] },
   { group: 'Matrix', name: '2×1', node: mat(2, 1), focus: ['c0'] },
