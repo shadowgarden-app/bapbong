@@ -334,6 +334,8 @@ export function verticalStep(
   // so a sum's upper limit goes to its LOWER limit and not to the operand
   // sitting nearer below.
   let inStack = false;
+  let stackNames: readonly string[] = [];
+  let familyPath: readonly (string | number)[] = [];
   if (cur.path.length >= 2) {
     const parent = cur.path.slice(0, -2);
     const index = cur.path[cur.path.length - 2] as number;
@@ -346,6 +348,8 @@ export function verticalStep(
       const at = stack.indexOf(rowName);
       if (at >= 0) {
         inStack = true;
+        stackNames = stack;
+        familyPath = [...parent, index];
         const next = at + dir;
         const i =
           next >= 0 && next < stack.length
@@ -356,11 +360,17 @@ export function verticalStep(
     }
   }
 
-  // Off the end of the stack — or never on it. Look wider, but never back at
-  // rows the stack already ruled on, or leaving a denominator would land in
-  // the numerator it just came from.
+  // Off the end of the stack — or never on it. Rows the stack already ruled
+  // on are out (leaving a denominator would otherwise land in the numerator
+  // it just came from), but a sibling OUTSIDE the stack is still fair game:
+  // that is how a lone superscript reaches its base, and a sum carrying only
+  // an upper limit reaches its operand.
+  const ruled = (s: EqSlotRect): boolean =>
+    inStack &&
+    key(s.path.slice(0, -1)) === key(familyPath) &&
+    stackNames.includes(String(s.path[s.path.length - 1]));
   let best = inStack ? -1 : pick(sibling);
-  if (best < 0) best = pick((s) => !inStack || !sibling(s));
+  if (best < 0) best = pick((s) => !ruled(s));
   if (best < 0) return null;
   return { slot: best, caret: nearestCaret(slots[best], x) };
 }

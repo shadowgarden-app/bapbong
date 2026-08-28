@@ -287,7 +287,12 @@ export function eqVerticalRows(n: EqNode): readonly string[] {
     case 'rad':
       return ['deg', 'body'];
     case 'scr':
-      return ['sup', 'base', 'sub'];
+      // The two scripts are one stack hanging off the base, exactly as a big
+      // operator's limits hang off its sign: down from the superscript is the
+      // SUBSCRIPT, not the base sitting between them on the page. A script
+      // that carries only one of them falls through to geometry and reaches
+      // the base that way.
+      return ['sup', 'sub'];
     case 'big':
       return ['hi', 'lo'];
     case 'lim':
@@ -314,7 +319,9 @@ export function eqRowNames(n: EqNode): readonly string[] {
     case 'rad':
       return ['deg', 'body'];
     case 'scr':
-      return ['base', 'sub', 'sup'];
+      // Base, then the raised script, then the lowered one — reading a
+      // squared term before a indexed one, which is how these are dictated.
+      return ['base', 'sup', 'sub'];
     case 'fence':
       return ['body'];
     case 'big':

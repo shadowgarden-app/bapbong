@@ -440,3 +440,79 @@ describe('walking a matrix', () => {
     expect(verticalStep(ast, slots, C3, 0, -1)).toEqual({ slot: C1, caret: 0 });
   });
 });
+
+describe('walking a sub-and-super script', () => {
+  // 𝑎 with both scripts — the shape where the two are a stack of their own.
+  const ast: EqNode[] = [
+    {
+      t: 'scr',
+      base: [chr('𝑎')],
+      sub: [chr('1')],
+      sup: [chr('2')],
+      slots: 'both',
+    },
+  ];
+  const slots: EqSlotRect[] = [
+    { path: [], x: 0, y: -16, width: 20, height: 26, caretXs: [0, 20], em: 16 },
+    {
+      path: [0, 'base'],
+      x: 0,
+      y: -10,
+      width: 10,
+      height: 12,
+      caretXs: [0, 10],
+      em: 16,
+    },
+    {
+      path: [0, 'sup'],
+      x: 10,
+      y: -16,
+      width: 6,
+      height: 7,
+      caretXs: [0, 6],
+      em: 11,
+    },
+    {
+      path: [0, 'sub'],
+      x: 10,
+      y: 0,
+      width: 6,
+      height: 7,
+      caretXs: [0, 6],
+      em: 11,
+    },
+  ];
+  const [OUTER, BASE, SUP, SUB] = [0, 1, 2, 3];
+
+  it('goes right from the base to the SUPERSCRIPT', () => {
+    expect(horizontalStep(ast, slots, OUTER, 0, 1)).toEqual({
+      slot: BASE,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, BASE, 1, 1)).toEqual({
+      slot: SUP,
+      caret: 0,
+    });
+  });
+
+  it('goes down from the superscript to the SUBSCRIPT, not the base', () => {
+    // The base sits between them on the page and is the nearer row, but the
+    // two scripts are one stack — the base is reached by going left.
+    expect(verticalStep(ast, slots, SUP, 0, 1)).toEqual({
+      slot: SUB,
+      caret: 0,
+    });
+    expect(verticalStep(ast, slots, SUB, 0, -1)).toEqual({
+      slot: SUP,
+      caret: 0,
+    });
+  });
+
+  it('still reaches the base from a script that has no partner', () => {
+    const only: EqNode[] = [
+      { t: 'scr', base: [chr('𝑎')], sub: [], sup: [chr('2')], slots: 'sup' },
+    ];
+    const s2 = slots.filter((s) => String(s.path[1] ?? '') !== 'sub');
+    expect(verticalStep(only, s2, 2, 0, 1)).toEqual({ slot: 1, caret: 1 });
+  });
+});

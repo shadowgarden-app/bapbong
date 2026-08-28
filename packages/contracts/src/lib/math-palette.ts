@@ -144,9 +144,14 @@ const big = (op: string, limits = false): EqNode => ({
 export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Fraction', name: 'Stacked', node: frac(), focus: ['num'] },
 
-  { group: 'Script', name: 'Superscript', node: scr('sup'), focus: ['sup'] },
-  { group: 'Script', name: 'Subscript', node: scr('sub'), focus: ['sub'] },
-  { group: 'Script', name: 'Sub and super', node: scr('both'), focus: ['sub'] },
+  { group: 'Script', name: 'Superscript', node: scr('sup'), focus: ['base'] },
+  { group: 'Script', name: 'Subscript', node: scr('sub'), focus: ['base'] },
+  {
+    group: 'Script',
+    name: 'Sub and super',
+    node: scr('both'),
+    focus: ['base'],
+  },
 
   { group: 'Radical', name: 'Square root', node: rad(false), focus: ['body'] },
   { group: 'Radical', name: 'Nth root', node: rad(true), focus: ['deg'] },
