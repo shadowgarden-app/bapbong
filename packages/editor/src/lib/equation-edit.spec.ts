@@ -516,3 +516,96 @@ describe('walking a sub-and-super script', () => {
     expect(verticalStep(only, s2, 2, 0, 1)).toEqual({ slot: 1, caret: 1 });
   });
 });
+
+describe('walking past a built-in function name', () => {
+  // lim with a condition under it, applied to an argument — the shape Word
+  // writes for a limit, and the one where the name must not be a caret stop.
+  const ast: EqNode[] = [
+    {
+      t: 'func',
+      name: [
+        {
+          t: 'lim',
+          base: [chr('l'), chr('i'), chr('m')],
+          lim: [],
+          below: true,
+        },
+      ],
+      body: [],
+    },
+    { t: 'func', name: [chr('s'), chr('i'), chr('n')], body: [] },
+    { t: 'func', name: [], body: [] },
+  ];
+  const at = (path: (number | string)[], x: number, y: number): EqSlotRect => ({
+    path,
+    x,
+    y,
+    width: 8,
+    height: 8,
+    caretXs: [0, 8],
+    em: 12,
+  });
+  const slots: EqSlotRect[] = [
+    {
+      path: [],
+      x: 0,
+      y: -12,
+      width: 90,
+      height: 20,
+      caretXs: [0, 30, 60, 90],
+      em: 16,
+    },
+    at([0, 'name'], 0, -8),
+    at([0, 'name', 0, 'base'], 0, -8),
+    at([0, 'name', 0, 'lim'], 2, 4),
+    at([0, 'body'], 20, -8),
+    at([1, 'name'], 32, -8),
+    at([1, 'body'], 50, -8),
+    at([2, 'name'], 62, -8),
+    at([2, 'body'], 78, -8),
+  ];
+  const [OUTER, , , LIM_COND, LIM_BODY, , SIN_BODY, CUSTOM_NAME] = [
+    0, 1, 2, 3, 4, 5, 6, 7,
+  ];
+
+  it('goes straight to the condition, then to the argument', () => {
+    // Not into the word "lim", and not to the empty stop after it either.
+    expect(horizontalStep(ast, slots, OUTER, 0, 1)).toEqual({
+      slot: LIM_COND,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, LIM_COND, 1, 1)).toEqual({
+      slot: LIM_BODY,
+      caret: 0,
+    });
+    expect(horizontalStep(ast, slots, LIM_BODY, 1, 1)).toEqual({
+      slot: OUTER,
+      caret: 1,
+    });
+  });
+
+  it('skips a plain name entirely', () => {
+    expect(horizontalStep(ast, slots, OUTER, 1, 1)).toEqual({
+      slot: SIN_BODY,
+      caret: 0,
+    });
+  });
+
+  it('still enters an EMPTY name — that is the Custom entry', () => {
+    expect(horizontalStep(ast, slots, OUTER, 2, 1)).toEqual({
+      slot: CUSTOM_NAME,
+      caret: 0,
+    });
+  });
+
+  it('mirrors going left', () => {
+    expect(horizontalStep(ast, slots, OUTER, 1, -1)).toEqual({
+      slot: LIM_BODY,
+      caret: 1,
+    });
+    expect(horizontalStep(ast, slots, LIM_BODY, 0, -1)).toEqual({
+      slot: LIM_COND,
+      caret: 1,
+    });
+  });
+});

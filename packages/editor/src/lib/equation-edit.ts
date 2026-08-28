@@ -196,16 +196,54 @@ function slotAt(
   return slots.findIndex((s) => key(s.path) === k);
 }
 
-/** The rows of `node` in caret order, minus any the layout did not draw. */
-function rowsOf(
-  node: EqNode,
+/**
+ * A row that SPELLS something rather than holding maths to edit: a built-in
+ * function's name (`sin`), or the word a limit is built on (`lim`). The caret
+ * does not stop in one — it goes straight to whatever editable slot the name
+ * carries, or past it into the argument. A click still lands there, so a
+ * mistyped name is still fixable; only the arrow walk skips it.
+ *
+ * An EMPTY name is the opposite: that is the Custom entry, where typing the
+ * name is the whole point.
+ */
+function transparent(
+  ast: EqNode[],
+  path: readonly (number | string)[],
+): boolean {
+  const row = rowAt(ast, path);
+  if (!row || row.length === 0) return false;
+  if (path[path.length - 1] === 'name') return true;
+  // Inside a name, a row of plain characters is part of the spelling — the
+  // `lim` of a limit, the `log` of a logarithm with a base.
+  return path.slice(0, -1).includes('name') && row.every((n) => n.t === 'chr');
+}
+
+/**
+ * The slots of `node` the caret visits, as full paths, in caret order. Minus
+ * any the layout did not draw, and seeing THROUGH a transparent row: what it
+ * carries is visited in its place, so `lim` offers its condition and then its
+ * argument, with nothing in between.
+ */
+function walkPaths(
+  ast: EqNode[],
+  slots: readonly EqSlotRect[],
   base: readonly (number | string)[],
   index: number,
-  slots: readonly EqSlotRect[],
-): string[] {
-  return eqRowNames(node).filter(
-    (n) => slotAt(slots, [...base, index, n]) >= 0,
-  );
+  node: EqNode,
+): (readonly (number | string)[])[] {
+  const out: (readonly (number | string)[])[] = [];
+  for (const name of eqRowNames(node)) {
+    const path = [...base, index, name];
+    if (slotAt(slots, path) < 0) continue;
+    if (!transparent(ast, path)) {
+      out.push(path);
+      continue;
+    }
+    (rowAt(ast, path) ?? []).forEach((child, i) => {
+      if (child.t !== 'chr') out.push(...walkPaths(ast, slots, path, i, child));
+    });
+  }
+  return out;
 }
 
 const lastCaret = (s: EqSlotRect): number => Math.max(0, s.caretXs.length - 1);
@@ -220,21 +258,44 @@ function ascend(
   dir: 1 | -1,
 ): SlotStep {
   const edge: SlotStep = dir > 0 ? 'out-right' : 'out-left';
-  if (path.length < 2) return edge;
-  const parent = path.slice(0, -2);
-  const index = path[path.length - 2] as number;
-  const rowName = path[path.length - 1] as string;
-  const node = (rowAt(ast, parent) ?? [])[index];
-  if (!node) return edge;
-  const names = rowsOf(node, parent, index, slots);
-  const next = names.indexOf(rowName) + dir;
-  if (next >= 0 && next < names.length) {
-    const i = slotAt(slots, [...parent, index, names[next]]);
-    if (i >= 0) return { slot: i, caret: dir > 0 ? 0 : lastCaret(slots[i]) };
+  let from = path;
+  // Climbs THROUGH a transparent row rather than stopping in it.
+  for (;;) {
+    if (from.length < 2) return edge;
+    const parent = from.slice(0, -2);
+    const index = from[from.length - 2] as number;
+    const node = (rowAt(ast, parent) ?? [])[index];
+    if (!node) return edge;
+    const list = walkPaths(ast, slots, parent, index, node);
+    let at = list.findIndex((q) => key(q) === key(from));
+    if (at < 0) {
+      // Came up out of a transparent row: resume from the outermost slot it
+      // contributed, so the next step leaves the whole name behind.
+      const mine = list
+        .map((q, i) => (isPrefix(from, q) ? i : -1))
+        .filter((i) => i >= 0);
+      at =
+        mine.length === 0
+          ? -1
+          : dir > 0
+            ? Math.max(...mine)
+            : Math.min(...mine);
+    }
+    if (at >= 0) {
+      const next = at + dir;
+      if (next >= 0 && next < list.length) {
+        const i = slotAt(slots, list[next]);
+        if (i >= 0)
+          return { slot: i, caret: dir > 0 ? 0 : lastCaret(slots[i]) };
+      }
+    }
+    if (!transparent(ast, parent)) {
+      const up = slotAt(slots, parent);
+      if (up < 0) return edge;
+      return { slot: up, caret: dir > 0 ? index + 1 : index };
+    }
+    from = parent;
   }
-  const up = slotAt(slots, parent);
-  if (up < 0) return edge;
-  return { slot: up, caret: dir > 0 ? index + 1 : index };
 }
 
 /** One step left or right, descending into structures and climbing out of
@@ -255,9 +316,9 @@ export function horizontalStep(
   if (dir > 0 ? caret >= row.length : caret <= 0)
     return ascend(ast, slots, cur.path, dir);
   if (node && node.t !== 'chr') {
-    const names = rowsOf(node, cur.path, at, slots);
-    const name = dir > 0 ? names[0] : names[names.length - 1];
-    const i = name ? slotAt(slots, [...cur.path, at, name]) : -1;
+    const list = walkPaths(ast, slots, cur.path, at, node);
+    const p = dir > 0 ? list[0] : list[list.length - 1];
+    const i = p ? slotAt(slots, p) : -1;
     if (i >= 0) return { slot: i, caret: dir > 0 ? 0 : lastCaret(slots[i]) };
   }
   return { slot, caret: caret + dir };
@@ -343,7 +404,9 @@ export function verticalStep(
     const node = (rowAt(ast, parent) ?? [])[index];
     if (node) {
       const stack = eqVerticalRows(node).filter(
-        (n) => slotAt(slots, [...parent, index, n]) >= 0,
+        (n) =>
+          slotAt(slots, [...parent, index, n]) >= 0 &&
+          !transparent(ast, [...parent, index, n]),
       );
       const at = stack.indexOf(rowName);
       if (at >= 0) {
