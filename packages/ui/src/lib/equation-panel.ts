@@ -9,7 +9,7 @@ import {
   MATH_SYMBOL_SETS,
 } from '@shadow-garden/bapbong-contracts';
 import { equationPreviewSvg } from './equation-gallery.js';
-import { injectStyle } from './internal.js';
+import { injectStyle, TABS_CSS } from './internal.js';
 
 export interface EquationPanelOptions {
   /**
@@ -28,9 +28,6 @@ export interface EquationPanelOptions {
 export interface EquationPanel {
   /** The panel element. The caller positions it and shows/hides it. */
   readonly el: HTMLElement;
-  /** Fold to the tab strip alone, or open again. */
-  setCollapsed(collapsed: boolean): void;
-  readonly collapsed: boolean;
   destroy(): void;
 }
 
@@ -44,17 +41,10 @@ for (const [name, ch] of Object.entries(MATH_AUTOCORRECT))
 const PREVIEW_PT = 10;
 
 const STYLE = `
-.bb-eqp{width:352px;display:flex;flex-direction:column;background:var(--bb-ui-bg,#fff);border:0.5px solid var(--bb-ui-border,#e3e3e0);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.13);user-select:none;overflow:hidden}
-.bb-eqp-tabs{display:flex;align-items:flex-end;gap:2px;padding:5px 5px 0;border-bottom:0.5px solid var(--bb-ui-border,#e3e3e0)}
-.bb-eqp.is-collapsed .bb-eqp-tabs{border-bottom:0}
-.bb-eqp-tab{padding:6px 11px;border:0;border-radius:6px 6px 0 0;background:transparent;color:inherit;font:inherit;font-size:13px;opacity:.65;cursor:pointer}
-.bb-eqp-tab:hover{background:var(--bb-ui-hover,#f1efe8)}
-.bb-eqp-tab[aria-selected="true"]{opacity:1;background:var(--bb-ui-sel,#e6f1fb);color:var(--bb-ui-sel-fg,#0c447c)}
-.bb-eqp-fold{margin-left:auto;margin-bottom:5px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;opacity:.5;cursor:pointer}
-.bb-eqp-fold:hover{background:var(--bb-ui-hover,#f1efe8);opacity:.9}
+.bb-eqp{width:352px;display:flex;flex-direction:column;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);user-select:none;overflow:hidden}
+.bb-eqp-tabs{display:flex;padding:8px 8px 0}
 .bb-eqp-body{padding:8px}
-.bb-eqp.is-collapsed .bb-eqp-body{display:none}
-.bb-eqp-set{width:100%;height:30px;margin-bottom:7px;font:inherit;font-size:13px}
+.bb-eqp-set{width:100%;height:30px;margin-bottom:7px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,#fff);color:inherit;font:inherit;font-size:13px;padding:0 8px}
 .bb-eqp-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:1px;max-height:190px;overflow-y:auto}
 .bb-eqp-sym{padding:5px 0;border:0;border-radius:5px;background:transparent;color:inherit;font-family:"Cambria Math","Times New Roman",Tinos,serif;font-size:16px;line-height:1.2;cursor:pointer}
 .bb-eqp-sym:hover{background:var(--bb-ui-hover,#f1efe8)}
@@ -70,11 +60,6 @@ const STYLE = `
 .bb-eqp-st svg{display:block}
 `;
 
-const CHEVRON_UP =
-  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg>';
-const CHEVRON_DOWN =
-  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>';
-
 /**
  * The equation palette: Word's Symbols and Structures galleries as ONE
  * floating surface with tabs inside it, rather than a bar that opens a
@@ -85,6 +70,7 @@ const CHEVRON_DOWN =
  * the host hands that to the slot editor.
  */
 export function equationPanel(options: EquationPanelOptions): EquationPanel {
+  injectStyle('bb-ui-tabs', TABS_CSS);
   injectStyle('bb-ui-eqp-styles', STYLE);
 
   const root = document.createElement('div');
@@ -97,26 +83,27 @@ export function equationPanel(options: EquationPanelOptions): EquationPanel {
   // the click ever ran. Same guard the galleries use.
   root.addEventListener('mousedown', (e) => e.preventDefault());
 
+  const strip = document.createElement('div');
+  strip.className = 'bb-eqp-tabs';
   const tabs = document.createElement('div');
-  tabs.className = 'bb-eqp-tabs';
+  tabs.className = 'bb-tabs';
   tabs.setAttribute('role', 'tablist');
+  strip.append(tabs);
 
   const body = document.createElement('div');
   body.className = 'bb-eqp-body';
 
-  let collapsed = false;
   let current: 'symbols' | 'structures' = 'symbols';
 
   const tabEls: Record<string, HTMLButtonElement> = {};
   const mkTab = (id: 'symbols' | 'structures', label: string) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'bb-eqp-tab';
+    b.className = 'bb-tab';
     b.textContent = label;
     b.setAttribute('role', 'tab');
     b.addEventListener('click', () => {
       current = id;
-      if (collapsed) setCollapsed(false);
       render();
     });
     tabEls[id] = b;
@@ -125,24 +112,7 @@ export function equationPanel(options: EquationPanelOptions): EquationPanel {
   mkTab('symbols', 'Symbols');
   mkTab('structures', 'Structures');
 
-  const fold = document.createElement('button');
-  fold.type = 'button';
-  fold.className = 'bb-eqp-fold';
-  fold.addEventListener('click', () => setCollapsed(!collapsed));
-  tabs.append(fold);
-
-  root.append(tabs, body);
-
-  function setCollapsed(next: boolean): void {
-    collapsed = next;
-    root.classList.toggle('is-collapsed', collapsed);
-    fold.innerHTML = collapsed ? CHEVRON_DOWN : CHEVRON_UP;
-    fold.setAttribute(
-      'aria-label',
-      collapsed ? 'Show palette' : 'Hide palette',
-    );
-    fold.setAttribute('aria-expanded', String(!collapsed));
-  }
+  root.append(strip, body);
 
   function symbolsBody(): void {
     const set = document.createElement('select');
@@ -233,15 +203,10 @@ export function equationPanel(options: EquationPanelOptions): EquationPanel {
     else structuresBody();
   }
 
-  setCollapsed(false);
   render();
 
   return {
     el: root,
-    setCollapsed,
-    get collapsed() {
-      return collapsed;
-    },
     destroy() {
       root.remove();
     },

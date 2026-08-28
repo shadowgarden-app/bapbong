@@ -57,6 +57,21 @@ export function shortcutLabel(
   return undefined;
 }
 
+/**
+ * The segmented tab strip every bapbong-ui surface uses — the Font dialog's
+ * Font/Advanced, the equation palette's Symbols/Structures. One definition,
+ * so a widget added later cannot drift into its own look, and it reads the
+ * `--bb-ui-active-*` and `--bb-ui-control-*` variables the host already maps
+ * to its theme rather than inventing names nobody sets.
+ */
+export const TABS_CSS = `
+.bb-tabs{display:inline-flex;align-self:flex-start;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;overflow:hidden}
+.bb-tab{height:30px;padding:0 18px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;opacity:.65;font:inherit;font-size:13px;cursor:pointer}
+.bb-tab:last-child{border-right:0}
+.bb-tab:hover{background:var(--bb-ui-hover,#f1efe8);opacity:.9}
+.bb-tab[aria-selected="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);opacity:1}
+`;
+
 /** Inject a stylesheet once, keyed by `id` (idempotent across mounts). */
 export function injectStyle(id: string, css: string): void {
   if (document.getElementById(id)) return;

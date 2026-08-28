@@ -1,7 +1,7 @@
 import type { CharacterFormatting } from '@shadow-garden/bapbong-contracts';
 import { Dialog } from './dialog.js';
 import { colorButton } from './color-picker.js';
-import { injectStyle } from './internal.js';
+import { injectStyle, TABS_CSS } from './internal.js';
 
 /**
  * Format ▸ Font — the home for character formatting, in two tabs the way Word
@@ -51,10 +51,6 @@ const STYLE = `
    active tab's background to equal the pane's, and this dialog floats on
    frosted glass whose colour the widget cannot know. Same shape cell-properties
    already uses, so the two dialogs read as one product. */
-.bb-fd-tabs{display:inline-flex;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;overflow:hidden;align-self:flex-start}
-.bb-fd-tab{height:30px;padding:0 18px;border:0;border-right:0.5px solid var(--bb-ui-border,#e3e3e0);background:transparent;color:inherit;opacity:.65;font:inherit;font-size:13px;cursor:pointer}
-.bb-fd-tab:last-child{border-right:0}
-.bb-fd-tab[aria-selected="true"]{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);opacity:1}
 .bb-fd-pane{display:flex;flex-direction:column;gap:13px}
 /* A class-level display beats the UA's [hidden]{display:none}; without this
    both tabs render at once. */
@@ -148,15 +144,16 @@ export function openFontDialog({
   sizes,
   onApply,
 }: FontDialogOptions): void {
+  injectStyle('bb-ui-tabs', TABS_CSS);
   injectStyle('bb-font-dialog', STYLE);
   const dialog = new Dialog({ title: 'Font', modal: true });
   const root = el('div', 'bb-fd');
 
   // ── tabs ────────────────────────────────────────────────────────
-  const tabs = el('div', 'bb-fd-tabs');
+  const tabs = el('div', 'bb-tabs');
   tabs.setAttribute('role', 'tablist');
-  const fontTab = el('button', 'bb-fd-tab', 'Font');
-  const advTab = el('button', 'bb-fd-tab', 'Advanced');
+  const fontTab = el('button', 'bb-tab', 'Font');
+  const advTab = el('button', 'bb-tab', 'Advanced');
   for (const t of [fontTab, advTab]) {
     t.type = 'button';
     t.setAttribute('role', 'tab');
