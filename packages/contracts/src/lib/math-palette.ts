@@ -80,11 +80,13 @@ const scr = (slots: 'sub' | 'sup' | 'both'): EqNode => ({
   sup: [],
   slots,
 });
-const rad = (showDeg: boolean): EqNode => ({
+const rad = (deg: string | null): EqNode => ({
   t: 'rad',
-  deg: [],
+  // A degree the template fills in — the 3 of a cube root — is content like
+  // any other: the caret can reach it and type over it.
+  deg: deg ? upright(deg) : [],
   body: [],
-  showDeg,
+  showDeg: deg !== null,
 });
 const fence = (l: string, r: string): EqNode => ({
   t: 'fence',
@@ -102,6 +104,12 @@ const func = (name: string): EqNode => ({
   body: [],
 });
 const acc = (chr: string): EqNode => ({ t: 'acc', chr, body: [] });
+/** A function whose NAME carries a subscript — log with a base. */
+const funcSub = (name: string): EqNode => ({
+  t: 'func',
+  name: [{ t: 'scr', base: upright(name), sub: [], sup: [], slots: 'sub' }],
+  body: [],
+});
 const mat = (rows: number, cols: number): EqNode => ({
   t: 'mat',
   cols,
@@ -153,8 +161,9 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
     focus: ['base'],
   },
 
-  { group: 'Radical', name: 'Square root', node: rad(false), focus: ['body'] },
-  { group: 'Radical', name: 'Nth root', node: rad(true), focus: ['deg'] },
+  { group: 'Radical', name: 'Square root', node: rad(null), focus: ['body'] },
+  { group: 'Radical', name: 'Cube root', node: rad('3'), focus: ['body'] },
+  { group: 'Radical', name: 'Nth root', node: rad(''), focus: ['deg'] },
 
   { group: 'Integral', name: 'Integral', node: big('∫'), focus: ['body'] },
   { group: 'Integral', name: 'Definite', node: big('∫', true), focus: ['lo'] },
@@ -216,8 +225,24 @@ export const EQ_STRUCTURES: readonly EqStructure[] = [
   { group: 'Function', name: 'cos', node: func('cos'), focus: ['body'] },
   { group: 'Function', name: 'tan', node: func('tan'), focus: ['body'] },
   { group: 'Function', name: 'cot', node: func('cot'), focus: ['body'] },
+  { group: 'Function', name: 'sec', node: func('sec'), focus: ['body'] },
+  { group: 'Function', name: 'csc', node: func('csc'), focus: ['body'] },
+  { group: 'Function', name: 'arcsin', node: func('arcsin'), focus: ['body'] },
+  { group: 'Function', name: 'arccos', node: func('arccos'), focus: ['body'] },
+  { group: 'Function', name: 'arctan', node: func('arctan'), focus: ['body'] },
+  { group: 'Function', name: 'sinh', node: func('sinh'), focus: ['body'] },
+  { group: 'Function', name: 'cosh', node: func('cosh'), focus: ['body'] },
+  { group: 'Function', name: 'tanh', node: func('tanh'), focus: ['body'] },
   { group: 'Function', name: 'ln', node: func('ln'), focus: ['body'] },
   { group: 'Function', name: 'log', node: func('log'), focus: ['body'] },
+  // The base rides the NAME, not the argument, and the caret opens on it —
+  // it is the part you came to this entry to type.
+  {
+    group: 'Function',
+    name: 'log base',
+    node: funcSub('log'),
+    focus: ['name', 0, 'sub'],
+  },
   { group: 'Function', name: 'exp', node: func('exp'), focus: ['body'] },
   // The name is empty and editable — for anything the list does not carry.
   { group: 'Function', name: 'Custom', node: func(''), focus: ['name'] },
