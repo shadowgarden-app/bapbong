@@ -1305,17 +1305,18 @@ describe('importDocx', () => {
     // Word's "picture border". Shape outlines have always been read; a
     // framed photo lost its frame because nothing looked at the picture's
     // own spPr.
-    const pic = (rid: string, spPr: string) =>
-      `<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/>
+    const pic = (rid: string, spPr: string, afterExtent = '') =>
+      `<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/>${afterExtent}
         <a:graphic><a:graphicData><pic:pic>
           <pic:blipFill><a:blip r:embed="${rid}"/></pic:blipFill>
           <pic:spPr>${spPr}</pic:spPr>
         </pic:pic></a:graphicData></a:graphic>
       </wp:inline></w:drawing></w:r></w:p>`;
     const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>
-      ${pic('rId7', '<a:ln w="9525"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln>')}
+      ${pic('rId7', '<a:ln w="9525"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln>', '<wp:effectExtent l="19050" t="19050" r="9613" b="13795"/>')}
       ${pic('rId7', '<a:ln><a:noFill/></a:ln>')}
       ${pic('rId7', '')}
+      ${pic('rId7', '<a:ln w="19050"><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:ln>')}
     </w:body></w:document>`;
     const relsXml = `<?xml version="1.0"?><Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId7" Type="${R_NS}/image" Target="media/image1.png"/></Relationships>`;
     const { doc } = await importDocx(
@@ -1332,6 +1333,34 @@ describe('importDocx', () => {
     // The spec's explicit "no outline" stays no outline, and so does silence.
     expect(doc.child(1).child(0).attrs.outline).toBeNull();
     expect(doc.child(2).child(0).attrs.outline).toBeNull();
+    // wp:effectExtent rides the node verbatim (EMU) — Word's own odd r/b
+    // included — and is null where the file has none.
+    expect(doc.child(0).child(0).attrs.effectExtent).toEqual({
+      l: 19050,
+      t: 19050,
+      r: 9613,
+      b: 13795,
+    });
+    expect(doc.child(3).child(0).attrs.effectExtent).toBeNull();
+
+    // Save: the carried value goes back out as it came; a framed picture
+    // without one gets twice its line width per side (Word's own number for
+    // its 0.75pt default is 19050); an unframed one gets none. Word clips an
+    // inline picture to extent + effectExtent — this is what kept the top
+    // edge of a framed photo from vanishing after a save.
+    const out = await exportDocx(doc);
+    const xml = await (await JSZip.loadAsync(out))
+      .file('word/document.xml')
+      ?.async('string');
+    const drawings = xml?.match(/<w:drawing>[\s\S]*?<\/w:drawing>/g) ?? [];
+    expect(drawings).toHaveLength(4);
+    expect(drawings[0]).toContain(
+      '<wp:effectExtent l="19050" t="19050" r="9613" b="13795"/>',
+    );
+    expect(drawings[2]).not.toContain('<wp:effectExtent');
+    expect(drawings[3]).toContain(
+      '<wp:effectExtent l="38100" t="38100" r="38100" b="38100"/>',
+    );
   });
 
   it('resolves mapped scheme names (bg1/tx1) through w:clrSchemeMapping', async () => {

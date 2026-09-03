@@ -53,6 +53,7 @@ function pastedImageAttrs(el: unknown) {
     height: dim(e.getAttribute('height')),
     crop: dataJson(el, 'data-crop'),
     outline: dataJson(el, 'data-outline'),
+    effectExtent: dataJson(el, 'data-effect-extent'),
   };
 }
 
@@ -383,6 +384,12 @@ export const schema = new Schema({
         crop: { default: null },
         // a:ln on pic:spPr — Word's picture border, as a BorderSide, or null.
         outline: { default: null },
+        // wp:effectExtent — { l, t, r, b } in EMU, verbatim from the file, or
+        // null. The room Word keeps around the extent for what paints
+        // outside it (a picture border sits centred on the edge). Word CLIPS
+        // an inline picture to extent + effectExtent, so this has to survive
+        // a save or a framed photo loses the outer half of its top edge.
+        effectExtent: { default: null },
         // a:solidFill on pic:spPr — "#RRGGBB" painted behind the bitmap
         // (shows through transparency), or null.
         background: { default: null },
@@ -399,6 +406,8 @@ export const schema = new Schema({
         if (a['height'] != null) attrs['height'] = String(a['height']);
         if (a['crop']) attrs['data-crop'] = JSON.stringify(a['crop']);
         if (a['outline']) attrs['data-outline'] = JSON.stringify(a['outline']);
+        if (a['effectExtent'])
+          attrs['data-effect-extent'] = JSON.stringify(a['effectExtent']);
         if (a['background'])
           attrs['data-background'] = a['background'] as string;
         return ['img', attrs];

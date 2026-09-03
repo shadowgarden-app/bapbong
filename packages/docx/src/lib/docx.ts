@@ -739,6 +739,10 @@ function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
   if (!wgp) return null;
   const baseFloat = parseAnchorFloat(drawing);
   if (!baseFloat) return null;
+  // The GROUP's effect extent has no per-member meaning once the group is
+  // flattened into one float per picture; each member goes back out with an
+  // extent of its own. Consulted and set aside, not a gap.
+  audit.markSubtree(findDescendant(drawing, 'wp:effectExtent'));
   const num = (n: OoxmlNode | undefined, a: string) =>
     Number(attrOf(n, a) ?? '0');
   const xfrm = child(child(wgp, 'wpg:grpSpPr'), 'a:xfrm');
@@ -811,6 +815,7 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (!src) return null;
 
   const extent = findDescendant(drawing, 'wp:extent');
+  const effectExtent = parseEffectExtent(drawing);
   const docPr = findDescendant(drawing, 'wp:docPr');
   const picDescr = attrOf(docPr, 'descr');
   const picTitle = attrOf(docPr, 'title');
@@ -858,8 +863,25 @@ function parseImage(run: OoxmlNode, ctx: Ctx): PMNode | null {
     float,
     ...(crop && { crop }),
     ...(outline && { outline }),
+    ...(effectExtent && { effectExtent }),
     rotation: xfrmRotation(drawing),
   });
+}
+
+/**
+ * `wp:effectExtent` — the extra room Word keeps around a drawing's extent for
+ * what paints outside it: a picture border sits centred on the edge, half of
+ * it out. Kept in EMU, verbatim (a carry, not a model of the effect). Word
+ * clips an INLINE picture to extent + effectExtent, so a save that dropped
+ * this cut the outer half of every framed photo's top edge in Word.
+ */
+function parseEffectExtent(
+  drawing: OoxmlNode | undefined,
+): { l: number; t: number; r: number; b: number } | null {
+  const el = findDescendant(drawing, 'wp:effectExtent');
+  if (!el) return null;
+  const n = (a: string) => Number(attrOf(el, a) ?? '0') || 0;
+  return { l: n('l'), t: n('t'), r: n('r'), b: n('b') };
 }
 
 /** A picture's outline as a {@link BorderSide}. DrawingML states the width in
@@ -1127,6 +1149,7 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   if (attrOf(child(spPr, 'a:xfrm'), 'flipV') === '1') shape['flipV'] = true;
 
   const extent = findDescendant(drawing, 'wp:extent');
+  const effectExtent = parseEffectExtent(drawing);
   const docPr = findDescendant(drawing, 'wp:docPr');
   const shapeDescr = attrOf(docPr, 'descr');
   const shapeTitle = attrOf(docPr, 'title');
@@ -1144,6 +1167,7 @@ function parseShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     shape,
     textbox,
     rotation: xfrmRotation(spPr),
+    ...(effectExtent && { effectExtent }),
   });
 }
 

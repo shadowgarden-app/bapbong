@@ -139,7 +139,6 @@ const IGNORED_TAGS = new Set([
   'pic:nvPicPr',
   'pic:cNvPicPr',
   'a:stretch',
-  'wp:effectExtent',
   'wp:cNvGraphicFramePr',
   // Non-visual shape/connector/group properties — pure editor metadata.
   'wps:cNvSpPr',

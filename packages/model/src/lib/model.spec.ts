@@ -113,10 +113,12 @@ describe('schema', () => {
         title: null,
         width: 120,
         height: 81,
-        // No data-crop / data-outline on pasted HTML — an external <img>
-        // has no opinion on which part of the bitmap shows, or on a border.
+        // No data-crop / data-outline / data-effect-extent on pasted HTML —
+        // an external <img> has no opinion on which part of the bitmap
+        // shows, on a border, or on the room Word keeps around one.
         crop: null,
         outline: null,
+        effectExtent: null,
       });
       expect(
         img(el({ src: 'data:image/jpeg;base64,BB', alt: 'chart' })),
@@ -128,6 +130,7 @@ describe('schema', () => {
         height: null,
         crop: null,
         outline: null,
+        effectExtent: null,
       });
       expect(img(el({ src: 'https://cdn.x/pic.png' }))).toBe(false); // remote: CORS/export unsafe
       expect(img(el({ src: 'data:text/html,x' }))).toBe(false);

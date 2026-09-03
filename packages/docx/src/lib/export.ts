@@ -216,6 +216,32 @@ function runProps(marks: readonly Mark[]): string {
   return out.length ? `<w:rPr>${out.join('')}</w:rPr>` : '';
 }
 
+/**
+ * The wp:effectExtent to write for a drawing: the importer's verbatim value
+ * when the node carries one; else, for a picture border, twice the line
+ * width on every side — what Word itself writes for its default 0.75pt
+ * border (19050 EMU, on every framed picture across the corpus); else
+ * nothing, or zeros where the element is expected (anchors). Word clips an
+ * inline picture to extent + effectExtent, so a framed photo written without
+ * it lost the outer half of its top edge in Word.
+ */
+function effectExtentXml(node: PMNode, always: boolean): string {
+  const ee = node.attrs['effectExtent'] as {
+    l: number;
+    t: number;
+    r: number;
+    b: number;
+  } | null;
+  if (ee)
+    return `<wp:effectExtent l="${ee.l}" t="${ee.t}" r="${ee.r}" b="${ee.b}"/>`;
+  const outline = node.attrs['outline'] as { width: number } | null;
+  if (outline) {
+    const v = 2 * pxToEmu(outline.width);
+    return `<wp:effectExtent l="${v}" t="${v}" r="${v}" b="${v}"/>`;
+  }
+  return always ? '<wp:effectExtent l="0" t="0" r="0" b="0"/>' : '';
+}
+
 /** Float attrs → the wp:anchor wrapper (position + wrap) around a graphic. */
 function anchorXml(
   float: Record<string, unknown>,
@@ -223,7 +249,8 @@ function anchorXml(
   cy: number,
   n: number,
   graphic: string,
-  docPr?: string,
+  docPr: string | undefined,
+  effectExtent: string,
 ): string {
   const dist = (k: string) => pxToEmu((float[k] as number) ?? 0);
   const hRel = float['hRel'] === 'page' ? 'page' : 'column';
@@ -249,7 +276,7 @@ function anchorXml(
     `<wp:simplePos x="0" y="0"/>` +
     `<wp:positionH relativeFrom="${hRel}">${posH}</wp:positionH>` +
     `<wp:positionV relativeFrom="${vRel}">${posV}</wp:positionV>` +
-    `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    `<wp:extent cx="${cx}" cy="${cy}"/>${effectExtent}` +
     wrap +
     (docPr ?? `<wp:docPr id="${n}" name="Shape ${n}"/>`) +
     `<wp:cNvGraphicFramePr/>` +
@@ -367,7 +394,7 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   const docPr = `<wp:docPr id="${n}" name="Shape ${n}"${alt ? ` descr="${esc(alt)}"` : ''}${title ? ` title="${esc(title)}"` : ''}/>`;
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
-    ? anchorXml(float, cx, cy, n, graphic, docPr)
+    ? anchorXml(float, cx, cy, n, graphic, docPr, effectExtentXml(node, true))
     : `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>` +
       `${docPr}${graphic}</wp:inline>`;
   return `<w:r><w:drawing>${body}</w:drawing></w:r>`;
@@ -448,9 +475,9 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
   // inline on save (shapes were fine; they take the shapeXml path).
   const float = node.attrs['float'] as Record<string, unknown> | null;
   const body = float
-    ? anchorXml(float, cx, cy, n, graphic, docPr)
+    ? anchorXml(float, cx, cy, n, graphic, docPr, effectExtentXml(node, true))
     : `<wp:inline distT="0" distB="0" distL="0" distR="0">` +
-      `<wp:extent cx="${cx}" cy="${cy}"/>${docPr}${graphic}</wp:inline>`;
+      `<wp:extent cx="${cx}" cy="${cy}"/>${effectExtentXml(node, false)}${docPr}${graphic}</wp:inline>`;
   // Baseline shift (`raise`, px positive UP) rides the RUN as w:position in
   // half-points — the same place MathType puts it, so a re-import (ours or
   // Word's) seats the object exactly where the user left it.
