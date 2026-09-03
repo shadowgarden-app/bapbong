@@ -48,6 +48,7 @@ import {
   type EqNode,
   type MathAlphabet,
   branchRegion,
+  cellStyleLayer,
   condTypesFor,
   type ResolvedTableStyle,
   type TableCondType,
@@ -3454,7 +3455,10 @@ function condLayerOf(
     const shd = child(tcPr, 'w:shd');
     if (shd) out.background = shdFill(shd, resolveTheme) ?? null;
     const va = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
-    if (va === 'center' || va === 'bottom') out.vAlign = va;
+    // Like resolveCellProps: center/bottom are kept, any OTHER declared value
+    // ("top", "both") is an explicit reset of an inherited one.
+    if (va !== undefined)
+      out.vAlign = va === 'center' || va === 'bottom' ? va : null;
     const mar = parseMarginsEl(child(tcPr, 'w:tcMar'));
     if (mar) out.padding = { ...(out.padding ?? {}), ...mar };
     if (!withBorders) continue;
@@ -3525,6 +3529,99 @@ export function buildTableStyleSheet(
     sheet[id] = entry;
   }
   return sheet;
+}
+
+// ── Table-style shadow check (spec-only) ────────────────────────────
+// While the baked path is still the one that renders, specs can run the
+// sheet path ALONGSIDE it: for every cell of every table, build the style's
+// sheet, ask cellStyleLayer for the cell's layer, and compare it with what
+// the baked resolvers produced from the same inputs. This is the gate in
+// front of the flip — once the importer stops baking, the information needed
+// for this comparison (which formatting was direct, which was style) is gone
+// from the model, so it has to be proven HERE.
+
+let tableStyleShadow: {
+  sheets: Map<string, ResolvedTableStyle>;
+  cells: number;
+  mismatches: string[];
+} | null = null;
+
+/** Spec-only: start shadow-comparing on the next import(s). */
+export function beginTableStyleShadow(): void {
+  tableStyleShadow = { sheets: new Map(), cells: 0, mismatches: [] };
+}
+
+/** Spec-only: stop shadow-comparing. `cells` is how many cells were actually
+ *  compared — a green run that compared nothing proves nothing. */
+export function endTableStyleShadow(): {
+  cells: number;
+  mismatches: string[];
+} {
+  const out = tableStyleShadow ?? { cells: 0, mismatches: [] };
+  tableStyleShadow = null;
+  return { cells: out.cells, mismatches: out.mismatches };
+}
+
+/** JSON with sorted object keys — the two paths build objects in different
+ *  insertion orders, which must not read as a disagreement. */
+function canon(v: unknown): string {
+  return JSON.stringify(v, (_k, val: unknown) =>
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? Object.fromEntries(
+          Object.entries(val as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : 1,
+          ),
+        )
+      : val,
+  );
+}
+
+function shadowCheckCell(
+  tblCond: TableCond,
+  pos: CellPos,
+  branches: CellBranch[],
+  ctx: Ctx,
+): void {
+  const shadow = tableStyleShadow;
+  if (!shadow) return;
+  const id = tblCond.styleId ?? ctx.styles.defaultStyleIdFor('table') ?? '';
+  let sheet = shadow.sheets.get(id);
+  if (!sheet) {
+    sheet = buildTableStyleSheet([id], ctx.styles, ctx.resolveTheme)[id];
+    shadow.sheets.set(id, sheet);
+  }
+  shadow.cells++;
+  const layer = cellStyleLayer(sheet, tblCond.look, pos);
+  const cell = `${id}[r${pos.row},c${pos.col}]`;
+  const diff = (what: string, baked: unknown, sheetSide: unknown) => {
+    if (canon(baked) !== canon(sheetSide))
+      shadow.mismatches.push(
+        `${cell} ${what}: baked=${canon(baked)} sheet=${canon(sheetSide)}`,
+      );
+  };
+  // Style-only cell props — the same resolveCellProps call the baked path
+  // makes, minus the cell's own w:tcPr.
+  const baked = resolveCellProps(
+    [...tblCond.styleTcPr, ...branches.flatMap((b) => b.layer.tcPr)],
+    ctx,
+  );
+  diff('background', baked.background, layer.background ?? null);
+  diff('vAlign', baked.vAlign, layer.vAlign ?? null);
+  diff('padding', baked.padding, layer.padding ?? null);
+  diff(
+    'borders',
+    branchBorders(branches, pos, tblCond.look, tblCond.bands, ctx),
+    layer.borders ?? null,
+  );
+  // The run-font layer: the style's own rPr with the branches merged on top,
+  // projected onto the sheet's font fields.
+  const bakedFont = styleFontOf(
+    branches.reduce(
+      (acc, b) => mergeRunProps(acc, b.layer.rPr),
+      ctx.styles.resolveTableStyleRPr(tblCond.styleId),
+    ),
+  );
+  diff('font', bakedFont ?? null, layer.font ?? null);
 }
 
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
@@ -3624,6 +3721,7 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
         header: rowHeader,
       };
       const branches = cellBranches(tblCond, pos);
+      if (tableStyleShadow) shadowCheckCell(tblCond, pos, branches, ctx);
       const { background, vAlign, padding } = resolveCellProps(
         [
           ...tblCond.styleTcPr,

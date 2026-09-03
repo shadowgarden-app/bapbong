@@ -83,8 +83,9 @@ export interface TableStyleCondLayer {
    *  region's outer edges, insideH/insideV the edges between its cells —
    *  {@link condCellBorders} picks per cell. */
   borders?: TableBorders;
-  /** w:tcPr/w:vAlign. */
-  vAlign?: 'center' | 'bottom';
+  /** w:tcPr/w:vAlign — null is an explicit RESET (Word's other values,
+   *  "top"/"both", clear an inherited centring rather than being kept). */
+  vAlign?: 'center' | 'bottom' | null;
   /** w:tcPr/w:tcMar, px per side. */
   padding?: CellPadding;
 }
@@ -240,7 +241,7 @@ export interface TableCellStyleLayer {
   font?: TableStyleFont;
   background?: string | null;
   borders?: TableBorders | null;
-  vAlign?: 'center' | 'bottom';
+  vAlign?: 'center' | 'bottom' | null;
   padding?: CellPadding | null;
 }
 
