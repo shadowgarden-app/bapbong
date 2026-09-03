@@ -111,6 +111,11 @@ h2 {
   border: 1px solid #d9d5cc;
   border-radius: 10px;
   overflow: hidden;
+  /* The whole palette below is a fixed light scheme; pin the ground and ink
+     so a dark-mode UA canvas can't leave grey-on-black rows. */
+  background: #fffdf8;
+  color: #33312c;
+  color-scheme: light;
   font:
     11.5px/1.7 ui-monospace,
     'SF Mono',
