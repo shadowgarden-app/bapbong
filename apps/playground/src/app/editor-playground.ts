@@ -20,7 +20,10 @@ import {
   activeListPresetId,
   activeTextColor,
   applyListPreset,
+  applyTableStyle,
   cellAt,
+  currentTableStyle,
+  setTableLook,
   deleteColumn,
   deleteRow,
   deleteSelectionCommand,
@@ -81,10 +84,13 @@ import {
   createFindDialog,
   createSectionChip,
   createSymbolDialog,
+  createTableStylePanel,
   openKeyboardShortcutsDialog,
   openSymbolPopover,
   panelAnchor,
   type SymbolDialogHandle,
+  type TableStyleGalleryItem,
+  type TableStylePanelHandle,
   equationGallery,
   equationPanel,
   type EquationPanel,
@@ -289,6 +295,7 @@ export class EditorPlayground implements OnDestroy {
   private disposeWindowKeys: (() => void) | null = null;
   /** Insert › Symbol… — non-modal like Word's, built once per editor. */
   private symbolDialog: SymbolDialogHandle | null = null;
+  private tableStylePanel: TableStylePanelHandle | null = null;
 
   /** The framework-agnostic render/edit core (lazily created on first load). */
   private editor: BapbongEditor | null = null;
@@ -497,6 +504,24 @@ export class EditorPlayground implements OnDestroy {
         localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(r)),
       anchor: this.floatAnchor,
     });
+    // The Table style panel — all three entry points (Format ▸ Table, the
+    // contextual toolbar button, the table context menu) open this instance.
+    // Data + commands stay with the host: the gallery is the document's own
+    // sheet (the built-in catalog joins later), picks and gate flips run the
+    // registry-shaped commands, and every editor change refreshes an open
+    // panel so its checkboxes track the caret's table.
+    this.tableStylePanel = createTableStylePanel({
+      anchor: this.floatAnchor,
+      styles: () => this.tableStyleGallery(),
+      current: () =>
+        this.editor ? currentTableStyle(this.editor.state) : null,
+      onPick: (item) =>
+        this.exec(
+          applyTableStyle({ styleId: item?.id ?? null, style: item?.style }),
+        ),
+      onLook: (patch) => this.exec(setTableLook(patch)),
+    });
+    editor.onChange(() => this.tableStylePanel?.refresh());
     const menubarHost = this.editorMenubar()?.nativeElement;
     if (menubarHost)
       this.menubar = mountMenubar(menubarHost, editor, {
@@ -603,6 +628,17 @@ export class EditorPlayground implements OnDestroy {
               onSelect: (id) => this.exec(applyListPreset('ordered', id)),
             },
           ],
+          {
+            visible: (s) => currentTableStyle(s) !== null,
+            entries: [
+              {
+                kind: 'button',
+                title: 'Table style',
+                svg: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 2h12v12H2zM2 6h12M2 10h12M6.5 2v12M11 2v12"/><path d="M2 2h12v4H2z" fill="currentColor" opacity=".25" stroke="none"/></svg>',
+                onClick: () => this.tableStylePanel?.open(),
+              },
+            ],
+          },
           ['align-left', 'align-center', 'align-right', 'align-justify'],
           [
             {
@@ -989,6 +1025,21 @@ export class EditorPlayground implements OnDestroy {
     return { width: eq.width, height: eq.height, ops: eq.ops };
   }
 
+  /** Gallery content: the styles the document's sheet already holds — every
+   *  style its tables name, resolved at import (the built-in catalog joins
+   *  in a later step). Ids read fine enough as names for now. */
+  private tableStyleGallery(): TableStyleGalleryItem[] {
+    const sheet = (this.editor?.state.doc.attrs['tableStyles'] ?? {}) as Record<
+      string,
+      TableStyleGalleryItem['style']
+    >;
+    return Object.entries(sheet).map(([id, style]) => ({
+      id,
+      name: id.replace(/-/g, ' · ').replace(/([a-z])([A-Z])/g, '$1 $2'),
+      style,
+    }));
+  }
+
   private buildMenus(): Menu[] {
     return [
       {
@@ -1215,6 +1266,18 @@ export class EditorPlayground implements OnDestroy {
               { command: 'columns-3', label: 'Three columns' },
             ],
           },
+          {
+            label: 'Table',
+            submenu: [
+              {
+                label: 'Table style…',
+                run: () => this.tableStylePanel?.open(),
+                isEnabled: () =>
+                  !!this.editor &&
+                  currentTableStyle(this.editor.state) !== null,
+              },
+            ],
+          },
         ],
       },
       {
@@ -1291,6 +1354,10 @@ export class EditorPlayground implements OnDestroy {
       entries.push('separator', {
         label: 'Cell properties…',
         run: () => this.openCellPropsForBlock(block),
+      });
+      entries.push({
+        label: 'Table style…',
+        run: () => this.tableStylePanel?.open(),
       });
       if (block.cells.length > 1) {
         entries.push({
@@ -1486,6 +1553,7 @@ export class EditorPlayground implements OnDestroy {
     if (this.panelTimer != null) clearTimeout(this.panelTimer);
     this.findDialog?.destroy();
     this.symbolDialog?.destroy();
+    this.tableStylePanel?.destroy();
     this.symbolDialog = null;
     this.disposeWindowKeys?.();
     this.disposeWindowKeys = null;
