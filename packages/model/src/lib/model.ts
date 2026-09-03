@@ -183,6 +183,10 @@ export const schema = new Schema({
         // w:spacing — { before?, after?, line?, lineRule?, beforeAuto?,
         // afterAuto? }, or null. The two *Auto flags record that Word computes
         // the gap itself; before/after hold what it works out to here.
+        // Carries the cascade ABOVE the table-style slot only (paragraph
+        // style, numbering, direct): the document defaults live in
+        // doc.attrs.paragraphDefaults and a table style's pPr in the sheet,
+        // and the layout stacks floor → cell layer → this attr.
         spacing: { default: null },
         // w:bookmarkStart names anchored in this paragraph (["_Toc89595219"]),
         // or null. Link hrefs of the form "#name" resolve against these —

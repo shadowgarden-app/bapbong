@@ -49,6 +49,7 @@ import {
   type MathAlphabet,
   branchRegion,
   cellStyleLayer,
+  mergeParagraphSpacing,
   condTypesFor,
   type ResolvedTableStyle,
   type TableCondType,
@@ -273,7 +274,7 @@ interface Ctx {
    * not "content of the table" either, so the parser CLEARS this while
    * reading one (see txbxParagraphs).
    */
-  tableStyles: { pPr: OoxmlNode[]; rPr: RunProps }[];
+  tableStyles: { pPr: OoxmlNode[]; rPr: RunProps; live: boolean }[];
   /** Every w:tblStyle id a table of THIS story named — the story doc's
    *  tableStyles sheet is built from exactly these. Per-ctx: a header part
    *  gets its own ctx, so its doc carries its own (usually smaller) sheet. */
@@ -2327,7 +2328,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   }
   const align = resolveAlign(pPrChain);
   const indent = resolveIndent(pPrChain);
-  const spacing = resolveSpacing(pPrChain);
+  const spacing = resolveOwnSpacing(pPrChain, tableLayer, ctx);
   const tabs = resolveTabs(pPrChain);
   const heading = headingLevel(pStyleId, pPrChain);
 
@@ -2878,6 +2879,114 @@ function resolveSpacing(chain: (OoxmlNode | undefined)[]): Spacing | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/**
+ * The paragraph's `spacing` attr: the cascade ABOVE the table-style slot.
+ * The floor (docDefaults) and the slot (the table style's pPr, with the
+ * branches reaching this cell) are left out, for the layout to stack back
+ * under the attr — the doc carries the floor in `paragraphDefaults`, the
+ * table's sheet entry the slot — so a tblLook gate flipped in the editor
+ * moves the slot without touching a single paragraph.
+ *
+ * Each layer comes out only when the model can carry it: the floor needs
+ * the doc's paragraphDefaults attr, the slot needs the table on the live
+ * style path (a schema without table styling keeps it baked, as ever).
+ *
+ * The auto-spacing FLAGS are promoted from the full cascade regardless:
+ * which side is automatic is settled here, from every layer, and
+ * resolveAutoSpacing then fills the number in — so a flag set below the
+ * slot must still reach the attr, where the layout and exporter read it.
+ * A promoted flag drops the literal on its side like resolveSpacing does.
+ */
+function resolveOwnSpacing(
+  chain: (OoxmlNode | undefined)[],
+  tableLayer: TableLayer | undefined,
+  ctx: Ctx,
+): Spacing | null {
+  const full = resolveSpacing(chain);
+  const floorOut = !!ctx.schema.nodes['doc'].spec.attrs?.['paragraphDefaults'];
+  const slotOut = !!tableLayer?.live;
+  if (!floorOut && !slotOut) return full;
+  const floor = ctx.styles.docDefaultsPPr;
+  const own = resolveSpacing(
+    chain.filter(
+      (n) =>
+        n !== undefined &&
+        !(floorOut && n === floor) &&
+        !(slotOut && tableLayer?.pPr.includes(n)),
+    ),
+  );
+  let out: Spacing | null = own;
+  if (full?.beforeAuto && !own?.beforeAuto) {
+    out = { ...(out ?? {}), beforeAuto: true };
+    delete out.before;
+  }
+  if (full?.afterAuto && !own?.afterAuto) {
+    out = { ...(out ?? {}), afterAuto: true };
+    delete out.after;
+  }
+  if (out && Object.keys(out).length === 0) out = null;
+  if (paragraphSpacingShadow)
+    shadowCheckParagraph(full, out, tableLayer, slotOut, floorOut, ctx);
+  return out;
+}
+
+// ── Paragraph-spacing shadow check (spec-only) ──────────────────────
+// The un-bake's gate: for every paragraph, the full baked cascade must equal
+// floor → table slot → own attr re-stacked the way the layout does it. Run
+// across the corpus by paragraph-spacing-shadow.spec.ts.
+
+let paragraphSpacingShadow: {
+  paragraphs: number;
+  mismatches: string[];
+} | null = null;
+
+/** Spec-only: start shadow-comparing paragraph spacing on the next import(s). */
+export function beginParagraphSpacingShadow(): void {
+  paragraphSpacingShadow = { paragraphs: 0, mismatches: [] };
+}
+
+/** Spec-only: stop; `paragraphs` is how many were compared. */
+export function endParagraphSpacingShadow(): {
+  paragraphs: number;
+  mismatches: string[];
+} {
+  const out = paragraphSpacingShadow ?? { paragraphs: 0, mismatches: [] };
+  paragraphSpacingShadow = null;
+  return out;
+}
+
+function shadowCheckParagraph(
+  full: Spacing | null,
+  own: Spacing | null,
+  tableLayer: TableLayer | undefined,
+  slotOut: boolean,
+  floorOut: boolean,
+  ctx: Ctx,
+): void {
+  const shadow = paragraphSpacingShadow;
+  if (!shadow) return;
+  shadow.paragraphs++;
+  const floor = floorOut ? resolveSpacing([ctx.styles.docDefaultsPPr]) : null;
+  const slot =
+    slotOut && tableLayer ? styleParagraphOf(tableLayer.pPr)?.spacing : null;
+  const stacked =
+    mergeParagraphSpacing(mergeParagraphSpacing(floor, slot), own) ?? null;
+  // An automatic side has no literal (resolveSpacing drops it); the stack
+  // may still show the floor's number there, which the flag overrides.
+  const norm = (s: Spacing | null): Spacing | null => {
+    if (!s) return null;
+    const o: Spacing = { ...s };
+    if (o.beforeAuto) delete o.before;
+    if (o.afterAuto) delete o.after;
+    return Object.keys(o).length > 0 ? o : null;
+  };
+  if (canon(norm(stacked)) !== canon(norm(full)))
+    shadow.mismatches.push(
+      `baked=${canon(norm(full))} stacked=${canon(norm(stacked))} ` +
+        `(floor=${canon(floor)} slot=${canon(slot ?? null)} own=${canon(own)})`,
+    );
+}
+
 /** Map w:jc to an alignment, or null when absent/unrecognized. */
 function parseAlign(pPr: OoxmlNode | undefined): Align | null {
   switch (attrOf(child(pPr, 'w:jc'), 'w:val')) {
@@ -3376,6 +3485,7 @@ function layerWithBranches(
 ): TableLayer | undefined {
   if (!base || branches.length === 0) return base;
   return {
+    live: base.live,
     pPr: [...base.pPr, ...branches.flatMap((b) => b.layer.pPr)],
     rPr: branches.reduce((acc, b) => mergeRunProps(acc, b.layer.rPr), base.rPr),
   };
@@ -3679,6 +3789,14 @@ function shadowCheckCell(
     ),
   );
   diff('font', bakedFont ?? null, layer.font ?? null);
+  // The paragraph slot: the raw pPr list the baked cascade sees for this
+  // cell (the style's own, then the admitted branches) vs the sheet's stack
+  // of per-branch deltas — per-field last-wins must agree either way.
+  const bakedSlot = styleParagraphOf([
+    ...ctx.styles.resolveTableStylePPr(tblCond.styleId),
+    ...branches.flatMap((b) => b.layer.pPr),
+  ])?.spacing;
+  diff('spacing', bakedSlot ?? null, layer.spacing ?? null);
 }
 
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
@@ -3687,14 +3805,16 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   // because the pop has to happen even if a malformed table throws — a leaked
   // entry would style the paragraphs that follow the table.
   const styleId = attrOf(child(child(tbl, 'w:tblPr'), 'w:tblStyle'), 'w:val');
+  const live = !!styleId && !!ctx.schema.nodes['table'].spec.attrs?.['styleId'];
   ctx.tableStyles.push({
     pPr: ctx.styles.resolveTableStylePPr(styleId),
     rPr: ctx.styles.resolveTableStyleRPr(styleId),
+    live,
   });
   try {
     return parseTableRows(tbl, ctx, {
       styleId,
-      live: !!styleId && !!ctx.schema.nodes['table'].spec.attrs?.['styleId'],
+      live,
       cond: ctx.styles.resolveTableStyleCond(styleId),
       look: tblLookFlags(child(tbl, 'w:tblPr')),
       bands: ctx.styles.resolveTableBandSizes(styleId),
@@ -4710,6 +4830,13 @@ function storyDoc(
       ctx.styles,
       ctx.resolveTheme,
     );
+  // The floor of every paragraph's spacing cascade — w:docDefaults/
+  // w:pPrDefault, taken OUT of the paragraphs' attrs (resolveOwnSpacing) so
+  // the layout can stack a table style's slot between it and them.
+  if (ctx.schema.nodes['doc'].spec.attrs?.['paragraphDefaults']) {
+    const spacing = resolveSpacing([ctx.styles.docDefaultsPPr]);
+    if (spacing) attrs['paragraphDefaults'] = { spacing };
+  }
   return ctx.schema.nodes['doc'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [ctx.schema.nodes['paragraph'].create()],

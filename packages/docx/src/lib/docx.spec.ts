@@ -2287,18 +2287,22 @@ describe('importDocx', () => {
     const para = (b: number, r: number) =>
       doc.child(b).child(r).child(0).child(0);
 
-    // Outside any table: docDefaults only.
+    // Outside any table: docDefaults only. Alignment is still baked; the
+    // spacing is NOT — it is the floor the doc carries, and the paragraph's
+    // own attr says nothing (the layout stacks the two).
     expect(doc.child(0).attrs.align).toBe('justify');
-    expect(doc.child(0).attrs.spacing).toMatchObject({ after: 16, line: 1.5 });
+    expect(doc.child(0).attrs.spacing).toBeNull();
+    expect(doc.attrs['paragraphDefaults']).toEqual({
+      spacing: { before: 16, after: 16, line: 1.5, lineRule: 'auto' },
+    });
 
-    // Inside: the table style wins over docDefaults. `before` survives from
-    // docDefaults because the table style's w:spacing names only after/line —
-    // per-attribute merging, not wholesale replacement.
+    // Inside: the table style's spacing is the sheet's (after/line only —
+    // per-attribute, so the floor's `before` survives under it at layout),
+    // and again the paragraph attr carries nothing of it.
     expect(para(1, 0).attrs.align).toBe('left');
-    expect(para(1, 0).attrs.spacing).toMatchObject({
-      before: 16,
-      after: 0,
-      line: 1,
+    expect(para(1, 0).attrs.spacing).toBeNull();
+    expect(doc.attrs['tableStyles']['Grid'].paragraph).toEqual({
+      spacing: { after: 0, line: 1, lineRule: 'auto' },
     });
     // A paragraph style beats the table style.
     expect(para(1, 1).attrs.align).toBe('center');

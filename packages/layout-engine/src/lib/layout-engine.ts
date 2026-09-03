@@ -409,9 +409,13 @@ function paragraphToFlow(
         } | null;
         if (tb && tb.blocks.length > 0) {
           const schema = child.type.schema;
-          // The box's paragraphs sit in the same cascade as the anchoring
-          // paragraph (the importer parses them on the same table-layer
-          // stack), so the styles flow in unchanged.
+          // A textbox is its own story: the importer empties the table-layer
+          // stack while reading one, so an enclosing cell's slot must not
+          // reach its paragraphs here either — the floor still does.
+          const boxStyles: FlowStyles | undefined = styles && {
+            ...styles,
+            cell: undefined,
+          };
           f.content = tb.blocks
             .map((json, i) =>
               nodeToBlock(
@@ -420,7 +424,7 @@ function paragraphToFlow(
                 i,
                 false,
                 undefined,
-                styles,
+                boxStyles,
               ),
             )
             .filter((b): b is FlowBlock => b !== null);
