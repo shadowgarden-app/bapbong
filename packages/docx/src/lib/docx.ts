@@ -273,6 +273,10 @@ interface Ctx {
    * reading one (see txbxParagraphs).
    */
   tableStyles: { pPr: OoxmlNode[]; rPr: RunProps }[];
+  /** Every w:tblStyle id a table of THIS story named — the story doc's
+   *  tableStyles sheet is built from exactly these. Per-ctx: a header part
+   *  gets its own ctx, so its doc carries its own (usually smaller) sheet. */
+  usedTableStyles: Set<string>;
   notes: NotesRegistry;
   /** SDT wrappers keyed by their boundary w:p / w:tbl nodes — filled by
    *  unwrapContainers, read by parseParagraph / parseTable into `carry`. */
@@ -3884,6 +3888,19 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
     attrOf(child(child(tbl, 'w:tblPr'), 'w:jc'), 'w:val') ??
     ctx.styles.resolveTableJc(tblCond.styleId);
   const attrs: Record<string, unknown> = {};
+  // Live theming: a table that NAMES a style carries the styleId + look
+  // attrs, and its story doc will carry the style's resolved sheet. While
+  // the importer still bakes, the layout's sheet layer sits under the baked
+  // values and resolves to the same answers (the shadow spec proves it), so
+  // this stays idempotent; the bake is then removed layer by layer. Tables
+  // naming NO style stay fully baked on purpose — the default table style's
+  // contributions keep flowing through the resolvers as before, and the
+  // live path only ever deals with explicitly styled tables.
+  if (tblCond.styleId && ctx.schema.nodes['table'].spec.attrs?.['styleId']) {
+    ctx.usedTableStyles.add(tblCond.styleId);
+    attrs['styleId'] = tblCond.styleId;
+    attrs['look'] = { ...tblCond.look };
+  }
   if (cellPadding) attrs['cellPadding'] = cellPadding;
   if (borders) attrs['borders'] = borders;
   if (jc === 'center' || jc === 'right' || jc === 'end')
@@ -4615,6 +4632,18 @@ function storyDoc(
   // layout rule that depends on it can ask the doc, wherever it is laid out.
   if (ctx.schema.nodes['doc'].spec.attrs?.['compat'])
     attrs['compat'] = ctx.compat;
+  // The styles the story's tables actually name, resolved. Built here (not
+  // once per import) because each story doc is its own layout root: a
+  // header's tables read the header doc's sheet.
+  if (
+    ctx.usedTableStyles.size > 0 &&
+    ctx.schema.nodes['doc'].spec.attrs?.['tableStyles']
+  )
+    attrs['tableStyles'] = buildTableStyleSheet(
+      ctx.usedTableStyles,
+      ctx.styles,
+      ctx.resolveTheme,
+    );
   return ctx.schema.nodes['doc'].create(
     Object.keys(attrs).length > 0 ? attrs : null,
     blocks.length > 0 ? blocks : [ctx.schema.nodes['paragraph'].create()],
@@ -4800,6 +4829,7 @@ async function importDocxImpl(
     resolveThemeFill,
     resolveThemeLine,
     tableStyles: [],
+    usedTableStyles: new Set(),
     notes,
     sdtBoundaries: new WeakMap(),
     comments,

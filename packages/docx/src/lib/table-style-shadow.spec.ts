@@ -161,6 +161,36 @@ describe('table-style shadow: sheet application ≡ baked application', () => {
   });
 });
 
+describe('the import carries the live-theming data', () => {
+  it('styled tables get styleId/look attrs and the doc gets the sheet', async () => {
+    const bytes = await docxOf(
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${probeTable(
+        '<w:tblLook w:val="0740" w:firstRow="0" w:lastRow="1" w:firstColumn="0" w:lastColumn="1" w:noHBand="1" w:noVBand="0"/>',
+        3,
+        3,
+      )}<w:tbl><w:tblGrid><w:gridCol w:w="1700"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>plain</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>`,
+      STYLES,
+    );
+    const { doc } = await importDocx(bytes);
+    const styled = doc.child(0);
+    expect(styled.attrs['styleId']).toBe('Probe');
+    expect(styled.attrs['look']).toEqual({
+      firstRow: false,
+      lastRow: true,
+      firstCol: false,
+      lastCol: true,
+      hBand: false,
+      vBand: true,
+    });
+    // A table naming no style stays on the fully-baked path: no attrs.
+    expect(doc.child(1).attrs['styleId']).toBeNull();
+    expect(doc.child(1).attrs['look']).toBeNull();
+    const sheet = doc.attrs['tableStyles'] as Record<string, unknown>;
+    expect(Object.keys(sheet)).toEqual(['Probe']);
+    expect(sheet['Probe']).toMatchObject({ bands: { row: 1, col: 1 } });
+  });
+});
+
 describe('table-style shadow: real corpus', () => {
   // The playground's sample corpus, when this checkout has it (the package's
   // own __fixtures__ stay self-contained). Files over 3MB are skipped for
