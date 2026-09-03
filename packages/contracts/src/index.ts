@@ -8,3 +8,4 @@ export * from './lib/keybinding.js';
 export * from './lib/autocorrect.js';
 export * from './lib/math.js';
 export * from './lib/math-palette.js';
+export * from './lib/table-style.js';

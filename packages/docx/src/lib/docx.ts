@@ -47,6 +47,11 @@ import {
   mathLetters,
   type EqNode,
   type MathAlphabet,
+  branchRegion,
+  condTypesFor,
+  type TableCondType,
+  type TableCellPos,
+  type TableLook,
 } from '@shadow-garden/bapbong-contracts';
 import {
   attrOf,
@@ -3193,14 +3198,7 @@ function tableColumnWidths(tbl: OoxmlNode, grid: number[], ctx: Ctx): number[] {
 }
 
 /** Which conditional formats a table lets through — `w:tblLook`. */
-interface TblLook {
-  firstRow: boolean;
-  lastRow: boolean;
-  firstCol: boolean;
-  lastCol: boolean;
-  hBand: boolean;
-  vBand: boolean;
-}
+type TblLook = TableLook;
 
 /** ECMA-376 1st edition had only the `w:val` bitmask; the six booleans came
  *  later. Both are still written (in agreement) by every producer in our
@@ -3282,74 +3280,7 @@ function isOn(v: string | undefined): boolean {
 }
 
 /** Where a cell sits in its table — everything the conditional formats ask. */
-interface CellPos {
-  row: number;
-  rowCount: number;
-  /** Leading grid column, and how many columns the cell spans. */
-  col: number;
-  colspan: number;
-  colCount: number;
-  /** The row carries `w:tblHeader` (a repeated heading row). */
-  header: boolean;
-}
-
-/**
- * The `w:tblStylePr` types that apply to one cell, base-most FIRST so a plain
- * left-to-right merge reproduces Word's precedence:
- *
- *   *"When specified, Office applies conditional formats in the following
- *    order (therefore subsequent formats override properties on previous
- *    formats): Odd row banding, even row banding · Odd column banding, even
- *    column banding · First column, last column · First row, last row · Top
- *    left, top right, bottom left, bottom right"* — [MS-OI29500] §2.1.250.
- *
- * ISO 29500 §17.7.6.6 orders it differently (columns before rows, first row
- * before first column); we follow Word.
- *
- * Two rules that are not in the standard's prose:
- *   - A row carrying `w:tblHeader` also takes firstRow formatting (Eric White,
- *     "Assembling Paragraph and Run Properties for Cells").
- *   - Banding counts the BODY only: the first row drops out when firstRow
- *     formatting is on, the last when lastRow is. Verified against Word's own
- *     `w:cnfStyle` output on a 39-row Light Grid table — row 0 is firstRow
- *     alone, row 1 is band1Horz, and the last row keeps its band because that
- *     table's tblLook has lastRow off. Same expression for columns, which no
- *     file in the corpus exercises (every one of them sets noVBand).
- *   - Corner cells need BOTH gates: *"Top left cell – when Header Row and
- *     First Column are used"* ([MS-OI29500] §17.4.55(b)).
- */
-function condTypesFor(
-  pos: CellPos,
-  look: TblLook,
-  bands: { row: number; col: number },
-): string[] {
-  const firstRow = look.firstRow && (pos.row === 0 || pos.header);
-  const lastRow = look.lastRow && pos.row === pos.rowCount - 1;
-  const firstCol = look.firstCol && pos.col === 0;
-  const lastCol = look.lastCol && pos.col + pos.colspan >= pos.colCount;
-  const types: string[] = [];
-  if (look.hBand && bands.row > 0 && !firstRow && !lastRow) {
-    const body = pos.row - (look.firstRow ? 1 : 0);
-    types.push(
-      Math.floor(body / bands.row) % 2 === 0 ? 'band1Horz' : 'band2Horz',
-    );
-  }
-  if (look.vBand && bands.col > 0 && !firstCol && !lastCol) {
-    const body = pos.col - (look.firstCol ? 1 : 0);
-    types.push(
-      Math.floor(body / bands.col) % 2 === 0 ? 'band1Vert' : 'band2Vert',
-    );
-  }
-  if (firstCol) types.push('firstCol');
-  if (lastCol) types.push('lastCol');
-  if (firstRow) types.push('firstRow');
-  if (lastRow) types.push('lastRow');
-  if (firstRow && firstCol) types.push('nwCell');
-  if (firstRow && lastCol) types.push('neCell');
-  if (lastRow && firstCol) types.push('swCell');
-  if (lastRow && lastCol) types.push('seCell');
-  return types;
-}
+type CellPos = TableCellPos;
 
 /** The paragraph/run defaults a table (or one cell of it) hands its content. */
 type TableLayer = Ctx['tableStyles'][number];
@@ -3357,7 +3288,7 @@ type TableLayer = Ctx['tableStyles'][number];
 /** A conditional branch that reaches a cell, with the @w:type it came from —
  *  the type names the REGION its insideH/insideV edges belong to. */
 interface CellBranch {
-  type: string;
+  type: TableCondType;
   layer: CondLayer;
 }
 
@@ -3368,69 +3299,6 @@ function cellBranches(tblCond: TableCond, pos: CellPos): CellBranch[] {
     const layer = tblCond.cond.get(type);
     return layer ? [{ type, layer }] : [];
   });
-}
-
-/**
- * The rectangle of grid cells a branch styles. It decides what `insideH` and
- * `insideV` mean inside that branch: they are the edges BETWEEN cells of the
- * region, so a cell on the region's boundary takes top/bottom/left/right there
- * and an interior one takes the inside pair — the same question
- * `applyRowException` answers for a row's tblPrEx, one region smaller.
- */
-interface BranchRegion {
-  rowStart: number;
-  rowEnd: number;
-  colStart: number;
-  colEnd: number;
-}
-
-function branchRegion(
-  type: string,
-  pos: CellPos,
-  look: TblLook,
-  bands: { row: number; col: number },
-): BranchRegion {
-  const lastRow = pos.rowCount - 1;
-  const lastCol = pos.colCount - 1;
-  // Banding counts the body only, so a band's bounds are measured from there.
-  const bodyTop = look.firstRow ? 1 : 0;
-  const bodyBottom = lastRow - (look.lastRow ? 1 : 0);
-  const bodyLeft = look.firstCol ? 1 : 0;
-  const bodyRight = lastCol - (look.lastCol ? 1 : 0);
-  const wholeRows = { rowStart: 0, rowEnd: lastRow };
-  const wholeCols = { colStart: 0, colEnd: lastCol };
-  const band = (v: number, from: number, to: number, size: number) => {
-    const start = from + Math.floor((v - from) / size) * size;
-    return { start, end: Math.min(start + size - 1, to) };
-  };
-  switch (type) {
-    case 'firstRow':
-      return { rowStart: 0, rowEnd: 0, ...wholeCols };
-    case 'lastRow':
-      return { rowStart: lastRow, rowEnd: lastRow, ...wholeCols };
-    case 'firstCol':
-      return { ...wholeRows, colStart: 0, colEnd: 0 };
-    case 'lastCol':
-      return { ...wholeRows, colStart: lastCol, colEnd: lastCol };
-    case 'band1Horz':
-    case 'band2Horz': {
-      const b = band(pos.row, bodyTop, bodyBottom, Math.max(1, bands.row));
-      return { rowStart: b.start, rowEnd: b.end, ...wholeCols };
-    }
-    case 'band1Vert':
-    case 'band2Vert': {
-      const b = band(pos.col, bodyLeft, bodyRight, Math.max(1, bands.col));
-      return { ...wholeRows, colStart: b.start, colEnd: b.end };
-    }
-    // The four corner branches style exactly one cell.
-    default:
-      return {
-        rowStart: pos.row,
-        rowEnd: pos.row,
-        colStart: pos.col,
-        colEnd: pos.col + pos.colspan - 1,
-      };
-  }
 }
 
 /**
