@@ -2932,6 +2932,78 @@ describe('importDocx', () => {
     });
   });
 
+  it('merges tblCellMar per side through the basedOn chain too (probe F1)', async () => {
+    // Measured in Word's own PDF (probe F1): a derived style declaring ONLY
+    // w:top keeps the base's left/right — the text inset stayed 36.24pt
+    // (≈720 twips) on the base table AND the derived one. And an EMPTY
+    // w:tblCellMar erases nothing: the empty-element table rendered
+    // identically to the base. The old `own ?? base` resolver failed both.
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:styleId="MarBase"><w:name w:val="Mar Base"/>
+        <w:tblPr><w:tblCellMar>
+          <w:top w:w="0" w:type="dxa"/><w:left w:w="720" w:type="dxa"/>
+          <w:bottom w:w="0" w:type="dxa"/><w:right w:w="720" w:type="dxa"/>
+        </w:tblCellMar></w:tblPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="MarDerived"><w:name w:val="Mar Derived"/>
+        <w:basedOn w:val="MarBase"/>
+        <w:tblPr><w:tblCellMar><w:top w:w="360" w:type="dxa"/></w:tblCellMar></w:tblPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="MarEmpty"><w:name w:val="Mar Empty"/>
+        <w:basedOn w:val="MarBase"/>
+        <w:tblPr><w:tblCellMar/></w:tblPr>
+      </w:style></w:styles>`;
+    const tbl = (style: string, t: string) => `<w:tbl>
+        <w:tblPr><w:tblStyle w:val="${style}"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      ${tbl('MarDerived', 'x')}${tbl('MarEmpty', 'y')}
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, styles));
+    // Own top (360tw = 24px) on top of the base's other three sides.
+    expect(doc.child(0).attrs.cellPadding).toEqual({
+      top: 24,
+      left: 48,
+      right: 48,
+      bottom: 0,
+    });
+    // The empty element contributes nothing and blocks nothing.
+    expect(doc.child(1).attrs.cellPadding).toEqual({
+      top: 0,
+      left: 48,
+      right: 48,
+      bottom: 0,
+    });
+  });
+
+  it('a derived style\u2019s w:start/w:end beats the base\u2019s w:left/w:right', async () => {
+    // Same LOGICAL side under either spelling: a per-tag merge would keep the
+    // base's w:left next to the derived w:start and let the base win at
+    // parseMarginsEl time (it reads w:left first).
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:styleId="A"><w:name w:val="A"/>
+        <w:tblPr><w:tblCellMar>
+          <w:left w:w="600" w:type="dxa"/><w:right w:w="600" w:type="dxa"/>
+        </w:tblCellMar></w:tblPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="B"><w:name w:val="B"/><w:basedOn w:val="A"/>
+        <w:tblPr><w:tblCellMar>
+          <w:start w:w="150" w:type="dxa"/>
+        </w:tblCellMar></w:tblPr>
+      </w:style></w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="B"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    const { doc } = await importDocx(await makeDocx(documentXml, styles));
+    expect(doc.child(0).attrs.cellPadding).toEqual({ left: 10, right: 40 });
+  });
+
   it('a table naming no w:tblStyle still inherits the default table style', async () => {
     // Word applies w:default="1" per style TYPE, not just to paragraphs. Stock
     // documents park the 108-twip cell margins and any table borders on

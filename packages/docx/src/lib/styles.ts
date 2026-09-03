@@ -326,16 +326,46 @@ export function buildStyleRegistry(
     return child(def.tblPr, 'w:tblInd') ?? resolveTblInd(def.basedOn, seen);
   }
 
+  /** Logical margin sides; left/right also answer to the ST_ThemeColor-era
+   *  w:start/w:end spellings, so a derived style writing w:start must beat a
+   *  base's w:left, not sit beside it. */
+  const MAR_SIDES: readonly (readonly string[])[] = [
+    ['w:top'],
+    ['w:left', 'w:start'],
+    ['w:bottom'],
+    ['w:right', 'w:end'],
+  ];
+
   function resolveTblCellMar(
     styleId: string | undefined,
     seen: Set<string>,
   ): OoxmlNode | undefined {
-    if (!styleId || seen.has(styleId)) return undefined;
-    const def = defs.get(styleId);
-    if (!def) return undefined;
-    seen.add(styleId);
-    usedIds.add(styleId);
-    return def.tblCellMar ?? resolveTblCellMar(def.basedOn, seen);
+    // Word inherits cell margins PER SIDE through basedOn, exactly like
+    // tblBorders above — measured, not guessed (probe F1, Word PDF): a
+    // derived style declaring ONLY w:top keeps the base's left/right 720
+    // twips (text inset 36.24pt = 56.64 − 20.4 in the PDF, all three
+    // tables), and an EMPTY w:tblCellMar erases nothing. The previous
+    // `def.tblCellMar ?? recurse` was wrong both ways: a partial override
+    // dropped the base's other sides, and an empty element cut the chain.
+    const chain: OoxmlNode[] = [];
+    let id = styleId;
+    while (id && !seen.has(id)) {
+      const def = defs.get(id);
+      if (!def) break;
+      seen.add(id);
+      usedIds.add(id);
+      if (def.tblCellMar) chain.push(def.tblCellMar);
+      id = def.basedOn;
+    }
+    if (chain.length === 0) return undefined;
+    if (chain.length === 1) return chain[0];
+    const sides: OoxmlNode[] = [];
+    for (const names of MAR_SIDES) {
+      const holder = chain.find((m) => names.some((n) => child(m, n)));
+      const el = holder && names.map((n) => child(holder, n)).find(Boolean);
+      if (el) sides.push(el);
+    }
+    return { name: 'w:tblCellMar', attrs: {}, children: sides, text: '' };
   }
 
   /** Roll the conditional branches up the chain: a derived style's branch of
