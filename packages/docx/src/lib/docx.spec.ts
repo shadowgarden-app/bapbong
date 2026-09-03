@@ -16,6 +16,7 @@ import {
 } from '@shadow-garden/bapbong-model';
 import { astToLinear } from '@shadow-garden/bapbong-contracts';
 import { importDocx } from './docx';
+import { audit } from './audit';
 import { exportDocx } from './export';
 import { DocxImportError, IMPORT_ERROR_MESSAGES, sniffDocx } from './sniff';
 import { buildEncryptedDocx, importFailure } from './crypto-docx.spec-helper';
@@ -3013,6 +3014,62 @@ describe('importDocx', () => {
       right: 48,
       bottom: 0,
     });
+  });
+
+  it('a side the derived style redeclares is consumed, not reported as a gap', async () => {
+    // TableNormal's stock margins under a TableGrid that redeclares all four
+    // sides: Word takes the nearest per side (probe F1), so the base's are
+    // shadowed — nothing on the page can come from them. The overlay merge
+    // reads every layer and marks a beaten declaration consumed, so the
+    // audit stops listing four UNKNOWN lines per such file. Same for the
+    // borders resolver, which shares the overlay.
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
+      <w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/>
+        <w:tblPr>
+          <w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="FF0000"/></w:tblBorders>
+          <w:tblCellMar>
+            <w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/>
+            <w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/>
+          </w:tblCellMar>
+        </w:tblPr>
+      </w:style>
+      <w:style w:type="table" w:styleId="Grid"><w:name w:val="Grid"/>
+        <w:basedOn w:val="TableNormal"/>
+        <w:tblPr>
+          <w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="000000"/></w:tblBorders>
+          <w:tblCellMar>
+            <w:top w:w="20" w:type="dxa"/><w:left w:w="240" w:type="dxa"/>
+            <w:bottom w:w="20" w:type="dxa"/><w:right w:w="240" w:type="dxa"/>
+          </w:tblCellMar>
+        </w:tblPr>
+      </w:style></w:styles>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>
+      <w:tbl>
+        <w:tblPr><w:tblStyle w:val="Grid"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1500"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>
+    </w:body></w:document>`;
+    audit.setEnabled(true);
+    let doc;
+    try {
+      ({ doc } = await importDocx(await makeDocx(documentXml, styles)));
+    } finally {
+      audit.setEnabled(false);
+    }
+    // The derived declarations win per side, as before.
+    expect(doc.child(0).attrs.cellPadding).toEqual({
+      top: 1,
+      left: 16,
+      right: 16,
+      bottom: 1,
+    });
+    expect(doc.child(0).attrs.borders.top.color).toBe('#000000');
+    // …and the beaten base declarations are no longer gaps.
+    const unknown = (audit.lastReport?.unknown ?? []).filter((e) =>
+      e.part.endsWith('styles.xml'),
+    );
+    expect(unknown.map((e) => `${e.key} ${e.path}`)).toEqual([]);
   });
 
   it('a derived style\u2019s w:start/w:end beats the base\u2019s w:left/w:right', async () => {

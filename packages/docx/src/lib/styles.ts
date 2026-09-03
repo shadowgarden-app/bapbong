@@ -273,14 +273,44 @@ export function buildStyleRegistry(
     'w:insideV',
   ];
 
+  /**
+   * Per-side overlay of a basedOn chain (collected derived-first): walking
+   * base→derived, each layer's declaration of a side replaces the one
+   * beneath it, so the result is the nearest declaration per side. `names`
+   * are the spellings of ONE logical side (w:left/w:start), so a derived
+   * w:start beats a base w:left instead of sitting next to it.
+   *
+   * A replaced declaration is consumed on purpose: the merge read it and a
+   * nearer layer beat it, so nothing on the page can come from it — the
+   * audit must not report a shadowed side as a gap (TableNormal's cell
+   * margins under a TableGrid that redeclares all four used to show as
+   * four UNKNOWN lines per file).
+   */
+  function overlaySides(
+    chain: OoxmlNode[],
+    sides: readonly (readonly string[])[],
+  ): OoxmlNode[] {
+    const out: OoxmlNode[] = [];
+    for (const names of sides) {
+      let win: OoxmlNode | undefined;
+      for (let i = chain.length - 1; i >= 0; i--) {
+        const el = names.map((n) => child(chain[i], n)).find(Boolean);
+        if (!el) continue;
+        if (win) audit.markSubtree(win);
+        win = el;
+      }
+      if (win) out.push(win);
+    }
+    return out;
+  }
+
   function resolveTblBorders(
     styleId: string | undefined,
     seen: Set<string>,
   ): OoxmlNode | undefined {
     // Word inherits table-style borders PER SIDE through basedOn — a derived
-    // style overriding only w:bottom keeps the base's other five sides. The
-    // chain is collected derived-first, then each side takes its nearest
-    // definition; with a single declaration the element passes through as-is.
+    // style overriding only w:bottom keeps the base's other five sides. With
+    // a single declaration the element passes through as-is.
     const chain: OoxmlNode[] = [];
     let id = styleId;
     while (id && !seen.has(id)) {
@@ -293,13 +323,15 @@ export function buildStyleRegistry(
     }
     if (chain.length === 0) return undefined;
     if (chain.length === 1) return chain[0];
-    const sides: OoxmlNode[] = [];
-    for (const side of BORDER_SIDES) {
-      const holder = chain.find((b) => child(b, side));
-      const el = holder && child(holder, side);
-      if (el) sides.push(el);
-    }
-    return { name: 'w:tblBorders', attrs: {}, children: sides, text: '' };
+    return {
+      name: 'w:tblBorders',
+      attrs: {},
+      children: overlaySides(
+        chain,
+        BORDER_SIDES.map((s) => [s]),
+      ),
+      text: '',
+    };
   }
 
   function resolveTblJc(
@@ -359,13 +391,12 @@ export function buildStyleRegistry(
     }
     if (chain.length === 0) return undefined;
     if (chain.length === 1) return chain[0];
-    const sides: OoxmlNode[] = [];
-    for (const names of MAR_SIDES) {
-      const holder = chain.find((m) => names.some((n) => child(m, n)));
-      const el = holder && names.map((n) => child(holder, n)).find(Boolean);
-      if (el) sides.push(el);
-    }
-    return { name: 'w:tblCellMar', attrs: {}, children: sides, text: '' };
+    return {
+      name: 'w:tblCellMar',
+      attrs: {},
+      children: overlaySides(chain, MAR_SIDES),
+      text: '',
+    };
   }
 
   /** Roll the conditional branches up the chain: a derived style's branch of
