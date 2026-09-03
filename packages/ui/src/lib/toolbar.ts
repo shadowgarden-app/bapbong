@@ -88,6 +88,14 @@ export interface ToolbarButton {
   label?: string;
   /** Inline SVG markup (used instead of `label`). */
   svg?: string;
+  /** Text rendered BESIDE the svg — a labelled button ("Table style"). */
+  text?: string;
+  /** Render as an accent pill (the is-active palette, so every theme that
+   *  restyles active buttons restyles this too) — for the one control in a
+   *  contextual group that users should spot without hunting. */
+  accent?: boolean;
+  /** Append a small ▾ — the button opens a panel. */
+  caret?: boolean;
   /** Called with the button element (the anchor for what opens). */
   onClick: (anchor: HTMLElement) => void;
 }
@@ -216,6 +224,9 @@ const STYLE = `
 .bb-toolbar-btn:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-toolbar-btn.is-active{background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-border,#b5d4f4)}
 .bb-toolbar-btn:disabled{opacity:.38;cursor:default}
+.bb-toolbar-btn.bb-btn-accent{gap:5px;padding:0 9px;font-size:12.5px;white-space:nowrap;background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-border,#b5d4f4)}
+.bb-toolbar-btn.bb-btn-accent:hover{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-fg,#0c447c)}
+.bb-btn-caret{font-size:9px;opacity:.7;line-height:1}
 .bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer}
 .bb-toolbar-select:hover{background:var(--bb-ui-hover,#f1efe8)}
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
@@ -318,12 +329,25 @@ export function mountToolbar(
       if (typeof entry !== 'string' && entry.kind === 'button') {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'bb-toolbar-btn';
+        btn.className =
+          'bb-toolbar-btn' + (entry.accent ? ' bb-btn-accent' : '');
         btn.title = entry.title;
         btn.setAttribute('aria-label', entry.title);
         btn.setAttribute('aria-haspopup', 'dialog');
         if (entry.svg) btn.innerHTML = entry.svg;
         else btn.textContent = entry.label ?? entry.title;
+        if (entry.text) {
+          const span = document.createElement('span');
+          span.textContent = entry.text;
+          btn.appendChild(span);
+        }
+        if (entry.caret) {
+          const caret = document.createElement('span');
+          caret.className = 'bb-btn-caret';
+          caret.setAttribute('aria-hidden', 'true');
+          caret.textContent = '▾';
+          btn.appendChild(caret);
+        }
         // Keep the editor's selection when the button is pressed; the thing
         // that opens is what takes focus, so no editor.focus() here.
         btn.addEventListener('mousedown', (e) => e.preventDefault());

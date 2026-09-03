@@ -638,6 +638,9 @@ export class EditorPlayground implements OnDestroy {
               {
                 kind: 'button',
                 title: 'Table style',
+                text: 'Table style',
+                accent: true,
+                caret: true,
                 svg: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 2h12v12H2zM2 6h12M2 10h12M6.5 2v12M11 2v12"/><path d="M2 2h12v4H2z" fill="currentColor" opacity=".25" stroke="none"/></svg>',
                 onClick: () => this.tableStylePanel?.open(),
               },
