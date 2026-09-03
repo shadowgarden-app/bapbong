@@ -164,4 +164,31 @@ describe('cellStyleLayer', () => {
     const layer = cellStyleLayer(withLast, L, at(4, 1));
     expect(layer.font).toBeUndefined();
   });
+
+  it('paragraph spacing stacks per field: style, then the admitted branches', () => {
+    // Word's stock Light Grid: the style itself single-spaces every cell
+    // (after 0, line 1) and the lastRow branch only re-states the same —
+    // but a branch that sets ONE field must keep the style's others.
+    const spaced: ResolvedTableStyle = {
+      ...style,
+      paragraph: { spacing: { after: 0, line: 1, lineRule: 'auto' } },
+      cond: {
+        ...style.cond,
+        lastRow: { paragraph: { spacing: { before: 8 } } },
+      },
+    };
+    const body = cellStyleLayer(spaced, L, at(2, 1));
+    expect(body.spacing).toEqual({ after: 0, line: 1, lineRule: 'auto' });
+    // lastRow gated off by L: the branch's before does not reach row 4.
+    expect(cellStyleLayer(spaced, L, at(4, 1)).spacing).toEqual(body.spacing);
+    const last = cellStyleLayer(spaced, look({ lastRow: true }), at(4, 1));
+    expect(last.spacing).toEqual({
+      before: 8,
+      after: 0,
+      line: 1,
+      lineRule: 'auto',
+    });
+    // No paragraph delta anywhere → no field at all, not an empty object.
+    expect(cellStyleLayer(style, L, at(2, 1)).spacing).toBeUndefined();
+  });
 });

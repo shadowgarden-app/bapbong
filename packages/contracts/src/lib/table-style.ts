@@ -1,4 +1,8 @@
-import type { CellPadding, TableBorders } from './contracts.js';
+import type {
+  CellPadding,
+  ParagraphSpacing,
+  TableBorders,
+} from './contracts.js';
 
 /**
  * Table-style theming, resolved: the serializable sheet a document carries in
@@ -71,11 +75,21 @@ export interface TableStyleFont {
   color?: string;
 }
 
+/** The paragraph-property delta a style layer contributes to the paragraphs
+ *  of its cells (w:pPr of the style, or of one branch). Only spacing so far:
+ *  alignment and indent are still baked at import, so they stay out of the
+ *  sheet rather than be applied twice. */
+export interface TableStyleParagraph {
+  spacing?: ParagraphSpacing;
+}
+
 /** One resolved `w:tblStylePr` branch (or the style's own w:tcPr defaults):
  *  what it contributes to the cells of its region. */
 export interface TableStyleCondLayer {
   /** w:rPr, rolled up through basedOn. */
   font?: TableStyleFont;
+  /** w:pPr, rolled up through basedOn. */
+  paragraph?: TableStyleParagraph;
   /** w:shd fill — hex colour, or null for an explicit "no fill". Absent =
    *  the branch says nothing about shading. */
   background?: string | null;
@@ -101,6 +115,8 @@ export interface ResolvedTableStyle {
   };
   /** The style's own w:rPr — run defaults for every cell. */
   font?: TableStyleFont;
+  /** The style's own w:pPr — paragraph defaults for every cell. */
+  paragraph?: TableStyleParagraph;
   /** The style's own w:tcPr — cell defaults for every cell (borders here are
    *  ignored, matching Word: only conditional branches contribute borders
    *  below the table level). */
@@ -239,6 +255,10 @@ export function branchRegion(
  *  attributes and the document's direct formatting. */
 export interface TableCellStyleLayer {
   font?: TableStyleFont;
+  /** The paragraph spacing the style gives this cell's paragraphs — the
+   *  table-style slot of Word's paragraph cascade: above the document
+   *  defaults, below the paragraph's own style and direct formatting. */
+  spacing?: ParagraphSpacing;
   background?: string | null;
   borders?: TableBorders | null;
   vAlign?: 'center' | 'bottom' | null;
@@ -283,6 +303,27 @@ function condCellBorders(
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/**
+ * Merge one spacing delta over another, later winning per field — the same
+ * rule the importer's cascade applies to w:spacing, so a branch that sets
+ * only `after` keeps the style's `line`. Shared by the sheet's own layering
+ * here and by the layout, which stacks the document defaults, this layer and
+ * the paragraph's own attribute with it.
+ */
+export function mergeParagraphSpacing(
+  base: ParagraphSpacing | null | undefined,
+  over: ParagraphSpacing | null | undefined,
+): ParagraphSpacing | undefined {
+  if (!base) return over ?? undefined;
+  if (!over) return base;
+  const out: ParagraphSpacing = { ...base };
+  for (const k of Object.keys(over) as (keyof ParagraphSpacing)[]) {
+    const v = over[k];
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
+
 /** Merge one font delta over another (later wins per field). */
 export function mergeTableStyleFont(
   base: TableStyleFont | undefined,
@@ -311,16 +352,19 @@ export function cellStyleLayer(
   });
   const out: TableCellStyleLayer = {};
   let font = mergeTableStyleFont(style.font, undefined);
+  let spacing = mergeParagraphSpacing(style.paragraph?.spacing, undefined);
   const layers = style.cell ? [style.cell] : [];
   for (const b of branches) layers.push(b.layer);
   for (const layer of layers) {
     font = mergeTableStyleFont(font, layer.font);
+    spacing = mergeParagraphSpacing(spacing, layer.paragraph?.spacing);
     if (layer.background !== undefined) out.background = layer.background;
     if (layer.vAlign !== undefined) out.vAlign = layer.vAlign;
     if (layer.padding)
       out.padding = { ...(out.padding ?? {}), ...layer.padding };
   }
   if (font && Object.keys(font).length > 0) out.font = font;
+  if (spacing && Object.keys(spacing).length > 0) out.spacing = spacing;
   const borders = condCellBorders(branches, pos, look, bands0(style));
   if (borders) out.borders = borders;
   return out;

@@ -56,6 +56,7 @@ import {
   type TableLook,
   type TableStyleCondLayer,
   type TableStyleFont,
+  type TableStyleParagraph,
   type TableStyleSheet,
 } from '@shadow-garden/bapbong-contracts';
 import {
@@ -3482,6 +3483,16 @@ function styleFontOf(p: RunProps): TableStyleFont | undefined {
   return Object.keys(f).length > 0 ? f : undefined;
 }
 
+/** A base-most-first w:pPr layer list → the sheet's paragraph delta: the
+ *  cascade's own w:spacing merge, minus the auto-spacing flags (a table
+ *  style never sets them, and the sheet's type has no slot for them). */
+function styleParagraphOf(pPrs: OoxmlNode[]): TableStyleParagraph | undefined {
+  const sp = resolveSpacing(pPrs);
+  if (!sp) return undefined;
+  const { beforeAuto: _b, afterAuto: _a, ...spacing } = sp;
+  return Object.keys(spacing).length > 0 ? { spacing } : undefined;
+}
+
 /** One base-most-first w:tcPr layer list → the sheet's cell fields, with
  *  resolveCellProps' semantics (later layer wins; an explicit fill="auto"
  *  CLEARS an inherited colour). Borders merge per side BEFORE the edge pick —
@@ -3526,9 +3537,9 @@ function condLayerOf(
  * Two deliberate omissions, both matching the baking path:
  *   - a style-level w:tcPr's tcBorders (never applied today; `withBorders`
  *     false keeps it unread so the audit still reports it if a file uses it);
- *   - the branches' w:pPr (paragraph spacing/alignment) — that layer moves
- *     in the flip that stops baking, together with the paragraph side of
- *     tableToFlow.
+ *   - the w:pPr's alignment and indent — still baked into the paragraph at
+ *     import, so the sheet carries only the pPr's SPACING (which the layout
+ *     stacks under the paragraph's own attribute).
  */
 export function buildTableStyleSheet(
   styleIds: Iterable<string>,
@@ -3556,6 +3567,8 @@ export function buildTableStyleSheet(
       entry.table.align = jc === 'end' ? 'right' : jc;
     const font = styleFontOf(styles.resolveTableStyleRPr(id));
     if (font) entry.font = font;
+    const paragraph = styleParagraphOf(styles.resolveTableStylePPr(id));
+    if (paragraph) entry.paragraph = paragraph;
     const cellLayers = styles.resolveTableStyleTcPr(id);
     if (cellLayers.length > 0) {
       const cell = condLayerOf(cellLayers, false, resolveTheme);
@@ -3565,6 +3578,8 @@ export function buildTableStyleSheet(
       const cond = condLayerOf(layer.tcPr, true, resolveTheme);
       const condFont = styleFontOf(layer.rPr);
       if (condFont) cond.font = condFont;
+      const condParagraph = styleParagraphOf(layer.pPr);
+      if (condParagraph) cond.paragraph = condParagraph;
       if (Object.keys(cond).length > 0)
         entry.cond[type as TableCondType] = cond;
     }

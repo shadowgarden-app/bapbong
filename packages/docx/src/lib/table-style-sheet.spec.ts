@@ -19,13 +19,14 @@ const STYLES = `<?xml version="1.0"?><w:styles xmlns:w="${W_NS}">
     </w:tblCellMar></w:tblPr></w:style>
   <w:style w:type="table" w:styleId="LightGridProbe"><w:name w:val="Light Grid Probe"/>
     <w:basedOn w:val="TableNormal"/>
+    <w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>
     <w:tblPr><w:tblStyleRowBandSize w:val="1"/><w:tblStyleColBandSize w:val="1"/>
       <w:tblBorders>${side('top')}${side('left')}${side('bottom')}${side('right')}${side('insideH')}${side('insideV')}</w:tblBorders>
     </w:tblPr>
     <w:tblStylePr w:type="firstRow"><w:rPr><w:b/></w:rPr><w:tcPr>
       <w:tcBorders>${side('top')}${side('bottom', 'single', '18')}${side('insideH', 'nil', '0')}${side('insideV')}</w:tcBorders>
     </w:tcPr></w:tblStylePr>
-    <w:tblStylePr w:type="lastRow"><w:rPr><w:b/></w:rPr><w:tcPr>
+    <w:tblStylePr w:type="lastRow"><w:pPr><w:spacing w:before="120" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:b/></w:rPr><w:tcPr>
       <w:tcBorders>${side('top', 'double', '6')}</w:tcBorders>
     </w:tcPr></w:tblStylePr>
     <w:tblStylePr w:type="band1Horz"><w:tcPr>
@@ -37,6 +38,16 @@ function sheetFor(ids: string[]) {
   const root = parseXml(STYLES);
   return buildTableStyleSheet(ids, buildStyleRegistry(root));
 }
+
+/** Word's default gates (w:tblLook absent): firstRow + firstCol + hBand. */
+const WORD_LOOK = {
+  firstRow: true,
+  lastRow: false,
+  firstCol: true,
+  lastCol: false,
+  hBand: true,
+  vBand: false,
+};
 
 describe('buildTableStyleSheet', () => {
   it('resolves a Light-Grid-shaped style into plain values', () => {
@@ -111,5 +122,41 @@ describe('buildTableStyleSheet', () => {
     // lastRow branch exists in the sheet but the look gates it off (r5).
     const last = cellStyleLayer(style, look, pos(4, 2));
     expect(last.font?.bold).toBeUndefined();
+  });
+
+  it('carries the pPr spacing of the style and of every branch', () => {
+    // The paragraph slot of Word's cascade, as plain px/multipliers: the
+    // style single-spaces its cells (after 0, line ×1) and lastRow adds a
+    // 120tw = 8px gap above. Reading the branch here is also what clears
+    // the audit's last UNKNOWN on the Kpop corpus file — a gated branch's
+    // w:pPr/w:spacing that the baked path never had a reason to visit.
+    const style = sheetFor(['LightGridProbe'])['LightGridProbe'];
+    expect(style.paragraph).toEqual({
+      spacing: { after: 0, line: 1, lineRule: 'auto' },
+    });
+    expect(style.cond.lastRow?.paragraph).toEqual({
+      spacing: { before: 8, after: 0, line: 1, lineRule: 'auto' },
+    });
+    expect(style.cond.firstRow?.paragraph).toBeUndefined();
+    // cellStyleLayer stacks them: body cells get the style's, the last row
+    // (gate on) the branch's on top.
+    const on = { ...WORD_LOOK, lastRow: true };
+    const pos = (row: number) => ({
+      row,
+      rowCount: 5,
+      col: 1,
+      colspan: 1,
+      colCount: 5,
+      header: false,
+    });
+    expect(cellStyleLayer(style, on, pos(2)).spacing).toEqual({
+      after: 0,
+      line: 1,
+      lineRule: 'auto',
+    });
+    expect(cellStyleLayer(style, on, pos(4)).spacing?.before).toBe(8);
+    expect(cellStyleLayer(style, WORD_LOOK, pos(4)).spacing?.before).toBe(
+      undefined,
+    );
   });
 });
