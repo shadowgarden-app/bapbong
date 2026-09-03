@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { beginTableStyleShadow, endTableStyleShadow, importDocx } from './docx';
+import { exportDocx } from './export';
 import JSZip from 'jszip';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -211,6 +212,38 @@ describe('the explicit clear survives the model and the save', () => {
     expect(cell.attrs['vAlign']).toBe(false);
     // And the plain cell next to it declares nothing at all.
     expect(doc.child(0).child(0).child(1).attrs['background']).toBeNull();
+  });
+});
+
+describe('the style pair survives a save', () => {
+  it('export writes tblStyle/tblLook from the attrs, exactly once', async () => {
+    const bytes = await docxOf(
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${probeTable(
+        '<w:tblLook w:val="0740" w:firstRow="0" w:lastRow="1" w:firstColumn="0" w:lastColumn="1" w:noHBand="1" w:noVBand="0"/>',
+        2,
+        2,
+      )}</w:body></w:document>`,
+      STYLES,
+    );
+    const first = await importDocx(bytes);
+    const saved = await exportDocx(first.doc, { carry: first.raw });
+    const zip = await JSZip.loadAsync(saved);
+    const xml = await zip.file('word/document.xml')?.async('string');
+    expect(xml).toBeTruthy();
+    const tblPr = /<w:tblPr>([\s\S]*?)<\/w:tblPr>/.exec(xml ?? '')?.[1] ?? '';
+    expect(tblPr.match(/<w:tblStyle /g)?.length).toBe(1);
+    expect(tblPr.match(/<w:tblLook /g)?.length).toBe(1);
+    expect(tblPr).toContain('<w:tblStyle w:val="Probe"/>');
+    // Normalised on save: the probe's val="0740" carried a noVBand bit its
+    // own noVBand="0" attribute contradicted; the attributes won at import.
+    expect(tblPr).toContain('w:val="0340"');
+    expect(tblPr.indexOf('<w:tblStyle')).toBe(0);
+    // And a re-import of the save lands on the same live state.
+    const second = await importDocx(new Uint8Array(saved));
+    expect(second.doc.child(0).attrs['styleId']).toBe('Probe');
+    expect(second.doc.child(0).attrs['look']).toEqual(
+      first.doc.child(0).attrs['look'],
+    );
   });
 });
 

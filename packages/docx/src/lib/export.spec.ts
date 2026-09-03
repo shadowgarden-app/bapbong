@@ -244,9 +244,21 @@ describe('exportDocx (round-trip)', () => {
 
     const { doc, raw } = await importDocx(source);
     const tbl = doc.child(0);
+    // tblStyle and tblLook are MODELLED on the live path (styleId/look
+    // attrs); the carry keeps only what the model has no home for.
     expect((tbl.attrs['carry'] as { tblPr: string }).tblPr).toBe(
-      '<w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="dxa"/><w:tblInd w:w="720" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1"/>',
+      '<w:tblW w:w="5000" w:type="dxa"/><w:tblInd w:w="720" w:type="dxa"/><w:tblLayout w:type="fixed"/>',
     );
+    expect(tbl.attrs['styleId']).toBe('TableGrid');
+    // The modern attributes were present, so the legacy bitmask is ignored
+    // (MS-OI29500): only firstRow="1" was declared, and an absent noVBand
+    // means banding is ALLOWED.
+    expect(tbl.attrs['look']).toMatchObject({
+      firstRow: true,
+      firstCol: false,
+      hBand: true,
+      vBand: true,
+    });
     const row = tbl.child(0);
     expect((row.attrs['carry'] as { trPr: string }).trPr).toBe(
       '<w:gridBefore w:val="1"/><w:wBefore w:w="500" w:type="dxa"/>',
@@ -262,10 +274,18 @@ describe('exportDocx (round-trip)', () => {
       (await (await JSZip.loadAsync(out))
         .file('word/document.xml')
         ?.async('string')) ?? '';
-    // tblPr: carried extras first (tblStyle at the head), modelled after, no dupes.
+    // tblPr: modelled tblStyle at the head, carried extras after, the
+    // modelled tblLook (both spellings, in agreement) closing — no dupes.
     expect(xml).toContain('<w:tblPr><w:tblStyle w:val="TableGrid"/>');
+    expect(xml.match(/<w:tblStyle /g)?.length).toBe(1);
     expect(xml).toContain('<w:tblLayout w:type="fixed"/>');
-    expect(xml).toContain('<w:tblLook w:val="04A0" w:firstRow="1"/>');
+    // The save NORMALISES: the source's val="04A0" disagreed with its own
+    // attributes (only firstRow declared), the attributes won at import, and
+    // both spellings go out in agreement.
+    expect(xml).toContain(
+      '<w:tblLook w:val="0020" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="0"/>',
+    );
+    expect(xml.match(/<w:tblLook /g)?.length).toBe(1);
     expect(xml.match(/<w:jc w:val="center"\/>/g)?.length).toBe(1);
     expect(xml).not.toContain('w:tblPrChange'); // revision record dropped
     // Border w:space round-trips (4pt → px → 4pt).

@@ -1089,9 +1089,14 @@ function rowXml(
 function tableXml(node: PMNode, ctx: ExportCtx): string {
   const a = node.attrs;
   const pr: string[] = [];
-  // Carried tblPr extras go FIRST: they may hold w:tblStyle, which CT_TblPr
-  // requires at the head. The modelled props that follow (jc/borders/margins)
-  // are tolerated slightly out of strict sequence, same policy as rPr.
+  // Modelled w:tblStyle heads the sequence (CT_TblPr requires it first);
+  // the carry — which holds it only for tables off the live path — follows.
+  const styleId = a['styleId'] as string | null;
+  if (styleId) pr.push(`<w:tblStyle w:val="${esc(styleId)}"/>`);
+  // Carried tblPr extras go FIRST among the rest: they may hold w:tblStyle,
+  // which CT_TblPr requires at the head. The modelled props that follow
+  // (jc/borders/margins) are tolerated slightly out of strict sequence, same
+  // policy as rPr.
   const carry = a['carry'] as { tblPr?: string } | null;
   if (carry?.tblPr) pr.push(carry.tblPr);
   if (a['align']) pr.push(`<w:jc w:val="${a['align']}"/>`);
@@ -1119,6 +1124,32 @@ function tableXml(node: PMNode, ctx: ExportCtx): string {
   const gridXml = grid.length
     ? `<w:tblGrid>${grid.map((w) => `<w:gridCol w:w="${pxToTwips(w)}"/>`).join('')}</w:tblGrid>`
     : '';
+  // Modelled w:tblLook closes the sequence (CT_TblPr puts it last). The six
+  // booleans and the legacy bitmask are written in agreement, as Word does.
+  const look = a['look'] as {
+    firstRow: boolean;
+    lastRow: boolean;
+    firstCol: boolean;
+    lastCol: boolean;
+    hBand: boolean;
+    vBand: boolean;
+  } | null;
+  if (look) {
+    const bits =
+      (look.firstRow ? 0x20 : 0) |
+      (look.lastRow ? 0x40 : 0) |
+      (look.firstCol ? 0x80 : 0) |
+      (look.lastCol ? 0x100 : 0) |
+      (look.hBand ? 0 : 0x200) |
+      (look.vBand ? 0 : 0x400);
+    const b = (v: boolean) => (v ? '1' : '0');
+    pr.push(
+      `<w:tblLook w:val="${bits.toString(16).toUpperCase().padStart(4, '0')}" ` +
+        `w:firstRow="${b(look.firstRow)}" w:lastRow="${b(look.lastRow)}" ` +
+        `w:firstColumn="${b(look.firstCol)}" w:lastColumn="${b(look.lastCol)}" ` +
+        `w:noHBand="${b(!look.hBand)}" w:noVBand="${b(!look.vBand)}"/>`,
+    );
+  }
   let rows = '';
   // One map per table, threaded through the rows: a merge opened in row N has
   // to be closed out by rows N+1… — state that cannot live inside rowXml.

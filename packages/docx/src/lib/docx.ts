@@ -1761,6 +1761,13 @@ const CONSUMED_PPR = new Set([
  *  toggle buttons), table styles are rarely edited away in-app, and dropping
  *  the link visibly strips banding/theme colors the moment a customer saves. */
 const CONSUMED_TBLPR = new Set(['w:tblBorders', 'w:tblCellMar', 'w:jc']);
+/** The live path also MODELS the style pair (styleId/look attrs), so carrying
+ *  them too would write each twice on save. */
+const CONSUMED_TBLPR_LIVE = new Set([
+  ...CONSUMED_TBLPR,
+  'w:tblStyle',
+  'w:tblLook',
+]);
 
 /** trPr children the model represents (header / height / cantSplit). */
 const CONSUMED_TRPR = new Set(['w:tblHeader', 'w:trHeight', 'w:cantSplit']);
@@ -3971,8 +3978,13 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
     const leftPad = cellPadding?.left ?? twipsToPx(108);
     attrs['indent'] = ctx.compat.tableIndentToBorder ? value : value - leftPad;
   }
-  // Carry-through: tblStyle/tblW/tblLayout/tblInd/tblLook/… survive the save.
-  const tblCarry = collectCarry(child(tbl, 'w:tblPr'), CONSUMED_TBLPR);
+  // Carry-through: tblW/tblLayout/tblInd/… survive the save; tblStyle and
+  // tblLook ride the MODEL on the live path (attrs → exporter) and the carry
+  // otherwise.
+  const tblCarry = collectCarry(
+    child(tbl, 'w:tblPr'),
+    tblCond.live ? CONSUMED_TBLPR_LIVE : CONSUMED_TBLPR,
+  );
   const tblSdt = ctx.sdtBoundaries.get(tbl);
   if (tblCarry || tblSdt)
     attrs['carry'] = {
