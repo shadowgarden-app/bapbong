@@ -49,9 +49,13 @@ import {
   type MathAlphabet,
   branchRegion,
   condTypesFor,
+  type ResolvedTableStyle,
   type TableCondType,
   type TableCellPos,
   type TableLook,
+  type TableStyleCondLayer,
+  type TableStyleFont,
+  type TableStyleSheet,
 } from '@shadow-garden/bapbong-contracts';
 import {
   attrOf,
@@ -67,6 +71,7 @@ import {
   RunProps,
   serializeOoxml,
   shdFill,
+  type ThemeColorResolver,
 } from './ooxml.js';
 import type {
   BorderSide,
@@ -3419,6 +3424,107 @@ function withTableLayer<T>(
   } finally {
     ctx.tableStyles.pop();
   }
+}
+
+/** RunProps → the sheet's font delta: just the fields a renderer's base font
+ *  carries. Toggle-ish extras (underline, smallCaps, …) stay out of the sheet
+ *  until the layout can honour them — better absent than silently dropped. */
+function styleFontOf(p: RunProps): TableStyleFont | undefined {
+  const f: TableStyleFont = {};
+  if (p.fontFamily !== undefined) f.family = p.fontFamily;
+  if (p.sizePt !== undefined) f.sizePt = p.sizePt;
+  if (p.bold !== undefined) f.bold = p.bold;
+  if (p.italic !== undefined) f.italic = p.italic;
+  if (p.color !== undefined) f.color = p.color;
+  return Object.keys(f).length > 0 ? f : undefined;
+}
+
+/** One base-most-first w:tcPr layer list → the sheet's cell fields, with
+ *  resolveCellProps' semantics (later layer wins; an explicit fill="auto"
+ *  CLEARS an inherited colour). Borders merge per side BEFORE the edge pick —
+ *  which commutes with cellStyleLayer's per-cell selection, because both
+ *  merges are per-side and independent. */
+function condLayerOf(
+  tcPrs: OoxmlNode[],
+  withBorders: boolean,
+  resolveTheme: ThemeColorResolver | undefined,
+): TableStyleCondLayer {
+  const out: TableStyleCondLayer = {};
+  for (const tcPr of tcPrs) {
+    const shd = child(tcPr, 'w:shd');
+    if (shd) out.background = shdFill(shd, resolveTheme) ?? null;
+    const va = attrOf(child(tcPr, 'w:vAlign'), 'w:val');
+    if (va === 'center' || va === 'bottom') out.vAlign = va;
+    const mar = parseMarginsEl(child(tcPr, 'w:tcMar'));
+    if (mar) out.padding = { ...(out.padding ?? {}), ...mar };
+    if (!withBorders) continue;
+    const set = parseBordersEl(
+      child(tcPr, 'w:tcBorders'),
+      TABLE_SIDES,
+      resolveTheme,
+    );
+    if (set) out.borders = { ...(out.borders ?? {}), ...set };
+  }
+  return out;
+}
+
+/**
+ * Resolve the table styles named by `styleIds` into the serializable sheet
+ * the document will carry (`doc.attrs['tableStyles']`) once styles stop
+ * being baked at import. Values come out of the SAME registry resolvers the
+ * baking path uses — resolveTableStyleCond, resolveTableBorders, … — so the
+ * two paths cannot disagree about what a style says, only about how it is
+ * applied; and application is the shared cellStyleLayer, shadow-checked
+ * against the baked output across the corpus.
+ *
+ * Two deliberate omissions, both matching the baking path:
+ *   - a style-level w:tcPr's tcBorders (never applied today; `withBorders`
+ *     false keeps it unread so the audit still reports it if a file uses it);
+ *   - the branches' w:pPr (paragraph spacing/alignment) — that layer moves
+ *     in the flip that stops baking, together with the paragraph side of
+ *     tableToFlow.
+ */
+export function buildTableStyleSheet(
+  styleIds: Iterable<string>,
+  styles: StyleRegistry,
+  resolveTheme?: ThemeColorResolver,
+): TableStyleSheet {
+  const sheet: TableStyleSheet = {};
+  for (const id of styleIds) {
+    if (sheet[id]) continue;
+    const entry: ResolvedTableStyle = {
+      table: {},
+      cond: {},
+      bands: styles.resolveTableBandSizes(id),
+    };
+    const borders = parseBordersEl(
+      styles.resolveTableBorders(id),
+      TABLE_SIDES,
+      resolveTheme,
+    );
+    if (borders) entry.table.borders = borders;
+    const mar = parseMarginsEl(styles.resolveTableCellMar(id));
+    if (mar) entry.table.cellPadding = mar;
+    const jc = styles.resolveTableJc(id);
+    if (jc === 'center' || jc === 'right' || jc === 'end')
+      entry.table.align = jc === 'end' ? 'right' : jc;
+    const font = styleFontOf(styles.resolveTableStyleRPr(id));
+    if (font) entry.font = font;
+    const cellLayers = styles.resolveTableStyleTcPr(id);
+    if (cellLayers.length > 0) {
+      const cell = condLayerOf(cellLayers, false, resolveTheme);
+      if (Object.keys(cell).length > 0) entry.cell = cell;
+    }
+    for (const [type, layer] of styles.resolveTableStyleCond(id)) {
+      const cond = condLayerOf(layer.tcPr, true, resolveTheme);
+      const condFont = styleFontOf(layer.rPr);
+      if (condFont) cond.font = condFont;
+      if (Object.keys(cond).length > 0)
+        entry.cond[type as TableCondType] = cond;
+    }
+    sheet[id] = entry;
+  }
+  return sheet;
 }
 
 function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
