@@ -84,21 +84,17 @@ const runFont = (cellPara: unknown) =>
   ).font;
 
 describe('tableToFlow applies the live style sheet', () => {
-  it('per-region fonts land in the run base, colour beside it', () => {
+  it('fonts deliberately do NOT flow from the layer', () => {
+    // Run fonts are still baked into marks at import, and the mark model has
+    // no explicit-off — a live bold under a baked strong mark cannot be
+    // toggled away (⌘B in a styled header got stuck). So the layer's font
+    // half stays parked until marks learn negation; fonts travel through
+    // marks, rewritten by applyTableStyle on a style change.
     const flow = flowOf(docWith({ styleId: 'Probe', look: LOOK }));
     const header = flow.rows[0].cells[1].content[0] as FlowParagraph;
-    expect(runFont(header)).toMatchObject({
-      bold: true,
-      family: 'Cambria',
-    });
-    expect(header.runs[0]).toMatchObject({ color: '#FFFFFF' });
-    // Body cell: the style's base family without the header's bold.
-    const body = flow.rows[2].cells[1].content[0] as FlowParagraph;
-    expect(runFont(body)).toMatchObject({ bold: false, family: 'Cambria' });
-    // First column stays bold below the header.
-    expect(runFont(flow.rows[1].cells[0].content[0])).toMatchObject({
-      bold: true,
-    });
+    expect(runFont(header).bold).toBe(false);
+    expect(runFont(header).family).toBe('Arial');
+    expect(header.runs[0]).toMatchObject({ color: undefined });
   });
 
   it('fills, borders and table-level fallbacks follow the gates', () => {
@@ -108,8 +104,6 @@ describe('tableToFlow applies the live style sheet', () => {
     // Banding counts the body: row 1 is band1 (filled), row 2 is band2.
     expect(flow.rows[1].cells[1].background).toBe('#D6E3BC');
     expect(flow.rows[2].cells[1].background).toBeUndefined();
-    // lastRow is gated off by this look.
-    expect(runFont(flow.rows[2].cells[1].content[0]).italic).toBe(false);
     expect(flow.cellPadding).toEqual({ left: 7, right: 7 });
     expect(flow.borders).toMatchObject({ top: green });
   });
@@ -132,7 +126,6 @@ describe('tableToFlow applies the live style sheet', () => {
   it('no styleId, unknown styleId, or a missing sheet change nothing', () => {
     const plain = flowOf(docWith({}));
     expect(plain.rows[0].cells[0].background).toBeUndefined();
-    expect(runFont(plain.rows[0].cells[0].content[0]).bold).toBe(false);
     const unknown = flowOf(docWith({ styleId: 'Nope', look: LOOK }));
     expect(unknown.rows[0].cells[0].background).toBeUndefined();
     const table = schema.nodes['table'].create({ styleId: 'Probe' }, [
@@ -163,9 +156,5 @@ describe('tableToFlow applies the live style sheet', () => {
     const table = (resolved.pages[0].tables ?? [])[0];
     expect(table).toBeTruthy();
     expect(table.cells[0].background).toBe('#1F4E79');
-    const headerSeg = table.cells[0].lines[0]?.segments[0];
-    expect(headerSeg && 'font' in headerSeg ? headerSeg.font.bold : null).toBe(
-      true,
-    );
   });
 });

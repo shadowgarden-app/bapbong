@@ -76,15 +76,6 @@ const WORD_DEFAULT_LOOK: TableLook = {
   vBand: false,
 };
 
-/** What a table style hands the paragraphs of ONE cell: a font delta already
- *  merged into their `base`, plus the default run colour (which FontSpec does
- *  not carry — it rides here to become each run's colour unless a textColor
- *  mark says otherwise). */
-interface CellStyleCtx {
-  font?: Partial<FontSpec>;
-  color?: string;
-}
-
 /** Default point size per heading level (the run base for a heading paragraph;
  *  explicit fontSize marks — e.g. on imported headings — still override). */
 const HEADING_PT: Record<number, number> = {
@@ -155,12 +146,7 @@ function findMark(marks: readonly Mark[], name: string): Mark | undefined {
 
 /** Resolve a text node's marks into an InlineRun (font + color + link).
  *  `pos` is the absolute PM position of the run's first character. */
-function resolveRun(
-  node: PMNode,
-  base: FontSpec,
-  pos: number,
-  defaultColor?: string,
-): InlineRun {
+function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const marks = node.marks;
   const font: FontSpec = { ...base };
   if (findMark(marks, 'strong')) font.bold = true;
@@ -174,7 +160,7 @@ function resolveRun(
   const run: InlineRun = {
     text: node.text ?? '',
     font,
-    color: color ? String(color.attrs['color']) : defaultColor,
+    color: color ? String(color.attrs['color']) : undefined,
     link: link ? String(link.attrs['href']) : undefined,
     pos,
   };
@@ -326,7 +312,6 @@ function paragraphToFlow(
   allowFloats = false,
   marker?: string,
   markerStyle?: MarkerStyle,
-  cellStyle?: CellStyleCtx,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   // A heading paragraph sizes its runs from the level by default (bigger +
@@ -346,9 +331,7 @@ function paragraphToFlow(
   const floats: FlowFloat[] = [];
   node.forEach((child, offset) => {
     if (child.isText)
-      runs.push(
-        resolveRun(child, runBase, contentStart + offset, cellStyle?.color),
-      );
+      runs.push(resolveRun(child, runBase, contentStart + offset));
     else if (child.type.name === 'image') {
       const float = child.attrs['float'] as Omit<
         FlowFloat,
@@ -433,13 +416,8 @@ function paragraphToFlow(
   // line's runs (and the whole line of a run-less paragraph). A stale value
   // left by an edit cannot shrink text — the mark only ever RAISES a line's
   // maxima — so it is carried whether or not the paragraph has runs.
-  // The mark's font: the cell's style layer underneath the imported mark rPr
-  // — the layer is already IN `base` for the runs, but markFont overrides
-  // ride separately and one consumer seeds from the GLOBAL base (the float
-  // walk), so the style fields must travel with the override.
   const markFont = node.attrs['markFont'] as Partial<FontFace> | null;
-  if (markFont || cellStyle?.font)
-    flow.markFont = { ...cellStyle?.font, ...markFont };
+  if (markFont) flow.markFont = markFont;
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
   const spacing = effectiveSpacing(
@@ -512,19 +490,10 @@ function nodeToBlock(
   allowFloats = false,
   counter?: NumberingCounter,
   sheet?: TableStyleSheet | null,
-  cellStyle?: CellStyleCtx,
 ): FlowBlock | null {
   if (node.type.name === 'paragraph') {
     const m = markerFor(node, counter);
-    return paragraphToFlow(
-      node,
-      base,
-      nodePos,
-      allowFloats,
-      m?.text,
-      m?.style,
-      cellStyle,
-    );
+    return paragraphToFlow(node, base, nodePos, allowFloats, m?.text, m?.style);
   }
   if (node.type.name === 'table')
     return tableToFlow(node, base, nodePos, counter, sheet);
@@ -584,45 +553,24 @@ function tableToFlow(
             header: rowNode.attrs['header'] === true,
           })
         : undefined;
-      // The layer's font joins the cell's BASE (so measuring sees it); its
-      // colour rides beside (FontSpec has no colour channel).
-      const styleFont = layer?.font;
-      const face: Partial<FontSpec> | undefined = styleFont
-        ? {
-            ...(styleFont.family !== undefined && {
-              family: styleFont.family,
-            }),
-            ...(styleFont.sizePt !== undefined && {
-              sizePt: styleFont.sizePt,
-            }),
-            ...(styleFont.bold !== undefined && { bold: styleFont.bold }),
-            ...(styleFont.italic !== undefined && {
-              italic: styleFont.italic,
-            }),
-          }
-        : undefined;
-      const cellBase = face ? { ...base, ...face } : base;
-      const cellStyle: CellStyleCtx | undefined =
-        face || styleFont?.color
-          ? {
-              ...(face && Object.keys(face).length > 0 && { font: face }),
-              ...(styleFont?.color !== undefined && {
-                color: styleFont.color,
-              }),
-            }
-          : undefined;
+      // The layer's FONT deliberately does not flow: run fonts are still
+      // baked into marks at import, and the mark model has no explicit-off
+      // (no "bold: false" mark) — a live bold under a baked strong mark
+      // cannot be toggled away, so applying both broke ⌘B in styled headers.
+      // Fonts travel exclusively through marks (applyTableStyle rewrites
+      // them on a style change) until marks learn negation; then this layer
+      // regains its font half and the bake comes off.
       const content: FlowBlock[] = [];
       cellNode.forEach((child, childOffset) => {
         // Cells keep anchored floats: layoutFlow positions them inside the
         // cell box (painted at their offsets; text doesn't wrap around them).
         const block = nodeToBlock(
           child,
-          cellBase,
+          base,
           cellPos + 1 + childOffset,
           true,
           counter,
           sheet,
-          cellStyle,
         );
         if (block) content.push(block);
       });
