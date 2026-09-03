@@ -7,6 +7,7 @@ import {
   type NumberingCounter,
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
+import { cellStyleLayer } from '@shadow-garden/bapbong-contracts';
 import type {
   Align,
   BorderSide,
@@ -50,6 +51,8 @@ import type {
   ResolvedTable,
   SectionConfig,
   TableBorders,
+  TableLook,
+  TableStyleSheet,
   TabStop,
 } from '@shadow-garden/bapbong-contracts';
 
@@ -60,6 +63,27 @@ const DEFAULT_FONT: FontSpec = {
   italic: false,
 };
 const PT_TO_PX = 96 / 72;
+
+/** Word's tblLook when a table declares none: 0x04A0 — firstRow + firstCol
+ *  on, horizontal banding allowed, everything else off (MS-OI29500 §17.4.55;
+ *  the importer applies the same default when parsing w:tblLook). */
+const WORD_DEFAULT_LOOK: TableLook = {
+  firstRow: true,
+  lastRow: false,
+  firstCol: true,
+  lastCol: false,
+  hBand: true,
+  vBand: false,
+};
+
+/** What a table style hands the paragraphs of ONE cell: a font delta already
+ *  merged into their `base`, plus the default run colour (which FontSpec does
+ *  not carry — it rides here to become each run's colour unless a textColor
+ *  mark says otherwise). */
+interface CellStyleCtx {
+  font?: Partial<FontSpec>;
+  color?: string;
+}
 
 /** Default point size per heading level (the run base for a heading paragraph;
  *  explicit fontSize marks — e.g. on imported headings — still override). */
@@ -107,6 +131,11 @@ interface Ctx {
    *  config's, else current Word). Rules that differ by Word version ask
    *  this and nothing else. */
   compat: DocCompat;
+  /** doc.attrs.tableStyles — the resolved table-style sheet, applied per
+   *  cell at flatten time. Read once per layout; the table CACHE stays
+   *  keyed on node identity because every editor path that changes a
+   *  table's styling changes the table's attrs (and so the node). */
+  sheet?: TableStyleSheet | null;
 }
 
 /** Current Word's rules — what an editor-authored document (no settings.xml
@@ -126,7 +155,12 @@ function findMark(marks: readonly Mark[], name: string): Mark | undefined {
 
 /** Resolve a text node's marks into an InlineRun (font + color + link).
  *  `pos` is the absolute PM position of the run's first character. */
-function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
+function resolveRun(
+  node: PMNode,
+  base: FontSpec,
+  pos: number,
+  defaultColor?: string,
+): InlineRun {
   const marks = node.marks;
   const font: FontSpec = { ...base };
   if (findMark(marks, 'strong')) font.bold = true;
@@ -140,7 +174,7 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const run: InlineRun = {
     text: node.text ?? '',
     font,
-    color: color ? String(color.attrs['color']) : undefined,
+    color: color ? String(color.attrs['color']) : defaultColor,
     link: link ? String(link.attrs['href']) : undefined,
     pos,
   };
@@ -292,6 +326,7 @@ function paragraphToFlow(
   allowFloats = false,
   marker?: string,
   markerStyle?: MarkerStyle,
+  cellStyle?: CellStyleCtx,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   // A heading paragraph sizes its runs from the level by default (bigger +
@@ -311,7 +346,9 @@ function paragraphToFlow(
   const floats: FlowFloat[] = [];
   node.forEach((child, offset) => {
     if (child.isText)
-      runs.push(resolveRun(child, runBase, contentStart + offset));
+      runs.push(
+        resolveRun(child, runBase, contentStart + offset, cellStyle?.color),
+      );
     else if (child.type.name === 'image') {
       const float = child.attrs['float'] as Omit<
         FlowFloat,
@@ -396,8 +433,13 @@ function paragraphToFlow(
   // line's runs (and the whole line of a run-less paragraph). A stale value
   // left by an edit cannot shrink text — the mark only ever RAISES a line's
   // maxima — so it is carried whether or not the paragraph has runs.
+  // The mark's font: the cell's style layer underneath the imported mark rPr
+  // — the layer is already IN `base` for the runs, but markFont overrides
+  // ride separately and one consumer seeds from the GLOBAL base (the float
+  // walk), so the style fields must travel with the override.
   const markFont = node.attrs['markFont'] as Partial<FontFace> | null;
-  if (markFont) flow.markFont = markFont;
+  if (markFont || cellStyle?.font)
+    flow.markFont = { ...cellStyle?.font, ...markFont };
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
   const spacing = effectiveSpacing(
@@ -469,13 +511,23 @@ function nodeToBlock(
   nodePos: number,
   allowFloats = false,
   counter?: NumberingCounter,
+  sheet?: TableStyleSheet | null,
+  cellStyle?: CellStyleCtx,
 ): FlowBlock | null {
   if (node.type.name === 'paragraph') {
     const m = markerFor(node, counter);
-    return paragraphToFlow(node, base, nodePos, allowFloats, m?.text, m?.style);
+    return paragraphToFlow(
+      node,
+      base,
+      nodePos,
+      allowFloats,
+      m?.text,
+      m?.style,
+      cellStyle,
+    );
   }
   if (node.type.name === 'table')
-    return tableToFlow(node, base, nodePos, counter);
+    return tableToFlow(node, base, nodePos, counter, sheet);
   return null;
 }
 
@@ -496,39 +548,112 @@ function tableToFlow(
   base: FontSpec,
   nodePos: number,
   counter?: NumberingCounter,
+  sheet?: TableStyleSheet | null,
 ): FlowTable {
+  // The table's LIVE style, if the document carries one: cellStyleLayer
+  // hands each cell the layer its position earns, and everything the cell's
+  // own attrs declare rides ON TOP — direct formatting wins, per property.
+  const styleId = node.attrs['styleId'] as string | null;
+  const style = (styleId ? sheet?.[styleId] : undefined) ?? undefined;
+  const look = (node.attrs['look'] as TableLook | null) ?? WORD_DEFAULT_LOOK;
+  const rowCount = node.childCount;
+  let colCount = 0;
+  if (style)
+    node.forEach((rowNode) => {
+      let n = 0;
+      rowNode.forEach((c) => (n += Number(c.attrs['colspan']) || 1));
+      colCount = Math.max(colCount, n);
+    });
+  let rowIdx = 0;
   const rows: FlowTableRow[] = [];
   node.forEach((rowNode, rowOffset) => {
     const rowPos = nodePos + 1 + rowOffset;
     const cells: FlowTableCell[] = [];
+    let colIdx = 0;
     rowNode.forEach((cellNode, cellOffset) => {
       const cellPos = rowPos + 1 + cellOffset;
+      const a = cellNode.attrs;
+      const colspan = Number(a['colspan']) || 1;
+      const layer = style
+        ? cellStyleLayer(style, look, {
+            row: rowIdx,
+            rowCount,
+            col: colIdx,
+            colspan,
+            colCount,
+            header: rowNode.attrs['header'] === true,
+          })
+        : undefined;
+      // The layer's font joins the cell's BASE (so measuring sees it); its
+      // colour rides beside (FontSpec has no colour channel).
+      const styleFont = layer?.font;
+      const face: Partial<FontSpec> | undefined = styleFont
+        ? {
+            ...(styleFont.family !== undefined && {
+              family: styleFont.family,
+            }),
+            ...(styleFont.sizePt !== undefined && {
+              sizePt: styleFont.sizePt,
+            }),
+            ...(styleFont.bold !== undefined && { bold: styleFont.bold }),
+            ...(styleFont.italic !== undefined && {
+              italic: styleFont.italic,
+            }),
+          }
+        : undefined;
+      const cellBase = face ? { ...base, ...face } : base;
+      const cellStyle: CellStyleCtx | undefined =
+        face || styleFont?.color
+          ? {
+              ...(face && Object.keys(face).length > 0 && { font: face }),
+              ...(styleFont?.color !== undefined && {
+                color: styleFont.color,
+              }),
+            }
+          : undefined;
       const content: FlowBlock[] = [];
       cellNode.forEach((child, childOffset) => {
         // Cells keep anchored floats: layoutFlow positions them inside the
         // cell box (painted at their offsets; text doesn't wrap around them).
         const block = nodeToBlock(
           child,
-          base,
+          cellBase,
           cellPos + 1 + childOffset,
           true,
           counter,
+          sheet,
+          cellStyle,
         );
         if (block) content.push(block);
       });
-      const a = cellNode.attrs;
+      const aBg = a['background'] as string | null;
+      const aBorders = a['borders'] as TableBorders | null;
+      const aVAlign = a['vAlign'] as 'center' | 'bottom' | null;
+      const aPadding = a['padding'] as CellPadding | null;
+      // Per property: direct value, else the style layer's (whose explicit
+      // null — "no fill", "reset alignment" — reads as none, not as absent).
+      const background = aBg ?? layer?.background ?? undefined;
+      const borders = layer?.borders
+        ? { ...layer.borders, ...(aBorders ?? {}) }
+        : (aBorders ?? undefined);
+      const vAlign = aVAlign ?? layer?.vAlign ?? undefined;
+      const padding = layer?.padding
+        ? { ...layer.padding, ...(aPadding ?? {}) }
+        : (aPadding ?? undefined);
       cells.push({
-        colspan: Number(a['colspan']) || 1,
+        colspan,
         rowspan: Number(a['rowspan']) || 1,
         colwidth: (a['colwidth'] as number[] | null) ?? null,
-        background: (a['background'] as string | null) ?? undefined,
-        vAlign: (a['vAlign'] as 'center' | 'bottom' | null) ?? undefined,
-        borders: (a['borders'] as TableBorders | null) ?? undefined,
+        background: background ?? undefined,
+        vAlign: vAlign ?? undefined,
+        borders,
         diagonals: (a['diagonals'] as CellDiagonals | null) ?? undefined,
-        padding: (a['padding'] as CellPadding | null) ?? undefined,
+        padding,
         content,
       });
+      colIdx += colspan;
     });
+    rowIdx++;
     const row: FlowTableRow = { cells };
     if (rowNode.attrs['header'] === true) row.header = true;
     if (rowNode.attrs['cantSplit'] === true) row.cantSplit = true;
@@ -540,13 +665,18 @@ function tableToFlow(
     rows.push(row);
   });
   const flow: FlowTable = { type: 'table', rows };
-  const cellPadding = node.attrs['cellPadding'] as CellPadding | null;
+  // Table-level: the table's own attrs, else what the style contributes.
+  const cellPadding =
+    (node.attrs['cellPadding'] as CellPadding | null) ??
+    style?.table.cellPadding;
   if (cellPadding) flow.cellPadding = cellPadding;
-  const align = node.attrs['align'] as 'center' | 'right' | null;
+  const align =
+    (node.attrs['align'] as 'center' | 'right' | null) ?? style?.table.align;
   if (align) flow.align = align;
   const indent = node.attrs['indent'] as number | null;
   if (indent != null) flow.indent = indent;
-  const borders = node.attrs['borders'] as TableBorders | null;
+  const borders =
+    (node.attrs['borders'] as TableBorders | null) ?? style?.table.borders;
   if (borders) flow.borders = borders;
   return flow;
 }
@@ -561,9 +691,10 @@ export function toFlowBlocks(
   const counter = createNumberingCounter(
     doc.attrs['numbering'] as NumberingDefs | null,
   );
+  const sheet = doc.attrs['tableStyles'] as TableStyleSheet | null;
   const blocks: FlowBlock[] = [];
   doc.forEach((node, offset) => {
-    const block = nodeToBlock(node, base, offset, allowFloats, counter);
+    const block = nodeToBlock(node, base, offset, allowFloats, counter, sheet);
     if (block) blocks.push(block);
   });
   return blocks;
@@ -5195,6 +5326,9 @@ export function layout(
 ): ResolvedLayout {
   config = sanitizeConfig(config);
   const ctx = buildCtx(config, doc.attrs['compat'] as DocCompat | null);
+  // One ctx serves body AND chrome — headers/footers share the document's
+  // styles part, so their tables take the same sheet.
+  ctx.sheet = (doc.attrs['tableStyles'] as TableStyleSheet | null) ?? null;
   setEquationCtx(ctx);
   const { page } = config;
   const left = contentLeftOf(page);
@@ -5485,7 +5619,7 @@ export function layout(
       }
       perf.bump('table.miss');
       const table = layoutTable(
-        tableToFlow(node, ctx.base, offset, counter),
+        tableToFlow(node, ctx.base, offset, counter, ctx.sheet),
         bLeft,
         colRight,
         ctx,
