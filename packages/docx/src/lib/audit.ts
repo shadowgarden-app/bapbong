@@ -50,6 +50,13 @@ export interface AuditEntry {
    *  "mark comment" / "node foo" for export-side model types. */
   key: string;
   count: number;
+  /** Element path of the FIRST occurrence, from the part root down to the
+   *  entry itself, with identifying attributes on the containers that have
+   *  one — "w:styles/w:style[TableNormal]/w:tblPr/w:tblCellMar/w:top". One
+   *  sample only: occurrences of the same key in other places still count
+   *  into this entry, the path just says where to start looking. Import
+   *  side only (export entries are model types, they have no XML path). */
+  path?: string;
 }
 
 /** An entry mid-collection, before bucketing: same as AuditEntry plus the
@@ -659,7 +666,8 @@ function classify(counts: Map<string, Counted>): {
   const aggregate = (into: Map<string, AuditEntry>, e: Counted) => {
     const agg = into.get(e.key);
     if (agg) agg.count += e.count;
-    else into.set(e.key, { part: '*', key: e.key, count: e.count });
+    else
+      into.set(e.key, { part: '*', key: e.key, count: e.count, path: e.path });
   };
   for (const e of counts.values()) {
     const tag = e.key.split(' @')[0];
@@ -671,7 +679,7 @@ function classify(counts: Map<string, Counted>): {
     } else if (e.unreferenced) {
       aggregate(deadByKey, e);
     } else {
-      unknown.push({ part: e.part, key: e.key, count: e.count });
+      unknown.push({ part: e.part, key: e.key, count: e.count, path: e.path });
     }
   }
   const byCount = (a: AuditEntry, b: AuditEntry) =>
@@ -703,14 +711,15 @@ function emitReport(report: AuditReport): void {
     0,
     ...[...unknown, ...inert, ...unref, ...ignored].map((e) => e.part.length),
   );
+  const at = (e: AuditEntry) => (e.path ? `  — ${e.path}` : '');
   for (const e of unknown)
-    emitLine(`  UNKNOWN ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
+    emitLine(`  UNKNOWN ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}${at(e)}`);
   for (const e of inert)
-    emitLine(`  inert   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
+    emitLine(`  inert   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}${at(e)}`);
   for (const e of unref)
-    emitLine(`  unref   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
+    emitLine(`  unref   ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}${at(e)}`);
   for (const e of ignored)
-    emitLine(`  ignored ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}`);
+    emitLine(`  ignored ${e.part.padEnd(pad)}  ${e.key}  ×${e.count}${at(e)}`);
   if (grouped) c.groupEnd?.();
 }
 
@@ -766,23 +775,47 @@ function isDeadDeclaration(n: OoxmlNode): boolean {
  *  still sees the node and its value — and it belongs to the bucket identity,
  *  not to the key: two `wp:wrapSquare` elements with different `wrapText`
  *  values must not collapse into one verdict. */
+/** Containers whose path segment is ambiguous without an identity — decorate
+ *  with the attribute that names them, "w:style[TableGrid]" — so a reported
+ *  path pins THE occurrence, not just the shape of one. */
+const PATH_IDS: Record<string, string> = {
+  'w:style': 'w:styleId',
+  'w:tblStylePr': 'w:type',
+  'w:abstractNum': 'w:abstractNumId',
+  'w:num': 'w:numId',
+  'w:lvl': 'w:ilvl',
+};
+
+function pathSegment(n: OoxmlNode): string {
+  const idAttr = PATH_IDS[n.name];
+  const id = idAttr && n.attrs[idAttr];
+  return id !== undefined && id !== '' ? `${n.name}[${id}]` : n.name;
+}
+
 function collectPart(
   part: string,
   root: OoxmlNode,
   counts: Map<string, Counted>,
 ): void {
-  const bump = (key: string, inert: boolean, dead: boolean) => {
+  const bump = (key: string, inert: boolean, dead: boolean, path: string) => {
     const id = `${part} ${key} ${inert} ${dead}`;
     const e = counts.get(id);
     if (e) e.count++;
-    else counts.set(id, { part, key, count: 1, inert, unreferenced: dead });
+    else
+      counts.set(id, { part, key, count: 1, inert, unreferenced: dead, path });
   };
-  const walk = (node: OoxmlNode, parentVisited: boolean, dead: boolean) => {
+  const walk = (
+    node: OoxmlNode,
+    parentVisited: boolean,
+    dead: boolean,
+    path: string,
+  ) => {
     for (const c of node.children) {
       if (subtrees.has(c)) continue; // consumed wholesale by design
       // A declaration nothing points at makes a dead zone for its subtree.
       const inDead = dead || isDeadDeclaration(c);
       const v = visited.has(c);
+      const p = path === '' ? pathSegment(c) : `${path}/${pathSegment(c)}`;
       if (v) {
         const asked = readAttrs.get(c);
         for (const a of Object.keys(c.attrs)) {
@@ -793,15 +826,16 @@ function collectPart(
               `${keyOf(c)} @${a}`,
               isInertAttr(c.name, a, c.attrs[a], c),
               inDead,
+              `${p} @${a}`,
             );
         }
       } else if (parentVisited) {
-        bump(keyOf(c), isInertTag(c), inDead);
+        bump(keyOf(c), isInertTag(c), inDead, p);
       }
-      walk(c, v, inDead);
+      walk(c, v, inDead, p);
     }
   };
-  walk(root, true, false); // the synthetic #root counts as visited
+  walk(root, true, false, ''); // the synthetic #root counts as visited
 }
 
 export const audit = {

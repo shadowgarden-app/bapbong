@@ -175,10 +175,14 @@ h2 {
   color: #6f6d66;
 }
 .a-key {
+  flex: none;
+}
+.a-path {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #8a8a84;
 }
 .a-count {
   flex: none;

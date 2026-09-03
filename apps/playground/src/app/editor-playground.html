@@ -72,6 +72,7 @@
       <span class="a-kind unknown">UNKNOWN</span>
       <span class="a-part">{{ e.part }}</span>
       <span class="a-key">{{ e.key }}</span>
+      <span class="a-path" [title]="e.path ?? ''">{{ e.path }}</span>
       <span class="a-count">×{{ e.count }}</span>
     </div>
     } @if (showAuditInert()) { @for (e of auditInert(); track e.part + e.key) {
@@ -79,6 +80,7 @@
       <span class="a-kind">inert</span>
       <span class="a-part">{{ e.part }}</span>
       <span class="a-key">{{ e.key }}</span>
+      <span class="a-path" [title]="e.path ?? ''">{{ e.path }}</span>
       <span class="a-count">×{{ e.count }}</span>
     </div>
     } } @if (showAuditUnref()) { @for (e of auditUnref(); track e.part + e.key)
@@ -87,6 +89,7 @@
       <span class="a-kind">unref</span>
       <span class="a-part">{{ e.part }}</span>
       <span class="a-key">{{ e.key }}</span>
+      <span class="a-path" [title]="e.path ?? ''">{{ e.path }}</span>
       <span class="a-count">×{{ e.count }}</span>
     </div>
     } } @if (showAuditIgnored()) { @for (e of auditIgnored(); track e.part +
@@ -95,6 +98,7 @@
       <span class="a-kind">ignored</span>
       <span class="a-part">{{ e.part }}</span>
       <span class="a-key">{{ e.key }}</span>
+      <span class="a-path" [title]="e.path ?? ''">{{ e.path }}</span>
       <span class="a-count">×{{ e.count }}</span>
     </div>
     } }
