@@ -1,4 +1,10 @@
 import JSZip from 'jszip';
+import {
+  cellStyleLayer,
+  type ResolvedTableStyle,
+  type TableLook,
+  type TableStyleSheet,
+} from '@shadow-garden/bapbong-contracts';
 import { Mark, Schema } from 'prosemirror-model';
 import {
   bookmarkLabel,
@@ -1818,20 +1824,40 @@ describe('importDocx', () => {
     const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
     const cellAt = (r: number, c: number) => doc.child(0).child(r).child(c);
 
+    // The table rides the LIVE path: its attrs carry only what each cell
+    // declares, and the layering below happens in the layout, per cell, from
+    // the sheet the doc carries. The semantics being asserted are unchanged —
+    // only where they are computed moved.
+    const table = doc.child(0);
+    const sheet = doc.attrs['tableStyles'] as TableStyleSheet;
+    const style = sheet[String(table.attrs['styleId'])] as ResolvedTableStyle;
+    const look = table.attrs['look'] as TableLook;
+    const at = (row: number, col: number) =>
+      cellStyleLayer(style, look, {
+        row,
+        rowCount: 3,
+        col,
+        colspan: 1,
+        colCount: 2,
+        header: false,
+      });
+
     // Row 0 is firstRow: its branch beats the style's own w:tcPr…
-    expect(cellAt(0, 0).attrs['background']).toBe('#336699');
-    expect(cellAt(0, 0).attrs['vAlign']).toBe('bottom');
+    expect(at(0, 0).background).toBe('#336699');
+    expect(at(0, 0).vAlign).toBe('bottom');
     // …and w:tcMar merges: left comes from the branch, top from the style.
-    expect(cellAt(0, 0).attrs['padding']).toMatchObject({ left: 30, top: 20 });
-    // …while the cell's own w:shd still beats the branch.
+    expect(at(0, 0).padding).toMatchObject({ left: 30, top: 20 });
+    // …while the cell's own w:shd still beats the branch — it rides the
+    // ATTR, above whatever the layer says.
     expect(cellAt(0, 1).attrs['background']).toBe('#FF0000');
+    expect(cellAt(0, 0).attrs['background']).toBe(null);
 
     // Row 1 is the first body row → band1Horz, whose fill="auto" CLEARS the
-    // style's EEEEEE rather than leaving it in place.
-    expect(cellAt(1, 0).attrs['background']).toBe(null);
-    expect(cellAt(1, 0).attrs['vAlign']).toBe('center'); // still the style's
+    // style's EEEEEE rather than leaving it in place: an explicit null.
+    expect(at(1, 0).background).toBe(null);
+    expect(at(1, 0).vAlign).toBe('center'); // still the style's
     // Row 2 is band2Horz, which this style does not declare → style's own fill.
-    expect(cellAt(2, 0).attrs['background']).toBe('#EEEEEE');
+    expect(at(2, 0).background).toBe('#EEEEEE');
   });
 
   it("maps a branch's insideH/insideV to its own region, not the table", async () => {
@@ -1868,11 +1894,22 @@ describe('importDocx', () => {
       </w:tbl>
     </w:body></w:document>`;
     const { doc } = await importDocx(await makeDocx(documentXml, stylesXml));
+    // Live path: region borders come out of the sheet per cell (the cells'
+    // attrs stay bare — nothing direct was declared).
+    const table = doc.child(0);
+    const sheet = doc.attrs['tableStyles'] as TableStyleSheet;
+    const style = sheet[String(table.attrs['styleId'])] as ResolvedTableStyle;
+    const look = table.attrs['look'] as TableLook;
+    expect(table.child(0).child(1).attrs['borders']).toBe(null);
     const borders = (r: number, c: number) =>
-      doc.child(0).child(r).child(c).attrs['borders'] as Record<
-        string,
-        { color?: string } | false
-      > | null;
+      cellStyleLayer(style, look, {
+        row: r,
+        rowCount: 2,
+        col: c,
+        colspan: 1,
+        colCount: 3,
+        header: false,
+      }).borders ?? (null as Record<string, { color?: string } | false> | null);
 
     // First row, middle cell: the region's top and bottom edges are this
     // cell's own, and both vertical edges are interior → insideV.

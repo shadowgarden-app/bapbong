@@ -2923,8 +2923,10 @@ interface LogicalCell {
   colspan: number;
   vMerge: 'restart' | 'continue' | null;
   colwidth: number[] | null;
-  background: string | null;
-  vAlign: string | null;
+  /** `false` = the cell EXPLICITLY clears (live path): shd fill="auto",
+   *  vAlign "top"/"both" — must block the style layer, unlike null. */
+  background: string | false | null;
+  vAlign: string | false | null;
   borders: TableBorders | null;
   diagonals: CellDiagonals | null;
   padding: {
@@ -3415,6 +3417,35 @@ function resolveCellProps(
   return { background, vAlign, padding };
 }
 
+/**
+ * One cell's OWN w:tcPr-borne properties, for a table on the live style
+ * path: what the cell itself declares and nothing from the style. The
+ * distinction resolveCellProps cannot make matters here — a declared
+ * fill="auto" (or vAlign "top"/"both") comes back as an EXPLICIT `false`,
+ * because it must block the style layer underneath, while an absent element
+ * is null and lets the layer through.
+ */
+function directCellProps(
+  tcPr: OoxmlNode | undefined,
+  ctx: Ctx,
+): {
+  background: string | false | null;
+  vAlign: 'center' | 'bottom' | false | null;
+  padding: CellPadding | null;
+} {
+  const shd = tcPr && child(tcPr, 'w:shd');
+  const background = shd ? (shdFill(shd, ctx.resolveTheme) ?? false) : null;
+  const vAlignEl = tcPr && child(tcPr, 'w:vAlign');
+  const va = attrOf(vAlignEl, 'w:val');
+  const vAlign =
+    va === undefined ? null : va === 'center' || va === 'bottom' ? va : false;
+  return {
+    background,
+    vAlign,
+    padding: parseMarginsEl(tcPr && child(tcPr, 'w:tcMar')),
+  };
+}
+
 /** Run `fn` with `layer` as the innermost table layer. */
 function withTableLayer<T>(
   ctx: Ctx,
@@ -3641,6 +3672,7 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
   try {
     return parseTableRows(tbl, ctx, {
       styleId,
+      live: !!styleId && !!ctx.schema.nodes['table'].spec.attrs?.['styleId'],
       cond: ctx.styles.resolveTableStyleCond(styleId),
       look: tblLookFlags(child(tbl, 'w:tblPr')),
       bands: ctx.styles.resolveTableBandSizes(styleId),
@@ -3656,6 +3688,10 @@ function parseTable(tbl: OoxmlNode, ctx: Ctx): PMNode {
 interface TableCond {
   /** w:tblPr/w:tblStyle of this table, for the resolvers that need it again. */
   styleId: string | undefined;
+  /** True when this table rides the LIVE style path: it names a style, the
+   *  schema carries the theming attrs, and the layout applies the sheet —
+   *  so the importer must NOT bake the style's cell layer in as well. */
+  live: boolean;
   cond: Map<string, CondLayer>;
   look: TblLook;
   bands: { row: number; col: number };
@@ -3726,14 +3762,19 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
       };
       const branches = cellBranches(tblCond, pos);
       if (tableStyleShadow) shadowCheckCell(tblCond, pos, branches, ctx);
-      const { background, vAlign, padding } = resolveCellProps(
-        [
-          ...tblCond.styleTcPr,
-          ...branches.flatMap((b) => b.layer.tcPr),
-          ...(tcPr ? [tcPr] : []),
-        ],
-        ctx,
-      );
+      // Live path: the cell attrs carry ONLY what the cell declares; the
+      // layout re-derives the style layer per cell from the doc's sheet.
+      // Baked path (tables naming no style): merged as ever.
+      const { background, vAlign, padding } = tblCond.live
+        ? directCellProps(tcPr, ctx)
+        : resolveCellProps(
+            [
+              ...tblCond.styleTcPr,
+              ...branches.flatMap((b) => b.layer.tcPr),
+              ...(tcPr ? [tcPr] : []),
+            ],
+            ctx,
+          );
       const ownBorders = parseBordersEl(
         child(tcPr, 'w:tcBorders'),
         CELL_SIDES,
@@ -3748,14 +3789,12 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
           })
         : ownBorders;
       // The table style's conditional borders are the lowest layer: they fill
-      // the sides nothing else claimed.
-      const fromStyle = branchBorders(
-        branches,
-        pos,
-        tblCond.look,
-        tblCond.bands,
-        ctx,
-      );
+      // the sides nothing else claimed. On the live path the LAYOUT is that
+      // layer (from the sheet), so only the direct + row-exception sides may
+      // ride the attr.
+      const fromStyle = tblCond.live
+        ? null
+        : branchBorders(branches, pos, tblCond.look, tblCond.bands, ctx);
       const borders = fromStyle ? { ...fromStyle, ...(withEx ?? {}) } : withEx;
       const diagonals = parseDiagonals(
         child(tcPr, 'w:tcBorders'),
@@ -3896,7 +3935,7 @@ function parseTableRows(tbl: OoxmlNode, ctx: Ctx, tblCond: TableCond): PMNode {
   // naming NO style stay fully baked on purpose — the default table style's
   // contributions keep flowing through the resolvers as before, and the
   // live path only ever deals with explicitly styled tables.
-  if (tblCond.styleId && ctx.schema.nodes['table'].spec.attrs?.['styleId']) {
+  if (tblCond.live && tblCond.styleId) {
     ctx.usedTableStyles.add(tblCond.styleId);
     attrs['styleId'] = tblCond.styleId;
     attrs['look'] = { ...tblCond.look };

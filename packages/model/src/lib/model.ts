@@ -80,8 +80,15 @@ function pastedCellAttrs(el: unknown) {
     colspan: span('colspan'),
     rowspan: span('rowspan'),
     colwidth: dataJson(el, 'data-colwidth'),
-    background: bg ? bg[1].trim() : null,
-    vAlign: e.getAttribute('data-valign'),
+    background: bg
+      ? bg[1].trim()
+      : e.getAttribute('data-background') === 'none'
+        ? false
+        : null,
+    vAlign:
+      e.getAttribute('data-valign') === 'none'
+        ? false
+        : e.getAttribute('data-valign'),
     borders: dataJson(el, 'data-borders'),
     diagonals: dataJson(el, 'data-diagonals'),
     padding: dataJson(el, 'data-padding'),
@@ -508,8 +515,13 @@ export const schema = new Schema({
         colspan: { default: 1 },
         rowspan: { default: 1 },
         colwidth: { default: null }, // px widths of the spanned columns, or null
-        background: { default: null }, // w:shd w:fill — cell fill "#RRGGBB"
-        vAlign: { default: null }, // w:vAlign — 'center' | 'bottom' (top default)
+        // w:shd w:fill — cell fill "#RRGGBB". `false` is an EXPLICIT no-fill
+        // (w:fill="auto"), which must beat a table style's fill; null means
+        // the cell says nothing and the style layer may paint.
+        background: { default: null },
+        // w:vAlign — 'center' | 'bottom' (top is Word's default). `false` is
+        // an explicit reset ("top"/"both" declared), beating a style's.
+        vAlign: { default: null },
         borders: { default: null }, // w:tcBorders per-side visibility override
         // w:tcBorders/w:tl2br + w:br2tl — rules across the cell's corners
         diagonals: { default: null },
@@ -530,10 +542,13 @@ export const schema = new Schema({
           attrs['rowspan'] = String(node.attrs['rowspan']);
         if (node.attrs['background'])
           attrs['style'] = `background-color: ${node.attrs['background']}`;
+        else if (node.attrs['background'] === false)
+          attrs['data-background'] = 'none';
         if (node.attrs['colwidth'])
           attrs['data-colwidth'] = JSON.stringify(node.attrs['colwidth']);
         if (node.attrs['vAlign'])
           attrs['data-valign'] = String(node.attrs['vAlign']);
+        else if (node.attrs['vAlign'] === false) attrs['data-valign'] = 'none';
         if (node.attrs['borders'])
           attrs['data-borders'] = JSON.stringify(node.attrs['borders']);
         if (node.attrs['diagonals'])

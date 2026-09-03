@@ -955,13 +955,19 @@ function cellXml(cell: PMNode, ctx: ExportCtx): string {
           : CELL_SIDES,
       ),
     );
-  const bg = a['background'] as string | null;
+  const bg = a['background'] as string | false | null;
+  // `false` is the live path's explicit clear (shd fill="auto" beating the
+  // table style) — written back as exactly that, so Word keeps blocking the
+  // style's fill too. Same for vAlign's reset, whose spelling is "top".
   if (bg)
     pr.push(
       `<w:shd w:val="clear" w:color="auto" w:fill="${bg.replace(/^#/, '')}"/>`,
     );
-  const vAlign = a['vAlign'] as string | null;
+  else if (bg === false)
+    pr.push('<w:shd w:val="clear" w:color="auto" w:fill="auto"/>');
+  const vAlign = a['vAlign'] as string | false | null;
   if (vAlign) pr.push(`<w:vAlign w:val="${vAlign}"/>`);
+  else if (vAlign === false) pr.push('<w:vAlign w:val="top"/>');
   const padding = a['padding'] as {
     left?: number;
     right?: number;

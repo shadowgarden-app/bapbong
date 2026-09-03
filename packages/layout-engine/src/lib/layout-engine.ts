@@ -626,17 +626,21 @@ function tableToFlow(
         );
         if (block) content.push(block);
       });
-      const aBg = a['background'] as string | null;
+      const aBg = a['background'] as string | false | null;
       const aBorders = a['borders'] as TableBorders | null;
-      const aVAlign = a['vAlign'] as 'center' | 'bottom' | null;
+      const aVAlign = a['vAlign'] as 'center' | 'bottom' | false | null;
       const aPadding = a['padding'] as CellPadding | null;
-      // Per property: direct value, else the style layer's (whose explicit
-      // null — "no fill", "reset alignment" — reads as none, not as absent).
-      const background = aBg ?? layer?.background ?? undefined;
+      // Per property: direct value, else the style layer's. Two spellings of
+      // "none" and they differ: the ATTR's `false` is the cell explicitly
+      // clearing (blocks the layer), the LAYER's null is the style declaring
+      // no fill/reset (blocks nothing above, paints nothing itself).
+      const background =
+        aBg === false ? undefined : (aBg ?? layer?.background ?? undefined);
       const borders = layer?.borders
         ? { ...layer.borders, ...(aBorders ?? {}) }
         : (aBorders ?? undefined);
-      const vAlign = aVAlign ?? layer?.vAlign ?? undefined;
+      const vAlign =
+        aVAlign === false ? undefined : (aVAlign ?? layer?.vAlign ?? undefined);
       const padding = layer?.padding
         ? { ...layer.padding, ...(aPadding ?? {}) }
         : (aPadding ?? undefined);

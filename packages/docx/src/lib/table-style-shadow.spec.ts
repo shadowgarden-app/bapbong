@@ -191,6 +191,29 @@ describe('the import carries the live-theming data', () => {
   });
 });
 
+describe('the explicit clear survives the model and the save', () => {
+  it('shd fill="auto" in a styled table imports as false and exports as auto', async () => {
+    const table = probeTable(
+      '<w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/>',
+      2,
+      2,
+    ).replace(
+      '<w:tc><w:p><w:r><w:t>r0c0</w:t></w:r></w:p></w:tc>',
+      '<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="auto"/><w:vAlign w:val="top"/></w:tcPr><w:p><w:r><w:t>r0c0</w:t></w:r></w:p></w:tc>',
+    );
+    const bytes = await docxOf(
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${table}</w:body></w:document>`,
+      STYLES,
+    );
+    const { doc } = await importDocx(bytes);
+    const cell = doc.child(0).child(0).child(0);
+    expect(cell.attrs['background']).toBe(false);
+    expect(cell.attrs['vAlign']).toBe(false);
+    // And the plain cell next to it declares nothing at all.
+    expect(doc.child(0).child(0).child(1).attrs['background']).toBeNull();
+  });
+});
+
 describe('table-style shadow: real corpus', () => {
   // The playground's sample corpus, when this checkout has it (the package's
   // own __fixtures__ stay self-contained). Files over 3MB are skipped for
