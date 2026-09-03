@@ -719,6 +719,38 @@ function chromeRefsOf(sectPr: string): {
 }
 
 /** A paragraph's w:pPr children (no wrapper). */
+type ExportSpacing = {
+  before?: number;
+  after?: number;
+  line?: number;
+  lineRule?: string;
+  beforeAuto?: boolean;
+  afterAuto?: boolean;
+};
+
+/** A paragraph-spacing value as a `w:spacing` element, or '' when it says
+ *  nothing. Shared by the paragraph's own pPr and the docDefaults floor. */
+function spacingXml(sp: ExportSpacing | null): string {
+  if (!sp) return '';
+  const at: string[] = [];
+  if (sp.before != null) at.push(`w:before="${pxToTwips(sp.before)}"`);
+  // The flag goes back out next to the resolved number, which is what Word
+  // itself writes: a consumer that implements auto spacing recomputes it and
+  // ignores w:before, one that does not still has a usable gap. Dropping the
+  // flag instead would silently turn "let Word decide" into a fixed value.
+  if (sp.beforeAuto) at.push('w:beforeAutospacing="1"');
+  if (sp.after != null) at.push(`w:after="${pxToTwips(sp.after)}"`);
+  if (sp.afterAuto) at.push('w:afterAutospacing="1"');
+  if (sp.line != null) {
+    const auto = sp.lineRule === 'auto' || sp.lineRule == null;
+    at.push(
+      `w:line="${auto ? Math.round(sp.line * 240) : pxToTwips(sp.line)}"`,
+    );
+    at.push(`w:lineRule="${sp.lineRule ?? 'auto'}"`);
+  }
+  return at.length ? `<w:spacing ${at.join(' ')}/>` : '';
+}
+
 function paraProps(node: PMNode, ctx: ExportCtx): string {
   const a = node.attrs;
   const out: string[] = [];
@@ -772,33 +804,8 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
       .join('');
     out.push(`<w:tabs>${stops}</w:tabs>`);
   }
-  const sp = a['spacing'] as {
-    before?: number;
-    after?: number;
-    line?: number;
-    lineRule?: string;
-    beforeAuto?: boolean;
-    afterAuto?: boolean;
-  } | null;
-  if (sp) {
-    const at: string[] = [];
-    if (sp.before != null) at.push(`w:before="${pxToTwips(sp.before)}"`);
-    // The flag goes back out next to the resolved number, which is what Word
-    // itself writes: a consumer that implements auto spacing recomputes it and
-    // ignores w:before, one that does not still has a usable gap. Dropping the
-    // flag instead would silently turn "let Word decide" into a fixed value.
-    if (sp.beforeAuto) at.push('w:beforeAutospacing="1"');
-    if (sp.after != null) at.push(`w:after="${pxToTwips(sp.after)}"`);
-    if (sp.afterAuto) at.push('w:afterAutospacing="1"');
-    if (sp.line != null) {
-      const auto = sp.lineRule === 'auto' || sp.lineRule == null;
-      at.push(
-        `w:line="${auto ? Math.round(sp.line * 240) : pxToTwips(sp.line)}"`,
-      );
-      at.push(`w:lineRule="${sp.lineRule ?? 'auto'}"`);
-    }
-    if (at.length) out.push(`<w:spacing ${at.join(' ')}/>`);
-  }
+  const spacingEl = spacingXml(a['spacing'] as ExportSpacing | null);
+  if (spacingEl) out.push(spacingEl);
   const ind = a['indent'] as {
     left?: number;
     right?: number;
@@ -1353,12 +1360,23 @@ function styleDefXml(id: string): string {
   return STYLE_DEFS[id] ?? catalogStyleXml(id) ?? '';
 }
 
-/** A from-scratch word/styles.xml: docDefaults + Normal + the used defs. */
-function stylesXml(used: Set<string>): string {
+/** A from-scratch word/styles.xml: docDefaults + Normal + the used defs.
+ *  The paragraph defaults are the doc's floor (doc.attrs.paragraphDefaults):
+ *  the importer takes docDefaults spacing OUT of every paragraph, so a
+ *  package written without the original styles part must put it back here
+ *  or every paragraph would lose its default gap in Word. */
+function stylesXml(
+  used: Set<string>,
+  paragraphDefaults: { spacing?: ExportSpacing } | null,
+): string {
   const defs = [...used].map(styleDefXml).join('');
+  const floor = spacingXml(paragraphDefaults?.spacing ?? null);
+  const pPrDefault = floor
+    ? `<w:pPrDefault><w:pPr>${floor}</w:pPr></w:pPrDefault>`
+    : '<w:pPrDefault/>';
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="${W_NS}">` +
-    `<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault/></w:docDefaults>` +
+    `<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault>${pPrDefault}</w:docDefaults>` +
     `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>` +
     defs +
     `</w:styles>`
@@ -1818,7 +1836,13 @@ export async function exportDocx(
     ctx.rels.push(
       `<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.xml"/>`,
     );
-    zip.file('word/styles.xml', stylesXml(styleIds));
+    zip.file(
+      'word/styles.xml',
+      stylesXml(
+        styleIds,
+        doc.attrs['paragraphDefaults'] as { spacing?: ExportSpacing } | null,
+      ),
+    );
     zip.file(
       '[Content_Types].xml',
       contentTypes(ctx.exts, hasComments, numberingPart != null, chromeCt),

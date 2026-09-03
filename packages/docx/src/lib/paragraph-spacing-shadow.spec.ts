@@ -6,6 +6,7 @@ import {
   endParagraphSpacingShadow,
   importDocx,
 } from './docx';
+import { exportDocx } from './export';
 import JSZip from 'jszip';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -125,6 +126,24 @@ describe('paragraph-spacing un-bake', () => {
     // A layer above that names a literal after does not cancel the flag
     // (ECMA-376 §17.3.1.33: the literal is ignored while the flag is on).
     expect(doc.child(1).attrs['spacing']).toMatchObject({ afterAuto: true });
+  });
+});
+
+describe('paragraph-spacing export', () => {
+  it('writes the floor back into pPrDefault when styles.xml is generated', async () => {
+    // Without the carried styles part, the only place the floor can live is
+    // a fresh docDefaults — and the paragraph must NOT get it back as direct
+    // formatting, or Word could never apply a table style's spacing under it.
+    const { doc } = await importDocx(await docxOf(DOCUMENT, STYLES));
+    const zip = await JSZip.loadAsync(await exportDocx(doc));
+    const styles = await zip.file('word/styles.xml')?.async('string');
+    expect(styles).toContain(
+      '<w:pPrDefault><w:pPr><w:spacing w:after="195" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault>',
+    );
+    const document = await zip.file('word/document.xml')?.async('string');
+    // First paragraph ("body"): nothing of its own, so no w:spacing at all.
+    const firstP = document?.slice(0, document.indexOf('</w:p>'));
+    expect(firstP).not.toContain('<w:spacing');
   });
 });
 
