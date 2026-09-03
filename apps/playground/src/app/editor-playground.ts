@@ -1029,27 +1029,30 @@ export class EditorPlayground implements OnDestroy {
     return { width: eq.width, height: eq.height, ops: eq.ops };
   }
 
-  /** Gallery content: the document's own sheet first (its definitions win —
-   *  an imported LightGrid-Accent3 IS that file's version of it), then every
-   *  built-in the sheet doesn't cover. Catalog names where the id is known. */
+  /** Gallery content, in a STABLE order: the catalog's positions first, the
+   *  document's own extra styles appended. Where the document's sheet holds
+   *  a catalog id, its DEFINITION wins (an imported LightGrid-Accent3 IS
+   *  that file's version of it) but the tile stays put — a pick must only
+   *  move the highlight, never re-sort the shelf under the pointer. */
   private tableStyleGallery(): TableStyleGalleryItem[] {
     const sheet = (this.editor?.state.doc.attrs['tableStyles'] ?? {}) as Record<
       string,
       TableStyleGalleryItem['style']
     >;
     const catalog = catalogTableStyles();
-    const names = new Map(catalog.map((c) => [c.id, c.name]));
-    const out: TableStyleGalleryItem[] = Object.entries(sheet).map(
-      ([id, style]) => ({
-        id,
-        name:
-          names.get(id) ??
-          id.replace(/-/g, ' · ').replace(/([a-z])([A-Z])/g, '$1 $2'),
-        style,
-      }),
-    );
-    const have = new Set(out.map((o) => o.id));
-    for (const c of catalog) if (!have.has(c.id)) out.push(c);
+    const out: TableStyleGalleryItem[] = catalog.map((c) => ({
+      id: c.id,
+      name: c.name,
+      style: sheet[c.id] ?? c.style,
+    }));
+    const inCatalog = new Set(catalog.map((c) => c.id));
+    for (const [id, style] of Object.entries(sheet))
+      if (!inCatalog.has(id))
+        out.push({
+          id,
+          name: id.replace(/-/g, ' · ').replace(/([a-z])([A-Z])/g, '$1 $2'),
+          style,
+        });
     return out;
   }
 
