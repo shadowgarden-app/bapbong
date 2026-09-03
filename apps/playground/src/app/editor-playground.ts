@@ -634,6 +634,7 @@ export class EditorPlayground implements OnDestroy {
           ],
           {
             visible: (s) => currentTableStyle(s) !== null,
+            sticky: true,
             entries: [
               {
                 kind: 'button',

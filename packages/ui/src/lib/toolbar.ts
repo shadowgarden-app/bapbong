@@ -116,7 +116,15 @@ export type ToolbarEntry =
  *  never silently pushes the tail of the row out of sight. */
 export type ToolbarGroup =
   | ToolbarEntry[]
-  | { entries: ToolbarEntry[]; visible?: (state: EditorStateOf) => boolean };
+  | {
+      entries: ToolbarEntry[];
+      visible?: (state: EditorStateOf) => boolean;
+      /** Fold into the overflow popover only after every non-sticky group
+       *  has folded (tail-first among sticky groups themselves) — for the
+       *  contextual control that should stay in sight while anything else
+       *  can still give way. */
+      sticky?: boolean;
+    };
 
 export interface ToolbarOptions {
   /** Groups rendered as separated clusters — command names (buttons) and/or
@@ -264,6 +272,57 @@ export function defaultToolbarGroups(
  * DOM, styling and active-state tracking; a host framework only provides the
  * element and the editor handle, then calls `destroy()` on teardown.
  */
+/** One toolbar group as the fold arithmetic sees it. */
+export interface FoldCandidate {
+  /** Original toolbar position — identity for the returned set. */
+  idx: number;
+  /** Measured width in px (the caller caches the last non-zero measurement:
+   *  a group inside the CLOSED popover is display:none and measures 0). */
+  width: number;
+  sticky: boolean;
+  /** Conditionally hidden right now — takes no space, never folds. */
+  hidden: boolean;
+}
+
+/**
+ * Which groups must fold into the ⋮ popover, as pure arithmetic: called with
+ * ONE batch of measurements, so the layout pass costs a single reflow
+ * instead of the old mutate-then-remeasure loop (O(N) forced reflows per
+ * resize tick). Fold order is non-sticky tail-first, then sticky tail-first
+ * — a sticky group leaves the row only when nothing else can give way.
+ */
+export function foldPlan(
+  candidates: readonly FoldCandidate[],
+  avail: number,
+  moreWidth: number,
+  gap: number,
+): Set<number> {
+  const vis = candidates.filter((c) => !c.hidden);
+  const rowWidth =
+    vis.reduce((sum, c) => sum + c.width, 0) +
+    gap * Math.max(0, vis.length - 1);
+  const folded = new Set<number>();
+  if (rowWidth <= avail + 1) return folded;
+  const order = [
+    ...vis.filter((c) => !c.sticky).reverse(),
+    ...vis.filter((c) => c.sticky).reverse(),
+  ];
+  // With ⋮ shown the row is [remaining groups…, moreBtn]: widths + a gap per
+  // remaining group (the gap BEFORE moreBtn included) + the button itself.
+  const fitsRemaining = (): boolean => {
+    const rem = vis.filter((c) => !folded.has(c.idx));
+    return (
+      rem.reduce((sum, c) => sum + c.width, 0) + gap * rem.length + moreWidth <=
+      avail + 1
+    );
+  };
+  for (const c of order) {
+    if (fitsRemaining()) break;
+    folded.add(c.idx);
+  }
+  return folded;
+}
+
 export function mountToolbar(
   host: HTMLElement,
   editor: EditorHandle,
@@ -282,6 +341,16 @@ export function mountToolbar(
   root.setAttribute('role', 'toolbar');
 
   const buttons: Array<{ name: string; el: HTMLButtonElement }> = [];
+  /** Every rendered group in ORIGINAL order — the identity the fold plan and
+   *  the delta writer key on. Elements move between row and popover; this
+   *  array never reorders, so "where does idx belong" stays answerable. */
+  const groupList: Array<{
+    el: HTMLElement;
+    sticky: boolean;
+    /** Last non-zero measurement — a group inside the closed popover is
+     *  display:none and would measure 0. */
+    lastWidth: number;
+  }> = [];
   const conditionalGroups: Array<{
     el: HTMLElement;
     visible: (state: EditorStateOf) => boolean;
@@ -300,6 +369,7 @@ export function mountToolbar(
     if (entries.length === 0) continue;
     const groupEl = document.createElement('div');
     groupEl.className = 'bb-toolbar-group';
+    groupList.push({ el: groupEl, sticky: !!spec.sticky, lastWidth: 0 });
     if (spec.visible) {
       conditionalGroups.push({ el: groupEl, visible: spec.visible });
       groupEl.hidden = true; // until the first refresh says otherwise
@@ -537,24 +607,69 @@ export function mountToolbar(
     moreBtn.setAttribute('aria-expanded', String(!pop.hidden));
   });
 
-  const fits = (): boolean => root.scrollWidth <= root.clientWidth + 1;
+  // Read → compute → write. All measurements happen in one batch (a single
+  // forced reflow), foldPlan decides membership arithmetically, and only
+  // groups CHANGING sides move — a resize tick that changes nothing writes
+  // nothing, where the old unfold-everything-then-refold loop paid O(N)
+  // forced reflows and 2N element moves per tick.
+  let gapPx = -1;
+  let moreW = -1;
+  /** The next element of `container` that belongs AFTER original index
+   *  `idx` — where a returning/folding group slots in, so both the row and
+   *  the popover always read in original toolbar order no matter what order
+   *  the fold plan moved things (the old code leaned on folding being a
+   *  contiguous tail; sticky breaks that invariant). */
+  const anchorIn = (container: HTMLElement, idx: number): Node | null => {
+    for (let j = idx + 1; j < groupList.length; j++)
+      if (groupList[j].el.parentElement === container) return groupList[j].el;
+    return container === root ? moreBtn : null;
+  };
   const layout = (): void => {
-    // Unfold everything (in order), then refold the tail until the row fits.
-    while (pop.firstChild) root.insertBefore(pop.firstChild, moreBtn);
-    moreBtn.style.display = 'none';
-    closePop();
-    // Refolding moves the anchor buttons — an open color/split pop would float
-    // detached from its button, so close them all.
-    wrap
-      .querySelectorAll('.bb-split-pop')
-      .forEach((p) => ((p as HTMLElement).hidden = true));
-    if (fits()) return;
-    moreBtn.style.display = '';
-    const groupEls = Array.from(root.children).filter((el) =>
-      el.classList.contains('bb-toolbar-group'),
-    );
-    for (let i = groupEls.length - 1; i >= 0 && !fits(); i--) {
-      pop.insertBefore(groupEls[i], pop.firstChild);
+    // ── read (one reflow for the whole batch) ──
+    if (gapPx < 0)
+      gapPx = Number.parseFloat(getComputedStyle(root).columnGap) || 0;
+    if (moreW < 0) {
+      // One-time: the ⋮ starts display:none and would measure 0.
+      moreBtn.style.visibility = 'hidden';
+      const prev = moreBtn.style.display;
+      moreBtn.style.display = '';
+      moreW = moreBtn.offsetWidth;
+      moreBtn.style.display = prev;
+      moreBtn.style.visibility = '';
+    }
+    const avail = root.clientWidth;
+    const candidates = groupList.map((g, idx) => {
+      const w = g.el.offsetWidth;
+      if (w > 0) g.lastWidth = w;
+      return {
+        idx,
+        width: g.lastWidth,
+        sticky: g.sticky,
+        hidden: g.el.hidden,
+      };
+    });
+    // ── compute ──
+    const folded = foldPlan(candidates, avail, moreW, gapPx);
+    // ── write (delta only) ──
+    let moved = false;
+    groupList.forEach((g, idx) => {
+      const inPop = g.el.parentElement === pop;
+      const should = folded.has(idx);
+      if (inPop === should) return;
+      moved = true;
+      if (should) pop.insertBefore(g.el, anchorIn(pop, idx));
+      else root.insertBefore(g.el, anchorIn(root, idx));
+    });
+    const showMore = folded.size > 0;
+    if ((moreBtn.style.display !== 'none') !== showMore)
+      moreBtn.style.display = showMore ? '' : 'none';
+    if (!showMore) closePop();
+    if (moved) {
+      // Moving anchors detaches any open floating panels from their buttons.
+      closePop();
+      wrap
+        .querySelectorAll('.bb-split-pop')
+        .forEach((p) => ((p as HTMLElement).hidden = true));
     }
   };
   // Direct call (no rAF): backgrounded/headless pages throttle rAF, and our
