@@ -7,7 +7,10 @@ import {
   type NumberingCounter,
   type NumberingDefs,
 } from '@shadow-garden/bapbong-model';
-import { cellStyleLayer } from '@shadow-garden/bapbong-contracts';
+import {
+  cellStyleLayer,
+  mergeParagraphSpacing,
+} from '@shadow-garden/bapbong-contracts';
 import type {
   Align,
   BorderSide,
@@ -127,6 +130,10 @@ interface Ctx {
    *  keyed on node identity because every editor path that changes a
    *  table's styling changes the table's attrs (and so the node). */
   sheet?: TableStyleSheet | null;
+  /** doc.attrs.paragraphDefaults.spacing — the document's default paragraph
+   *  spacing (w:docDefaults/w:pPrDefault), the floor of every paragraph's
+   *  spacing cascade. Read once per layout, like the sheet. */
+  paraDefaults?: ParagraphSpacing | null;
 }
 
 /** Current Word's rules — what an editor-authored document (no settings.xml
@@ -305,6 +312,30 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
  *  `nodePos` is the absolute PM position of the paragraph node itself. With
  *  `allowFloats`, anchored images become FlowFloats instead of inline content;
  *  contexts without float support (table cells, chrome) degrade them inline. */
+/**
+ * The document-level style inputs that flow down through flattening — what
+ * a paragraph needs beyond its own attrs to resolve its spacing cascade.
+ *
+ * A paragraph's spacing is `floor → cell → own`, later winning per field:
+ * the document defaults, then the table-style slot of the cell it sits in
+ * (Word: "the global default paragraph properties · the table style
+ * paragraph properties · the paragraph properties applied directly"), then
+ * the paragraph's attribute, which carries everything above that slot (its
+ * paragraph style, numbering, direct formatting). The importer stops baking
+ * the two lower layers into the attribute for exactly this reason: a
+ * tblLook gate flipped in the editor moves the cell layer, and the layout
+ * must be able to re-stack.
+ */
+interface FlowStyles {
+  sheet?: TableStyleSheet | null;
+  floor?: ParagraphSpacing | null;
+  /** The table-style spacing of the enclosing cell, set by tableToFlow for
+   *  the cell's content (a nested table's cells replace it with their own,
+   *  or with nothing — the innermost table's style is the one that counts,
+   *  as at import). */
+  cell?: ParagraphSpacing;
+}
+
 function paragraphToFlow(
   node: PMNode,
   base: FontSpec,
@@ -312,6 +343,7 @@ function paragraphToFlow(
   allowFloats = false,
   marker?: string,
   markerStyle?: MarkerStyle,
+  styles?: FlowStyles,
 ): FlowParagraph {
   const contentStart = nodePos + 1;
   // A heading paragraph sizes its runs from the level by default (bigger +
@@ -377,8 +409,20 @@ function paragraphToFlow(
         } | null;
         if (tb && tb.blocks.length > 0) {
           const schema = child.type.schema;
+          // The box's paragraphs sit in the same cascade as the anchoring
+          // paragraph (the importer parses them on the same table-layer
+          // stack), so the styles flow in unchanged.
           f.content = tb.blocks
-            .map((json, i) => nodeToBlock(schema.nodeFromJSON(json), base, i))
+            .map((json, i) =>
+              nodeToBlock(
+                schema.nodeFromJSON(json),
+                base,
+                i,
+                false,
+                undefined,
+                styles,
+              ),
+            )
             .filter((b): b is FlowBlock => b !== null);
           if (tb.inset) f.inset = tb.inset;
           if (tb.anchor) f.anchor = tb.anchor;
@@ -421,7 +465,7 @@ function paragraphToFlow(
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
   const spacing = effectiveSpacing(
-    node.attrs['spacing'] as ParagraphSpacing | null,
+    stackedSpacing(node, styles),
     node.attrs['contextualSpacing'] as {
       before: boolean;
       after: boolean;
@@ -481,6 +525,23 @@ function markerFor(
   return { text, style };
 }
 
+/** A paragraph's spacing with the layers under its attribute stacked in:
+ *  floor → enclosing cell's table-style slot → the attribute. Null when no
+ *  layer says anything. */
+function stackedSpacing(
+  node: PMNode,
+  styles: FlowStyles | undefined,
+): ParagraphSpacing | null {
+  const own = node.attrs['spacing'] as ParagraphSpacing | null;
+  if (!styles) return own;
+  return (
+    mergeParagraphSpacing(
+      mergeParagraphSpacing(styles.floor, styles.cell),
+      own,
+    ) ?? null
+  );
+}
+
 /** Flatten a block-level node (paragraph or table) into a FlowBlock, or null
  *  for node types we don't model yet. `nodePos` is its absolute PM position. */
 function nodeToBlock(
@@ -489,14 +550,22 @@ function nodeToBlock(
   nodePos: number,
   allowFloats = false,
   counter?: NumberingCounter,
-  sheet?: TableStyleSheet | null,
+  styles?: FlowStyles,
 ): FlowBlock | null {
   if (node.type.name === 'paragraph') {
     const m = markerFor(node, counter);
-    return paragraphToFlow(node, base, nodePos, allowFloats, m?.text, m?.style);
+    return paragraphToFlow(
+      node,
+      base,
+      nodePos,
+      allowFloats,
+      m?.text,
+      m?.style,
+      styles,
+    );
   }
   if (node.type.name === 'table')
-    return tableToFlow(node, base, nodePos, counter, sheet);
+    return tableToFlow(node, base, nodePos, counter, styles);
   return null;
 }
 
@@ -517,13 +586,13 @@ function tableToFlow(
   base: FontSpec,
   nodePos: number,
   counter?: NumberingCounter,
-  sheet?: TableStyleSheet | null,
+  styles?: FlowStyles,
 ): FlowTable {
   // The table's LIVE style, if the document carries one: cellStyleLayer
   // hands each cell the layer its position earns, and everything the cell's
   // own attrs declare rides ON TOP — direct formatting wins, per property.
   const styleId = node.attrs['styleId'] as string | null;
-  const style = (styleId ? sheet?.[styleId] : undefined) ?? undefined;
+  const style = (styleId ? styles?.sheet?.[styleId] : undefined) ?? undefined;
   const look = (node.attrs['look'] as TableLook | null) ?? WORD_DEFAULT_LOOK;
   const rowCount = node.childCount;
   let colCount = 0;
@@ -560,6 +629,12 @@ function tableToFlow(
       // Fonts travel exclusively through marks (applyTableStyle rewrites
       // them on a style change) until marks learn negation; then this layer
       // regains its font half and the bake comes off.
+      //
+      // The layer's SPACING does flow: it is the table-style slot under every
+      // paragraph of this cell (see FlowStyles). A table with no style, or
+      // a cell whose layer has no paragraph half, hands the content an
+      // empty slot — not the enclosing table's.
+      const cellStyles: FlowStyles = { ...styles, cell: layer?.spacing };
       const content: FlowBlock[] = [];
       cellNode.forEach((child, childOffset) => {
         // Cells keep anchored floats: layoutFlow positions them inside the
@@ -570,7 +645,7 @@ function tableToFlow(
           cellPos + 1 + childOffset,
           true,
           counter,
-          sheet,
+          cellStyles,
         );
         if (block) content.push(block);
       });
@@ -643,13 +718,28 @@ export function toFlowBlocks(
   const counter = createNumberingCounter(
     doc.attrs['numbering'] as NumberingDefs | null,
   );
-  const sheet = doc.attrs['tableStyles'] as TableStyleSheet | null;
+  const styles = flowStylesOf(doc);
   const blocks: FlowBlock[] = [];
   doc.forEach((node, offset) => {
-    const block = nodeToBlock(node, base, offset, allowFloats, counter, sheet);
+    const block = nodeToBlock(node, base, offset, allowFloats, counter, styles);
     if (block) blocks.push(block);
   });
   return blocks;
+}
+
+/** The document-level style inputs a story doc carries (see FlowStyles). */
+function flowStylesOf(doc: PMNode): FlowStyles {
+  return {
+    sheet: (doc.attrs['tableStyles'] as TableStyleSheet | null) ?? null,
+    floor: paragraphDefaultsOf(doc),
+  };
+}
+
+function paragraphDefaultsOf(doc: PMNode): ParagraphSpacing | null {
+  const defaults = doc.attrs['paragraphDefaults'] as {
+    spacing?: ParagraphSpacing;
+  } | null;
+  return defaults?.spacing ?? null;
 }
 
 interface Token {
@@ -5281,6 +5371,7 @@ export function layout(
   // One ctx serves body AND chrome — headers/footers share the document's
   // styles part, so their tables take the same sheet.
   ctx.sheet = (doc.attrs['tableStyles'] as TableStyleSheet | null) ?? null;
+  ctx.paraDefaults = paragraphDefaultsOf(doc);
   setEquationCtx(ctx);
   const { page } = config;
   const left = contentLeftOf(page);
@@ -5493,6 +5584,10 @@ export function layout(
       const hasFloats = nodeHasFloats(node);
       // Which paragraph ends a section is a property of the SECTION table, not
       // of the node, so it is stamped here rather than by the importer.
+      const bodyStyles: FlowStyles = {
+        sheet: ctx.sheet,
+        floor: ctx.paraDefaults,
+      };
       const getFlow = () => {
         const f = paragraphToFlow(
           node,
@@ -5501,12 +5596,13 @@ export function layout(
           true,
           marker,
           markerStyle,
+          bodyStyles,
         );
         if (bs.breakMark) f.breakMark = true;
         return f;
       };
       const sp = effectiveSpacing(
-        node.attrs['spacing'] as ParagraphSpacing | null,
+        stackedSpacing(node, bodyStyles),
         node.attrs['contextualSpacing'] as {
           before: boolean;
           after: boolean;
@@ -5571,7 +5667,10 @@ export function layout(
       }
       perf.bump('table.miss');
       const table = layoutTable(
-        tableToFlow(node, ctx.base, offset, counter, ctx.sheet),
+        tableToFlow(node, ctx.base, offset, counter, {
+          sheet: ctx.sheet,
+          floor: ctx.paraDefaults,
+        }),
         bLeft,
         colRight,
         ctx,

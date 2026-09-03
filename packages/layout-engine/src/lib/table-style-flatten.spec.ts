@@ -30,6 +30,7 @@ const STYLE: ResolvedTableStyle = {
     cellPadding: { left: 7, right: 7 },
   },
   font: { family: 'Cambria' },
+  paragraph: { spacing: { after: 0, line: 1, lineRule: 'auto' } },
   cond: {
     firstRow: {
       font: { bold: true, color: '#FFFFFF' },
@@ -38,10 +39,12 @@ const STYLE: ResolvedTableStyle = {
     },
     firstCol: { font: { bold: true } },
     band1Horz: { background: '#D6E3BC' },
-    lastRow: { font: { italic: true } },
+    lastRow: { font: { italic: true }, paragraph: { spacing: { before: 8 } } },
   },
   bands: { row: 1, col: 1 },
 };
+/** The floor: what w:docDefaults/w:pPrDefault would give every paragraph. */
+const FLOOR = { spacing: { after: 13, line: 1.15, lineRule: 'auto' as const } };
 const SHEET: TableStyleSheet = { Probe: STYLE };
 const LOOK: TableLook = {
   firstRow: true,
@@ -62,7 +65,11 @@ const rowNode = (texts: string[]) =>
     texts.map((t) => cellNode(t)),
   );
 
-function docWith(tableAttrs: Record<string, unknown>, rows?: unknown[]) {
+function docWith(
+  tableAttrs: Record<string, unknown>,
+  rows?: unknown[],
+  docAttrs: Record<string, unknown> = {},
+) {
   const table = schema.nodes['table'].create(
     tableAttrs,
     (rows as ReturnType<typeof rowNode>[]) ?? [
@@ -71,8 +78,12 @@ function docWith(tableAttrs: Record<string, unknown>, rows?: unknown[]) {
       rowNode(['b1', 'b2', 'b3']),
     ],
   );
-  return schema.nodes['doc'].create({ tableStyles: SHEET }, [table]);
+  return schema.nodes['doc'].create({ tableStyles: SHEET, ...docAttrs }, [
+    table,
+  ]);
 }
+const cellPara = (flow: FlowTable, row: number, col: number) =>
+  flow.rows[row].cells[col].content[0] as FlowParagraph;
 
 const flowOf = (doc: ReturnType<typeof docWith>) =>
   toFlowBlocks(doc)[0] as FlowTable;
@@ -156,5 +167,89 @@ describe('tableToFlow applies the live style sheet', () => {
     const table = (resolved.pages[0].tables ?? [])[0];
     expect(table).toBeTruthy();
     expect(table.cells[0].background).toBe('#1F4E79');
+  });
+});
+
+describe('paragraph spacing stacks floor → cell layer → own attr', () => {
+  const styled = (
+    rows?: unknown[],
+    look: TableLook | null = LOOK,
+    docAttrs: Record<string, unknown> = { paragraphDefaults: FLOOR },
+  ) => flowOf(docWith({ styleId: 'Probe', look }, rows, docAttrs));
+
+  it('a cell paragraph takes the style’s spacing over the floor', () => {
+    const flow = styled();
+    // Style: after 0, single — beats the floor's after 13 / 1.15 per field.
+    expect(cellPara(flow, 1, 1).spacing).toEqual({
+      after: 0,
+      line: 1,
+      lineRule: 'auto',
+    });
+  });
+
+  it('the lastRow branch reaches the last row only through its gate', () => {
+    const off = styled();
+    expect(cellPara(off, 2, 1).spacing?.before).toBeUndefined();
+    const on = styled(undefined, { ...LOOK, lastRow: true });
+    expect(cellPara(on, 2, 1).spacing).toEqual({
+      before: 8,
+      after: 0,
+      line: 1,
+      lineRule: 'auto',
+    });
+    // …and the branch is a delta: the style's own fields still stand.
+    expect(cellPara(on, 1, 1).spacing?.before).toBeUndefined();
+  });
+
+  it('the paragraph’s own attr wins per field', () => {
+    const rows = [
+      schema.nodes['table_row'].create(null, [
+        schema.nodes['table_cell'].create(null, [
+          schema.nodes['paragraph'].create({ spacing: { after: 4 } }, [
+            schema.text('x'),
+          ]),
+        ]),
+      ]),
+    ];
+    const flow = styled(rows);
+    expect(cellPara(flow, 0, 0).spacing).toEqual({
+      after: 4,
+      line: 1,
+      lineRule: 'auto',
+    });
+  });
+
+  it('an unstyled table hands its cells the floor, not a neighbour’s layer', () => {
+    const flow = flowOf(docWith({}, undefined, { paragraphDefaults: FLOOR }));
+    expect(cellPara(flow, 0, 0).spacing).toEqual(FLOOR.spacing);
+    // Without a floor either, a plain paragraph has no spacing at all.
+    expect(cellPara(flowOf(docWith({})), 0, 0).spacing).toBeUndefined();
+  });
+
+  it('body paragraphs stand on the floor too, in flattening and in layout()', () => {
+    const para = (text: string, attrs: Record<string, unknown> | null = null) =>
+      schema.nodes['paragraph'].create(attrs, [schema.text(text)]);
+    const doc = (floor: boolean) =>
+      schema.nodes['doc'].create(
+        floor ? { paragraphDefaults: { spacing: { after: 20 } } } : null,
+        [para('one'), para('two')],
+      );
+    const flow = toFlowBlocks(doc(true))[0] as FlowParagraph;
+    expect(flow.spacing).toEqual({ after: 20 });
+    const cfg: LayoutConfig = {
+      measureText: measure,
+      page: {
+        width: 600,
+        height: 400,
+        margin: { top: 20, right: 20, bottom: 20, left: 20 },
+      },
+    };
+    const gap = (d: ReturnType<typeof doc>) => {
+      const lines = layout(d, cfg).pages[0].lines;
+      return lines[1].y - lines[0].y;
+    };
+    // The placer's before/after come from the same stack: 20px more between
+    // the two paragraphs once the floor asks for it.
+    expect(gap(doc(true)) - gap(doc(false))).toBe(20);
   });
 });

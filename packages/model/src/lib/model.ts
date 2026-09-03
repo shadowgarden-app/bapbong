@@ -135,6 +135,14 @@ export const schema = new Schema({
         // switching styles is one small attr transaction. Importer-set;
         // extended when the editor applies a style the sheet lacks.
         tableStyles: { default: null },
+        // { spacing?: ParagraphSpacing } | null — the document's default
+        // paragraph properties (w:docDefaults/w:pPrDefault), the FLOOR of
+        // every paragraph's cascade. Live data like the sheet: a paragraph's
+        // `spacing` attr carries only what sits ABOVE the table-style slot
+        // (its style, numbering, direct formatting), and the layout stacks
+        // floor → table-style cell layer → attr. Importer-set; null for an
+        // editor-authored doc (whose paragraphs then carry everything).
+        paragraphDefaults: { default: null },
         // Per-section header/footer story OVERRIDES, keyed by section index →
         // story ('headers'|'footers') → variant ('default'|'first'|'even') →
         // the full story doc as JSON. The first chrome EDIT the model supports
