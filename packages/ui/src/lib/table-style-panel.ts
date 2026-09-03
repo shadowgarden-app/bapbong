@@ -79,23 +79,8 @@ const STYLE = `
 .bb-tsp-tile.is-selected{padding:2px;border:2px solid var(--bb-ui-active-fg,#0c447c)}
 .bb-tsp-thumb{display:grid;grid-template-columns:repeat(${THUMB_COLS},12px);grid-auto-rows:8px;gap:0}
 .bb-tsp-none{display:flex;align-items:center;justify-content:center;width:60px;height:32px;font-size:11px;opacity:.7;line-height:1.1}
-.bb-tsp-foot{display:flex;justify-content:space-between;gap:8px;font-size:12px;opacity:.75}
-.bb-tsp-foot code{font-family:ui-monospace,monospace;font-size:11px;opacity:.85}
 .bb-tsp-empty{font-size:13px;opacity:.65;padding:8px 0}
 `;
-
-/** The legacy w:tblLook bitmask for a look — shown in the footer so what the
- *  file will say is one glance away. */
-export function tblLookBits(look: TableLook): string {
-  const bits =
-    (look.firstRow ? 0x20 : 0) |
-    (look.lastRow ? 0x40 : 0) |
-    (look.firstCol ? 0x80 : 0) |
-    (look.lastCol ? 0x100 : 0) |
-    (look.hBand ? 0 : 0x200) |
-    (look.vBand ? 0 : 0x400);
-  return bits.toString(16).toUpperCase().padStart(4, '0');
-}
 
 /** One border side's CSS, `false`/absent → none. */
 function edgeCss(side: BorderSide | false | undefined): string {
@@ -177,12 +162,7 @@ export function createTableStylePanel(
   mainLbl.textContent = 'Table styles';
   const gallery = document.createElement('div');
   gallery.className = 'bb-tsp-gallery';
-  const foot = document.createElement('div');
-  foot.className = 'bb-tsp-foot';
-  const footName = document.createElement('span');
-  const footLook = document.createElement('code');
-  foot.append(footName, footLook);
-  main.append(mainLbl, gallery, foot);
+  main.append(mainLbl, gallery);
 
   root.append(opts, main);
 
@@ -215,8 +195,6 @@ export function createTableStylePanel(
       empty.className = 'bb-tsp-empty';
       empty.textContent = 'Click inside a table to style it.';
       gallery.appendChild(empty);
-      footName.textContent = '';
-      footLook.textContent = '';
       return;
     }
     const noneTile = document.createElement('button');
@@ -230,7 +208,6 @@ export function createTableStylePanel(
     noneTile.appendChild(noneInner);
     noneTile.addEventListener('click', () => options.onPick(null));
     gallery.appendChild(noneTile);
-    let selectedName = 'None';
     for (const item of items) {
       const tile = document.createElement('button');
       tile.type = 'button';
@@ -240,10 +217,7 @@ export function createTableStylePanel(
       tile.appendChild(thumbnail(item.style, current.look));
       tile.addEventListener('click', () => options.onPick(item));
       gallery.appendChild(tile);
-      if (current.styleId === item.id) selectedName = item.name;
     }
-    footName.textContent = selectedName;
-    footLook.textContent = `w:tblLook ${tblLookBits(current.look)}`;
   };
 
   return {
