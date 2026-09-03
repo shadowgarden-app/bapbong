@@ -9,6 +9,7 @@ export * from './lib/cell-properties.js';
 export * from './lib/equation-gallery.js';
 export * from './lib/equation-panel.js';
 export * from './lib/table-grid.js';
+export * from './lib/table-style-panel.js';
 export * from './lib/page-setup.js';
 export * from './lib/section-chip.js';
 export * from './lib/font-dialog.js';
