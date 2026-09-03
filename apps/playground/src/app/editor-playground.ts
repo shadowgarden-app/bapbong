@@ -77,7 +77,11 @@ import {
   createFontRegistryMetrics,
   type FontRegistry,
 } from '@shadow-garden/bapbong-measuring';
-import { audit, type AuditEntry } from '@shadow-garden/bapbong-docx';
+import {
+  audit,
+  catalogTableStyles,
+  type AuditEntry,
+} from '@shadow-garden/bapbong-docx';
 import { layoutEquation } from '@shadow-garden/bapbong-layout-engine';
 import { loadBundledFonts } from './fonts';
 import {
@@ -1025,19 +1029,28 @@ export class EditorPlayground implements OnDestroy {
     return { width: eq.width, height: eq.height, ops: eq.ops };
   }
 
-  /** Gallery content: the styles the document's sheet already holds — every
-   *  style its tables name, resolved at import (the built-in catalog joins
-   *  in a later step). Ids read fine enough as names for now. */
+  /** Gallery content: the document's own sheet first (its definitions win —
+   *  an imported LightGrid-Accent3 IS that file's version of it), then every
+   *  built-in the sheet doesn't cover. Catalog names where the id is known. */
   private tableStyleGallery(): TableStyleGalleryItem[] {
     const sheet = (this.editor?.state.doc.attrs['tableStyles'] ?? {}) as Record<
       string,
       TableStyleGalleryItem['style']
     >;
-    return Object.entries(sheet).map(([id, style]) => ({
-      id,
-      name: id.replace(/-/g, ' · ').replace(/([a-z])([A-Z])/g, '$1 $2'),
-      style,
-    }));
+    const catalog = catalogTableStyles();
+    const names = new Map(catalog.map((c) => [c.id, c.name]));
+    const out: TableStyleGalleryItem[] = Object.entries(sheet).map(
+      ([id, style]) => ({
+        id,
+        name:
+          names.get(id) ??
+          id.replace(/-/g, ' · ').replace(/([a-z])([A-Z])/g, '$1 $2'),
+        style,
+      }),
+    );
+    const have = new Set(out.map((o) => o.id));
+    for (const c of catalog) if (!have.has(c.id)) out.push(c);
+    return out;
   }
 
   private buildMenus(): Menu[] {
