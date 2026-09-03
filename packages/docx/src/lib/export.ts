@@ -19,6 +19,7 @@ import type {
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
+import { catalogStyleXml } from './table-style-catalog.js';
 import { parsePageGeometry } from './docx.js';
 import { child, parseXml } from './ooxml.js';
 
@@ -1325,10 +1326,18 @@ const STYLE_DEFS: Record<string, string> = (() => {
   };
 })();
 
-/** Every style id the document's paragraphs reference via w:pStyle. */
+/** Every style id the document references and we can DEFINE: paragraph
+ *  styles via w:pStyle (STYLE_DEFS), table styles via the styleId attr (the
+ *  built-in catalog). An id with no definition anywhere is left alone — the
+ *  reference still round-trips, it just styles nothing new. */
 function usedStyleIds(doc: PMNode): Set<string> {
   const used = new Set<string>();
   doc.descendants((n) => {
+    if (n.type.name === 'table') {
+      const id = n.attrs['styleId'] as string | null;
+      if (id && catalogStyleXml(id)) used.add(id);
+      return;
+    }
     if (n.type.name !== 'paragraph') return;
     const heading = n.attrs['heading'] as number | null;
     const styleId = n.attrs['styleId'] as string | null;
@@ -1338,9 +1347,15 @@ function usedStyleIds(doc: PMNode): Set<string> {
   return used;
 }
 
+/** The definition for one used id — paragraph defs first, then the table
+ *  catalog. usedStyleIds only admits ids one of the two can answer. */
+function styleDefXml(id: string): string {
+  return STYLE_DEFS[id] ?? catalogStyleXml(id) ?? '';
+}
+
 /** A from-scratch word/styles.xml: docDefaults + Normal + the used defs. */
 function stylesXml(used: Set<string>): string {
-  const defs = [...used].map((id) => STYLE_DEFS[id]).join('');
+  const defs = [...used].map(styleDefXml).join('');
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="${W_NS}">` +
     `<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault/></w:docDefaults>` +
@@ -1358,7 +1373,7 @@ function mergeStyles(xml: string, used: Set<string>): string {
   if (!missing.length) return xml;
   return xml.replace(
     '</w:styles>',
-    `${missing.map((id) => STYLE_DEFS[id]).join('')}</w:styles>`,
+    `${missing.map(styleDefXml).join('')}</w:styles>`,
   );
 }
 

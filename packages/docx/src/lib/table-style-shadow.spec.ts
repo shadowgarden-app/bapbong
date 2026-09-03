@@ -247,6 +247,46 @@ describe('the style pair survives a save', () => {
   });
 });
 
+describe('the catalog reaches styles.xml on save', () => {
+  it('a carried package gains the missing catalog def, exactly once', async () => {
+    // A table naming a CATALOG style the document's own styles.xml does not
+    // define (the gallery pick on an imported document).
+    const body = probeTable(
+      '<w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/>',
+      2,
+      2,
+    ).replace('w:val="Probe"', 'w:val="LightGrid-Accent2"');
+    const bytes = await docxOf(
+      `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${body}</w:body></w:document>`,
+      STYLES,
+    );
+    const first = await importDocx(bytes);
+    const saved = await exportDocx(first.doc, { carry: first.raw });
+    const zip = await JSZip.loadAsync(saved);
+    const styles = (await zip.file('word/styles.xml')?.async('string')) ?? '';
+    // Appended from the catalog…
+    expect(styles.match(/w:styleId="LightGrid-Accent2"/g)?.length).toBe(1);
+    expect(styles).toContain('w:val="Light Grid Accent 2"');
+    // …while the package's own styles stay untouched, and a SECOND save of
+    // the re-import stays at one copy.
+    expect(styles.match(/w:styleId="Probe"/g)?.length).toBe(1);
+    const second = await importDocx(new Uint8Array(saved));
+    const savedAgain = await exportDocx(second.doc, { carry: second.raw });
+    const styles2 =
+      (await (await JSZip.loadAsync(savedAgain))
+        .file('word/styles.xml')
+        ?.async('string')) ?? '';
+    expect(styles2.match(/w:styleId="LightGrid-Accent2"/g)?.length).toBe(1);
+    // And the re-import resolves the catalog def into a working sheet —
+    // the full circle: pick → save → open.
+    const sheet = second.doc.attrs['tableStyles'] as Record<
+      string,
+      { cond: Record<string, unknown> }
+    >;
+    expect(sheet['LightGrid-Accent2']?.cond['firstRow']).toBeTruthy();
+  });
+});
+
 describe('table-style shadow: real corpus', () => {
   // The playground's sample corpus, when this checkout has it (the package's
   // own __fixtures__ stay self-contained). Files over 3MB are skipped for
