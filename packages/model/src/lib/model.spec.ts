@@ -223,11 +223,21 @@ describe('commentSchema', () => {
       { header: true, height: { value: 50, exact: false } },
       [cell],
     );
+    const look = {
+      firstRow: true,
+      lastRow: false,
+      firstCol: true,
+      lastCol: false,
+      hBand: true,
+      vBand: false,
+    };
     const table = schema.nodes.table.create(
       {
         borders: { top: side, insideH: side },
         cellPadding: { left: 4 },
         align: 'center',
+        styleId: 'LightGrid-Accent3',
+        look,
       },
       [row],
     );
@@ -245,6 +255,10 @@ describe('commentSchema', () => {
     expect(tableBack['borders']).toEqual({ top: side, insideH: side });
     expect(tableBack['cellPadding']).toEqual({ left: 4 });
     expect(tableBack['align']).toBe('center');
+    // The live-theming pair: without these an internal copy/paste turns a
+    // styled table into an unstyled one.
+    expect(tableBack['styleId']).toBe('LightGrid-Accent3');
+    expect(tableBack['look']).toEqual(look);
 
     const rowBack = getAttrs(schema.nodes.table_row.spec)(
       asEl(domAttrs(row)),

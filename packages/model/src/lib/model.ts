@@ -121,6 +121,13 @@ export const schema = new Schema({
         // CommentNode[] (contracts) — comment threads keyed to `comment` marks.
         // Edited via setDocAttribute so add/reply/resolve/delete undo cleanly.
         comments: { default: null },
+        // TableStyleSheet (contracts) — every table style the document's
+        // tables name, fully resolved (basedOn rolled up, theme colours hex).
+        // LIVE data, not a bake: tables carry styleId/look attrs and the
+        // layout applies the sheet per cell, so flipping a tblLook gate or
+        // switching styles is one small attr transaction. Importer-set;
+        // extended when the editor applies a style the sheet lacks.
+        tableStyles: { default: null },
         // Per-section header/footer story OVERRIDES, keyed by section index →
         // story ('headers'|'footers') → variant ('default'|'first'|'even') →
         // the full story doc as JSON. The first chrome EDIT the model supports
@@ -414,6 +421,14 @@ export const schema = new Schema({
         // the importer). null = Word's implicit outdent by the left cell
         // margin. Importer-set; the element itself rides carry for export.
         indent: { default: null },
+        // w:tblStyle — the table style this table names, or null. The style's
+        // definition lives in doc.attrs.tableStyles; the LAYOUT applies it,
+        // so this attr (with `look`) is the whole apply-a-style transaction.
+        styleId: { default: null },
+        // w:tblLook — the six conditional-formatting gates (TableLook,
+        // contracts), or null for Word's default 04A0 (firstRow + firstCol +
+        // hBand on).
+        look: { default: null },
         // Carry-through fidelity: unmodelled w:tblPr children (tblStyle,
         // tblLayout, tblLook, tblInd, floating tblpPr, …) as one raw XML
         // string ({ tblPr: string }), or null. Importer-set; the exporter
@@ -431,6 +446,8 @@ export const schema = new Schema({
             cellPadding: dataJson(el, 'data-cell-padding'),
             align: (el as DomEl).getAttribute('data-align'),
             indent: dataJson(el, 'data-indent'),
+            styleId: (el as DomEl).getAttribute('data-style-id'),
+            look: dataJson(el, 'data-look'),
             carry: dataJson(el, 'data-carry'),
           }),
         },
@@ -443,6 +460,8 @@ export const schema = new Schema({
           dom['data-cell-padding'] = JSON.stringify(a['cellPadding']);
         if (a['align']) dom['data-align'] = String(a['align']);
         if (a['indent'] != null) dom['data-indent'] = String(a['indent']);
+        if (a['styleId']) dom['data-style-id'] = String(a['styleId']);
+        if (a['look']) dom['data-look'] = JSON.stringify(a['look']);
         if (a['carry']) dom['data-carry'] = JSON.stringify(a['carry']);
         return ['table', dom, ['tbody', 0]];
       },
