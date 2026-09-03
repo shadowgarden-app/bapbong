@@ -101,10 +101,19 @@ export type ToolbarEntry =
   | ToolbarSplit
   | ToolbarButton;
 
+/** A toolbar cluster: a plain entry list, or one that only SHOWS in certain
+ *  editor states (`visible`) — the contextual "Table style" group renders
+ *  only while the caret sits in a table. Visibility is re-evaluated on every
+ *  editor change, and a flip re-runs the overflow fold, so a group appearing
+ *  never silently pushes the tail of the row out of sight. */
+export type ToolbarGroup =
+  | ToolbarEntry[]
+  | { entries: ToolbarEntry[]; visible?: (state: EditorStateOf) => boolean };
+
 export interface ToolbarOptions {
   /** Groups rendered as separated clusters — command names (buttons) and/or
    *  controls (selects). Defaults to marks then alignments, from the registry. */
-  groups?: ToolbarEntry[][];
+  groups?: ToolbarGroup[];
   /** Presentation per command name, merged over the built-in defaults. */
   items?: Record<string, ToolbarItem>;
 }
@@ -198,6 +207,7 @@ const STYLE = `
 .bb-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;overflow:hidden;padding:6px 8px;font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a);background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));border-bottom:1px solid var(--bb-ui-border,#e3e3e0);box-sizing:border-box}
 .bb-toolbar *{box-sizing:border-box}
 .bb-toolbar-group{display:flex;gap:2px;flex:none}
+.bb-toolbar-group[hidden]{display:none}
 .bb-toolbar-group+.bb-toolbar-group{padding-left:10px;border-left:1px solid var(--bb-ui-border,#e3e3e0)}
 .bb-toolbar-more{margin-left:auto;flex:none}
 .bb-toolbar-pop{position:absolute;z-index:1200;top:100%;left:0;right:0;margin-top:4px;display:flex;flex-wrap:wrap;gap:10px;row-gap:6px;align-items:center;padding:6px 8px;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16);font-family:var(--bb-ui-font,system-ui,-apple-system,sans-serif);color:var(--bb-ui-fg,#2c2c2a)}
@@ -261,19 +271,28 @@ export function mountToolbar(
   root.setAttribute('role', 'toolbar');
 
   const buttons: Array<{ name: string; el: HTMLButtonElement }> = [];
+  const conditionalGroups: Array<{
+    el: HTMLElement;
+    visible: (state: EditorStateOf) => boolean;
+  }> = [];
   const selects: Array<{ spec: ToolbarSelect; el: HTMLSelectElement }> = [];
   const colors: Array<{ sync(): void }> = [];
   const splits: Array<{ spec: ToolbarSplit; cards: HTMLButtonElement[] }> = [];
   let latest: EditorStateOf | null = null;
 
   for (const group of groups) {
+    const spec = Array.isArray(group) ? { entries: group } : group;
     // Keep command entries only if the command exists; controls always render.
-    const entries = group.filter(
+    const entries = spec.entries.filter(
       (e) => typeof e !== 'string' || editor.commands.has(e),
     );
     if (entries.length === 0) continue;
     const groupEl = document.createElement('div');
     groupEl.className = 'bb-toolbar-group';
+    if (spec.visible) {
+      conditionalGroups.push({ el: groupEl, visible: spec.visible });
+      groupEl.hidden = true; // until the first refresh says otherwise
+    }
     for (const entry of entries) {
       if (typeof entry !== 'string' && entry.kind === 'select') {
         const sel = document.createElement('select');
@@ -526,6 +545,18 @@ export function mountToolbar(
 
   const refresh = (state: EditorStateOf): void => {
     latest = state;
+    let visibilityChanged = false;
+    for (const g of conditionalGroups) {
+      const show = g.visible(state);
+      if (show === g.el.hidden) {
+        g.el.hidden = !show;
+        visibilityChanged = true;
+      }
+    }
+    // A group appearing can overflow the row (it has overflow:hidden and
+    // would swallow the tail without a word) — refold whenever the set of
+    // rendered groups changes.
+    if (visibilityChanged) layout();
     for (const { name, el } of buttons) {
       const cmd = editor.commands.get(name);
       if (!cmd) continue;
