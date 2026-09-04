@@ -14,6 +14,11 @@
  * host adds its own records (folder-level tools, UI actions) beside them.
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type {
+  ServerNotification,
+  ServerRequest,
+} from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 import {
   AnchorError,
@@ -138,13 +143,23 @@ export function isOffered(
   return command.requires === undefined || caps[command.requires] === true;
 }
 
+/** What the MCP transport knows about one call — its JSON-RPC id above all,
+ *  so a host can tell which calls in a request reached its executor. */
+export type CallContext = RequestHandlerExtra<
+  ServerRequest,
+  ServerNotification
+>;
+
 /**
  * The MCP adapter for a set of commands: one `registerTool` per record,
  * title/description/schema straight from the data. A host uses this for its
  * own records too, so its tools and the engine's are registered the same way.
  *
  * `execute` lets a host interpose (permission gate, logging) between the
- * transport and `run`; the default runs the command directly.
+ * transport and `run`; the default runs the command directly. It receives
+ * the transport's {@link CallContext} so the host can match the call to its
+ * JSON-RPC id — the SDK answers schema failures and unknown tools ITSELF, as
+ * `isError` results, without ever reaching `execute`.
  */
 export function registerCommands<Ports, Effect extends string>(
   server: McpServer,
@@ -154,6 +169,7 @@ export function registerCommands<Ports, Effect extends string>(
   execute: (
     command: AgentCommand<z.ZodRawShape, Ports, Effect>,
     args: CommandArgs<z.ZodRawShape>,
+    context: CallContext,
   ) => Promise<CommandResult> = (command, args) => command.run(ports, args),
 ): void {
   for (const command of commands) {
@@ -165,7 +181,8 @@ export function registerCommands<Ports, Effect extends string>(
         description: command.description,
         inputSchema: command.input,
       },
-      async (args) => execute(command, args as CommandArgs<z.ZodRawShape>),
+      async (args, context) =>
+        execute(command, args as CommandArgs<z.ZodRawShape>, context),
     );
   }
 }

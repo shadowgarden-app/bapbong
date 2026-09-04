@@ -82,8 +82,10 @@ describe('agent catalog', () => {
       { prefix: '> ' },
       {},
       // The seam a permission gate sits in: every call passes through here.
-      async (command, args) => {
-        seen.push(`${command.name}:${command.effect}`);
+      async (command, args, context) => {
+        seen.push(
+          `${command.name}:${command.effect}:${String(context.requestId)}`,
+        );
         return command.run({ prefix: '> ' }, args);
       },
     );
@@ -100,6 +102,7 @@ describe('agent catalog', () => {
     expect(JSON.parse((res.content as { text: string }[])[0].text)).toEqual({
       out: '> hi',
     });
-    expect(seen).toEqual(['echo:read']);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/^echo:read:\d+$/);
   });
 });

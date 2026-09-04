@@ -15,6 +15,7 @@ export {
   registerDocumentResource,
   withSession,
   type AgentCommand,
+  type CallContext,
   type CommandArgs,
   type DocumentEffect,
   type CommandRequirement,
