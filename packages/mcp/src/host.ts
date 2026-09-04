@@ -6,3 +6,18 @@
  */
 export * from './session.js';
 export { createMcpServer, type CreateMcpServerOptions } from './lib/server.js';
+export {
+  defineCommand,
+  errorText,
+  isOffered,
+  json,
+  registerCommands,
+  withSession,
+  type AgentCommand,
+  type CommandArgs,
+  type CommandEffect,
+  type CommandRequirement,
+  type CommandResult,
+  type HostCapabilities,
+} from './lib/catalog.js';
+export * from './lib/document-commands.js';
