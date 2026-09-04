@@ -37,7 +37,12 @@ export type SessionOpName =
   | 'consent'
   /** Host → UI: something host-side changed; `args[0]` is a host-defined
    *  topic the UI re-reads (it carries no document state itself). */
-  | 'notify';
+  | 'notify'
+  /** Host → UI: perform a host-defined UI action — `args[0]` names it,
+   *  `args[1]` is its payload — and answer with a value (open a document,
+   *  render pages, inspect layout). The wire carries no notion of what the
+   *  actions are; that is the host's and its UI's contract. */
+  | 'ui';
 
 export interface SessionOpRequest {
   id: string;
@@ -58,7 +63,7 @@ export type SessionOpResponse =
   | { id: string; ok: true; value: unknown }
   | { id: string; ok: false; error: { name: string; message: string } };
 
-/** Run one wire op against a local session ('consent' and 'notify' are
+/** Run one wire op against a local session ('consent', 'notify' and 'ui' are
  *  host-level and are handled by the caller before this). Never throws —
  *  errors are encoded. */
 export async function executeOp(
