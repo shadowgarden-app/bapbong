@@ -11,6 +11,7 @@ import {
   setTableLook,
   WORD_DEFAULT_TABLE_LOOK,
 } from './table-style.js';
+import { insertTable } from './insert.js';
 
 // Minimal schema, same policy as commands.spec: commands key everything by
 // NAME, so no model dependency — a backend could drive this identically.
@@ -227,5 +228,53 @@ describe('currentTableStyle', () => {
       styleId: 'S',
       look: WORD_DEFAULT_TABLE_LOOK,
     });
+  });
+});
+
+describe('insertTable with a style', () => {
+  // Word's new table carries the "Table Grid" STYLE. A direct border grid
+  // would outrank whatever style the user picks next — black vertical
+  // lines under Medium Shading was the reported bug — so with a style the
+  // table holds the style pair only, and the definition joins the sheet.
+  const grid: ResolvedTableStyle = {
+    table: { borders: { top: { width: 1, style: 'solid', color: '#000' } } },
+    cond: {},
+    bands: { row: 0, col: 0 },
+  };
+  const paraState = () => {
+    const doc = schema.nodes['doc'].create(null, [
+      schema.nodes['paragraph'].create(null, [schema.text('x')]),
+    ]);
+    const state = EditorState.create({ doc });
+    return state.apply(state.tr.setSelection(TextSelection.create(doc, 1)));
+  };
+
+  it('is born with the style pair and injects the definition', () => {
+    const { ok, state } = run(
+      paraState(),
+      insertTable(2, 2, { styleId: 'TableGrid', style: grid }),
+    );
+    expect(ok).toBe(true);
+    let table: PMNode | null = null;
+    state.doc.descendants((n) => {
+      if (n.type.name === 'table') table = n;
+      return !table;
+    });
+    if (!table) throw new Error('expected an inserted table');
+    const t: PMNode = table;
+    expect(t.attrs['styleId']).toBe('TableGrid');
+    expect(t.attrs['look']).toEqual(WORD_DEFAULT_TABLE_LOOK);
+    expect(state.doc.attrs['tableStyles']).toEqual({ TableGrid: grid });
+  });
+
+  it('without a style the table stays unstyled (the direct-grid fallback)', () => {
+    const { state } = run(paraState(), insertTable(1, 1));
+    let styleId: unknown = 'unset';
+    state.doc.descendants((n) => {
+      if (n.type.name === 'table') styleId = n.attrs['styleId'];
+      return true;
+    });
+    expect(styleId).toBeNull();
+    expect(state.doc.attrs['tableStyles']).toBeNull();
   });
 });

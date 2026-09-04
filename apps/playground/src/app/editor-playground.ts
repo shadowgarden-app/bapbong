@@ -32,6 +32,7 @@ import {
   insertImage,
   insertRow,
   insertTable,
+  type InsertTableStyle,
   insertText,
   linkInfoAt,
   listPresets,
@@ -1038,6 +1039,14 @@ export class EditorPlayground implements OnDestroy {
    *  a catalog id, its DEFINITION wins (an imported LightGrid-Accent3 IS
    *  that file's version of it) but the tile stays put — a pick must only
    *  move the highlight, never re-sort the shelf under the pointer. */
+  /** What a new table is born with: Word's "Table Grid", from the catalog
+   *  — a STYLE, so the gallery can replace it (a direct grid would outrank
+   *  every style picked afterwards). */
+  private newTableStyle(): InsertTableStyle | undefined {
+    const grid = catalogTableStyles().find((s) => s.id === 'TableGrid');
+    return grid ? { styleId: grid.id, style: grid.style } : undefined;
+  }
+
   private tableStyleGallery(): TableStyleGalleryItem[] {
     const sheet = (this.editor?.state.doc.attrs['tableStyles'] ?? {}) as Record<
       string,
@@ -1173,7 +1182,7 @@ export class EditorPlayground implements OnDestroy {
             widget: (close) =>
               tableGridPicker({
                 onPick: (rows, cols) => {
-                  this.exec(insertTable(rows, cols));
+                  this.exec(insertTable(rows, cols, this.newTableStyle()));
                   close();
                 },
               }),

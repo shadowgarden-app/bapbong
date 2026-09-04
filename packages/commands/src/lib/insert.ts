@@ -1,8 +1,14 @@
 import { NodeSelection, type EditorState } from 'prosemirror-state';
 import type { Mark as Mark0, Node as PMNode0 } from 'prosemirror-model';
-import type { Command } from '@shadow-garden/bapbong-contracts';
+import type {
+  Command,
+  ResolvedTableStyle,
+  TableLook,
+  TableStyleSheet,
+} from '@shadow-garden/bapbong-contracts';
 import { MATH_ALPHABETS, mathLetters } from '@shadow-garden/bapbong-contracts';
 import { isMarkActive } from './marks.js';
+import { WORD_DEFAULT_TABLE_LOOK } from './table-style.js';
 
 /** Toggle "start on a new page" (`w:pageBreakBefore`) on the paragraph(s) the
  *  selection touches; the first such paragraph decides the new on/off state. */
@@ -51,11 +57,34 @@ export function insertText(text: string): Command {
   };
 }
 
-/** Insert a `rows`×`cols` table of empty cells, replacing the selection.
- *  New tables get Word's default look: a full 1px solid grid — OOXML tables
- *  are borderless unless declared, and an invisible fresh table reads as
- *  "nothing happened". */
-export function insertTable(rows = 2, cols = 2): Command {
+/** The table STYLE a new table is born with — Word's "Table Grid" — as the
+ *  host resolves it (the docx package's catalog). */
+export interface InsertTableStyle {
+  styleId: string;
+  /** Gates; absent = Word's default (0x04A0). */
+  look?: TableLook;
+  /** The resolved definition, injected into doc.attrs.tableStyles when the
+   *  sheet lacks the id (the same move applyTableStyle makes). */
+  style?: ResolvedTableStyle;
+}
+
+/**
+ * Insert a `rows`×`cols` table of empty cells, replacing the selection.
+ *
+ * A new table must not be invisible — OOXML tables are borderless unless
+ * declared — and Word gives it the "Table Grid" STYLE, not a grid of direct
+ * borders. The difference shows the moment the style changes: a direct
+ * border outranks any style, so a table born with a direct 1px grid kept
+ * its black vertical lines under Medium Shading (whose look has none), and
+ * its black frame under every style. With `style` the table carries the
+ * style pair instead, and the gallery replaces it cleanly. Without one (or
+ * on a schema without table styling), the direct grid remains the fallback.
+ */
+export function insertTable(
+  rows = 2,
+  cols = 2,
+  style?: InsertTableStyle,
+): Command {
   return {
     name: 'insert-table',
     run(state, dispatch) {
@@ -68,21 +97,42 @@ export function insertTable(rows = 2, cols = 2): Command {
             table_cell.create(null, paragraph.create()),
           ),
         );
-      const side = { width: 1, style: 'solid', color: '#000000' };
-      const borders = {
-        top: side,
-        bottom: side,
-        left: side,
-        right: side,
-        insideH: side,
-        insideV: side,
-      };
-      const node = table.create(
-        { borders },
-        Array.from({ length: rows }, makeRow),
-      );
-      if (dispatch)
-        dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+      const styled = !!style && !!table.spec.attrs?.['styleId'];
+      let attrs: Record<string, unknown>;
+      if (styled) {
+        attrs = {
+          styleId: style.styleId,
+          look: { ...(style.look ?? WORD_DEFAULT_TABLE_LOOK) },
+        };
+      } else {
+        const side = { width: 1, style: 'solid', color: '#000000' };
+        attrs = {
+          borders: {
+            top: side,
+            bottom: side,
+            left: side,
+            right: side,
+            insideH: side,
+            insideV: side,
+          },
+        };
+      }
+      const node = table.create(attrs, Array.from({ length: rows }, makeRow));
+      if (dispatch) {
+        const tr = state.tr.replaceSelectionWith(node);
+        const sheet = (state.doc.attrs['tableStyles'] ?? {}) as TableStyleSheet;
+        if (
+          styled &&
+          style.style &&
+          !sheet[style.styleId] &&
+          state.schema.nodes['doc'].spec.attrs?.['tableStyles']
+        )
+          tr.setDocAttribute('tableStyles', {
+            ...sheet,
+            [style.styleId]: style.style,
+          });
+        dispatch(tr.scrollIntoView());
+      }
       return true;
     },
   };
