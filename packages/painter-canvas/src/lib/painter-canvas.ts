@@ -957,11 +957,21 @@ export class CanvasPainter {
     pageInfo?: PageInfo,
   ): void {
     const ctx = this.ctx;
-    // Cell fills (w:shd) first — behind everything.
+    // Cell fills (w:shd) first — behind everything. Fills tile edge to edge,
+    // and a column (or row) boundary at a fractional coordinate left a
+    // one-pixel seam where two same-coloured fills each covered half the
+    // pixel and let the page show through (measured: a lighter column down
+    // every filled row of a styled table). Snap the box to whole pixels —
+    // both neighbours round to the SAME edge, so they meet exactly, with
+    // neither gap nor overlap (floor/ceil would overlap; round tiles).
     for (const cell of table.cells) {
       if (cell.background) {
         ctx.fillStyle = cell.background;
-        ctx.fillRect(cell.x, yOffset + cell.y, cell.width, cell.height);
+        const x0 = Math.round(cell.x);
+        const x1 = Math.round(cell.x + cell.width);
+        const y0 = Math.round(yOffset + cell.y);
+        const y1 = Math.round(yOffset + cell.y + cell.height);
+        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
       }
     }
     // behindDoc drawings in cells: under the cell text, over the fills.
