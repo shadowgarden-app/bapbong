@@ -161,6 +161,9 @@ export class CanvasPainter {
       selection: [],
     };
   private lastFrame: { o: ResolvedOptions; dpr: number } | null = null;
+  /** Device pixels per layout px on the canvas being painted (zoom × dpr) —
+   *  what {@link snapEdge}/{@link snapCenter} align to. */
+  private pixelScale = 1;
   /** Top edge (layout px) of each page in the stacked document. */
   private pageY: number[] = [];
   /** Pages currently showing caret/selection (so an overlay change can clear them). */
@@ -259,6 +262,7 @@ export class CanvasPainter {
 
     this.ctx = slot.ctx;
     this.ctx.setTransform(o.zoom * dpr, 0, 0, o.zoom * dpr, 0, 0);
+    this.pixelScale = o.zoom * dpr;
     this.ctx.clearRect(0, 0, page.width, page.height);
     this.ctx.textBaseline = 'alphabetic';
 
@@ -967,10 +971,10 @@ export class CanvasPainter {
     for (const cell of table.cells) {
       if (cell.background) {
         ctx.fillStyle = cell.background;
-        const x0 = Math.round(cell.x);
-        const x1 = Math.round(cell.x + cell.width);
-        const y0 = Math.round(yOffset + cell.y);
-        const y1 = Math.round(yOffset + cell.y + cell.height);
+        const x0 = this.snapEdge(cell.x);
+        const x1 = this.snapEdge(cell.x + cell.width);
+        const y0 = this.snapEdge(yOffset + cell.y);
+        const y1 = this.snapEdge(yOffset + cell.y + cell.height);
         ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
       }
     }
@@ -1004,13 +1008,10 @@ export class CanvasPainter {
       const eps = 0.5;
       for (const cell of table.cells) {
         const cb = cell.borders;
-        const x0 = cell.x + 0.5;
-        const x1 = cell.x + cell.width + 0.5;
         // Horizontal gridlines OCCUPY vertical space (the layout reserves
         // their width above/below the cell boxes), so outer-edge detection
         // allows for the reserved band, and the strokes sit OUTSIDE the box,
-        // centered in the band — adjacent cells' strokes then coincide. For
-        // 1px borders this is the same half-pixel crispness as before.
+        // centered in the band — adjacent cells' strokes then coincide.
         const topBandW = (b?.top ? b.top.width : 0) + eps;
         const bottomBandW = (b?.bottom ? b.bottom.width : 0) + eps;
         const topOuter = cell.y - table.y < topBandW;
@@ -1025,9 +1026,26 @@ export class CanvasPainter {
         const bottom = cb?.bottom ?? (bottomOuter ? b?.bottom : b?.insideH);
         const left = cb?.left ?? (leftOuter ? b?.left : b?.insideV);
         const right = cb?.right ?? (rightOuter ? b?.right : b?.insideV);
-        const y0 = yOffset + cell.y - (top ? top.width / 2 : -0.5);
-        const y1 =
-          yOffset + cell.y + cell.height + (bottom ? bottom.width / 2 : 0.5);
+        // Every stroke centre snaps to the device-pixel grid (see snapCenter):
+        // a cell edge at a fractional x put a 1px gridline across two pixel
+        // columns, half-grey each — measured as the inner lines of a fresh
+        // Table Grid looking heavier than its outer ones. Neighbours share
+        // the edge, so they snap to the same line; the horizontal strokes run
+        // between the snapped vertical centres so corners meet.
+        const x0 = this.snapCenter(cell.x, left ? left.width : 1);
+        const x1 = this.snapCenter(
+          cell.x + cell.width,
+          right ? right.width : 1,
+        );
+        const y0 = top
+          ? this.snapCenter(yOffset + cell.y - top.width / 2, top.width)
+          : this.snapCenter(yOffset + cell.y, 1);
+        const y1 = bottom
+          ? this.snapCenter(
+              yOffset + cell.y + cell.height + bottom.width / 2,
+              bottom.width,
+            )
+          : this.snapCenter(yOffset + cell.y + cell.height, 1);
         if (top) this.strokeBorder(top, x0, y0, x1, y0);
         if (bottom) this.strokeBorder(bottom, x0, y1, x1, y1);
         if (left) this.strokeBorder(left, x0, y0, x0, y1);
@@ -1055,6 +1073,23 @@ export class CanvasPainter {
       for (const f of cell.floats ?? [])
         if (!f.behind) this.paintFloat(f, yOffset, o, pageInfo);
     }
+  }
+
+  /** A coordinate on the device-pixel grid — where a fill's edge belongs,
+   *  so two fills meeting there leave no half-covered seam. */
+  private snapEdge(v: number): number {
+    const s = this.pixelScale;
+    return Math.round(v * s) / s;
+  }
+
+  /** The centre line for a stroke of `width` so it covers whole device
+   *  pixels: an odd device width sits on a half pixel, an even one on a
+   *  boundary. In layout px, for the current zoom × dpr. */
+  private snapCenter(v: number, width: number): number {
+    const s = this.pixelScale;
+    const dw = Math.max(1, Math.round(width * s));
+    const dv = v * s;
+    return (dw % 2 ? Math.floor(dv) + 0.5 : Math.round(dv)) / s;
   }
 
   /** Four edges of a box in one border style — a picture's own outline. */
@@ -1161,10 +1196,16 @@ export class CanvasPainter {
   ): void {
     const ctx = this.ctx;
     ctx.strokeStyle = side.color;
+    // Never thinner than one device pixel — Word's hairline. A 0.5pt grid
+    // line is 0.67px, which covers three quarters of its pixel: grey where
+    // one cell strokes an outer edge, near-black where two cells stroke the
+    // edge they share (measured 64 vs 16). At a whole pixel the second
+    // stroke changes nothing, so every line of the grid reads the same.
+    const hairline = 1 / this.pixelScale;
     if (side.style === 'double') {
       // Two thin parallel lines straddling the edge.
       ctx.setLineDash([]);
-      ctx.lineWidth = Math.max(0.75, side.width / 3);
+      ctx.lineWidth = Math.max(hairline, side.width / 3);
       const gap = Math.max(2, side.width) / 2;
       const horiz = y1 === y2;
       ctx.beginPath();
@@ -1175,7 +1216,7 @@ export class CanvasPainter {
       ctx.stroke();
       return;
     }
-    ctx.lineWidth = side.width;
+    ctx.lineWidth = Math.max(hairline, side.width);
     ctx.setLineDash(
       side.style === 'dashed'
         ? [side.width * 3, side.width * 2]
