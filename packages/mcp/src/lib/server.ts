@@ -9,7 +9,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SessionProvider } from './contract.js';
-import { registerCommands } from './catalog.js';
+import { registerCommands, registerDocumentResource } from './catalog.js';
 import { documentCommands } from './document-commands.js';
 
 export interface CreateMcpServerOptions {
@@ -32,27 +32,7 @@ export function createMcpServer(
     selection: opts.selection,
   });
 
-  server.registerResource(
-    'document',
-    'bapbong://document',
-    {
-      title: 'Open document',
-      description:
-        'The currently open document as plain text (one line per block).',
-      mimeType: 'text/plain',
-    },
-    async (uri) => {
-      const session = await provider.get(undefined);
-      if (!session)
-        return { contents: [{ uri: uri.href, text: '(no document open)' }] };
-      const snap = await session.snapshot();
-      return {
-        contents: [
-          { uri: uri.href, text: snap.blocks.map((b) => b.text).join('\n') },
-        ],
-      };
-    },
-  );
+  registerDocumentResource(server, provider);
 
   return server;
 }

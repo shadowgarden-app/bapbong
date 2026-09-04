@@ -24,17 +24,12 @@ import {
   type SessionProvider,
 } from './contract.js';
 
-/** What a command does to the world — the axis a permission gate decides on.
- *  `read` touches nothing; `edit`/`save` change document content; `create`,
- *  `delete`, `move` change the file system; `ui` drives the host's window. */
-export type CommandEffect =
-  | 'read'
-  | 'edit'
-  | 'save'
-  | 'create'
-  | 'delete'
-  | 'move'
-  | 'ui';
+/** What a document command does — the axis a permission gate decides on.
+ *  `read` touches nothing; `edit` changes content; `save` persists it. This
+ *  package works on ONE document, so these are the only effects it knows; a
+ *  host with more (a folder to create or move files in, a window to drive)
+ *  widens the type for its own commands via {@link AgentCommand}'s `Effect`. */
+export type DocumentEffect = 'read' | 'edit' | 'save';
 
 /** What a command hands back — the MCP tool-result shape, so an MCP adapter
  *  forwards it untouched and every other adapter unwraps the same fields.
@@ -58,11 +53,12 @@ export type CommandRequirement = 'selection';
  * One command, as data. `Ports` is whatever the host gives commands to act
  * through — for the document commands it is a {@link SessionProvider}; a host
  * with a file system or a window supplies a richer object for its own
- * commands.
+ * commands, and a wider `Effect` to classify them.
  */
 export interface AgentCommand<
   Shape extends z.ZodRawShape = z.ZodRawShape,
   Ports = SessionProvider,
+  Effect extends string = DocumentEffect,
 > {
   name: string;
   title: string;
@@ -70,7 +66,7 @@ export interface AgentCommand<
   description: string;
   /** Zod raw shape: MCP takes it as-is; a CLI derives flags from it. */
   input: Shape;
-  effect: CommandEffect;
+  effect: Effect;
   requires?: CommandRequirement;
   /** The document ids (or paths) the call touches — what a gate resolves
    *  permission for. `undefined` means "the document the user has open". */
@@ -82,7 +78,10 @@ export interface AgentCommand<
 export function defineCommand<
   Shape extends z.ZodRawShape,
   Ports = SessionProvider,
->(command: AgentCommand<Shape, Ports>): AgentCommand<Shape, Ports> {
+  Effect extends string = DocumentEffect,
+>(
+  command: AgentCommand<Shape, Ports, Effect>,
+): AgentCommand<Shape, Ports, Effect> {
   return command;
 }
 
@@ -147,13 +146,13 @@ export function isOffered(
  * `execute` lets a host interpose (permission gate, logging) between the
  * transport and `run`; the default runs the command directly.
  */
-export function registerCommands<Ports>(
+export function registerCommands<Ports, Effect extends string>(
   server: McpServer,
-  commands: readonly AgentCommand<z.ZodRawShape, Ports>[],
+  commands: readonly AgentCommand<z.ZodRawShape, Ports, Effect>[],
   ports: Ports,
   caps: HostCapabilities = {},
   execute: (
-    command: AgentCommand<z.ZodRawShape, Ports>,
+    command: AgentCommand<z.ZodRawShape, Ports, Effect>,
     args: CommandArgs<z.ZodRawShape>,
   ) => Promise<CommandResult> = (command, args) => command.run(ports, args),
 ): void {
@@ -169,4 +168,34 @@ export function registerCommands<Ports>(
       async (args) => execute(command, args as CommandArgs<z.ZodRawShape>),
     );
   }
+}
+
+/** The `bapbong://document` resource: the open document as plain text, one
+ *  line per block. Registered by {@link createMcpServer}; a host that builds
+ *  its own server from the records registers it the same way. */
+export function registerDocumentResource(
+  server: McpServer,
+  provider: SessionProvider,
+): void {
+  server.registerResource(
+    'document',
+    'bapbong://document',
+    {
+      title: 'Open document',
+      description:
+        'The currently open document as plain text (one line per block).',
+      mimeType: 'text/plain',
+    },
+    async (uri) => {
+      const session = await provider.get(undefined);
+      if (!session)
+        return { contents: [{ uri: uri.href, text: '(no document open)' }] };
+      const snap = await session.snapshot();
+      return {
+        contents: [
+          { uri: uri.href, text: snap.blocks.map((b) => b.text).join('\n') },
+        ],
+      };
+    },
+  );
 }
