@@ -1,6 +1,6 @@
 {
   "name": "@shadow-garden/bapbong-painter-canvas",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "bapbong — paints ResolvedLayout onto a Canvas 2D context",
   "license": "MIT",
   "repository": {
