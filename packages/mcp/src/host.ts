@@ -23,3 +23,8 @@ export {
   type HostCapabilities,
 } from './lib/catalog.js';
 export * from './lib/document-commands.js';
+export {
+  CONTENT_GRAMMAR,
+  blockSchema,
+  contentSchema,
+} from './lib/blocks-schema.js';

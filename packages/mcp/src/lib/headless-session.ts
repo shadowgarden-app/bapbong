@@ -8,12 +8,14 @@
  * service; the desktop app hosts the same PmDocSession over its live editor.
  */
 import {
+  catalogTableStyles,
   importDocx,
   exportDocx,
   type DocxImport,
 } from '@shadow-garden/bapbong-headless';
 import { EditorState, type Transaction } from 'prosemirror-state';
 import type {
+  Content,
   DocSnapshot,
   DocumentSession,
   FindMatch,
@@ -70,6 +72,10 @@ export class HeadlessSession implements DocumentSession {
         this.dirty = false;
       },
       // no selection() — headless documents have no user selection
+      tableStyle: () => {
+        const grid = catalogTableStyles().find((t) => t.id === 'TableGrid');
+        return grid ? { styleId: grid.id, style: grid.style } : undefined;
+      },
     };
     this.inner = new PmDocSession(host);
   }
@@ -108,7 +114,7 @@ export class HeadlessSession implements DocumentSession {
     return this.inner.replaceText(oldText, newText, opts);
   }
   insertContent(
-    content: string,
+    content: Content,
     anchor: InsertAnchor,
     opts?: MutationOptions,
   ): Promise<MutationResult> {

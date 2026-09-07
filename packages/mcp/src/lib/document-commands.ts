@@ -13,6 +13,7 @@ import {
   withSession,
   type AgentCommand,
 } from './catalog.js';
+import { CONTENT_GRAMMAR, contentSchema } from './blocks-schema.js';
 
 const documentId = z
   .string()
@@ -113,14 +114,14 @@ export const insertContent = defineCommand({
   name: 'insert_content',
   title: 'Insert content',
   description:
-    'Insert new paragraphs. Each line of `content` becomes one paragraph. Anchor by exact text with position before/after ' +
-    '(the paragraph containing the anchor), or position document_end to append.',
+    'Insert content: paragraphs, headings, tables. Anchor by exact text with position before/after ' +
+    '(the paragraph containing the anchor), or position document_end to append. ' +
+    CONTENT_GRAMMAR,
   input: {
     documentId,
-    content: z
-      .string()
-      .min(1)
-      .describe('Plain text; every line becomes a paragraph.'),
+    content: contentSchema.describe(
+      'Plain text (one paragraph per line) or an array of blocks — see the tool description.',
+    ),
     position: z.enum(['before', 'after', 'document_end']),
     anchor_text: z
       .string()

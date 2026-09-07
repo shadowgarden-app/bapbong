@@ -18,6 +18,9 @@
  *   {@link VersionConflictError} and the caller re-reads before retrying.
  */
 
+import type { Content } from './blocks.js';
+export type { Block, Content } from './blocks.js';
+
 /** An inline image (bitmap picture or drawn shape) inside a block —
  *  addressable as (block index, image index) by updateImage. */
 export interface DocImage {
@@ -116,7 +119,7 @@ export interface DocumentSession {
   ): Promise<MutationResult>;
   /** `content`: plain text; each line becomes one paragraph. */
   insertContent(
-    content: string,
+    content: Content,
     anchor: InsertAnchor,
     opts?: MutationOptions,
   ): Promise<MutationResult>;
@@ -185,6 +188,15 @@ export class AnchorError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AnchorError';
+  }
+}
+
+/** Structured content that cannot be built (ragged table rows, a widths
+ *  list that does not fit…) — the message says what to change. */
+export class ContentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContentError';
   }
 }
 

@@ -26,6 +26,12 @@ import {
   type MutationResult,
   type SessionCapabilities,
 } from './contract.js';
+import {
+  contentToNodes,
+  referencedTableStyles,
+  type Content,
+  type TableStyleSource,
+} from './blocks.js';
 
 /** What a PmDocSession needs from its host. */
 export interface PmSessionHost {
@@ -38,7 +44,14 @@ export interface PmSessionHost {
   save(): Promise<void>;
   /** Current user selection, when the host has one (desktop editor). */
   selection?(): { from: number; to: number } | null;
+  /** The style a new table is born with ("Table Grid"), when the host can
+   *  resolve it; absent → a direct 1px grid. */
+  tableStyle?(): TableStyleSource | undefined;
 }
+
+/** A4 with 1in margins — what the layout shows when the doc has no page
+ *  attr, so "100%" and equal columns must mean the same here. */
+const DEFAULT_CONTENT_WIDTH = 794 - 96 * 2;
 
 /** A text hit resolved to absolute PM positions. */
 interface Hit {
@@ -127,22 +140,18 @@ export class PmDocSession implements DocumentSession {
   }
 
   async insertContent(
-    content: string,
+    content: Content,
     anchor: InsertAnchor,
     opts: MutationOptions = {},
   ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
     const state = this.host.getState();
     const { schema } = state;
-    const paragraphs = content
-      .split('\n')
-      .map((line) =>
-        schema.node(
-          'paragraph',
-          null,
-          line.length > 0 ? [schema.text(line)] : [],
-        ),
-      );
+    const tableStyle = this.host.tableStyle?.();
+    const paragraphs = contentToNodes(content, schema, {
+      contentWidth: this.contentWidth(),
+      tableStyle,
+    });
 
     let insertAt: number;
     if (anchor.position === 'document_end') {
@@ -156,7 +165,18 @@ export class PmDocSession implements DocumentSession {
           : block.pos + block.node.nodeSize;
     }
     const inserted = paragraphs.reduce((size, node) => size + node.nodeSize, 0);
-    this.host.apply(state.tr.insert(insertAt, paragraphs));
+    let tr = state.tr.insert(insertAt, paragraphs);
+    // A table born with a style needs its definition in the document's
+    // sheet for the layout to paint it (the same move insertTable makes).
+    if (tableStyle?.style && schema.nodes['doc'].spec.attrs?.['tableStyles']) {
+      const sheet = (state.doc.attrs['tableStyles'] ?? {}) as Record<string, unknown>;
+      for (const id of referencedTableStyles(paragraphs)) {
+        if (id === tableStyle.styleId && !sheet[id]) {
+          tr = tr.setDocAttribute('tableStyles', { ...sheet, [id]: tableStyle.style });
+        }
+      }
+    }
+    this.host.apply(tr);
     return {
       docVersion: this.host.getVersion(),
       range: { from: insertAt, to: insertAt + inserted },
@@ -267,6 +287,16 @@ export class PmDocSession implements DocumentSession {
   }
 
   // ── internals ────────────────────────────────────────────────────────
+
+  /** The text area's width in px, from the document's page setup. */
+  private contentWidth(): number {
+    const page = this.host.getState().doc.attrs['page'] as
+      | { width: number; margin: { left: number; right: number }; gutter?: number }
+      | null
+      | undefined;
+    if (!page) return DEFAULT_CONTENT_WIDTH;
+    return page.width - page.margin.left - page.margin.right - (page.gutter ?? 0);
+  }
 
   private checkVersion(expected?: string): void {
     const current = this.host.getVersion();

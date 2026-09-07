@@ -22,6 +22,7 @@ import type {
 import type { z } from 'zod';
 import {
   AnchorError,
+  ContentError,
   NoDocumentError,
   ReadOnlyError,
   VersionConflictError,
@@ -120,6 +121,7 @@ export async function withSession(
   } catch (err) {
     if (
       err instanceof AnchorError ||
+      err instanceof ContentError ||
       err instanceof VersionConflictError ||
       err instanceof NoDocumentError ||
       err instanceof ReadOnlyError

@@ -13,8 +13,10 @@
  */
 import {
   AnchorError,
+  ContentError,
   NoDocumentError,
   VersionConflictError,
+  type Content,
   type DocumentSession,
   type Formatting,
   type ImageChanges,
@@ -135,6 +137,8 @@ export function reviveError(error: { name: string; message: string }): Error {
       return new AnchorError(error.message);
     case 'NoDocumentError':
       return new NoDocumentError(error.message);
+    case 'ContentError':
+      return new ContentError(error.message);
     case 'VersionConflictError': {
       const revived = new VersionConflictError('?', '?');
       revived.message = error.message;
@@ -183,7 +187,7 @@ export class RemoteSession implements DocumentSession {
       [oldText, newText, opts],
     );
   }
-  insertContent(content: string, anchor: InsertAnchor, opts?: MutationOptions) {
+  insertContent(content: Content, anchor: InsertAnchor, opts?: MutationOptions) {
     return this.call<Awaited<ReturnType<DocumentSession['insertContent']>>>(
       'insertContent',
       [content, anchor, opts],

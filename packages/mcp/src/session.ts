@@ -7,6 +7,20 @@
 export * from './lib/contract.js';
 export { PmDocSession, type PmSessionHost } from './lib/pm-session.js';
 export {
+  contentToNodes,
+  lengthToPx,
+  referencedTableStyles,
+  type Block,
+  type BuildOptions,
+  type Cell,
+  type Content,
+  type Inline,
+  type ParagraphBlock,
+  type TableBlock,
+  type TableStyleSource,
+  type TabStop,
+} from './lib/blocks.js';
+export {
   ReadOnlySession,
   type ReadOnlySessionOptions,
 } from './lib/read-only-session.js';
