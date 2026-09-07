@@ -18,8 +18,8 @@
  *   {@link VersionConflictError} and the caller re-reads before retrying.
  */
 
-import type { Content } from './blocks.js';
-export type { Block, Content } from './blocks.js';
+import type { Content, TabStop, TableEdit } from './blocks.js';
+export type { Block, Cell, Content, TableEdit, TabStop } from './blocks.js';
 
 /** An inline image (bitmap picture or drawn shape) inside a block —
  *  addressable as (block index, image index) by updateImage. */
@@ -45,6 +45,9 @@ export interface DocBlock {
   text: string;
   /** The block's inline images, when it has any. */
   images?: DocImage[];
+  /** Set when the block sits in a table cell: the table's 0-based index in
+   *  the document (what edit_table addresses), the row and the cell. */
+  table?: { index: number; row: number; cell: number };
 }
 
 export interface DocSnapshot {
@@ -73,9 +76,21 @@ export interface Formatting {
   italic?: boolean;
   underline?: boolean;
   strike?: boolean;
+  /** Font size in points for the target text. */
+  fontSize?: number;
   /** Paragraph alignment of the block(s) containing the target text. */
   align?: 'left' | 'center' | 'right' | 'justify';
+  /** Word "Heading N" for the containing paragraph; 0 or null = body text. */
+  heading?: number | null;
+  /** Named paragraph style; null = body text. Clears `heading`. */
+  style?: 'Title' | 'Subtitle' | null;
+  /** The containing paragraph's tab stops (replaces them all). */
+  tabs?: TabStop[];
 }
+
+/** What applyFormatting addresses: exact text (matched once, or with
+ *  occurrence) or a whole block by index from the latest snapshot. */
+export type FormatTarget = string | { blockIndex: number };
 
 /** Partial image update — absent fields keep their current value. */
 export interface ImageChanges {
@@ -124,10 +139,17 @@ export interface DocumentSession {
     opts?: MutationOptions,
   ): Promise<MutationResult>;
   applyFormatting(
-    target: string,
+    target: FormatTarget,
     format: Formatting,
     opts?: MutationOptions,
   ): Promise<MutationResult>;
+  /** Change an existing table — rows, merges, widths, borders — addressed by
+   *  its 0-based index from the latest snapshot. One transaction. */
+  editTable(
+    tableIndex: number,
+    edit: TableEdit,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { rows: number; cols: number }>;
   /** Resize/rotate one image, addressed as (blockIndex, imageIndex) from the
    *  latest snapshot. One transaction — a single undo step in a live editor. */
   updateImage(

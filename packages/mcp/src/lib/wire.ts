@@ -18,7 +18,9 @@ import {
   VersionConflictError,
   type Content,
   type DocumentSession,
+  type FormatTarget,
   type Formatting,
+  type TableEdit,
   type ImageChanges,
   type InsertAnchor,
   type MutationOptions,
@@ -31,6 +33,7 @@ export type SessionOpName =
   | 'replaceText'
   | 'insertContent'
   | 'applyFormatting'
+  | 'editTable'
   | 'updateImage'
   | 'getSelection'
   | 'save'
@@ -109,8 +112,14 @@ function run(
       );
     case 'applyFormatting':
       return session.applyFormatting(
-        args[0] as string,
+        args[0] as FormatTarget,
         args[1] as Formatting,
+        args[2] as MutationOptions | undefined,
+      );
+    case 'editTable':
+      return session.editTable(
+        args[0] as number,
+        args[1] as TableEdit,
         args[2] as MutationOptions | undefined,
       );
     case 'updateImage':
@@ -187,16 +196,30 @@ export class RemoteSession implements DocumentSession {
       [oldText, newText, opts],
     );
   }
-  insertContent(content: Content, anchor: InsertAnchor, opts?: MutationOptions) {
+  insertContent(
+    content: Content,
+    anchor: InsertAnchor,
+    opts?: MutationOptions,
+  ) {
     return this.call<Awaited<ReturnType<DocumentSession['insertContent']>>>(
       'insertContent',
       [content, anchor, opts],
     );
   }
-  applyFormatting(target: string, format: Formatting, opts?: MutationOptions) {
+  applyFormatting(
+    target: FormatTarget,
+    format: Formatting,
+    opts?: MutationOptions,
+  ) {
     return this.call<Awaited<ReturnType<DocumentSession['applyFormatting']>>>(
       'applyFormatting',
       [target, format, opts],
+    );
+  }
+  editTable(tableIndex: number, edit: TableEdit, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['editTable']>>>(
+      'editTable',
+      [tableIndex, edit, opts],
     );
   }
   updateImage(

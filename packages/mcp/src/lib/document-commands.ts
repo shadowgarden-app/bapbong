@@ -13,7 +13,12 @@ import {
   withSession,
   type AgentCommand,
 } from './catalog.js';
-import { CONTENT_GRAMMAR, contentSchema } from './blocks-schema.js';
+import {
+  CONTENT_GRAMMAR,
+  contentSchema,
+  tableEditShape,
+  tabStopSchema,
+} from './blocks-schema.js';
 
 const documentId = z
   .string()
@@ -173,21 +178,47 @@ export const applyFormatting = defineCommand({
   name: 'apply_formatting',
   title: 'Apply formatting',
   description:
-    'Format one occurrence of exact text: character marks (bold/italic/underline/strike — true applies, false removes) ' +
-    'and/or paragraph alignment of the containing paragraph. Same anchoring rules as replace_text.',
+    'Format text or a paragraph. Address it by exact text (target_text, matched once or with occurrence — same rules ' +
+    'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
+    '(true applies, false removes) and font_size apply to the text; align, heading (1-6, 0 = body text), style ' +
+    "(Title/Subtitle/Normal) and tabs (replace the paragraph's tab stops) apply to the containing paragraph.",
   input: {
     documentId,
     target_text: z
       .string()
       .min(1)
+      .optional()
       .describe(
         'Exact text to format (must match uniquely, or pass occurrence).',
+      ),
+    block_index: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Instead of target_text: the whole block with this index (from get_document).',
       ),
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
     underline: z.boolean().optional(),
     strike: z.boolean().optional(),
+    font_size: z.number().positive().optional().describe('Points.'),
     align: z.enum(['left', 'center', 'right', 'justify']).optional(),
+    heading: z
+      .number()
+      .int()
+      .min(0)
+      .max(6)
+      .optional()
+      .describe('Word Heading level; 0 makes it body text.'),
+    style: z.enum(['Title', 'Subtitle', 'Normal']).optional(),
+    tabs: z
+      .array(tabStopSchema)
+      .optional()
+      .describe(
+        "The paragraph's tab stops, replacing any it had; [] removes them.",
+      ),
     occurrence,
     expectedVersion,
   },
@@ -198,19 +229,105 @@ export const applyFormatting = defineCommand({
     {
       documentId: id,
       target_text,
+      block_index,
       occurrence: occ,
       expectedVersion: ver,
+      font_size,
+      heading,
+      style,
       ...format
     },
   ) =>
-    withSession(provider, id, async (s) =>
-      json(
-        await s.applyFormatting(target_text, format, {
-          occurrence: occ,
-          expectedVersion: ver,
-        }),
-      ),
-    ),
+    withSession(provider, id, async (s) => {
+      if (target_text === undefined && block_index === undefined)
+        return errorText(
+          'Pass target_text (exact text) or block_index (a whole block).',
+        );
+      return json(
+        await s.applyFormatting(
+          target_text !== undefined
+            ? target_text
+            : { blockIndex: block_index as number },
+          {
+            ...format,
+            ...(font_size !== undefined ? { fontSize: font_size } : {}),
+            ...(heading !== undefined ? { heading } : {}),
+            ...(style !== undefined
+              ? { style: style === 'Normal' ? null : style }
+              : {}),
+          },
+          { occurrence: occ, expectedVersion: ver },
+        ),
+      );
+    }),
+});
+
+export const editTable = defineCommand({
+  name: 'edit_table',
+  title: 'Edit a table',
+  description:
+    'Change an existing table: insert or delete rows, merge cells in a row, set column widths, borders ' +
+    '(grid/outer/none), a repeated header row, or the table alignment. Address the table by its 0-based index: ' +
+    'get_document marks every block inside a table with table: { index, row, cell }. Rows and cells are 0-based. ' +
+    'Order within one call: delete_rows, insert_rows, merge, widths, then borders/header/align. ' +
+    'Cell text is edited with replace_text like any paragraph.',
+  input: {
+    documentId,
+    table: z
+      .number()
+      .int()
+      .min(0)
+      .describe('The table, 0-based, from get_document.'),
+    ...tableEditShape,
+    expectedVersion,
+  },
+  effect: 'edit',
+  targets: (a) => [a.documentId],
+  run: (
+    provider,
+    {
+      documentId: id,
+      table,
+      insert_rows,
+      delete_rows,
+      merge,
+      widths,
+      borders,
+      header,
+      align,
+      expectedVersion: ver,
+    },
+  ) =>
+    withSession(provider, id, async (s) => {
+      if (
+        !insert_rows &&
+        !delete_rows?.length &&
+        !merge &&
+        !widths &&
+        !borders &&
+        header === undefined &&
+        align === undefined
+      ) {
+        return errorText(
+          'Pass at least one change: insert_rows, delete_rows, merge, widths, borders, header, align.',
+        );
+      }
+      return json(
+        await s.editTable(
+          table,
+          {
+            ...(insert_rows ? { insertRows: insert_rows } : {}),
+            ...(delete_rows ? { deleteRows: delete_rows } : {}),
+            ...(merge ? { merge } : {}),
+            ...(widths ? { widths } : {}),
+            ...(borders ? { borders } : {}),
+            ...(header !== undefined ? { header } : {}),
+            ...(align !== undefined ? { align } : {}),
+          },
+          { expectedVersion: ver },
+        ),
+      );
+    }),
 });
 
 export const updateImage = defineCommand({
@@ -316,6 +433,7 @@ export const documentCommands: readonly AgentCommand<
   replaceText,
   insertContent,
   applyFormatting,
+  editTable,
   updateImage,
   saveDocument,
   getSelection,

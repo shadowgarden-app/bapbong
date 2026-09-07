@@ -19,7 +19,9 @@ import type {
   DocSnapshot,
   DocumentSession,
   FindMatch,
+  FormatTarget,
   Formatting,
+  TableEdit,
   ImageChanges,
   InsertAnchor,
   MutationOptions,
@@ -120,8 +122,15 @@ export class HeadlessSession implements DocumentSession {
   ): Promise<MutationResult> {
     return this.inner.insertContent(content, anchor, opts);
   }
+  editTable(
+    tableIndex: number,
+    edit: TableEdit,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { rows: number; cols: number }> {
+    return this.inner.editTable(tableIndex, edit, opts);
+  }
   applyFormatting(
-    target: string,
+    target: FormatTarget,
     format: Formatting,
     opts?: MutationOptions,
   ): Promise<MutationResult> {

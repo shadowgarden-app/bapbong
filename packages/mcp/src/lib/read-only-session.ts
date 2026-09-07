@@ -66,6 +66,9 @@ export class ReadOnlySession implements DocumentSession {
   applyFormatting(): Promise<MutationResult> {
     this.refuse('format this document');
   }
+  editTable(): Promise<MutationResult & { rows: number; cols: number }> {
+    this.refuse('change tables in this document');
+  }
   updateImage(): Promise<MutationResult> {
     this.refuse('change images in this document');
   }

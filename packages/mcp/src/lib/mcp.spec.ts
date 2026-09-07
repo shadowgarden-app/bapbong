@@ -285,6 +285,7 @@ describe('createMcpServer (end-to-end over MCP)', () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
       'apply_formatting',
+      'edit_table',
       'find_text',
       'get_document',
       'insert_content',

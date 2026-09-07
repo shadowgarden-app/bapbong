@@ -14,11 +14,13 @@ import type { EditorState, Transaction } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import {
   AnchorError,
+  ContentError,
   VersionConflictError,
   type DocBlock,
   type DocSnapshot,
   type DocumentSession,
   type FindMatch,
+  type FormatTarget,
   type Formatting,
   type ImageChanges,
   type InsertAnchor,
@@ -27,9 +29,15 @@ import {
   type SessionCapabilities,
 } from './contract.js';
 import {
+  columnWidths,
   contentToNodes,
+  lengthToPx,
   referencedTableStyles,
+  rowNode,
+  tableChrome,
+  tableGrid,
   type Content,
+  type TableEdit,
   type TableStyleSource,
 } from './blocks.js';
 
@@ -52,6 +60,12 @@ export interface PmSessionHost {
 /** A4 with 1in margins — what the layout shows when the doc has no page
  *  attr, so "100%" and equal columns must mean the same here. */
 const DEFAULT_CONTENT_WIDTH = 794 - 96 * 2;
+
+interface TextBlock {
+  node: PMNode;
+  pos: number;
+  table?: { index: number; row: number; cell: number };
+}
 
 /** A text hit resolved to absolute PM positions. */
 interface Hit {
@@ -78,23 +92,26 @@ export class PmDocSession implements DocumentSession {
   // ── reads ────────────────────────────────────────────────────────────
 
   async snapshot(): Promise<DocSnapshot> {
-    const blocks: DocBlock[] = this.textblocks().map(({ node }, index) => {
-      const block: DocBlock = {
-        index,
-        type: blockType(node),
-        text: node.textContent,
-      };
-      const images = blockImages(node).map(({ node: img }, i) => ({
-        index: i,
-        alt: String(img.attrs['alt'] ?? ''),
-        width: Number(img.attrs['width']) || 0,
-        height: Number(img.attrs['height']) || 0,
-        rotation: Number(img.attrs['rotation']) || 0,
-        kind: img.attrs['shape'] ? ('shape' as const) : ('bitmap' as const),
-      }));
-      if (images.length > 0) block.images = images;
-      return block;
-    });
+    const blocks: DocBlock[] = this.textblocks().map(
+      ({ node, table }, index) => {
+        const block: DocBlock = {
+          index,
+          type: blockType(node),
+          text: node.textContent,
+        };
+        if (table) block.table = table;
+        const images = blockImages(node).map(({ node: img }, i) => ({
+          index: i,
+          alt: String(img.attrs['alt'] ?? ''),
+          width: Number(img.attrs['width']) || 0,
+          height: Number(img.attrs['height']) || 0,
+          rotation: Number(img.attrs['rotation']) || 0,
+          kind: img.attrs['shape'] ? ('shape' as const) : ('bitmap' as const),
+        }));
+        if (images.length > 0) block.images = images;
+        return block;
+      },
+    );
     return {
       docVersion: this.host.getVersion(),
       blocks,
@@ -169,10 +186,16 @@ export class PmDocSession implements DocumentSession {
     // A table born with a style needs its definition in the document's
     // sheet for the layout to paint it (the same move insertTable makes).
     if (tableStyle?.style && schema.nodes['doc'].spec.attrs?.['tableStyles']) {
-      const sheet = (state.doc.attrs['tableStyles'] ?? {}) as Record<string, unknown>;
+      const sheet = (state.doc.attrs['tableStyles'] ?? {}) as Record<
+        string,
+        unknown
+      >;
       for (const id of referencedTableStyles(paragraphs)) {
         if (id === tableStyle.styleId && !sheet[id]) {
-          tr = tr.setDocAttribute('tableStyles', { ...sheet, [id]: tableStyle.style });
+          tr = tr.setDocAttribute('tableStyles', {
+            ...sheet,
+            [id]: tableStyle.style,
+          });
         }
       }
     }
@@ -184,12 +207,12 @@ export class PmDocSession implements DocumentSession {
   }
 
   async applyFormatting(
-    target: string,
+    target: FormatTarget,
     format: Formatting,
     opts: MutationOptions = {},
   ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
-    const hit = this.uniqueHit(target, opts.occurrence);
+    const hit = this.formatHit(target, opts.occurrence);
     const state = this.host.getState();
     const { schema } = state;
     let tr = state.tr;
@@ -202,11 +225,42 @@ export class PmDocSession implements DocumentSession {
         ? tr.addMark(hit.from, hit.to, mark.create())
         : tr.removeMark(hit.from, hit.to, mark);
     }
-    if (format.align) {
+    if (
+      format.fontSize !== undefined &&
+      schema.marks['fontSize'] &&
+      hit.to > hit.from
+    ) {
+      tr = tr.addMark(
+        hit.from,
+        hit.to,
+        schema.marks['fontSize'].create({ size: format.fontSize }),
+      );
+    }
+    const pAttrs: Record<string, unknown> = {};
+    if (format.align) pAttrs['align'] = format.align;
+    if (format.heading !== undefined) {
+      pAttrs['heading'] = format.heading ? format.heading : null;
+      if (format.heading) pAttrs['styleId'] = null;
+    }
+    if (format.style !== undefined) {
+      pAttrs['styleId'] = format.style;
+      if (format.style) pAttrs['heading'] = null;
+    }
+    if (format.tabs !== undefined) {
+      const width = this.contentWidth();
+      pAttrs['tabs'] = format.tabs.length
+        ? format.tabs.map((t) => ({
+            pos: Math.round(lengthToPx(t.at, width)),
+            val: t.align ?? 'left',
+            ...(t.leader ? { leader: t.leader } : {}),
+          }))
+        : null;
+    }
+    if (Object.keys(pAttrs).length > 0) {
       const block = this.textblocks()[hit.blockIndex];
       tr = tr.setNodeMarkup(block.pos, undefined, {
         ...block.node.attrs,
-        align: format.align,
+        ...pAttrs,
       });
     }
     if (tr.steps.length === 0) {
@@ -286,16 +340,219 @@ export class PmDocSession implements DocumentSession {
     /* sessions over a host hold no resources of their own */
   }
 
+  async editTable(
+    tableIndex: number,
+    edit: TableEdit,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & { rows: number; cols: number }> {
+    this.checkVersion(opts.expectedVersion);
+    const state = this.host.getState();
+    const { schema } = state;
+    const width = this.contentWidth();
+    let tr = state.tr;
+    const locate = () => {
+      let found: { node: PMNode; pos: number } | null = null;
+      let n = 0;
+      tr.doc.descendants((node, pos) => {
+        if (found) return false;
+        if (node.type.name === 'table') {
+          if (n === tableIndex) found = { node, pos };
+          n++;
+        }
+        return !found;
+      });
+      if (!found) {
+        throw new ContentError(
+          `No table ${tableIndex} — get_document marks the blocks inside tables with table.index (0-based); the document has ${n}.`,
+        );
+      }
+      return found as { node: PMNode; pos: number };
+    };
+    const rowAt = (table: PMNode, pos: number, r: number) => {
+      if (r < 0 || r >= table.childCount) {
+        throw new ContentError(
+          `Row ${r} is out of range — the table has ${table.childCount} row(s).`,
+        );
+      }
+      let rowPos = pos + 1;
+      for (let i = 0; i < r; i++) rowPos += table.child(i).nodeSize;
+      return { node: table.child(r), pos: rowPos };
+    };
+
+    if (edit.deleteRows?.length) {
+      const { node, pos } = locate();
+      const rows = [...new Set(edit.deleteRows)].sort((a, b) => b - a);
+      if (rows.length >= node.childCount)
+        throw new ContentError('A table must keep at least one row.');
+      for (const r of rows) {
+        const row = rowAt(node, pos, r);
+        tr = tr.delete(row.pos, row.pos + row.node.nodeSize);
+      }
+    }
+    if (edit.insertRows) {
+      const { node, pos } = locate();
+      const grid = tableGrid(node, width);
+      const at = edit.insertRows.at ?? node.childCount;
+      if (at < 0 || at > node.childCount) {
+        throw new ContentError(
+          `Cannot insert at row ${at} — the table has ${node.childCount} row(s); omit at to append.`,
+        );
+      }
+      const rows = edit.insertRows.rows.map((cells) =>
+        rowNode(cells, grid.widths, schema),
+      );
+      const insertAt =
+        at === node.childCount
+          ? pos + node.nodeSize - 1
+          : rowAt(node, pos, at).pos;
+      tr = tr.insert(insertAt, rows);
+    }
+    if (edit.merge) {
+      const { node, pos } = locate();
+      const { row: r, from, to } = edit.merge;
+      const row = rowAt(node, pos, r);
+      if (from < 0 || to >= row.node.childCount || from > to) {
+        throw new ContentError(
+          `merge cells ${from}..${to} is out of range — row ${r} has ${row.node.childCount} cell(s).`,
+        );
+      }
+      if (from < to) {
+        let cellPos = row.pos + 1;
+        for (let i = 0; i < from; i++) cellPos += row.node.child(i).nodeSize;
+        let end = cellPos;
+        let colspan = 0;
+        const colwidth: number[] = [];
+        let content = row.node.child(from).content;
+        for (let i = from; i <= to; i++) {
+          const cell = row.node.child(i);
+          end += cell.nodeSize;
+          colspan += Math.max(1, Number(cell.attrs['colspan']) || 1);
+          const cw = cell.attrs['colwidth'] as number[] | null;
+          if (cw) colwidth.push(...cw);
+          if (i > from) content = content.append(cell.content);
+        }
+        const first = row.node.child(from);
+        const merged = first.type.create(
+          {
+            ...first.attrs,
+            colspan,
+            colwidth: colwidth.length === colspan ? colwidth : null,
+          },
+          content,
+        );
+        tr = tr.replaceWith(cellPos, end, merged);
+      }
+    }
+    if (edit.widths) {
+      const { node, pos } = locate();
+      const grid = tableGrid(node, width);
+      const widths = columnWidths(edit.widths, grid.cols, width);
+      node.forEach((row, rowOffset) => {
+        let col = 0;
+        row.forEach((cell, cellOffset) => {
+          const span = Math.max(1, Number(cell.attrs['colspan']) || 1);
+          const cellPos = pos + 1 + rowOffset + 1 + cellOffset;
+          tr = tr.setNodeMarkup(cellPos, undefined, {
+            ...cell.attrs,
+            colwidth: widths.slice(col, col + span),
+          });
+          col += span;
+        });
+      });
+    }
+    if (edit.borders || edit.align !== undefined || edit.header !== undefined) {
+      const { node, pos } = locate();
+      const attrs: Record<string, unknown> = { ...node.attrs };
+      const tableStyle = this.host.tableStyle?.();
+      if (edit.borders) {
+        const chrome = tableChrome(
+          edit.borders,
+          tableStyle,
+          !!node.type.spec.attrs?.['styleId'],
+        );
+        attrs['styleId'] = chrome.styleId;
+        attrs['look'] = chrome.look;
+        attrs['borders'] = chrome.borders;
+        if (
+          chrome.styleId &&
+          tableStyle?.style &&
+          schema.nodes['doc'].spec.attrs?.['tableStyles']
+        ) {
+          const sheet = (tr.doc.attrs['tableStyles'] ?? {}) as Record<
+            string,
+            unknown
+          >;
+          if (!sheet[chrome.styleId]) {
+            tr = tr.setDocAttribute('tableStyles', {
+              ...sheet,
+              [chrome.styleId]: tableStyle.style,
+            });
+          }
+        }
+      }
+      if (edit.align !== undefined)
+        attrs['align'] = edit.align === 'left' ? null : edit.align;
+      tr = tr.setNodeMarkup(pos, undefined, attrs);
+      if (edit.header !== undefined) {
+        const first = rowAt(locate().node, pos, 0);
+        tr = tr.setNodeMarkup(first.pos, undefined, {
+          ...first.node.attrs,
+          header: edit.header,
+        });
+      }
+    }
+    if (tr.steps.length === 0) {
+      const { node } = locate();
+      return {
+        docVersion: this.host.getVersion(),
+        rows: node.childCount,
+        cols: tableGrid(node, width).cols,
+      };
+    }
+    this.host.apply(tr);
+    const { node, pos } = locate();
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: pos, to: pos + node.nodeSize },
+      rows: node.childCount,
+      cols: tableGrid(node, width).cols,
+    };
+  }
+
   // ── internals ────────────────────────────────────────────────────────
+
+  /** Resolve a formatting target to absolute positions. */
+  private formatHit(target: FormatTarget, occurrence?: number): Hit {
+    if (typeof target === 'string') return this.uniqueHit(target, occurrence);
+    const blocks = this.textblocks();
+    const block = blocks[target.blockIndex];
+    if (!block) {
+      throw new AnchorError(
+        `blockIndex ${target.blockIndex} is out of range — the document has ${blocks.length} block(s).`,
+      );
+    }
+    return {
+      from: block.pos + 1,
+      to: block.pos + 1 + block.node.content.size,
+      blockIndex: target.blockIndex,
+      context: block.node.textContent,
+    };
+  }
 
   /** The text area's width in px, from the document's page setup. */
   private contentWidth(): number {
     const page = this.host.getState().doc.attrs['page'] as
-      | { width: number; margin: { left: number; right: number }; gutter?: number }
+      | {
+          width: number;
+          margin: { left: number; right: number };
+          gutter?: number;
+        }
       | null
       | undefined;
     if (!page) return DEFAULT_CONTENT_WIDTH;
-    return page.width - page.margin.left - page.margin.right - (page.gutter ?? 0);
+    return (
+      page.width - page.margin.left - page.margin.right - (page.gutter ?? 0)
+    );
   }
 
   private checkVersion(expected?: string): void {
@@ -305,16 +562,31 @@ export class PmDocSession implements DocumentSession {
     }
   }
 
-  /** All textblocks (paragraphs, incl. inside table cells) in reading order. */
-  private textblocks(): { node: PMNode; pos: number }[] {
-    const out: { node: PMNode; pos: number }[] = [];
-    this.host.getState().doc.descendants((node, pos) => {
-      if (node.isTextblock) {
-        out.push({ node, pos });
-        return false;
-      }
-      return true;
-    });
+  /** All textblocks (paragraphs, incl. inside table cells) in reading order,
+   *  each knowing which table cell holds it. */
+  private textblocks(): TextBlock[] {
+    const out: TextBlock[] = [];
+    let tables = 0;
+    const walk = (node: PMNode, base: number, ctx: TextBlock['table']) => {
+      node.forEach((child, offset, i) => {
+        const pos = base + offset;
+        if (child.isTextblock) {
+          out.push(
+            ctx ? { node: child, pos, table: ctx } : { node: child, pos },
+          );
+          return;
+        }
+        let next = ctx;
+        if (child.type.name === 'table')
+          next = { index: tables++, row: 0, cell: 0 };
+        else if (child.type.name === 'table_row' && ctx)
+          next = { ...ctx, row: i, cell: 0 };
+        else if (child.type.name === 'table_cell' && ctx)
+          next = { ...ctx, cell: i };
+        walk(child, pos + 1, next);
+      });
+    };
+    walk(this.host.getState().doc, 0, undefined);
     return out;
   }
 

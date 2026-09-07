@@ -18,6 +18,7 @@ export {
   type Inline,
   type ParagraphBlock,
   type TableBlock,
+  type TableEdit,
   type TableStyleSource,
   type TabStop,
 } from './lib/blocks.js';

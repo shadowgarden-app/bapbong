@@ -19,11 +19,14 @@ export const inlineSchema = z.union([
   z.object({ tab: z.literal(true) }).strict(),
 ]);
 
-const length = z.union([z.number(), z.string()]);
+export const lengthSchema = z.union([z.number(), z.string()]);
+const length = lengthSchema;
 
 export const tabStopSchema = z
   .object({
-    at: length.describe('Position: a number is cm; or "100%" (of the text width), "3cm", "1in".'),
+    at: length.describe(
+      'Position: a number is cm; or "100%" (of the text width), "3cm", "1in".',
+    ),
     align: z.enum(['left', 'right', 'center']).optional(),
     leader: z.enum(['dot', 'underscore', 'hyphen']).optional(),
   })
@@ -49,7 +52,10 @@ export const cellSchema = z.union([
       text: z.union([z.string(), z.array(inlineSchema)]),
       colspan: z.number().int().min(1).optional(),
       align: align.optional(),
-      shading: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      shading: z
+        .string()
+        .regex(/^#[0-9a-fA-F]{6}$/)
+        .optional(),
       vAlign: z.enum(['center', 'bottom']).optional(),
       ...marks,
     })
@@ -66,7 +72,58 @@ export const tableBlockSchema = z
   })
   .strict();
 
-export const blockSchema = z.union([z.string(), paragraphBlockSchema, tableBlockSchema]);
+export const blockSchema = z.union([
+  z.string(),
+  paragraphBlockSchema,
+  tableBlockSchema,
+]);
+
+/** The edit_table input pieces (see TableEdit in ./blocks). */
+export const tableEditShape = {
+  insert_rows: z
+    .object({
+      at: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe('Insert before this 0-based row; omit to append.'),
+      rows: z
+        .array(z.array(cellSchema))
+        .min(1)
+        .describe('Rows of cells, same grammar as a table block.'),
+    })
+    .strict()
+    .optional(),
+  delete_rows: z
+    .array(z.number().int().min(0))
+    .optional()
+    .describe('0-based rows to remove.'),
+  merge: z
+    .object({
+      row: z.number().int().min(0),
+      from: z.number().int().min(0),
+      to: z.number().int().min(0),
+    })
+    .strict()
+    .optional()
+    .describe(
+      'Merge cells from..to (0-based, inclusive) of one row into one cell.',
+    ),
+  widths: z
+    .array(length)
+    .optional()
+    .describe('One length per grid column: cm as a number, or "%".'),
+  borders: z.enum(['grid', 'none', 'outer']).optional(),
+  header: z
+    .boolean()
+    .optional()
+    .describe('Row 0 is a header row, repeated on every page.'),
+  align: z
+    .enum(['left', 'center', 'right'])
+    .optional()
+    .describe('Table alignment on the page.'),
+};
 
 /** `content` as commands accept it: plain text, or blocks. */
 export const contentSchema = z.union([z.string(), z.array(blockSchema)]);
