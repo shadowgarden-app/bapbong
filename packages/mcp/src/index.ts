@@ -34,8 +34,10 @@ export { createMcpServer, type CreateMcpServerOptions } from './lib/server.js';
 export {
   defineCommand,
   errorText,
+  image,
   isOffered,
   json,
+  resultText,
   registerCommands,
   registerDocumentResource,
   withSession,
@@ -45,6 +47,7 @@ export {
   type DocumentEffect,
   type CommandRequirement,
   type CommandResult,
+  type ContentBlock,
   type HostCapabilities,
 } from './lib/catalog.js';
 export * from './lib/document-commands.js';

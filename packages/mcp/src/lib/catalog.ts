@@ -41,10 +41,26 @@ export type DocumentEffect = 'read' | 'edit' | 'save';
  *  forwards it untouched and every other adapter unwraps the same fields.
  *  (A type literal, not an interface: the SDK's result type carries an index
  *  signature, which only type literals satisfy implicitly.) */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
 export type CommandResult = {
-  content: { type: 'text'; text: string }[];
+  content: ContentBlock[];
   isError?: true;
 };
+
+/** The first text block of a result — what a non-MCP adapter reads. */
+export function resultText(result: CommandResult): string {
+  for (const c of result.content) if (c.type === 'text') return c.text;
+  return '';
+}
+
+/** An image block: base64 bytes the model sees inline (MCP clients render
+ *  it; other adapters may drop or save it). */
+export function image(data: string, mimeType = 'image/png'): ContentBlock {
+  return { type: 'image', data, mimeType };
+}
 
 /** The arguments a command receives: its zod shape, parsed. */
 export type CommandArgs<Shape extends z.ZodRawShape> = z.objectOutputType<
