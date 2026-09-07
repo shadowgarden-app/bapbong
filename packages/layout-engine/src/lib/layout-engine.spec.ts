@@ -1533,6 +1533,32 @@ describe('layoutBlocks', () => {
     expect(segs[2]).toMatchObject({ text: '9', x: 120 }); // lands at the stop
   });
 
+  it('paints a trailing tab that carries a leader — the fill-in line of a form', () => {
+    // "Name:" then a tab to a right stop at the line end with a dot leader
+    // and NOTHING after it. Word draws the dots to the stop; trimming it as
+    // trailing whitespace left the line bare.
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'Name:\t', font: font(), pos: 1 }],
+      tabs: [{ pos: 200, val: 'right', leader: 'dot' }],
+    };
+    const { pages } = layoutBlocks([block], config());
+    const segs = pages[0].lines[0].segments;
+    expect(segs[0]).toMatchObject({ text: 'Name:', x: 20 });
+    // tab spans 70..220 (150px) → 14 dots (150/10 − 1), decoration only.
+    expect(segs[1].text).toBe('..............');
+    expect(segs[1].pos).toBeUndefined();
+    // A trailing PLAIN tab is still trimmed like any whitespace.
+    const plain: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'Name:\t', font: font(), pos: 1 }],
+      tabs: [{ pos: 200, val: 'right' }],
+    };
+    expect(
+      layoutBlocks([plain], config()).pages[0].lines[0].segments,
+    ).toHaveLength(1);
+  });
+
   it('right-aligns and decimal-aligns tab groups at their stops', () => {
     const right: FlowBlock = {
       type: 'paragraph',

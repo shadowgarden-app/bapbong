@@ -1244,9 +1244,18 @@ function wrapParagraph(
     // Word lets it hang past the line's end. With w:ulTrailSpace the
     // underlined part of it is still painted (an underline runs under the
     // hanging spaces); it hangs all the same, so it never moves the text.
+    // A trailing tab that resolved to a leader fill is CONTENT, not
+    // whitespace: "Name: ........" is the fill-in line of every form, and
+    // Word paints it to the stop with nothing after it.
     let end = lineTokens.length;
     let contentWidth = lineWidth;
-    while (end > 0 && lineTokens[end - 1].isSpace) {
+    const isLeaderFill = (t: Token) =>
+      t.isTab && t.text != null && t.text !== '\t';
+    while (
+      end > 0 &&
+      lineTokens[end - 1].isSpace &&
+      !isLeaderFill(lineTokens[end - 1])
+    ) {
       contentWidth -= lineTokens[end - 1].width;
       end--;
     }
