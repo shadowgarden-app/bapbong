@@ -254,6 +254,8 @@ export class BapbongEditor {
   private readOnly = false;
   /** Document position of the node the frame is around (see setFrame). */
   private framePos: number | null = null;
+  /** The frame's page-local box, for a snapshot of the framed object. */
+  private frameBox: SelectionRect | null = null;
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -596,6 +598,29 @@ export class BapbongEditor {
       pos: this.framePos,
       rect: { x: r.left, y: r.top, width: r.width, height: r.height },
     };
+  }
+
+  /**
+   * A picture of `from`–`to` as the page shows it: the passage cut out of
+   * its page(s) with a little margin, the picked lines tinted. When the
+   * range is exactly the framed object (a picture or shape clicked), the
+   * cut is that object's box, outlined. Rendered off screen, so a passage
+   * scrolled out of view comes out whole. Null before layout.
+   */
+  selectionSnapshot(
+    from: number,
+    to: number,
+  ): Promise<{ blob: Blob; width: number; height: number } | null> {
+    const node = this.state?.doc.nodeAt(from);
+    const framed =
+      this.framePos === from &&
+      this.frameBox !== null &&
+      node !== null &&
+      node !== undefined &&
+      to === from + node.nodeSize;
+    return framed
+      ? this.core.regionSnapshot([this.frameBox!], { mark: 'outline' })
+      : this.core.regionSnapshot(this.core.selectionRects(from, to));
   }
 
   /** Insert an image blob at the selection, measured to its intrinsic size
@@ -1554,6 +1579,15 @@ export class BapbongEditor {
    *  DOM (no canvas repaint). Handle geometry stays constant-size on screen. */
   private setFrame(frame: OverlayFrame | null): void {
     this.framePos = frame ? (frame.pos ?? this.framePos) : null;
+    this.frameBox = frame
+      ? {
+          pageIndex: frame.pageIndex,
+          x: frame.x,
+          y: frame.y,
+          width: frame.width,
+          height: frame.height,
+        }
+      : null;
     if (!frame) {
       if (this.frameEl) this.frameEl.style.display = 'none';
       return;

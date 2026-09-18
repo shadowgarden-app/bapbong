@@ -24,6 +24,7 @@ import {
 } from '@shadow-garden/bapbong-selection';
 import { A11yMirror } from '@shadow-garden/bapbong-a11y';
 import { perf } from '@shadow-garden/bapbong-contracts';
+import { fitScale, planSnapshot } from './region-snapshot.js';
 import type {
   CaretRect,
   MeasureMetrics,
@@ -564,6 +565,129 @@ export class RenderCore {
         width: parseFloat(target.style.width) || target.width,
         height: parseFloat(target.style.height) || target.height,
       };
+    } finally {
+      holder.remove();
+    }
+  }
+
+  /**
+   * A picture of part of the document: one band per page `rects` touch
+   * (their bounding box plus `pad`), stacked with a thin grey seam, the
+   * rects themselves tinted — filled for text, outlined for an object.
+   * Rendered off screen like `pageSnapshot`, so pages scrolled out of view
+   * come out whole. The long side is capped at `maxSide` px; a PNG over
+   * `maxBytes` is re-encoded as JPEG. Null when nothing can be cut.
+   */
+  async regionSnapshot(
+    rects: readonly SelectionRect[],
+    opts: {
+      pad?: number;
+      maxSide?: number;
+      maxBytes?: number;
+      mark?: 'fill' | 'outline';
+    } = {},
+  ): Promise<{ blob: Blob; width: number; height: number } | null> {
+    const layout = this.resolved;
+    if (!layout) return null;
+    const pieces = planSnapshot(
+      rects,
+      (i) => {
+        const p = layout.pages[i];
+        return p ? { width: p.width, height: p.height } : null;
+      },
+      opts.pad ?? 12,
+    );
+    if (!pieces.length) return null;
+    const first = pieces[0].pageIndex;
+    const last = pieces[pieces.length - 1].pageIndex;
+    const tops: number[] = [];
+    let acc = 0;
+    for (let i = 0; i <= last; i++) {
+      tops.push(acc);
+      acc += layout.pages[i].height + this.pageGapPx;
+    }
+    const holder = document.createElement('div');
+    holder.style.cssText =
+      'position:absolute;left:-99999px;top:0;pointer-events:none;';
+    document.body.appendChild(holder);
+    try {
+      const painter = new CanvasPainter(holder);
+      painter.paint(layout, {
+        zoom: 1,
+        pageGap: this.pageGapPx,
+        viewport: {
+          top: tops[first],
+          height: tops[last] + layout.pages[last].height - tops[first],
+        },
+      });
+      await painter.whenImagesSettled();
+      const canvases = Array.from(holder.querySelectorAll('canvas'));
+      const sources = pieces.map((piece) => {
+        const top = tops[piece.pageIndex];
+        const canvas = canvases.find(
+          (c) => Math.abs(parseFloat(c.style.top || '0') - top) < 1,
+        );
+        const cssWidth = layout.pages[piece.pageIndex].width;
+        return canvas ? { canvas, density: canvas.width / cssWidth } : null;
+      });
+      if (sources.some((s) => s === null)) return null;
+      const SEAM = 8;
+      const width = Math.max(...pieces.map((p) => p.crop.width));
+      const height =
+        pieces.reduce((h, p) => h + p.crop.height, 0) +
+        SEAM * (pieces.length - 1);
+      const natural = Math.min(...sources.map((s) => s!.density));
+      const scale = fitScale(width, height, opts.maxSide ?? 1200, natural);
+      const out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(width * scale));
+      out.height = Math.max(1, Math.round(height * scale));
+      const ctx = out.getContext('2d');
+      if (!ctx) return null;
+      ctx.fillStyle = '#e4e4e7';
+      ctx.fillRect(0, 0, out.width, out.height);
+      let y = 0;
+      pieces.forEach((piece, i) => {
+        const { canvas, density } = sources[i]!;
+        const c = piece.crop;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, y * scale, c.width * scale, c.height * scale);
+        ctx.drawImage(
+          canvas,
+          c.x * density,
+          c.y * density,
+          c.width * density,
+          c.height * density,
+          0,
+          y * scale,
+          c.width * scale,
+          c.height * scale,
+        );
+        for (const m of piece.marks) {
+          const x0 = m.x * scale;
+          const y0 = (y + m.y) * scale;
+          if (opts.mark === 'outline') {
+            ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+            ctx.lineWidth = Math.max(2, 3 * scale);
+            ctx.strokeRect(x0, y0, m.width * scale, m.height * scale);
+          } else {
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+            ctx.fillRect(x0, y0, m.width * scale, m.height * scale);
+          }
+        }
+        y += c.height + SEAM;
+      });
+      const encode = (type: string, quality?: number) =>
+        new Promise<Blob | null>((resolve) =>
+          out.toBlob(resolve, type, quality),
+        );
+      const maxBytes = opts.maxBytes ?? 300_000;
+      let blob = await encode('image/png');
+      // Text crops stay small as PNG; a picture-heavy one is re-encoded.
+      for (const q of [0.85, 0.7, 0.55]) {
+        if (!blob || blob.size <= maxBytes) break;
+        blob = await encode('image/jpeg', q);
+      }
+      return blob ? { blob, width: out.width, height: out.height } : null;
     } finally {
       holder.remove();
     }
