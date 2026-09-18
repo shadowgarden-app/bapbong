@@ -675,6 +675,11 @@ function windowedBlockView(
  * popups appear next to the visible (painted) caret. Only the blocks around
  * the selection exist as real DOM — see the DOM-windowing section above.
  */
+/** Transaction meta: this edit goes through even while the bridge is
+ *  read-only (see InputBridge.setReadOnly) — set by host code that vouches
+ *  for it, never by the reader's own input. */
+export const READ_ONLY_BYPASS = 'bapbong:readOnlyBypass';
+
 export class InputBridge {
   /** Clip layer appended near the canvas: it fills the positioned ancestor
    *  and `overflow: hidden`s the 800px-wide host riding the caret inside —
@@ -684,6 +689,7 @@ export class InputBridge {
   /** The hidden editor's host — the element `place()` actually moves. */
   private readonly host: HTMLElement;
   readonly view: EditorView;
+  private readOnly = false;
 
   constructor(options: InputBridgeOptions) {
     this.dom = document.createElement('div');
@@ -755,6 +761,8 @@ export class InputBridge {
           options.autoCorrect ?? true,
         ),
       handlePaste: options.handlePaste,
+      // Read-only: ProseMirror ignores typing, paste, drop and IME itself.
+      editable: () => !this.readOnly,
       // DOM windowing: only blocks near the selection render for real.
       decorations: windowDecorations,
       nodeViews: {
@@ -783,6 +791,10 @@ export class InputBridge {
         },
       },
       dispatchTransaction: (tr) => {
+        // Read-only holds the document still against every other path too —
+        // keymaps, toolbar commands, plugins — unless the host vouches.
+        if (this.readOnly && tr.docChanged && !tr.getMeta(READ_ONLY_BYPASS))
+          return;
         const state = this.view.state.apply(tr);
         this.view.updateState(state);
         options.onUpdate(state, tr);
@@ -802,6 +814,14 @@ export class InputBridge {
 
   focus(): void {
     this.view.focus();
+  }
+
+  /** Stop (or resume) every edit that does not carry READ_ONLY_BYPASS.
+   *  Selection still moves. */
+  setReadOnly(on: boolean): void {
+    if (this.readOnly === on) return;
+    this.readOnly = on;
+    this.view.setProps({}); // re-evaluates `editable` on the DOM
   }
 
   /** Set a text selection (collapsed caret or anchor→head range). Positions

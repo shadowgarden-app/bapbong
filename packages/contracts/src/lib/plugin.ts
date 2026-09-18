@@ -135,6 +135,10 @@ export interface OverlayFrameAction {
  *  around the rect center. Page-local geometry; purely visual — the plugin
  *  hit-tests handles itself from the same numbers. */
 export interface OverlayFrame {
+  /** Document position of the framed node, so hosts can ask what is
+   *  selected (see BapbongEditor.selectedObject). A frame without one — a
+   *  drag preview — keeps the position of the frame before it. */
+  pos?: number;
   pageIndex: number;
   x: number;
   y: number;
@@ -153,9 +157,10 @@ export interface OverlayFrame {
    * eight-handle picture frame; `'corners'` draws only the four corner
    * handles, so the box can only scale PROPORTIONALLY — what an embedded
    * object wants, since stretching one axis distorts the content it is a
-   * preview of (Word's own equation objects behave this way).
+   * preview of (Word's own equation objects behave this way). `'none'` is a
+   * bare outline: selected, not editable (a read-only editor's selection).
    */
-  handles?: 'all' | 'corners';
+  handles?: 'all' | 'corners' | 'none';
   /** Draw the rotate knob and accept rotation gestures. Default true; false
    *  for boxes rotation would be wrong on (Word blocks it while an object
    *  flows inline with text). */

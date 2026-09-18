@@ -551,6 +551,7 @@ export function imageResizePlugin(): EditorPlugin {
       frame
         ? {
             ...frame,
+            pos: sel.pos,
             actions: actionsFor(c, sel.pos),
             ...frameFlags(c, sel.pos),
           }
@@ -1005,6 +1006,7 @@ export function imageResizePlugin(): EditorPlugin {
         if (hit) {
           sel = { pos: hit.pos };
           c.setFrame({
+            pos: hit.pos,
             pageIndex: hit.pageIndex,
             ...hit.rect,
             ...(rotationAt(c.state, hit.pos)

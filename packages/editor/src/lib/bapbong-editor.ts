@@ -4,10 +4,12 @@ import {
   Schema,
 } from 'prosemirror-model';
 import { imagePasteHandler, insertImageBlobs } from './paste-images';
+import { imageAtPoint } from '@shadow-garden/bapbong-selection';
 import { schema as baseSchema } from '@shadow-garden/bapbong-model';
 import { RenderCore } from '@shadow-garden/bapbong-view';
 import {
   InputBridge,
+  READ_ONLY_BYPASS,
   IS_MAC,
   moveCaretCommand,
   backspaceOutdent,
@@ -248,6 +250,10 @@ export class BapbongEditor {
   private actionHandler: (() => void) | null = null;
   // Object-selection frame (image resize handles + rotate knob); lazily created.
   private frameEl: HTMLDivElement | null = null;
+  /** Read-only (see setReadOnly): the reader selects, nothing edits. */
+  private readOnly = false;
+  /** Document position of the node the frame is around (see setFrame). */
+  private framePos: number | null = null;
 
   /** Headless editor commands keyed by name — the surface a toolbar/menubar
    *  renders and dispatches against (`editor.commands.get('bold')?.run(...)`).
@@ -374,13 +380,18 @@ export class BapbongEditor {
       setCursor: (cursor: string | null) => {
         this.stack.style.cursor = cursor ?? '';
       },
-      setGuide: (guide: OverlayGuide | null) => this.setGuide(guide),
+      // Read-only keeps plugins' floating UI down: guides, panels, action
+      // buttons and frames are editing affordances.
+      setGuide: (guide: OverlayGuide | null) =>
+        this.setGuide(this.readOnly ? null : guide),
       setHighlight: (rects: OverlayRect[] | null) => this.setHighlight(rects),
       setPanel: (el: OverlayPanelElement | null, at?: OverlayRect) =>
-        this.setPanel((el as HTMLElement) ?? null, at),
+        this.setPanel(this.readOnly ? null : ((el as HTMLElement) ?? null), at),
       setActionButton: (at: PagePoint | null, onActivate?: () => void) =>
-        this.setActionButton(at, onActivate),
-      setFrame: (frame: OverlayFrame | null) => this.setFrame(frame),
+        this.setActionButton(this.readOnly ? null : at, onActivate),
+      setFrame: (frame: OverlayFrame | null) => {
+        if (!this.readOnly) this.setFrame(frame);
+      },
     };
     // `state` + `layout` are live (read on each access); arrow getters keep them
     // current without throwing at construction (the doc loads later).
@@ -511,8 +522,32 @@ export class BapbongEditor {
 
   /** Apply a transaction (the host builds comment/edit transactions against
    *  `state` and dispatches them here). */
-  dispatch(tr: Transaction): void {
+  dispatch(tr: Transaction, opts?: { evenIfReadOnly?: boolean }): void {
+    if (opts?.evenIfReadOnly) tr.setMeta(READ_ONLY_BYPASS, true);
     this.bridge?.dispatch(tr);
+  }
+
+  /**
+   * Read-only: the reader can still select — text by dragging, a picture or
+   * shape by clicking it (a plain frame, see selectedObject) — but nothing
+   * edits the document: typing, paste, keymaps, toolbar commands and
+   * plugins are all turned away, and plugins' floating UI stays down. Only
+   * a dispatch with `evenIfReadOnly` goes through (an agent's edit).
+   */
+  setReadOnly(on: boolean): void {
+    if (this.readOnly === on) return;
+    this.readOnly = on;
+    this.bridge?.setReadOnly(on);
+    this.setFrame(null);
+    this.setGuide(null);
+    this.setPanel(null);
+    this.setActionButton(null);
+    this.stack.style.cursor = '';
+    this.repaintOverlay(); // the caret goes (or comes back) at once
+  }
+
+  get isReadOnly(): boolean {
+    return this.readOnly;
   }
 
   /** Viewport-space rect of the caret at `pos` (default: the selection head)
@@ -542,6 +577,24 @@ export class BapbongEditor {
       x: host.left + top.x,
       y: host.top + top.y,
       height: bottom.y - top.y,
+    };
+  }
+
+  /** The object (picture, shape, equation preview) the selection frame is
+   *  around — its document position and viewport rect — or null when none
+   *  is. Object selection lives in its plugin, not in the PM selection, so
+   *  hosts that act on "what is selected" ask here too. */
+  selectedObject(): {
+    pos: number;
+    rect: { x: number; y: number; width: number; height: number };
+  } | null {
+    const el = this.frameEl;
+    if (this.framePos === null || !el || el.style.display === 'none')
+      return null;
+    const r = el.getBoundingClientRect();
+    return {
+      pos: this.framePos,
+      rect: { x: r.left, y: r.top, width: r.width, height: r.height },
     };
   }
 
@@ -987,6 +1040,7 @@ export class BapbongEditor {
       handlePaste: imagePasteHandler,
       autoCorrect: this.autoCorrect,
     });
+    this.bridge.setReadOnly(this.readOnly);
     // Hidden editor lives in the page-canvas container, so IME anchoring
     // scrolls along (positioned at the painted caret, in container coords).
     this.stack.appendChild(this.bridge.dom);
@@ -1065,7 +1119,11 @@ export class BapbongEditor {
     selection: SelectionRect[];
   } {
     return {
-      caret: this.caretVisible && !this.caretOwned ? this.lastCaret : null,
+      // Read-only draws no caret: there is nowhere to type.
+      caret:
+        this.caretVisible && !this.caretOwned && !this.readOnly
+          ? this.lastCaret
+          : null,
       selection: this.lastSelection,
     };
   }
@@ -1224,6 +1282,10 @@ export class BapbongEditor {
     // recorded before any claim, since a claimed gesture is exactly the case
     // that strands focus on <body>.
     markInteracted(this);
+    if (this.readOnly && ev.button === 0 && this.selectObjectAt(ev)) {
+      ev.preventDefault();
+      return;
+    }
     // A pointer plugin (e.g. table-column resize) may claim the press; if so,
     // preventDefault + capture the pointer for it and skip caret placement.
     if (this.offerPointer('down', ev)) {
@@ -1255,8 +1317,33 @@ export class BapbongEditor {
     perf.span('pointer.setSelection', () => this.bridge!.setSelection(pos)); // anchors the IME
     perf.span('pointer.focus', () => this.bridge!.focus());
     for (const cb of this.caretPickListeners) cb(pos);
+    if (this.readOnly) return;
     for (const p of this.plugins) p.onCaretPick?.(pos);
   };
+
+  /** Read-only click: frame the picture or shape under the pointer (no
+   *  handles, no knob, no strip) or drop the frame when there is none. */
+  private selectObjectAt(ev: PointerEvent): boolean {
+    const layout = this.core.layout;
+    const point = this.core.clientToPage(ev.clientX, ev.clientY);
+    const hit =
+      layout && point ? imageAtPoint(layout as ResolvedLayout, point) : null;
+    if (!hit) {
+      this.setFrame(null);
+      return false;
+    }
+    const rotation =
+      Number(this.state?.doc.nodeAt(hit.pos)?.attrs['rotation']) || 0;
+    this.setFrame({
+      pos: hit.pos,
+      pageIndex: hit.pageIndex,
+      ...hit.rect,
+      ...(rotation ? { rotation } : {}),
+      handles: 'none',
+      rotatable: false,
+    });
+    return true;
+  }
 
   /** Offer inserted text to plugins when it arrives with no usable keydown —
    *  an IME commit, a plain-text paste, a tool driving `insertText`. Runs on
@@ -1265,7 +1352,7 @@ export class BapbongEditor {
     const kind = ev.inputType;
     if (kind !== 'insertText' && kind !== 'insertCompositionText') return;
     const text = ev.data ?? '';
-    if (!text) return;
+    if (!text || this.readOnly) return;
     const node = ev.target instanceof Node ? ev.target : null;
     const mine = node !== null && this.stack.contains(node);
     if (!mine && lastInteracted !== null && lastInteracted !== this) return;
@@ -1307,6 +1394,7 @@ export class BapbongEditor {
     ) {
       this.inputStartedAt = perf.now();
     }
+    if (this.readOnly) return;
     const offered: EditorKeyEvent = {
       key: ev.key,
       ctrlKey: ev.ctrlKey,
@@ -1348,7 +1436,7 @@ export class BapbongEditor {
     this.lastSelection = from === to ? [] : this.core.selectionRects(from, to);
     this.caretVisible = true;
     this.core.paintOverlay({
-      caret: this.lastCaret,
+      caret: this.readOnly ? null : this.lastCaret,
       selection: this.lastSelection,
     });
   }
@@ -1390,6 +1478,9 @@ export class BapbongEditor {
     type: EditorPointerEvent['type'],
     ev: PointerEvent | MouseEvent,
   ): boolean {
+    // Read-only offers plugins nothing; a right-click is still claimed so
+    // the native menu (Reload, Inspect…) does not open over the page.
+    if (this.readOnly) return type === 'contextmenu';
     if (!this.pointerPlugins || !this.core.layout) return false;
     const point = this.core.clientToPage(ev.clientX, ev.clientY);
     const pos = type === 'move' || !point ? null : this.core.posAtPoint(point);
@@ -1462,6 +1553,7 @@ export class BapbongEditor {
    *  positioned container rotated around its center, so a drag updates plain
    *  DOM (no canvas repaint). Handle geometry stays constant-size on screen. */
   private setFrame(frame: OverlayFrame | null): void {
+    this.framePos = frame ? (frame.pos ?? this.framePos) : null;
     if (!frame) {
       if (this.frameEl) this.frameEl.style.display = 'none';
       return;
@@ -1556,7 +1648,10 @@ export class BapbongEditor {
     // from its corners and never rotates inline (see OverlayFrame).
     const corners = frame.handles === 'corners';
     el.querySelectorAll<HTMLDivElement>('[data-handle]').forEach((h) => {
-      h.style.display = corners && h.dataset['handle'] === 'edge' ? 'none' : '';
+      h.style.display =
+        frame.handles === 'none' || (corners && h.dataset['handle'] === 'edge')
+          ? 'none'
+          : '';
     });
     const rotatable = frame.rotatable !== false;
     el.querySelectorAll<HTMLDivElement>('[data-role="rotate"]').forEach((r) => {
