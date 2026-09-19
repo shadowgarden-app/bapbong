@@ -133,6 +133,18 @@ describe('a wpg group of freeform shapes', () => {
     expect(para.textContent).toBe('A, 3');
   });
 
+  it('paints its members from their own geometry', async () => {
+    const { doc } = await importFixture();
+    const v = doc.child(0).child(0).attrs['vector'] as {
+      width: number;
+      height: number;
+      ops: { kind: string }[];
+    };
+    expect(v.width).toBe(400);
+    expect(v.height).toBe(200);
+    expect(v.ops.map((o) => o.kind)).toEqual(['polygon', 'polyline']);
+  });
+
   it('carries its XML — Choice and Fallback — through a save', async () => {
     const { doc } = await importFixture();
     const out = await documentXmlOf(await exportDocx(doc));

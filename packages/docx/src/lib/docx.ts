@@ -87,6 +87,7 @@ import type {
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
+import { freeformGroupOps } from './freeform-group.js';
 import { symbolChar, symbolFontText, symbolTable } from './symbol-fonts.js';
 import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
 import { parseCompat } from './compat.js';
@@ -873,6 +874,17 @@ function parseCarriedGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
     1,
     Math.round(Number(attrOf(extent, 'cx') ?? 0) / 9525),
   );
+  // Painted from its own geometry; the XML goes back verbatim on save, so
+  // what this reads is all the box needs. Drawing identity (docPr, the
+  // graphic frame's locks) rides the carried XML, not the model.
+  const { ops } = freeformGroupOps(wgp, {
+    solidFill: (el) => solidFillColor(el, ctx),
+    consumed: (n) => audit.markSubtree(n),
+    visited: (n) => audit.mark(n),
+  });
+  audit.markSubtree(findDescendant(drawing, 'wp:docPr'));
+  audit.markSubtree(findDescendant(drawing, 'wp:cNvGraphicFramePr'));
+  audit.markSubtree(findDescendant(drawing, 'wp:effectExtent'));
   const height = Math.max(
     1,
     Math.round(Number(attrOf(extent, 'cy') ?? 0) / 9525),
@@ -884,7 +896,13 @@ function parseCarriedGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
       height,
       alt: attrOf(findDescendant(drawing, 'wp:docPr'), 'descr') ?? '',
       float,
-      vector: { width, height, ops: [] },
+      // The display list is in px of the group's exact extent; the box
+      // rounds to whole px, and the painter scales the one to the other.
+      vector: {
+        width: Number(attrOf(extent, 'cx') ?? 0) / 9525 || width,
+        height: Number(attrOf(extent, 'cy') ?? 0) / 9525 || height,
+        ops,
+      },
       rawDrawing: { xml, float },
     }),
   ];

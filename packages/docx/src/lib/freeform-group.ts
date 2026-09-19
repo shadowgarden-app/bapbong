@@ -101,8 +101,13 @@ export interface FreeformGroupResult {
 export interface FreeformGroupOptions {
   /** CSS colour of an element's a:solidFill child (or undefined). */
   solidFill(parent: OoxmlNode | undefined): string | undefined;
-  /** Called for every node read as understood — the audit's hook. */
+  /** Called with every subtree now fully represented — each drawn shape
+   *  whole, each group's properties — the audit's hook. A shape left out
+   *  is never reported, so it stays visible as a gap. */
   consumed?(node: OoxmlNode | undefined): void;
+  /** Called with each nested group element itself (not its subtree: a
+   *  member left out must stay reported). */
+  visited?(node: OoxmlNode): void;
 }
 
 /** Points of a cubic Bézier, flattened: enough segments that a curve the
@@ -121,7 +126,8 @@ export function freeformGroupOps(
   let drawn = 0;
   let skipped = 0;
   const topXfrm = child(child(wgp, 'wpg:grpSpPr'), 'a:xfrm');
-  opts.consumed?.(topXfrm);
+  opts.consumed?.(child(wgp, 'wpg:grpSpPr'));
+  opts.consumed?.(child(wgp, 'wpg:cNvGrpSpPr'));
   const topBox = boxOf(topXfrm);
   // The top group's own offset is where the anchor puts it — not ours.
   const toBox = childToBox(topXfrm, { ...topBox, x: 0, y: 0 });
@@ -133,8 +139,11 @@ export function freeformGroupOps(
   const walk = (grp: OoxmlNode, toTop: Map2): void => {
     for (const m of grp.children) {
       if (m.name === 'wpg:grpSp') {
+        opts.visited?.(m);
         const xfrm = child(child(m, 'wpg:grpSpPr'), 'a:xfrm');
-        opts.consumed?.(xfrm);
+        opts.consumed?.(child(m, 'wpg:grpSpPr'));
+        opts.consumed?.(child(m, 'wpg:cNvGrpSpPr'));
+        opts.consumed?.(child(m, 'wpg:cNvPr')); // its name
         const b = boxOf(xfrm);
         const inner = childToBox(xfrm, b);
         const place = placeInBox(b);
@@ -191,9 +200,9 @@ export function freeformGroupOps(
     }
     if (shapeOut.length === 0) return false;
     ops.push(...shapeOut);
-    opts.consumed?.(xfrm);
-    opts.consumed?.(geom);
-    opts.consumed?.(ln);
+    // Drawn, so all of it is accounted for — its name (cNvPr), the text
+    // body it has no text for (bodyPr), the 2010 hidden-fill extension.
+    opts.consumed?.(wsp);
     return true;
   };
 
