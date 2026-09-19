@@ -322,6 +322,37 @@ export interface ImageHit {
   pageIndex: number;
   rect: { x: number; y: number; width: number; height: number };
   kind: 'inline' | 'float';
+  /** A float painted under the text (behindDoc) — text drawn over it wins
+   *  a click on it; see glyphAtPoint. */
+  behind?: boolean;
+}
+
+/**
+ * Whether a page-local point falls on a drawn character — not on the
+ * spaces or tabs between them, not on the empty rest of a line. How a click
+ * on text laid over a behind-text drawing (labels over a diagram, a
+ * watermark) goes to the text: the drawing takes only the clicks that land
+ * where no glyph is.
+ */
+export function glyphAtPoint(
+  layout: ResolvedLayout,
+  point: PagePoint,
+  measure: MeasureText,
+): boolean {
+  const page = layout.pages[point.pageIndex];
+  if (!page) return false;
+  for (const line of allLines(page)) {
+    if (point.y < line.y || point.y >= line.y + line.height) continue;
+    for (const it of lineItems(line, measure)) {
+      if (it.text == null || !it.font) continue;
+      if (point.x < it.x || point.x > it.x + it.width) continue;
+      for (let c = 1; c <= it.size; c++) {
+        if (point.x <= it.x + measure(it.text.slice(0, c), it.font))
+          return !/\s/.test(it.text[c - 1] ?? ' ');
+      }
+    }
+  }
+  return false;
 }
 
 /** The topmost document image at a page-local point, or null. Floats win over
@@ -373,6 +404,7 @@ export function imageAtPoint(
       pageIndex: point.pageIndex,
       rect: { x: f.x, y: f.y, width: f.width, height: f.height },
       kind: 'float',
+      ...(f.behind ? { behind: true } : {}),
     };
   }
 

@@ -18,6 +18,7 @@ import {
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
 import {
   caretRect,
+  glyphAtPoint,
   hitTest,
   selectionRects,
   verticalCaret,
@@ -754,6 +755,13 @@ export class RenderCore {
   }
 
   /** The doc position under a page-local point, or null. */
+  /** Whether a page-local point lands on a drawn character. */
+  glyphAtPoint(point: PagePoint): boolean {
+    return this.resolved
+      ? glyphAtPoint(this.resolved, point, this.measureText)
+      : false;
+  }
+
   posAtPoint(point: PagePoint): number | null {
     return this.resolved
       ? hitTest(this.resolved, point, this.measureText)

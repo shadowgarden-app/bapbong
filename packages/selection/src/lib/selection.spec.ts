@@ -8,6 +8,7 @@ import type {
 import {
   caretRect,
   commonTableAt,
+  glyphAtPoint,
   hitTest,
   tableHitPath,
   imageAtPoint,
@@ -417,5 +418,31 @@ describe('selection over a tall inline object', () => {
     const [r] = selectionRects(layout, 1, 3, measure);
     expect(r.y).toBe(100);
     expect(r.height).toBe(20);
+  });
+});
+
+describe('glyphAtPoint — text over a behind-text drawing', () => {
+  // "A, 3" then spaces then "C" — the shape of a diagram's label line.
+  // x: A 20–30, ',' 30–40, ' ' 40–50, '3' 50–60, spaces 60–100, 'C' 100–110.
+  const labels: ResolvedLayout = {
+    pages: [page([line(0, [seg(20, 'A, 3    C', 1)], 1, 10)])],
+  } as ResolvedLayout;
+  const at = (x: number, y = 8) =>
+    glyphAtPoint(labels, { pageIndex: 0, x, y }, measure);
+
+  it('is true on a drawn character', () => {
+    expect(at(25)).toBe(true); // A
+    expect(at(55)).toBe(true); // 3
+    expect(at(105)).toBe(true); // C
+  });
+
+  it('is false on the spaces between labels and past the text', () => {
+    expect(at(45)).toBe(false); // the space after the comma
+    expect(at(80)).toBe(false); // the run of spaces
+    expect(at(150)).toBe(false); // empty rest of the line
+  });
+
+  it('is false above or below every line', () => {
+    expect(at(25, 40)).toBe(false);
   });
 });

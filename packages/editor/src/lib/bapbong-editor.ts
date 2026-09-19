@@ -374,6 +374,7 @@ export class BapbongEditor {
     const ctx = {
       dispatch: (tr: Transaction) => this.dispatch(tr),
       caretRect: (pos: number) => this.core.caretRect(pos),
+      glyphAt: (p: PagePoint) => this.core.glyphAtPoint(p),
       pageToCanvas: (p: PagePoint) => this.core.pageToCanvas(p),
       setSelection: (from: number, to?: number) => this.setSelection(from, to),
       scrollToPos: (pos: number, topMargin?: number) =>
@@ -1351,8 +1352,10 @@ export class BapbongEditor {
   private selectObjectAt(ev: PointerEvent): boolean {
     const layout = this.core.layout;
     const point = this.core.clientToPage(ev.clientX, ev.clientY);
-    const hit =
+    let hit =
       layout && point ? imageAtPoint(layout as ResolvedLayout, point) : null;
+    // Text over a behind-text drawing takes the click (see glyphAtPoint).
+    if (hit?.behind && point && this.core.glyphAtPoint(point)) hit = null;
     if (!hit) {
       this.setFrame(null);
       return false;

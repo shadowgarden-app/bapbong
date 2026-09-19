@@ -1002,7 +1002,11 @@ export function imageResizePlugin(): EditorPlugin {
         // ALSO armed as a possible move: past MOVE_TOL px it drags the image
         // (select-and-drag in one motion, as Word does); under it, it stays
         // a click and only the selection above happens.
-        const hit = imageAtPoint(c.layout as ResolvedLayout, ev.point);
+        let hit = imageAtPoint(c.layout as ResolvedLayout, ev.point);
+        // A drawing behind the text yields where a character is drawn over
+        // it: the labels of a diagram are text, and a click on one goes to
+        // the text (Word's behaviour), not to the whole diagram.
+        if (hit?.behind && c.glyphAt?.(ev.point)) hit = null;
         if (hit) {
           sel = { pos: hit.pos };
           c.setFrame({

@@ -189,6 +189,9 @@ export interface PluginContext {
   dispatch(tr: Transaction): void;
   /** Caret geometry at a doc position (page-local), or null. */
   caretRect(pos: number): CaretRect | null;
+  /** Whether a page-local point lands on a drawn character (not spaces,
+   *  not empty line) — text over a behind-text drawing wins its clicks. */
+  glyphAt?(point: PagePoint): boolean;
   /** Map a page-local point to canvas-stack coordinates, or null. */
   pageToCanvas(p: {
     pageIndex: number;
