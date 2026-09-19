@@ -8,8 +8,14 @@
  * with a path that states only its width, as 6 of the file's paths do.
  */
 import JSZip from 'jszip';
+import type {
+  VectorPolygonOp,
+  VectorPolylineOp,
+} from '@shadow-garden/bapbong-contracts';
 import { importDocx } from './docx';
 import { exportDocx } from './export';
+import { freeformGroupOps } from './freeform-group';
+import { child, findDescendant, parseXml, type OoxmlNode } from './ooxml';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R_NS =
@@ -184,5 +190,122 @@ describe('a wpg group of freeform shapes', () => {
     );
     const { doc } = await importFixture(withPic);
     expect(doc.child(0).child(0).attrs['rawDrawing'] ?? null).toBeNull();
+  });
+});
+
+describe('freeformGroupOps (the group → display list)', () => {
+  /** The fixture's wgp, parsed, with `members` inside. */
+  const wgpOf = (members: string) =>
+    findDescendant(parseXml(groupDocXml(members)), 'wpg:wgp')!;
+  const black = {
+    solidFill: (el: OoxmlNode | undefined) =>
+      child(el, 'a:solidFill') ? '#000000' : undefined,
+  };
+  const round = (p: { x: number; y: number }) => ({
+    x: Math.round(p.x * 100) / 100,
+    y: Math.round(p.y * 100) / 100,
+  });
+
+  it('carries a closed path through shape box and child space to px', () => {
+    const { ops, drawn } = freeformGroupOps(wgpOf(MEMBERS), black);
+    expect(drawn).toBe(2);
+    const tri = ops[0] as VectorPolygonOp;
+    expect(tri.kind).toBe('polygon');
+    // child unit = 0.5 px; the triangle's box sits at (1100, 2100).
+    expect(tri.points.map(round)).toEqual([
+      { x: 50, y: 50 },
+      { x: 70, y: 55 },
+      { x: 50, y: 60 },
+    ]);
+    expect(tri.fill).toBe('#000000');
+    expect(tri.strokeWidth).toBeCloseTo(0.32, 2); // 3048 EMU, unscaled
+    expect(tri.join).toBe('round');
+  });
+
+  it('reads a path with no h in the shape’s own units on that axis', () => {
+    const { ops } = freeformGroupOps(wgpOf(MEMBERS), black);
+    const line = ops[1] as VectorPolylineOp;
+    expect(line.kind).toBe('polyline');
+    expect(line.points.map(round)).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 50 },
+    ]);
+    expect(line.strokeWidth).toBeCloseTo(1.28, 2);
+  });
+
+  it('composes a nested group’s own child space', () => {
+    const nested =
+      `<wpg:grpSp><wpg:cNvGrpSpPr/><wpg:grpSpPr><a:xfrm><a:off x="1400" y="2200"/><a:ext cx="200" cy="100"/><a:chOff x="0" y="0"/><a:chExt cx="400" cy="200"/></a:xfrm></wpg:grpSpPr>` +
+      wsp({
+        off: [0, 0],
+        ext: [400, 200],
+        pathW: 400,
+        pathH: 200,
+        path: `<a:moveTo>${pt(0, 0)}</a:moveTo><a:lnTo>${pt(400, 200)}</a:lnTo>`,
+        lineW: 9525,
+      }) +
+      `</wpg:grpSp>`;
+    const { ops } = freeformGroupOps(wgpOf(nested), black);
+    const line = ops[0] as VectorPolylineOp;
+    // (0,0)–(400,200) in the nested space → (1400,2200)–(1600,2300) in the
+    // top child space → px at half a px per unit.
+    expect(line.points.map(round)).toEqual([
+      { x: 200, y: 100 },
+      { x: 300, y: 150 },
+    ]);
+    // The nested group halves its content; the line keeps its 1 px.
+    expect(line.strokeWidth).toBeCloseTo(1, 5);
+  });
+
+  it('mirrors a flipped shape inside its box', () => {
+    const flipped = wsp({
+      off: [1000, 2000],
+      ext: [200, 100],
+      pathW: 200,
+      pathH: 100,
+      path: `<a:moveTo>${pt(0, 0)}</a:moveTo><a:lnTo>${pt(200, 100)}</a:lnTo>`,
+      lineW: 9525,
+    }).replace('<a:xfrm>', '<a:xfrm flipH="1">');
+    const { ops } = freeformGroupOps(wgpOf(flipped), black);
+    expect((ops[0] as VectorPolylineOp).points.map(round)).toEqual([
+      { x: 100, y: 0 },
+      { x: 0, y: 50 },
+    ]);
+  });
+
+  it('leaves out a shape it cannot draw, whole', () => {
+    const arc = wsp({
+      off: [1000, 2000],
+      ext: [200, 100],
+      pathW: 200,
+      pathH: 100,
+      path: `<a:moveTo>${pt(0, 0)}</a:moveTo><a:lnTo>${pt(100, 0)}</a:lnTo><a:arcTo wR="50" hR="50" stAng="0" swAng="5400000"/>`,
+      lineW: 9525,
+    });
+    const { ops, drawn, skipped } = freeformGroupOps(
+      wgpOf(arc + MEMBERS),
+      black,
+    );
+    expect(skipped).toBe(1);
+    expect(drawn).toBe(2);
+    expect(ops).toHaveLength(2);
+  });
+
+  it('flattens a cubic curve into points along it', () => {
+    const curve = wsp({
+      off: [1000, 2000],
+      ext: [200, 100],
+      pathW: 200,
+      pathH: 100,
+      path: `<a:moveTo>${pt(0, 0)}</a:moveTo><a:cubicBezTo>${pt(0, 100)}${pt(200, 100)}${pt(200, 0)}</a:cubicBezTo>`,
+      lineW: 9525,
+    });
+    const { ops } = freeformGroupOps(wgpOf(curve), black);
+    const pts = (ops[0] as VectorPolylineOp).points;
+    expect(pts.length).toBeGreaterThan(8);
+    expect(round(pts[pts.length - 1])).toEqual({ x: 100, y: 0 });
+    // The curve bulges down to 3/4 of the control height at its middle.
+    const mid = pts[Math.floor(pts.length / 2)];
+    expect(mid.y).toBeCloseTo(37.5, 0);
   });
 });
