@@ -355,6 +355,12 @@ export const schema = new Schema({
         // data URL for export; the painter draws the ops instead. Null for
         // bitmaps and preset shapes.
         vector: { default: null },
+        // A drawing we paint but do not model (a wpg group of freeform
+        // shapes): { xml, float } — the run's original mc:AlternateContent /
+        // w:drawing with its own namespace declarations, and the float it
+        // was imported at. The exporter writes the XML back as it came
+        // (moving the anchor if the float moved), so a save never loses it.
+        rawDrawing: { default: null },
         // The equation's LINEAR text recovered from the metafile's embedded
         // MTEF (MathType semantics) — what "Convert to editable equation"
         // replaces the picture with. Null when the picture carries none.

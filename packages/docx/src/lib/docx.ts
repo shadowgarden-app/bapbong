@@ -304,6 +304,11 @@ interface Ctx {
    *  that SHARED object — identity is what marks the span (see the model's
    *  `fieldAt`). */
   openFields: FieldInfo[];
+  /** The part root's namespace declarations (prefix → URI) and its
+   *  mc:Ignorable prefixes — what a drawing carried verbatim needs to
+   *  declare for itself inside a generated document. */
+  nsDecls?: Map<string, string>;
+  ignorable?: string[];
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -494,7 +499,7 @@ const RUN_CHILD_TAGS = new Set([
 /** Inline nodes for a run, splitting text at soft w:br into hard_break nodes
  *  (page breaks are handled at the paragraph level, not here). */
 function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
-  const group = parseGroup(run, ctx);
+  const group = parseGroup(run, ctx) ?? parseCarriedGroup(run, ctx);
   if (group) return group;
   // Shapetypes are registered for every pict up front — see
   // registerVmlShapeTypes for why this cannot live in the shape parser.
@@ -789,6 +794,100 @@ function parseGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
     );
   }
   return out.length > 0 ? out : null;
+}
+
+/** Serialize a run's drawing container for verbatim carry, declaring on its
+ *  root every namespace prefix it uses (the generated document's root
+ *  declares only our own) and re-stating which of them are ignorable. Null
+ *  when a prefix has no known URI — carrying it would write a broken part. */
+function carryDrawingXml(container: OoxmlNode, ctx: Ctx): string | null {
+  const used = new Set<string>();
+  // Declarations may also sit on the drawing itself — they do in every file
+  // this exporter wrote, which is how a second round-trip reads its own.
+  const local = new Map<string, string>();
+  const localIgnorable: string[] = [];
+  const walk = (n: OoxmlNode): void => {
+    const p = n.name.indexOf(':');
+    if (p > 0) used.add(n.name.slice(0, p));
+    for (const [k, v] of Object.entries(n.attrs)) {
+      if (k.startsWith('xmlns:')) local.set(k.slice(6), v);
+      else if (k === 'mc:Ignorable')
+        localIgnorable.push(...v.split(/\s+/).filter(Boolean));
+      const q = k.indexOf(':');
+      if (q > 0 && !k.startsWith('xmlns')) used.add(k.slice(0, q));
+    }
+    n.children.forEach(walk);
+  };
+  walk(container);
+  const uriOf = (p: string) => local.get(p) ?? ctx.nsDecls?.get(p);
+  const ignorable = [
+    ...new Set([...(ctx.ignorable ?? []), ...localIgnorable]),
+  ].filter((p) => used.has(p) && p !== 'mc');
+  if (ignorable.length) used.add('mc');
+  const decls: string[] = [];
+  for (const p of [...used].sort()) {
+    if (p === 'xml') continue;
+    const uri = uriOf(p);
+    if (!uri) return null;
+    decls.push(` xmlns:${p}="${uri}"`);
+  }
+  if (ignorable.length) decls.push(` mc:Ignorable="${ignorable.join(' ')}"`);
+  const xml = serializeOoxml(container, {
+    element: () => true,
+    attr: (k) => !k.startsWith('xmlns') && k !== 'mc:Ignorable',
+  });
+  const head = `<${container.name}`;
+  return head + decls.join('') + xml.slice(head.length);
+}
+
+/** Any relationship reference (r:embed, r:link, r:id…) in the subtree. A
+ *  verbatim drawing that points into the source package's rels would point
+ *  at nothing — or at the wrong part — once written into ours. */
+function hasRelRefs(n: OoxmlNode): boolean {
+  if (Object.keys(n.attrs).some((k) => k.startsWith('r:'))) return true;
+  return n.children.some(hasRelRefs);
+}
+
+/**
+ * An anchored wpg group with no pictures in it — freeform shapes, nested
+ * groups: the diagrams Word's converter makes of legacy drawing canvases
+ * (a project network of circles and arrows, D-2609-PREK). One image box the
+ * size of the group, floating where the group floats, carrying the original
+ * XML so a save writes it back untouched. What it paints is `vector`.
+ * Groups holding relationship references (pictures, links) are left to
+ * parseGroup: their XML cannot travel between packages as-is.
+ */
+function parseCarriedGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
+  const container =
+    child(run, 'mc:AlternateContent') ?? child(run, 'w:drawing');
+  const drawing = runDrawing(run);
+  if (!container || !drawing) return null;
+  const wgp = findDescendant(drawing, 'wpg:wgp');
+  if (!wgp || hasRelRefs(container)) return null;
+  const float = parseAnchorFloat(drawing);
+  if (!float) return null;
+  const xml = carryDrawingXml(container, ctx);
+  if (!xml) return null;
+  const extent = findDescendant(drawing, 'wp:extent');
+  const width = Math.max(
+    1,
+    Math.round(Number(attrOf(extent, 'cx') ?? 0) / 9525),
+  );
+  const height = Math.max(
+    1,
+    Math.round(Number(attrOf(extent, 'cy') ?? 0) / 9525),
+  );
+  return [
+    ctx.schema.nodes['image'].create({
+      src: '',
+      width,
+      height,
+      alt: attrOf(findDescendant(drawing, 'wp:docPr'), 'descr') ?? '',
+      float,
+      vector: { width, height, ops: [] },
+      rawDrawing: { xml, float },
+    }),
+  ];
 }
 
 /** Rotation (clockwise degrees) from a subtree's a:xfrm@rot (1/60000 deg). */
@@ -5022,10 +5121,19 @@ async function importDocxImpl(
   const comments = await buildCommentsRegistry(zip);
   // Page geometry up front: pct-based table widths need the content width
   // while the body is being parsed.
-  const body = child(
-    child(parsePart('word/document.xml', rawDocumentXml), 'w:document'),
-    'w:body',
+  const documentEl = child(
+    parsePart('word/document.xml', rawDocumentXml),
+    'w:document',
   );
+  const body = child(documentEl, 'w:body');
+  // What a drawing carried verbatim must re-declare (carryDrawingXml).
+  // Header/footer parts declare the same set in every file Word writes.
+  const nsDecls = new Map<string, string>();
+  for (const [k, v] of Object.entries(documentEl?.attrs ?? {}))
+    if (k.startsWith('xmlns:')) nsDecls.set(k.slice(6), v);
+  const ignorable = (attrOf(documentEl, 'mc:Ignorable') ?? '')
+    .split(/\s+/)
+    .filter(Boolean);
   const sectPr = body ? child(body, 'w:sectPr') : undefined;
   const pageGeom = parsePageGeometry(sectPr);
   const contentWidth =
@@ -5054,6 +5162,8 @@ async function importDocxImpl(
     contentWidth,
     // Per-story: a field opened in the body can't leak into a header.
     openFields: [],
+    nsDecls,
+    ignorable,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');

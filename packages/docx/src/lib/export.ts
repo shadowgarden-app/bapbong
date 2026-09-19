@@ -400,7 +400,50 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
   return `<w:r><w:drawing>${body}</w:drawing></w:r>`;
 }
 
+/**
+ * A drawing imported verbatim (a group of freeform shapes — see the
+ * importer's parseCarriedGroup) goes back as it came. Two things are ours
+ * to fix on the way: every wp:docPr gets an id from this package's counter
+ * (the source's ids collide with the drawings we number ourselves, and Word
+ * calls a file with duplicate drawing ids damaged), and if the reader moved
+ * the float, the DrawingML anchor's offsets move with it.
+ *
+ * Not moved: the VML Fallback twin's position (style margins). Word reads
+ * the Choice; only a pre-2010 consumer would see the old spot.
+ */
+function rawDrawingXml(
+  node: PMNode,
+  raw: { xml: string; float?: Record<string, unknown> | null },
+  ctx: ExportCtx,
+): string {
+  let xml = raw.xml.replace(
+    /(<wp:docPr\b[^>]*?\bid=")\d+(")/g,
+    (_m, a: string, b: string) => `${a}${ctx.nextId++}${b}`,
+  );
+  const now = node.attrs['float'] as Record<string, unknown> | null;
+  const was = raw.float ?? null;
+  const moved = (axis: 'hOffset' | 'vOffset') =>
+    now && was && typeof now[axis] === 'number' && now[axis] !== was[axis];
+  const setOffset = (tag: 'wp:positionH' | 'wp:positionV', px: number) => {
+    xml = xml.replace(
+      new RegExp(
+        `(<${tag}\\b[^>]*>\\s*<wp:posOffset>)-?\\d+(</wp:posOffset>)`,
+        'g',
+      ),
+      (_m, a: string, b: string) => `${a}${pxToEmu(px)}${b}`,
+    );
+  };
+  if (moved('hOffset')) setOffset('wp:positionH', now!['hOffset'] as number);
+  if (moved('vOffset')) setOffset('wp:positionV', now!['vOffset'] as number);
+  return `<w:r>${xml}</w:r>`;
+}
+
 function imageXml(node: PMNode, ctx: ExportCtx): string {
+  const raw = node.attrs['rawDrawing'] as {
+    xml: string;
+    float?: Record<string, unknown> | null;
+  } | null;
+  if (raw?.xml) return rawDrawingXml(node, raw, ctx);
   if (node.attrs['shape']) return shapeXml(node, ctx);
   const src = String(node.attrs['src'] ?? '');
   const m = /^data:([^;]+);base64,(.+)$/.exec(src);
