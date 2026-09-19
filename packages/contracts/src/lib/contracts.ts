@@ -395,16 +395,36 @@ export interface VectorLineOp {
   color: string;
 }
 
-/** One filled polygon (arrowheads). */
+/** One filled polygon (arrowheads; a closed freeform subpath). */
 export interface VectorPolygonOp {
   kind: 'polygon';
   points: { x: number; y: number }[];
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
+  /** Corner joins of the outline (DrawingML a:round). Absent = miter. */
+  join?: 'round';
 }
 
-export type VectorOp = VectorTextOp | VectorLineOp | VectorPolygonOp;
+/** One open stroked path — a freeform line of several segments. Drawn as
+ *  ONE path, so a thick outline's corners join instead of gapping the way
+ *  separate line ops would. */
+export interface VectorPolylineOp {
+  kind: 'polyline';
+  points: { x: number; y: number }[];
+  stroke: string;
+  strokeWidth: number;
+  /** Corner joins (DrawingML a:round). Absent = miter. */
+  join?: 'round';
+  /** End caps (a:ln@cap). Absent = flat. */
+  cap?: 'round' | 'square';
+}
+
+export type VectorOp =
+  | VectorTextOp
+  | VectorLineOp
+  | VectorPolygonOp
+  | VectorPolylineOp;
 
 /** A metafile replayed as vector ops — how MathType/OLE equation previews
  *  (WMF) paint. Rides an image box like {@link ShapeSpec} does, but as a

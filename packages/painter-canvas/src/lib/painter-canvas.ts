@@ -945,8 +945,22 @@ export class CanvasPainter {
           if (op.stroke) {
             ctx.strokeStyle = op.stroke;
             ctx.lineWidth = Math.max((op.strokeWidth ?? 0) * sy, 0.75);
+            ctx.lineJoin = op.join ?? 'miter';
             ctx.stroke();
           }
+          break;
+        }
+        case 'polyline': {
+          // One path, so a thick line's corners join rather than gap.
+          if (op.points.length < 2) break;
+          ctx.beginPath();
+          ctx.moveTo(px(op.points[0].x), py(op.points[0].y));
+          for (const pt of op.points.slice(1)) ctx.lineTo(px(pt.x), py(pt.y));
+          ctx.strokeStyle = op.stroke;
+          ctx.lineWidth = Math.max(op.strokeWidth * sy, 0.75);
+          ctx.lineJoin = op.join ?? 'miter';
+          ctx.lineCap = op.cap ?? 'butt';
+          ctx.stroke();
           break;
         }
       }
