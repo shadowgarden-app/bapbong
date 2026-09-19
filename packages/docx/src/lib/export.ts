@@ -1964,8 +1964,16 @@ export async function exportDocx(
   });
   perf.bump('export.mediaCount', ctx.media.length);
   audit.endExport(); // body/parts serialized above; zip generation writes bytes
+  // DEFLATE: JSZip's default is STORE, which wrote every part uncompressed —
+  // a 98 KB Word file came back from a save at 760 KB. Word itself deflates
+  // every part; level 6 is zlib's default speed/size balance. Entries carried
+  // from the source package are recompressed the same way.
   return perf.spanAsync('export.generate', () =>
-    zip.generateAsync({ type: 'uint8array' }),
+    zip.generateAsync({
+      type: 'uint8array',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    }),
   );
 }
 

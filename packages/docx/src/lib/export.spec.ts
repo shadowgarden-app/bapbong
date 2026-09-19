@@ -46,6 +46,60 @@ function markFor(name: string, attrs?: Record<string, unknown>) {
   return schema.marks[name].create(attrs);
 }
 
+/** The compression method (0 = STORE, 8 = DEFLATE) of one entry, read from
+ *  its zip local file header: signature 50 4B 03 04, the method a
+ *  little-endian u16 at offset 8, the file name at offset 30. */
+function zipMethod(bytes: Uint8Array, name: string): number | null {
+  const want = new TextEncoder().encode(name);
+  for (let i = 0; i + 30 + want.length <= bytes.length; i++) {
+    if (
+      bytes[i] !== 0x50 ||
+      bytes[i + 1] !== 0x4b ||
+      bytes[i + 2] !== 0x03 ||
+      bytes[i + 3] !== 0x04
+    )
+      continue;
+    const nameLen = bytes[i + 26] | (bytes[i + 27] << 8);
+    if (nameLen !== want.length) continue;
+    if (want.every((b, k) => bytes[i + 30 + k] === b))
+      return bytes[i + 8] | (bytes[i + 9] << 8);
+  }
+  return null;
+}
+
+describe('exportDocx (zip compression)', () => {
+  // JSZip's default is STORE: every save wrote its parts uncompressed, and
+  // a 98 KB Word file came back 760 KB.
+  const repetitive = () =>
+    makeDoc(
+      Array.from({ length: 200 }, (_, i) => [
+        { text: `Paragraph ${i}: the same sentence, over and over again.` },
+      ]),
+    );
+
+  it('deflates its parts', async () => {
+    const bytes = await exportDocx(repetitive());
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = await zip.file('word/document.xml')!.async('string');
+    expect(zipMethod(bytes, 'word/document.xml')).toBe(8);
+    expect(zipMethod(bytes, '[Content_Types].xml')).toBe(8);
+    // The whole package is a fraction of its main part alone.
+    expect(bytes.length).toBeLessThan(xml.length / 3);
+    // And it still reads back.
+    const { doc } = await importDocx(bytes);
+    expect(doc.childCount).toBe(200);
+  });
+
+  it('deflates a save of an opened document (the carry path) too', async () => {
+    const first = await exportDocx(repetitive());
+    const opened = await importDocx(first);
+    const again = await exportDocx(opened.doc, { carry: opened.raw });
+    expect(zipMethod(again, 'word/document.xml')).toBe(8);
+    expect(zipMethod(again, 'word/styles.xml') ?? 8).toBe(8);
+    expect(again.length).toBeLessThan(first.length * 2);
+  });
+});
+
 describe('exportDocx (round-trip)', () => {
   it('round-trips paragraphs and common marks', async () => {
     const doc = makeDoc([
