@@ -151,7 +151,22 @@ function opElement(op: VectorOp): SVGElement {
     if (op.stroke) {
       el.setAttribute('stroke', op.stroke);
       el.setAttribute('stroke-width', String(op.strokeWidth ?? 1));
+      if (op.join) el.setAttribute('stroke-linejoin', op.join);
     }
+    return el;
+  }
+  if (op.kind === 'polyline') {
+    const el = document.createElementNS(SVG_NS, 'polyline');
+    el.setAttribute('points', op.points.map((p) => `${p.x},${p.y}`).join(' '));
+    el.setAttribute('fill', 'none');
+    el.setAttribute('stroke', op.stroke);
+    el.setAttribute('stroke-width', String(Math.max(op.strokeWidth, 0.75)));
+    if (op.join) el.setAttribute('stroke-linejoin', op.join);
+    if (op.cap)
+      el.setAttribute(
+        'stroke-linecap',
+        op.cap === 'round' ? 'round' : 'square',
+      );
     return el;
   }
   const el = document.createElementNS(SVG_NS, 'text');
