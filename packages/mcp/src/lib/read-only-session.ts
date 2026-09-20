@@ -13,6 +13,7 @@ import type {
   DocSnapshot,
   DocumentSession,
   FindMatch,
+  ImageBox,
   MutationResult,
   SessionCapabilities,
 } from './contract.js';
@@ -71,6 +72,15 @@ export class ReadOnlySession implements DocumentSession {
   }
   updateImage(): Promise<MutationResult> {
     this.refuse('change images in this document');
+  }
+  insertImage(): Promise<MutationResult & ImageBox> {
+    this.refuse('put a picture into this document');
+  }
+  replaceImage(): Promise<MutationResult & ImageBox> {
+    this.refuse('replace a picture in this document');
+  }
+  deleteImage(): Promise<MutationResult> {
+    this.refuse('remove a picture from this document');
   }
   save(): Promise<void> {
     this.refuse('save this document');

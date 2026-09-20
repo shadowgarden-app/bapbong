@@ -22,7 +22,12 @@ import type {
   FormatTarget,
   Formatting,
   TableEdit,
+  ImageBox,
+  ImageBytes,
   ImageChanges,
+  ImagePlacement,
+  ImageSource,
+  ImageSourceKind,
   InsertAnchor,
   MutationOptions,
   MutationResult,
@@ -40,10 +45,16 @@ export interface HeadlessSessionOptions {
    *  `expectedVersion` read from one document can silently satisfy the
    *  optimistic lock of another. */
   id?: string;
+  /** Fetch a picture's bytes for insert_image / replace_image, and which
+   *  sources that covers. A host without this takes no new pictures. */
+  readImage?: (source: ImageSource) => Promise<ImageBytes>;
+  imageSources?: readonly ImageSourceKind[];
 }
 
 export class HeadlessSession implements DocumentSession {
-  readonly capabilities: SessionCapabilities = { selection: false };
+  get capabilities(): SessionCapabilities {
+    return this.inner.capabilities;
+  }
 
   private state: EditorState;
   private version = 1;
@@ -74,6 +85,12 @@ export class HeadlessSession implements DocumentSession {
         this.dirty = false;
       },
       // no selection() — headless documents have no user selection
+      ...(this.opts.readImage
+        ? {
+            readImage: this.opts.readImage,
+            imageSources: this.opts.imageSources ?? [],
+          }
+        : {}),
       tableStyle: () => {
         const grid = catalogTableStyles().find((t) => t.id === 'TableGrid');
         return grid ? { styleId: grid.id, style: grid.style } : undefined;
@@ -143,6 +160,36 @@ export class HeadlessSession implements DocumentSession {
     opts?: MutationOptions,
   ): Promise<MutationResult> {
     return this.inner.updateImage(blockIndex, imageIndex, changes, opts);
+  }
+  insertImage(
+    source: ImageSource,
+    anchor: InsertAnchor,
+    placement?: ImagePlacement,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & ImageBox> {
+    return this.inner.insertImage(source, anchor, placement, opts);
+  }
+  replaceImage(
+    blockIndex: number,
+    imageIndex: number,
+    source: ImageSource,
+    placement?: ImagePlacement,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & ImageBox> {
+    return this.inner.replaceImage(
+      blockIndex,
+      imageIndex,
+      source,
+      placement,
+      opts,
+    );
+  }
+  deleteImage(
+    blockIndex: number,
+    imageIndex: number,
+    opts?: MutationOptions,
+  ): Promise<MutationResult> {
+    return this.inner.deleteImage(blockIndex, imageIndex, opts);
   }
   save(): Promise<void> {
     return this.inner.save();

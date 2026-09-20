@@ -392,6 +392,210 @@ export const updateImage = defineCommand({
     }),
 });
 
+/** The three ways a picture can reach a document, as tool arguments. One of
+ *  them, and which ones an app actually accepts is in its answer when it
+ *  cannot take the one you passed. */
+const imageSourceShape = {
+  image_path: z
+    .string()
+    .optional()
+    .describe(
+      'Full path of a picture file to use (PNG, JPEG, GIF or BMP). The app reads it only if you may read that folder.',
+    ),
+  attachment_id: z
+    .string()
+    .optional()
+    .describe(
+      'Id of a picture the user attached to this conversation — how you use a picture they sent you.',
+    ),
+  svg: z
+    .string()
+    .optional()
+    .describe(
+      'SVG markup to draw the picture yourself. The app rasterizes it before it goes in.',
+    ),
+};
+
+const ONE_SOURCE =
+  'Give the picture exactly one way: image_path (a file), attachment_id (a picture the user sent) ' +
+  'or svg (markup you write). ';
+
+/** Zod cannot say "exactly one of these" in a shape MCP clients read well,
+ *  so the check is here, with a sentence the model can act on. */
+function imageSource(a: {
+  image_path?: string;
+  attachment_id?: string;
+  svg?: string;
+}):
+  | { kind: 'path'; path: string }
+  | { kind: 'attachment'; attachmentId: string }
+  | { kind: 'svg'; svg: string }
+  | string {
+  const given = [
+    a.image_path !== undefined && ('path' as const),
+    a.attachment_id !== undefined && ('attachment' as const),
+    a.svg !== undefined && ('svg' as const),
+  ].filter(Boolean);
+  if (given.length !== 1)
+    return given.length === 0
+      ? `No picture given. ${ONE_SOURCE}`
+      : `Pass only one picture, not ${given.length}. ${ONE_SOURCE}`;
+  if (a.image_path !== undefined) return { kind: 'path', path: a.image_path };
+  if (a.attachment_id !== undefined)
+    return { kind: 'attachment', attachmentId: a.attachment_id };
+  return { kind: 'svg', svg: a.svg as string };
+}
+
+export const insertImage = defineCommand({
+  name: 'insert_image',
+  title: 'Insert a picture',
+  description:
+    'Put a picture in its own paragraph, before or after the paragraph holding anchor_text, or at the end ' +
+    'of the document. ' +
+    ONE_SOURCE +
+    'It comes in at its own size, shrunk to the text width when it is wider; pass width to set it. ' +
+    'To replace a picture that is already there, use replace_image instead — it keeps the layout around it.',
+  input: {
+    documentId,
+    ...imageSourceShape,
+    position: z.enum(['before', 'after', 'document_end']),
+    anchor_text: z
+      .string()
+      .optional()
+      .describe(
+        'Required for before/after: exact text inside the anchor paragraph.',
+      ),
+    width: z
+      .number()
+      .positive()
+      .optional()
+      .describe('Display width in CSS px; the height follows the picture.'),
+    alt: z.string().optional().describe('Alt text (Word’s Description).'),
+    occurrence,
+    expectedVersion,
+  },
+  effect: 'edit',
+  requires: 'images',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) => {
+      const source = imageSource(a);
+      if (typeof source === 'string') return errorText(source);
+      if (a.position !== 'document_end' && !a.anchor_text)
+        return errorText(
+          'anchor_text is required when position is before/after.',
+        );
+      const anchor =
+        a.position === 'document_end'
+          ? ({ position: 'document_end' } as const)
+          : ({
+              position: a.position,
+              text: a.anchor_text as string,
+              occurrence: a.occurrence,
+            } as const);
+      return json(
+        await s.insertImage(
+          source,
+          anchor,
+          { width: a.width, alt: a.alt },
+          { expectedVersion: a.expectedVersion },
+        ),
+      );
+    }),
+});
+
+export const replaceImage = defineCommand({
+  name: 'replace_image',
+  title: 'Replace a picture',
+  description:
+    'Swap one picture for another, keeping where it sits: its anchor, its text wrap, and its width unless you ' +
+    'pass one (the height follows the new picture, so nothing is squashed). This is how you redraw a diagram ' +
+    'without disturbing the page. ' +
+    ONE_SOURCE +
+    'Read get_document first — blocks list their images and (block_index, image_index) addresses one. ' +
+    'Mind what you are replacing: kind "drawing" is art the file describes shape by shape and kind "equation" ' +
+    'is a real equation; turning either into a flat picture cannot be undone from the file, so say so first. ' +
+    'Block indexes change with every edit — pass expectedVersion from your last read.',
+  input: {
+    documentId,
+    block_index: z
+      .number()
+      .int()
+      .min(0)
+      .describe('Index of the block holding the picture (from get_document).'),
+    image_index: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('0-based picture within the block (default 0, the first).'),
+    ...imageSourceShape,
+    width: z
+      .number()
+      .positive()
+      .optional()
+      .describe('Display width in CSS px; default keeps the old one.'),
+    alt: z
+      .string()
+      .optional()
+      .describe('Alt text; default keeps the old picture’s.'),
+    expectedVersion,
+  },
+  effect: 'edit',
+  requires: 'images',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) => {
+      const source = imageSource(a);
+      if (typeof source === 'string') return errorText(source);
+      return json(
+        await s.replaceImage(
+          a.block_index,
+          a.image_index ?? 0,
+          source,
+          { width: a.width, alt: a.alt },
+          { expectedVersion: a.expectedVersion },
+        ),
+      );
+    }),
+});
+
+export const deleteImage = defineCommand({
+  name: 'delete_image',
+  title: 'Delete a picture',
+  description:
+    'Remove one picture, addressed as (block_index, image_index) from get_document. Its paragraph stays, so ' +
+    'the text around it does not move. A diagram drawn as several separate objects takes one call each — and ' +
+    'the indexes shift after every one, so re-read get_document between calls. ' +
+    'To put something in a picture’s place, replace_image keeps the layout; this does not.',
+  input: {
+    documentId,
+    block_index: z
+      .number()
+      .int()
+      .min(0)
+      .describe('Index of the block holding the picture (from get_document).'),
+    image_index: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('0-based picture within the block (default 0, the first).'),
+    expectedVersion,
+  },
+  effect: 'edit',
+  requires: 'images',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) =>
+      json(
+        await s.deleteImage(a.block_index, a.image_index ?? 0, {
+          expectedVersion: a.expectedVersion,
+        }),
+      ),
+    ),
+});
+
 export const saveDocument = defineCommand({
   name: 'save_document',
   title: 'Save the document',
@@ -423,7 +627,8 @@ export const getSelection = defineCommand({
 });
 
 /** Every document command, in the order an agent reads them. `get_selection`
- *  needs the `selection` capability and is left out by hosts without one. */
+ *  needs the `selection` capability and the three picture commands need
+ *  `images`; hosts without one leave them out. */
 export const documentCommands: readonly AgentCommand<
   z.ZodRawShape,
   SessionProvider
@@ -435,6 +640,9 @@ export const documentCommands: readonly AgentCommand<
   applyFormatting,
   editTable,
   updateImage,
+  insertImage,
+  replaceImage,
+  deleteImage,
   saveDocument,
   getSelection,
 ];

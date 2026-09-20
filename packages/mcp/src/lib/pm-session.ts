@@ -17,17 +17,25 @@ import {
   ContentError,
   VersionConflictError,
   type DocBlock,
+  type DocImage,
+  type DocImageKind,
   type DocSnapshot,
   type DocumentSession,
   type FindMatch,
   type FormatTarget,
   type Formatting,
+  type ImageBox,
+  type ImageBytes,
   type ImageChanges,
+  type ImagePlacement,
+  type ImageSource,
+  type ImageSourceKind,
   type InsertAnchor,
   type MutationOptions,
   type MutationResult,
   type SessionCapabilities,
 } from './contract.js';
+import { dataUrl, sniffImage } from './image-bytes.js';
 import {
   columnWidths,
   contentToNodes,
@@ -55,6 +63,14 @@ export interface PmSessionHost {
   /** The style a new table is born with ("Table Grid"), when the host can
    *  resolve it; absent → a direct 1px grid. */
   tableStyle?(): TableStyleSource | undefined;
+  /** Fetch a picture's bytes: read the file, download the attachment,
+   *  rasterize the markup — whatever its `imageSources` promise. This tier
+   *  never touches a disk or a network itself, and runs headless in Bun, so
+   *  an SVG has to come back already rasterized. */
+  readImage?(source: ImageSource): Promise<ImageBytes>;
+  /** Which sources `readImage` accepts. Absent → none, and the image tools
+   *  are not offered. */
+  imageSources?: readonly ImageSourceKind[];
 }
 
 /** A4 with 1in margins — what the layout shows when the doc has no page
@@ -86,7 +102,11 @@ export class PmDocSession implements DocumentSession {
   readonly capabilities: SessionCapabilities;
 
   constructor(private readonly host: PmSessionHost) {
-    this.capabilities = { selection: typeof host.selection === 'function' };
+    this.capabilities = {
+      selection: typeof host.selection === 'function',
+      images:
+        typeof host.readImage === 'function' ? (host.imageSources ?? []) : [],
+    };
   }
 
   // ── reads ────────────────────────────────────────────────────────────
@@ -100,14 +120,18 @@ export class PmDocSession implements DocumentSession {
           text: node.textContent,
         };
         if (table) block.table = table;
-        const images = blockImages(node).map(({ node: img }, i) => ({
-          index: i,
-          alt: String(img.attrs['alt'] ?? ''),
-          width: Number(img.attrs['width']) || 0,
-          height: Number(img.attrs['height']) || 0,
-          rotation: Number(img.attrs['rotation']) || 0,
-          kind: img.attrs['shape'] ? ('shape' as const) : ('bitmap' as const),
-        }));
+        const images = blockImages(node).map(({ node: img }, i) => {
+          const image: DocImage = {
+            index: i,
+            alt: String(img.attrs['alt'] ?? ''),
+            width: Number(img.attrs['width']) || 0,
+            height: Number(img.attrs['height']) || 0,
+            rotation: Number(img.attrs['rotation']) || 0,
+            kind: imageKind(img),
+          };
+          if (img.attrs['float']) image.float = true;
+          return image;
+        });
         if (images.length > 0) block.images = images;
         return block;
       },
@@ -170,17 +194,7 @@ export class PmDocSession implements DocumentSession {
       tableStyle,
     });
 
-    let insertAt: number;
-    if (anchor.position === 'document_end') {
-      insertAt = state.doc.content.size;
-    } else {
-      const hit = this.uniqueHit(anchor.text, anchor.occurrence);
-      const block = this.textblocks()[hit.blockIndex];
-      insertAt =
-        anchor.position === 'before'
-          ? block.pos
-          : block.pos + block.node.nodeSize;
-    }
+    const insertAt = this.anchorPos(anchor);
     const inserted = paragraphs.reduce((size, node) => size + node.nodeSize, 0);
     let tr = state.tr.insert(insertAt, paragraphs);
     // A table born with a style needs its definition in the document's
@@ -281,29 +295,7 @@ export class PmDocSession implements DocumentSession {
     opts: MutationOptions = {},
   ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
-    const blocks = this.textblocks();
-    const block = blocks[blockIndex];
-    if (!block) {
-      throw new AnchorError(
-        `blockIndex ${blockIndex} is out of range — the document has ${blocks.length} block(s). ` +
-          `Block indexes change with every edit; call get_document again.`,
-      );
-    }
-    const images = blockImages(block.node).map((img) => ({
-      ...img,
-      pos: block.pos + 1 + img.offset,
-    }));
-    if (images.length === 0) {
-      throw new AnchorError(
-        `Block ${blockIndex} has no images. get_document lists each block's images.`,
-      );
-    }
-    const img = images[imageIndex];
-    if (!img) {
-      throw new AnchorError(
-        `imageIndex ${imageIndex} is out of range — block ${blockIndex} has ${images.length} image(s) (0-${images.length - 1}).`,
-      );
-    }
+    const img = this.imageAt(blockIndex, imageIndex);
     let tr = this.host.getState().tr;
     if (changes.width !== undefined)
       tr = tr.setNodeAttribute(
@@ -329,6 +321,98 @@ export class PmDocSession implements DocumentSession {
     return {
       docVersion: this.host.getVersion(),
       range: { from: img.pos, to: img.pos + 1 },
+    };
+  }
+
+  async insertImage(
+    source: ImageSource,
+    anchor: InsertAnchor,
+    placement: ImagePlacement = {},
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & ImageBox> {
+    this.checkVersion(opts.expectedVersion);
+    const picture = await this.fetchImage(source);
+    const state = this.host.getState();
+    const imageType = state.schema.nodes['image'];
+    const paragraph = state.schema.nodes['paragraph'];
+    if (!imageType || !paragraph) {
+      throw new ContentError('This document cannot hold pictures.');
+    }
+    const box = this.boxFor(picture, placement.width);
+    const node = paragraph.create(null, [
+      imageType.create({
+        src: dataUrl(picture.bytes, picture.mediaType),
+        alt: placement.alt ?? '',
+        width: box.width,
+        height: box.height,
+      }),
+    ]);
+    const at = this.anchorPos(anchor);
+    this.host.apply(state.tr.insert(at, node));
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: at, to: at + node.nodeSize },
+      ...box,
+    };
+  }
+
+  async replaceImage(
+    blockIndex: number,
+    imageIndex: number,
+    source: ImageSource,
+    placement: ImagePlacement = {},
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & ImageBox> {
+    this.checkVersion(opts.expectedVersion);
+    const picture = await this.fetchImage(source);
+    const img = this.imageAt(blockIndex, imageIndex);
+    const old = img.node.attrs;
+    // The box it takes over, so the page around it does not move: its width,
+    // with the height following the new picture's proportions.
+    const box = this.boxFor(
+      picture,
+      placement.width ?? (Number(old['width']) || undefined),
+    );
+    // Everything that described the OLD picture goes with it — above all
+    // `rawDrawing`, which the exporter writes back verbatim and would keep
+    // emitting the drawing this call was meant to replace.
+    const node = img.node.type.create(
+      {
+        src: dataUrl(picture.bytes, picture.mediaType),
+        alt: placement.alt ?? String(old['alt'] ?? ''),
+        title: old['title'] ?? null,
+        width: box.width,
+        height: box.height,
+        float: old['float'] ?? null,
+      },
+      null,
+      img.node.marks,
+    );
+    this.host.apply(
+      this.host
+        .getState()
+        .tr.replaceWith(img.pos, img.pos + img.node.nodeSize, node),
+    );
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: img.pos, to: img.pos + node.nodeSize },
+      ...box,
+    };
+  }
+
+  async deleteImage(
+    blockIndex: number,
+    imageIndex: number,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult> {
+    this.checkVersion(opts.expectedVersion);
+    const img = this.imageAt(blockIndex, imageIndex);
+    this.host.apply(
+      this.host.getState().tr.delete(img.pos, img.pos + img.node.nodeSize),
+    );
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: img.pos, to: img.pos },
     };
   }
 
@@ -640,6 +724,88 @@ export class PmDocSession implements DocumentSession {
     return out;
   }
 
+  /** Where an {@link InsertAnchor} puts new blocks, in PM positions. */
+  private anchorPos(anchor: InsertAnchor): number {
+    if (anchor.position === 'document_end')
+      return this.host.getState().doc.content.size;
+    const hit = this.uniqueHit(anchor.text, anchor.occurrence);
+    const block = this.textblocks()[hit.blockIndex];
+    return anchor.position === 'before'
+      ? block.pos
+      : block.pos + block.node.nodeSize;
+  }
+
+  /** The image a (blockIndex, imageIndex) pair from the latest snapshot
+   *  addresses, with its absolute position. */
+  private imageAt(
+    blockIndex: number,
+    imageIndex: number,
+  ): { node: PMNode; pos: number } {
+    const blocks = this.textblocks();
+    const block = blocks[blockIndex];
+    if (!block) {
+      throw new AnchorError(
+        `blockIndex ${blockIndex} is out of range — the document has ${blocks.length} block(s). ` +
+          `Block indexes change with every edit; call get_document again.`,
+      );
+    }
+    const images = blockImages(block.node).map((img) => ({
+      node: img.node,
+      pos: block.pos + 1 + img.offset,
+    }));
+    if (images.length === 0) {
+      throw new AnchorError(
+        `Block ${blockIndex} has no images. get_document lists each block's images.`,
+      );
+    }
+    const img = images[imageIndex];
+    if (!img) {
+      throw new AnchorError(
+        `imageIndex ${imageIndex} is out of range — block ${blockIndex} has ${images.length} image(s) (0-${images.length - 1}).`,
+      );
+    }
+    return img;
+  }
+
+  /** The host's bytes for a source, with what the bytes say they are. */
+  private async fetchImage(source: ImageSource): Promise<{
+    bytes: Uint8Array;
+    mediaType: string;
+    width: number;
+    height: number;
+  }> {
+    const offered = this.capabilities.images ?? [];
+    if (!this.host.readImage || !offered.includes(source.kind)) {
+      throw new ContentError(
+        `This app cannot take a picture from ${source.kind}. ` +
+          (offered.length
+            ? `It accepts: ${offered.join(', ')}.`
+            : 'It accepts no new pictures at all — tell the user to add the picture themselves.'),
+      );
+    }
+    const got = await this.host.readImage(source);
+    return { bytes: got.bytes, ...sniffImage(got.bytes, got.mediaType) };
+  }
+
+  /** The box a picture displays at: the asked-for width (or its own, shrunk
+   *  to the text width when it is wider), with the height kept in proportion
+   *  so nothing is ever squashed. */
+  private boxFor(
+    picture: { width: number; height: number },
+    width?: number,
+  ): ImageBox {
+    const natural = Math.max(1, picture.width);
+    const naturalHeight = Math.max(1, picture.height);
+    const w = Math.max(
+      1,
+      Math.round(width ?? Math.min(natural, this.contentWidth())),
+    );
+    return {
+      width: w,
+      height: Math.max(1, Math.round((w * naturalHeight) / natural)),
+    };
+  }
+
   private uniqueHit(text: string, occurrence?: number): Hit {
     const all = this.hits(text);
     if (all.length === 0) {
@@ -665,6 +831,16 @@ export class PmDocSession implements DocumentSession {
     }
     return all[0];
   }
+}
+
+/** What an image box actually holds — an agent about to swap one out needs
+ *  to know whether it is a photo or art the file describes shape by shape. */
+function imageKind(img: PMNode): DocImageKind {
+  const a = img.attrs;
+  if (a['oleProgId'] || a['equation'] || a['equationAst']) return 'equation';
+  if (a['rawDrawing']) return 'drawing';
+  if (a['shape'] || a['vector']) return 'shape';
+  return 'bitmap';
 }
 
 /** The block's inline image children, in order, with their child offsets. */

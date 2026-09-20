@@ -22,6 +22,8 @@ import {
   type Formatting,
   type TableEdit,
   type ImageChanges,
+  type ImagePlacement,
+  type ImageSource,
   type InsertAnchor,
   type MutationOptions,
   type SessionCapabilities,
@@ -35,6 +37,9 @@ export type SessionOpName =
   | 'applyFormatting'
   | 'editTable'
   | 'updateImage'
+  | 'insertImage'
+  | 'replaceImage'
+  | 'deleteImage'
   | 'getSelection'
   | 'save'
   // Host-level, handled by the caller before executeOp (see its note):
@@ -128,6 +133,27 @@ function run(
         args[1] as number,
         args[2] as ImageChanges,
         args[3] as MutationOptions | undefined,
+      );
+    case 'insertImage':
+      return session.insertImage(
+        args[0] as ImageSource,
+        args[1] as InsertAnchor,
+        args[2] as ImagePlacement | undefined,
+        args[3] as MutationOptions | undefined,
+      );
+    case 'replaceImage':
+      return session.replaceImage(
+        args[0] as number,
+        args[1] as number,
+        args[2] as ImageSource,
+        args[3] as ImagePlacement | undefined,
+        args[4] as MutationOptions | undefined,
+      );
+    case 'deleteImage':
+      return session.deleteImage(
+        args[0] as number,
+        args[1] as number,
+        args[2] as MutationOptions | undefined,
       );
     case 'getSelection':
       return session.getSelection?.() ?? Promise.resolve(null);
@@ -231,6 +257,35 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['updateImage']>>>(
       'updateImage',
       [blockIndex, imageIndex, changes, opts],
+    );
+  }
+  insertImage(
+    source: ImageSource,
+    anchor: InsertAnchor,
+    placement?: ImagePlacement,
+    opts?: MutationOptions,
+  ) {
+    return this.call<Awaited<ReturnType<DocumentSession['insertImage']>>>(
+      'insertImage',
+      [source, anchor, placement, opts],
+    );
+  }
+  replaceImage(
+    blockIndex: number,
+    imageIndex: number,
+    source: ImageSource,
+    placement?: ImagePlacement,
+    opts?: MutationOptions,
+  ) {
+    return this.call<Awaited<ReturnType<DocumentSession['replaceImage']>>>(
+      'replaceImage',
+      [blockIndex, imageIndex, source, placement, opts],
+    );
+  }
+  deleteImage(blockIndex: number, imageIndex: number, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['deleteImage']>>>(
+      'deleteImage',
+      [blockIndex, imageIndex, opts],
     );
   }
   async getSelection() {

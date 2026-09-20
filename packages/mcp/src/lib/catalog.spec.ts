@@ -19,7 +19,7 @@ const byName = (name: string) => {
 };
 
 describe('agent catalog', () => {
-  it('ships the nine document commands as data, in reading order', () => {
+  it('ships the twelve document commands as data, in reading order', () => {
     expect(documentCommands.map((c) => c.name)).toEqual([
       'get_document',
       'find_text',
@@ -28,6 +28,9 @@ describe('agent catalog', () => {
       'apply_formatting',
       'edit_table',
       'update_image',
+      'insert_image',
+      'replace_image',
+      'delete_image',
       'save_document',
       'get_selection',
     ]);
@@ -45,6 +48,9 @@ describe('agent catalog', () => {
       apply_formatting: 'edit',
       edit_table: 'edit',
       update_image: 'edit',
+      insert_image: 'edit',
+      replace_image: 'edit',
+      delete_image: 'edit',
       save_document: 'save',
       get_selection: 'read',
     });
@@ -63,6 +69,15 @@ describe('agent catalog', () => {
     expect(isOffered(sel, { selection: true })).toBe(true);
     const doc = byName('get_document');
     expect(isOffered(doc, {})).toBe(true);
+  });
+
+  it('offers the picture commands only to hosts that can fetch pictures', () => {
+    for (const name of ['insert_image', 'replace_image', 'delete_image']) {
+      expect(isOffered(byName(name), {})).toBe(false);
+      expect(isOffered(byName(name), { images: true })).toBe(true);
+    }
+    // Resizing one that is already there needs nothing fetched.
+    expect(isOffered(byName('update_image'), {})).toBe(true);
   });
 
   it('registers a host command on MCP the same way, through an interposer', async () => {

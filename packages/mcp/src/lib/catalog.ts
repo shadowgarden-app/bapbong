@@ -69,7 +69,7 @@ export type CommandArgs<Shape extends z.ZodRawShape> = z.objectOutputType<
 >;
 
 /** A host capability a command needs; hosts without it leave it out. */
-export type CommandRequirement = 'selection';
+export type CommandRequirement = 'selection' | 'images';
 
 /**
  * One command, as data. `Ports` is whatever the host gives commands to act
@@ -151,6 +151,9 @@ export async function withSession(
 /** Which optional capabilities a host offers (see {@link CommandRequirement}). */
 export interface HostCapabilities {
   selection?: boolean;
+  /** The host can fetch pictures (a file, an attachment, markup it can
+   *  rasterize) — enables insert_image / replace_image / delete_image. */
+  images?: boolean;
 }
 
 /** Does the host offer everything this command needs? */

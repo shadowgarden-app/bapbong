@@ -21,6 +21,18 @@
 import type { Content, TabStop, TableEdit } from './blocks.js';
 export type { Block, Cell, Content, TableEdit, TabStop } from './blocks.js';
 
+/**
+ * What kind of picture an image box holds. The agent needs this before it
+ * offers to change one: only a `bitmap` is a picture in the everyday sense.
+ *
+ * - `shape`   a drawn shape (rect, line, …) the editor models;
+ * - `drawing` art we paint but do not model — a group of freeform shapes
+ *             from the file, kept verbatim so a save never loses it.
+ *             Replacing one turns editable art into a flat picture;
+ * - `equation` a MathType/OLE object whose picture is only its preview.
+ */
+export type DocImageKind = 'bitmap' | 'shape' | 'drawing' | 'equation';
+
 /** An inline image (bitmap picture or drawn shape) inside a block —
  *  addressable as (block index, image index) by updateImage. */
 export interface DocImage {
@@ -32,8 +44,44 @@ export interface DocImage {
   height: number;
   /** Clockwise degrees around the image center (0 when unrotated). */
   rotation: number;
-  /** Drawn vector shape (rect/ellipse/…) vs a bitmap picture. */
-  kind: 'bitmap' | 'shape';
+  kind: DocImageKind;
+  /** Anchored to the page and wrapped by the text, rather than sitting
+   *  inline in it. Set only when it floats. */
+  float?: boolean;
+}
+
+/** Where the bytes of a new picture come from. The session never fetches
+ *  anything itself: the host reads the file, downloads the attachment or
+ *  rasterizes the markup, and declares which of these it can do
+ *  ({@link SessionCapabilities.images}). */
+export type ImageSourceKind = 'path' | 'attachment' | 'svg';
+
+export type ImageSource =
+  | { kind: 'path'; path: string }
+  | { kind: 'attachment'; attachmentId: string }
+  | { kind: 'svg'; svg: string };
+
+/** A host's answer to an {@link ImageSource}: the picture's bytes, and the
+ *  media type it was announced as (advisory — the bytes decide). */
+export interface ImageBytes {
+  bytes: Uint8Array;
+  mediaType?: string;
+}
+
+/** How a new picture is sized and described. */
+export interface ImagePlacement {
+  /** Display width in CSS px. Absent: the picture's own size, shrunk to the
+   *  text width when it is wider; on a replacement, the box it takes over. */
+  width?: number;
+  /** Alt text (Word's "Description"). A replacement keeps the old one when
+   *  this is absent. */
+  alt?: string;
+}
+
+/** The box a picture ended up occupying, in CSS px. */
+export interface ImageBox {
+  width: number;
+  height: number;
 }
 
 /** One addressable block in reading order (table-cell paragraphs included). */
@@ -120,6 +168,9 @@ export interface MutationOptions {
 export interface SessionCapabilities {
   /** A live user selection exists (desktop editor) — enables get_selection. */
   selection: boolean;
+  /** Which image sources the host can fetch. Empty (or absent) means it
+   *  cannot take new pictures at all, and the image tools aren't offered. */
+  images?: readonly ImageSourceKind[];
 }
 
 /** The port every document host implements. */
@@ -156,6 +207,30 @@ export interface DocumentSession {
     blockIndex: number,
     imageIndex: number,
     changes: ImageChanges,
+    opts?: MutationOptions,
+  ): Promise<MutationResult>;
+  /** Put a new picture in its own paragraph at `anchor`. Only when
+   *  `capabilities.images` lists the source's kind. */
+  insertImage(
+    source: ImageSource,
+    anchor: InsertAnchor,
+    placement?: ImagePlacement,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & ImageBox>;
+  /** Swap the picture at (blockIndex, imageIndex) for a new one, keeping
+   *  where it sits: its anchor, its wrap, and its width unless `placement`
+   *  says otherwise (the height follows the new picture's proportions). */
+  replaceImage(
+    blockIndex: number,
+    imageIndex: number,
+    source: ImageSource,
+    placement?: ImagePlacement,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & ImageBox>;
+  /** Remove the picture at (blockIndex, imageIndex). Its paragraph stays. */
+  deleteImage(
+    blockIndex: number,
+    imageIndex: number,
     opts?: MutationOptions,
   ): Promise<MutationResult>;
   /** Only when capabilities.selection — the user's current selection. */

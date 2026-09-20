@@ -17,6 +17,8 @@ export interface CreateMcpServerOptions {
   version?: string;
   /** Offer get_selection (hosts with a live user selection — the desktop). */
   selection?: boolean;
+  /** Offer the picture commands (hosts that can fetch image bytes). */
+  images?: boolean;
 }
 
 export function createMcpServer(
@@ -30,6 +32,7 @@ export function createMcpServer(
 
   registerCommands(server, documentCommands, provider, {
     selection: opts.selection,
+    images: opts.images,
   });
 
   registerDocumentResource(server, provider);
