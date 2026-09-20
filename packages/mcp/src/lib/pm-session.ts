@@ -784,7 +784,14 @@ export class PmDocSession implements DocumentSession {
       );
     }
     const got = await this.host.readImage(source);
-    return { bytes: got.bytes, ...sniffImage(got.bytes, got.mediaType) };
+    const info = sniffImage(got.bytes, got.mediaType);
+    const scale = got.scale && got.scale > 0 ? got.scale : 1;
+    return {
+      bytes: got.bytes,
+      mediaType: info.mediaType,
+      width: info.width / scale,
+      height: info.height / scale,
+    };
   }
 
   /** The box a picture displays at: the asked-for width (or its own, shrunk

@@ -184,6 +184,30 @@ describe('insertImage', () => {
     expect(asked).toMatchObject({ width: 300, height: 75 });
   });
 
+  it('treats a rasterizer\u2019s extra pixels as sharpness, not size', async () => {
+    // The window draws SVG at 2\u00d7 for print; the box stays the size the
+    // agent drew, and the picture simply has twice the pixels.
+    let state = EditorState.create({
+      doc: schema.node('doc', null, [para('Body')]),
+    });
+    const host: PmSessionHost = {
+      getState: () => state,
+      apply: (tr) => {
+        state = state.apply(tr);
+      },
+      getVersion: () => 'v1',
+      meta: () => ({}),
+      save: async () => undefined,
+      readImage: async () => ({ bytes: png(800, 400), scale: 2 }),
+      imageSources: ['svg'],
+    };
+    const out = await new PmDocSession(host).insertImage(
+      { kind: 'svg', svg: '<svg/>' },
+      { position: 'document_end' },
+    );
+    expect(out).toMatchObject({ width: 400, height: 200 });
+  });
+
   it('is refused, by name, when the host cannot fetch that kind', async () => {
     const { s } = session(schema.node('doc', null, [para('Body')]), {
       bytes: () => png(10, 10),

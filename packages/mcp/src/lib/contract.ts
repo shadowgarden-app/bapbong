@@ -66,6 +66,15 @@ export type ImageSource =
 export interface ImageBytes {
   bytes: Uint8Array;
   mediaType?: string;
+  /**
+   * Device pixels per CSS pixel in those bytes; default 1.
+   *
+   * A host that rasterizes (SVG → PNG) draws at 2× so the picture stays
+   * sharp in print, and says so here — otherwise a diagram the agent drew
+   * 400 wide would come into the document at 800 and be shrunk to whatever
+   * the page allows. The extra pixels ride along; only the box is divided.
+   */
+  scale?: number;
 }
 
 /** How a new picture is sized and described. */
