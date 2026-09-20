@@ -2624,9 +2624,11 @@ describe('importDocx', () => {
       ),
     ).toMatchObject({
       count: 2,
+      // Sub-pixel: twips/15 unrounded, so exporting them lands back on 8096
+      // and 652 rather than drifting the section off the right margin.
       cols: [
-        { width: Math.round(8096 / 15), space: Math.round(652 / 15) },
-        { width: Math.round(3022 / 15), space: 0 },
+        { width: 8096 / 15, space: 652 / 15 },
+        { width: 3022 / 15, space: 0 },
       ],
     });
 

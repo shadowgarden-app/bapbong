@@ -1855,6 +1855,52 @@ describe('exportDocx (sections + footnotes)', () => {
     expect(xml.match(/<w:sectPr>/g)?.length).toBe(2);
   });
 
+  it('writes the declared width of every column back (w:equalWidth="0")', async () => {
+    // A section whose columns differ: dropping the w:col children would hand
+    // Word three EQUAL columns instead, moving every line of the section —
+    // how a network diagram's labels drifted off its nodes (report PREK).
+    const uneven = [
+      { width: 300, space: 20 },
+      { width: 100, space: 30 },
+      { width: 160, space: 0 },
+    ];
+    const doc = schema.node(
+      'doc',
+      {
+        sections: [
+          {
+            blockCount: 1,
+            columns: { count: 3, gap: 48, cols: uneven },
+            newPage: false,
+          },
+          { blockCount: 1, columns: { count: 1, gap: 48 }, newPage: false },
+        ],
+      },
+      [
+        schema.node('paragraph', null, [schema.text('in the columns')]),
+        schema.node('paragraph', null, [schema.text('after them')]),
+      ],
+    );
+
+    const xml = await docXml(doc);
+    // @w:space stays (Word writes it too) and the last column's unused space
+    // is left out, exactly as Word serializes it.
+    expect(xml).toContain(
+      '<w:cols w:num="3" w:space="720" w:equalWidth="0">' +
+        '<w:col w:w="4500" w:space="300"/>' +
+        '<w:col w:w="1500" w:space="450"/>' +
+        '<w:col w:w="2400"/></w:cols>',
+    );
+
+    const back = await importDocx(await exportDocx(doc));
+    const sections = back.doc.attrs['sections'] as {
+      columns: { count: number; cols?: { width: number; space: number }[] };
+    }[];
+    expect(sections[0].columns.cols).toEqual(uneven);
+    // Equal columns still serialize without children — nothing to preserve.
+    expect(sections[1].columns.cols).toBeUndefined();
+  });
+
   it('serializes and round-trips w:pgNumType on a section break', async () => {
     const doc = schema.node(
       'doc',

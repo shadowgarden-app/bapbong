@@ -4420,12 +4420,18 @@ function parseColumns(sectPr: OoxmlNode | undefined): ColumnConfig {
   // would be wrong in a way the tests could never catch.
   const colEls = cols ? children(cols, 'w:col') : [];
   if (colEls.length !== count) return { count, gap };
+  // Column geometry keeps its sub-pixel remainder (twips/15, unrounded) where
+  // the rest of the importer rounds to whole px: the declared widths of a
+  // section have to add up to the text area, and rounding each of six columns
+  // to a pixel drifts the last one off the right margin on the way back out
+  // (export multiplies by 15 again). Fractional px is nothing to the layout
+  // engine, and the round-trip lands on the original twips exactly.
   const list = colEls.map((c) => {
     const w = Number(attrOf(c, 'w:w') ?? '0');
     const s = Number(attrOf(c, 'w:space') ?? '0');
     return {
-      width: twipsToPx(Number.isNaN(w) ? 0 : w),
-      space: twipsToPx(Number.isNaN(s) ? 0 : s),
+      width: (Number.isNaN(w) ? 0 : w) / 15,
+      space: (Number.isNaN(s) ? 0 : s) / 15,
     };
   });
   // The widths ride through verbatim even when they happen to be uniform —

@@ -10,6 +10,7 @@ import { commentSchema } from '@shadow-garden/bapbong-model';
 import type {
   BorderSide,
   BorderStyle,
+  ColumnConfig,
   ImageCrop,
   CommentNode,
   PageConfig,
@@ -752,14 +753,36 @@ function sectionSectPr(
   // may hold attrs the model doesn't, e.g. chapStyle); rebuilt from the model
   // otherwise. Schema slot: after pgMar, before cols.
   const pgNumType = carried?.pgNumType || pgNumTypeXml(s.pageNumbers);
-  const cols =
-    s.columns.count > 1
-      ? `<w:cols w:num="${s.columns.count}" w:space="${pxToTwips(s.columns.gap)}"/>`
-      : `<w:cols w:space="${pxToTwips(s.columns.gap)}"/>`;
+  const cols = colsXml(s.columns);
   // Carried header/footer references + titlePg re-attach in their schema
   // slots (refs first, titlePg after cols) — their parts and rels survive via
   // the carry package, so the old rIds stay valid.
   return `<w:sectPr>${carried?.refs ?? ''}${type}${geom}${pgNumType}${cols}${carried?.titlePg ?? ''}</w:sectPr>`;
+}
+
+/** w:cols for one section.
+ *
+ *  Uneven columns (`cols`) are Word's `@w:equalWidth="0"` form: every column
+ *  declares its own width and the gap that FOLLOWS it, and `@w:space` on the
+ *  parent is then disregarded (it is still written — Word writes it too, and
+ *  a reader that ignores the children falls back to something sane). The
+ *  last column's `space` is unused, so a zero is left out the way Word does.
+ *  Dropping the children here would turn a 6-column section with declared
+ *  widths into 6 EQUAL columns on the next open, moving every line in it. */
+function colsXml(c: ColumnConfig): string {
+  const space = ` w:space="${pxToTwips(c.gap)}"`;
+  // @w:num is Word's own shape: written from 2 columns up, absent (= 1) below.
+  const num = c.count > 1 ? ` w:num="${c.count}"` : '';
+  if (!c.cols?.length) return `<w:cols${num}${space}/>`;
+  const children = c.cols
+    .map(
+      (col) =>
+        `<w:col w:w="${pxToTwips(col.width)}"${
+          col.space ? ` w:space="${pxToTwips(col.space)}"` : ''
+        }/>`,
+    )
+    .join('');
+  return `<w:cols${num}${space} w:equalWidth="0">${children}</w:cols>`;
 }
 
 /** w:pgNumType from the model (empty string when the section declares none). */
