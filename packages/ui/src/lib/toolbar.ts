@@ -645,7 +645,10 @@ export function mountToolbar(
         idx,
         width: g.lastWidth,
         sticky: g.sticky,
-        hidden: g.el.hidden,
+        // Coerced: the DOM's `hidden` is `boolean | "until-found"` since the
+        // lib.dom that TypeScript 5.9 ships, and every non-false value means
+        // the group is taking no space either way.
+        hidden: !!g.el.hidden,
       };
     });
     // ── compute ──
