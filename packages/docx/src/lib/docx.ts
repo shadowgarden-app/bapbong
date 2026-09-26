@@ -2802,10 +2802,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // still shows the paragraph under it. Only when the paragraph isn't
   // already a heading (invariant: styleId ⇒ heading null); the default
   // paragraph style needs no name.
-  else if (
-    pStyleId &&
-    pStyleId !== ctx.styles.defaultStyleIdFor('paragraph')
-  ) {
+  else if (pStyleId && pStyleId !== ctx.styles.defaultStyleIdFor('paragraph')) {
     attrs.styleId = /^title$/i.test(pStyleId)
       ? 'Title'
       : /^subtitle$/i.test(pStyleId)
