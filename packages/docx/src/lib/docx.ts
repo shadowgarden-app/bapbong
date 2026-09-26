@@ -2796,10 +2796,21 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (list) attrs.list = list;
   if (align) attrs.align = align;
   if (heading) attrs.heading = heading;
-  // Title/Subtitle: named styles without an outline level. Only when the
-  // paragraph isn't already a heading (invariant: styleId ⇒ heading null).
-  else if (pStyleId && /^(title|subtitle)$/i.test(pStyleId)) {
-    attrs.styleId = pStyleId.toLowerCase() === 'title' ? 'Title' : 'Subtitle';
+  // A named style without an outline level is kept by its id — Title and
+  // Subtitle, which the layout sizes, but also the document's own ("Quote",
+  // "Caption", a company style), so the export writes it back and Word
+  // still shows the paragraph under it. Only when the paragraph isn't
+  // already a heading (invariant: styleId ⇒ heading null); the default
+  // paragraph style needs no name.
+  else if (
+    pStyleId &&
+    pStyleId !== ctx.styles.defaultStyleIdFor('paragraph')
+  ) {
+    attrs.styleId = /^title$/i.test(pStyleId)
+      ? 'Title'
+      : /^subtitle$/i.test(pStyleId)
+        ? 'Subtitle'
+        : pStyleId;
   }
   if (indent) attrs.indent = indent;
   if (spacing) attrs.spacing = spacing;

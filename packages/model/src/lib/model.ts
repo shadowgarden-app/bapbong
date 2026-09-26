@@ -995,7 +995,9 @@ export interface ParagraphAttrs {
   indent: Indent | null;
   spacing?: Spacing | null;
   heading?: number | null;
-  styleId?: 'Title' | 'Subtitle' | null;
+  /** A paragraph style by id: Title / Subtitle (which the layout sizes), or
+   *  one the document defines (its look is baked into the paragraph). */
+  styleId?: string | null;
 }
 
 /** Build an inline CSS `style` string for a paragraph's align/indent/spacing,

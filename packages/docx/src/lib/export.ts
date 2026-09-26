@@ -58,6 +58,9 @@ const pxToEmu = (px: number) => Math.round(px * 9525);
 /** Accumulates document.xml.rels + media parts emitted during serialization. */
 interface ExportCtx {
   rels: string[];
+  /** Paragraph style ids the output styles.xml defines beyond STYLE_DEFS —
+   *  the carried package's own, which a w:pStyle may name. */
+  paragraphStyles: Set<string>;
   media: { path: string; base64: string }[];
   exts: Set<string>; // image extensions → content-type defaults
   nextId: number; // shared rId / media / drawing counter
@@ -852,9 +855,11 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
   // into a carried package that lacks it).
   const heading = a['heading'] as number | null;
   const styleId = a['styleId'] as string | null;
+  const own = ownStyleId(node, ctx);
   if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
   else if (styleId === 'Title' || styleId === 'Subtitle')
     out.push(`<w:pStyle w:val="${styleId}"/>`);
+  else if (own) out.push(`<w:pStyle w:val="${esc(own)}"/>`);
   // CT_PPr schema order: keepNext, keepLines, pageBreakBefore, widowControl.
   if (a['keepNext']) out.push('<w:keepNext/>');
   if (a['keepLines']) out.push('<w:keepLines/>');
@@ -1479,6 +1484,31 @@ function stylesXml(
 /** Append any used-but-missing style defs to a carried styles.xml, so
  *  headings/Title/Subtitle authored in bapbong render styled in Word even
  *  when the source document never defined them. */
+/** The paragraph style ids a carried styles.xml defines. */
+async function carriedParagraphStyles(
+  carry: JSZip | undefined,
+): Promise<Set<string>> {
+  const xml = await carry?.file('word/styles.xml')?.async('string');
+  const out = new Set<string>();
+  for (const m of xml?.matchAll(/<w:style\b[^>]*>/g) ?? []) {
+    const tag = m[0];
+    const type = /\bw:type="([^"]*)"/.exec(tag)?.[1] ?? 'paragraph';
+    const id = /\bw:styleId="([^"]*)"/.exec(tag)?.[1];
+    if (id && type === 'paragraph') out.add(id);
+  }
+  return out;
+}
+
+/** A paragraph's own style (not Heading/Title/Subtitle), when the package
+ *  going out defines it. A new document has only STYLE_DEFS, where an
+ *  unknown name would mean Normal anyway. */
+function ownStyleId(node: PMNode, ctx: ExportCtx): string | null {
+  const styleId = node.attrs['styleId'] as string | null;
+  return styleId && !node.attrs['heading'] && ctx.paragraphStyles.has(styleId)
+    ? styleId
+    : null;
+}
+
 function mergeStyles(xml: string, used: Set<string>): string {
   const missing = [...used].filter((id) => !xml.includes(`w:styleId="${id}"`));
   if (!missing.length) return xml;
@@ -1837,6 +1867,7 @@ export async function exportDocx(
 
   const ctx: ExportCtx = {
     rels: [],
+    paragraphStyles: await carriedParagraphStyles(opts?.carry),
     media: [],
     exts: new Set(),
     nextId: 100,
@@ -2161,6 +2192,7 @@ function chromeStoryPart(
   // image targets are "media/…", relative to word/ for headers too.
   const storyCtx: ExportCtx = {
     rels: [],
+    paragraphStyles: ctx.paragraphStyles,
     media: ctx.media,
     exts: ctx.exts,
     nextId: ctx.nextId,
