@@ -1,5 +1,8 @@
 import { Node as ProseMirrorNode, Schema } from 'prosemirror-model';
-import { schema as baseSchema } from '@shadow-garden/bapbong-model';
+import {
+  effectiveSectionChrome,
+  schema as baseSchema,
+} from '@shadow-garden/bapbong-model';
 import {
   importDocx,
   exportDocx,
@@ -35,8 +38,6 @@ import type {
   PaintDecoration,
   RangeDecoration,
   ResolvedLayout,
-  SectionChromeOverrides,
-  SectionConfig,
   SelectionRect,
 } from '@shadow-garden/bapbong-contracts';
 
@@ -376,42 +377,16 @@ export class RenderCore {
   effectiveSectionChrome(
     doc: ProseMirrorNode | null = this.doc,
   ): SectionChrome[] | null {
-    if (!doc) return this.sectionChrome;
-    const overrides = doc.attrs[
-      'sectionChromeOverrides'
-    ] as SectionChromeOverrides | null;
-    if (!overrides || Object.keys(overrides).length === 0)
-      return this.sectionChrome;
-    const count = Math.max(
-      (doc.attrs['sections'] as SectionConfig[] | null)?.length ?? 1,
-      this.sectionChrome?.length ?? 0,
-    );
-    const base: SectionChrome[] =
-      this.sectionChrome ??
-      Array.from({ length: count }, () => ({
+    return effectiveSectionChrome(
+      doc,
+      {
+        sectionChrome: this.sectionChrome,
         headers: this.chromeHeaders,
         footers: this.chromeFooters,
         titlePg: this.chromeTitlePg,
-      }));
-    const out = base.map((s) => ({
-      headers: { ...s.headers },
-      footers: { ...s.footers },
-      titlePg: s.titlePg,
-    }));
-    for (const [key, o] of Object.entries(overrides)) {
-      const si = Number(key);
-      const target = out[si];
-      if (!target) continue;
-      for (const [variant, json] of Object.entries(o.headers ?? {})) {
-        const parsed = this.parseChromeStory(json);
-        if (parsed) target.headers[variant] = parsed;
-      }
-      for (const [variant, json] of Object.entries(o.footers ?? {})) {
-        const parsed = this.parseChromeStory(json);
-        if (parsed) target.footers[variant] = parsed;
-      }
-    }
-    return out;
+      },
+      (json) => this.parseChromeStory(json),
+    );
   }
 
   /** Header/footer stories shared by every section (the imported flat set) —
