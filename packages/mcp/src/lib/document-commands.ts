@@ -617,6 +617,45 @@ export const deleteImage = defineCommand({
     ),
 });
 
+export const deleteBlock = defineCommand({
+  name: 'delete_block',
+  title: 'Delete paragraphs',
+  description:
+    'Remove whole blocks — paragraphs or headings, with their text and pictures — addressed by block_index from ' +
+    'get_document; count removes that many consecutive blocks. replace_text with an empty new_text only empties ' +
+    'a paragraph; this takes the paragraph away. A paragraph inside a table cell can go only while the cell keeps ' +
+    'another: rows, columns and whole tables are removed with edit_table. Block indexes shift after this call — ' +
+    're-read before the next one.',
+  input: {
+    documentId,
+    block_index: z
+      .number()
+      .int()
+      .min(0)
+      .describe('Index of the first block to remove (from get_document).'),
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('How many consecutive blocks, default 1.'),
+    expectedVersion,
+  },
+  effect: 'edit',
+  targets: (a) => [a.documentId],
+  run: (
+    provider,
+    { documentId: id, block_index, count, expectedVersion: ver },
+  ) =>
+    withSession(provider, id, async (s) =>
+      json(
+        await s.deleteBlocks(block_index, count ?? 1, {
+          expectedVersion: ver,
+        }),
+      ),
+    ),
+});
+
 export const saveDocument = defineCommand({
   name: 'save_document',
   title: 'Save the document',
@@ -658,6 +697,7 @@ export const documentCommands: readonly AgentCommand<
   findText,
   replaceText,
   insertContent,
+  deleteBlock,
   applyFormatting,
   editTable,
   updateImage,

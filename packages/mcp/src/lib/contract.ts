@@ -251,6 +251,15 @@ export interface DocumentSession {
     imageIndex: number,
     opts?: MutationOptions,
   ): Promise<MutationResult>;
+  /** Remove `count` consecutive blocks from `blockIndex` (snapshot order),
+   *  whole — paragraph, text, pictures and all. A paragraph in a table cell
+   *  goes only while its cell keeps another; the document keeps one empty
+   *  paragraph if nothing else is left. One transaction. */
+  deleteBlocks(
+    blockIndex: number,
+    count: number,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { deleted: number }>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */

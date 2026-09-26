@@ -448,6 +448,75 @@ export class PmDocSession implements DocumentSession {
     };
   }
 
+  async deleteBlocks(
+    blockIndex: number,
+    count: number,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & { deleted: number }> {
+    this.checkVersion(opts.expectedVersion);
+    const blocks = this.textblocks();
+    if (!Number.isInteger(count) || count < 1) {
+      throw new ContentError('count is how many blocks to delete: 1 or more.');
+    }
+    if (
+      !Number.isInteger(blockIndex) ||
+      blockIndex < 0 ||
+      blockIndex + count > blocks.length
+    ) {
+      throw new AnchorError(
+        `Blocks ${blockIndex}..${blockIndex + count - 1} are out of range — the document has ${blocks.length} block(s). ` +
+          'Block indexes change with every edit; call get_document again.',
+      );
+    }
+    const doomed = blocks.slice(blockIndex, blockIndex + count);
+    const state = this.host.getState();
+
+    // A table cell holds at least one paragraph: the last one cannot go.
+    const perCell = new Map<number, { left: number; block: TextBlock }>();
+    for (const b of doomed) {
+      if (!b.table) continue;
+      const $pos = state.doc.resolve(b.pos);
+      const cell = $pos.before();
+      const entry = perCell.get(cell) ?? {
+        left: $pos.parent.childCount,
+        block: b,
+      };
+      entry.left--;
+      perCell.set(cell, entry);
+    }
+    for (const { left, block } of perCell.values()) {
+      if (left > 0 || !block.table) continue;
+      const { index, row, cell } = block.table;
+      throw new ContentError(
+        `Block ${blocks.indexOf(block)} is the last paragraph of its table cell (table ${index}, row ${row}, cell ${cell}), ` +
+          'and a cell cannot be empty. Clear its text with replace_text, or remove the row, the column or the ' +
+          'whole table with edit_table.',
+      );
+    }
+
+    let tr = state.tr;
+    const topLevel = doomed.filter((b) => !b.table).length;
+    if (topLevel === state.doc.childCount) {
+      // Everything goes: a document still has one (empty) paragraph.
+      tr = tr.replaceWith(
+        0,
+        state.doc.content.size,
+        state.schema.nodes['paragraph'].create(),
+      );
+    } else {
+      for (const b of [...doomed].reverse()) {
+        tr = tr.delete(b.pos, b.pos + b.node.nodeSize);
+      }
+    }
+    this.host.apply(keepSections(state.doc, tr, 1));
+    const at = tr.mapping.map(doomed[0].pos);
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: at, to: at },
+      deleted: count,
+    };
+  }
+
   async save(): Promise<void> {
     await this.host.save();
   }

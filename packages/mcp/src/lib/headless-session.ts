@@ -191,6 +191,13 @@ export class HeadlessSession implements DocumentSession {
   ): Promise<MutationResult> {
     return this.inner.deleteImage(blockIndex, imageIndex, opts);
   }
+  deleteBlocks(
+    blockIndex: number,
+    count: number,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { deleted: number }> {
+    return this.inner.deleteBlocks(blockIndex, count, opts);
+  }
   save(): Promise<void> {
     return this.inner.save();
   }

@@ -40,6 +40,7 @@ export type SessionOpName =
   | 'insertImage'
   | 'replaceImage'
   | 'deleteImage'
+  | 'deleteBlocks'
   | 'getSelection'
   | 'save'
   // Host-level, handled by the caller before executeOp (see its note):
@@ -151,6 +152,12 @@ function run(
       );
     case 'deleteImage':
       return session.deleteImage(
+        args[0] as number,
+        args[1] as number,
+        args[2] as MutationOptions | undefined,
+      );
+    case 'deleteBlocks':
+      return session.deleteBlocks(
         args[0] as number,
         args[1] as number,
         args[2] as MutationOptions | undefined,
@@ -286,6 +293,12 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['deleteImage']>>>(
       'deleteImage',
       [blockIndex, imageIndex, opts],
+    );
+  }
+  deleteBlocks(blockIndex: number, count: number, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['deleteBlocks']>>>(
+      'deleteBlocks',
+      [blockIndex, count, opts],
     );
   }
   async getSelection() {

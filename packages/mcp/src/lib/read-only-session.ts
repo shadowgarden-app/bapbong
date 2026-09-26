@@ -82,6 +82,9 @@ export class ReadOnlySession implements DocumentSession {
   deleteImage(): Promise<MutationResult> {
     this.refuse('remove a picture from this document');
   }
+  deleteBlocks(): Promise<MutationResult & { deleted: number }> {
+    this.refuse('delete paragraphs from this document');
+  }
   save(): Promise<void> {
     this.refuse('save this document');
   }
