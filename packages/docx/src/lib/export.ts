@@ -1853,9 +1853,20 @@ export async function exportDocx(
     origDocXml?.match(
       /<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>|<w:sectPr\b[^>]*\/>/g,
     ) ?? [];
-  // Chrome overrides (the page-number toggle) become real header/footer
-  // parts; their sectPr references are patched in below.
-  const chromePlan = planChromeOverrides(doc, origSectPrs, ctx);
+  // Chrome overrides (the page-number toggle, an agent's header edit)
+  // become real header/footer parts; their sectPr references are patched in
+  // below. Their names and rel ids must be ones the carried package does not
+  // use yet: a file bapbong saved before already has headerB1.xml under
+  // rIdChromeB1, and minting those again points two references at one part.
+  const carriedRels = opts?.carry
+    ? await opts.carry.file('word/_rels/document.xml.rels')?.async('string')
+    : undefined;
+  const chromePlan = planChromeOverrides(doc, origSectPrs, ctx, {
+    files: new Set(opts?.carry ? Object.keys(opts.carry.files) : []),
+    relIds: new Set(
+      [...(carriedRels ?? '').matchAll(/\bId="([^"]+)"/g)].map((m) => m[1]),
+    ),
+  });
   const boundaries = sectionBoundaries(doc, origSectPrs, chromePlan?.refPatch);
   const bodyBlocks: PMNode[] = [];
   doc.forEach((b) => bodyBlocks.push(b));
@@ -2052,6 +2063,11 @@ function planChromeOverrides(
   doc: PMNode,
   origSectPrs: string[],
   ctx: ExportCtx,
+  /** Part paths and document rel ids the carried package already uses. */
+  taken: { files: Set<string>; relIds: Set<string> } = {
+    files: new Set(),
+    relIds: new Set(),
+  },
 ): ChromePlan | null {
   const overrides = doc.attrs[
     'sectionChromeOverrides'
@@ -2091,6 +2107,11 @@ function planChromeOverrides(
       for (const [variant, json] of Object.entries(stories)) {
         const part = chromeStoryPart(json, tag, doc, ctx);
         if (!part) continue;
+        while (
+          taken.files.has(`word/${relType}B${seq}.xml`) ||
+          taken.relIds.has(`rIdChromeB${seq}`)
+        )
+          seq++;
         const name = `${relType}B${seq}.xml`;
         const rId = `rIdChromeB${seq}`;
         seq++;
