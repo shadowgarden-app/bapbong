@@ -34,6 +34,7 @@ import {
   type InsertAnchor,
   type MutationOptions,
   type MutationResult,
+  type ChromeEdit,
   type PageSetup,
   type PageSetupChange,
   type SessionCapabilities,
@@ -152,6 +153,7 @@ export class PmDocSession implements DocumentSession {
       images:
         typeof host.readImage === 'function' ? (host.imageSources ?? []) : [],
       pageSetup: typeof host.pageSetup === 'function',
+      headerFooter: typeof host.chrome === 'function',
     };
   }
 
@@ -216,7 +218,9 @@ export class PmDocSession implements DocumentSession {
         ['footer', stories.footers],
       ] as const) {
         for (const [variant, story] of Object.entries(set)) {
-          const text = story.textBetween(0, story.content.size, '\n').trim();
+          const text = story
+            .textBetween(0, story.content.size, '\n', fieldText)
+            .trim();
           if (!text) continue;
           const key = `${part}\u0000${variant}\u0000${text}`;
           const known = seen.get(key);
@@ -711,6 +715,125 @@ export class PmDocSession implements DocumentSession {
     return {
       docVersion: this.host.getVersion(),
       sections: sections?.length || 1,
+    };
+  }
+
+  async editChrome(
+    edit: ChromeEdit,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & { sections: number[] }> {
+    this.checkVersion(opts.expectedVersion);
+    const state = this.host.getState();
+    const { schema } = state;
+    if (
+      !this.host.chrome ||
+      !schema.nodes['doc'].spec.attrs?.['sectionChromeOverrides']
+    ) {
+      throw new ContentError(
+        'This document cannot change its headers and footers.',
+      );
+    }
+    if ((edit.content === undefined) === (edit.replace === undefined)) {
+      throw new ContentError(
+        'Pass content (to rewrite it) or old_text with new_text (to replace inside it) — one of the two.',
+      );
+    }
+    const perSection = this.host.chrome();
+    const sectionCount = Math.max(
+      (state.doc.attrs['sections'] as unknown[] | null)?.length ?? 1,
+      perSection.length,
+      1,
+    );
+    if (
+      edit.section !== undefined &&
+      (edit.section < 1 || edit.section > sectionCount)
+    ) {
+      throw new ContentError(
+        `No section ${edit.section} — the document has ${sectionCount} section(s).`,
+      );
+    }
+    const targets =
+      edit.section !== undefined
+        ? [edit.section - 1]
+        : Array.from({ length: sectionCount }, (_x, i) => i);
+    const variant = edit.variant ?? 'default';
+    const key = edit.part === 'header' ? 'headers' : 'footers';
+    // A flat chrome is one entry that every section shows.
+    const storyOf = (i: number): PMNode | undefined =>
+      (perSection.length === 1 ? perSection[0] : perSection[i])?.[key]?.[
+        variant
+      ];
+    const noun = `${variant === 'first' ? 'first-page ' : variant === 'even' ? 'even-page ' : ''}${edit.part}`;
+    if (variant !== 'default') {
+      for (const i of targets) {
+        if (!storyOf(i)) {
+          throw new ContentError(
+            `Section ${i + 1} has no ${noun} — bapbong edits the ones a document already shows. Use variant "default".`,
+          );
+        }
+      }
+    }
+
+    const changed = new Map<number, PMNode>();
+    if (edit.content !== undefined) {
+      const { nodes, numbering } = buildContent(edit.content, schema, {
+        contentWidth: this.contentWidth(),
+      });
+      if (numbering) {
+        throw new ContentError(
+          'A header or footer cannot hold a list — write the items as plain paragraphs.',
+        );
+      }
+      const story = schema.node(
+        'doc',
+        null,
+        nodes.length > 0 ? nodes : [schema.nodes['paragraph'].create()],
+      );
+      for (const i of targets) changed.set(i, story);
+    } else {
+      const r = edit.replace as NonNullable<ChromeEdit['replace']>;
+      let missing: Error | null = null;
+      for (const i of targets) {
+        const story = storyOf(i);
+        const where = `the ${noun} of section ${i + 1}`;
+        const hits = story ? hitsIn(textblocksOf(story), r.oldText) : [];
+        // Across every section a story without the text is left alone;
+        // only "found nowhere" (or an ambiguous anchor) is an error.
+        if (hits.length === 0 && edit.section === undefined) {
+          missing ??= new AnchorError(
+            `Text not found in any ${noun}: ${JSON.stringify(r.oldText)}. get_document lists them under chrome.`,
+          );
+          continue;
+        }
+        if (!story) {
+          throw new AnchorError(
+            `Section ${i + 1} has no ${noun} to change — write one with content.`,
+          );
+        }
+        const hit = pickHit(hits, r.oldText, r.occurrence, where);
+        changed.set(i, replaceInStory(story, hit, r.newText));
+      }
+      if (changed.size === 0)
+        throw missing ?? new AnchorError('Nothing to change.');
+    }
+
+    const overrides = {
+      ...((state.doc.attrs['sectionChromeOverrides'] as Record<
+        string,
+        Record<string, Record<string, unknown>>
+      > | null) ?? {}),
+    };
+    for (const [i, story] of changed) {
+      const entry = { ...(overrides[String(i)] ?? {}) };
+      entry[key] = { ...(entry[key] ?? {}), [variant]: story.toJSON() };
+      overrides[String(i)] = entry;
+    }
+    this.host.apply(
+      state.tr.setDocAttribute('sectionChromeOverrides', overrides),
+    );
+    return {
+      docVersion: this.host.getVersion(),
+      sections: [...changed.keys()].map((i) => i + 1),
     };
   }
 
@@ -1630,6 +1753,27 @@ function blockLinks(block: PMNode): { text: string; href: string }[] {
     }
   });
   return out;
+}
+
+/** How a page field reads in chrome text: where the number goes. */
+function fieldText(leaf: PMNode): string {
+  if (leaf.type.name !== 'page_field') return '';
+  return leaf.attrs['kind'] === 'pages' ? '{pages}' : '{page}';
+}
+
+/** `story` with the text at `hit` replaced, in the marks of its first
+ *  character. Built from the story's own nodes (this tier carries no
+ *  prosemirror-transform): the new text travels as a slice of a scratch
+ *  paragraph, open on both sides, so it joins the paragraph it lands in. */
+function replaceInStory(story: PMNode, hit: Hit, newText: string): PMNode {
+  const schema = story.type.schema;
+  if (!newText)
+    return story.replace(hit.from, hit.to, story.slice(hit.from, hit.from));
+  const marks = story.nodeAt(hit.from)?.marks ?? [];
+  const scratch = schema.node('doc', null, [
+    schema.node('paragraph', null, [schema.text(newText, marks)]),
+  ]);
+  return story.replace(hit.from, hit.to, scratch.slice(1, 1 + newText.length));
 }
 
 /** A paragraph's list membership (0-based level), or null for body text. */

@@ -46,7 +46,10 @@ export interface CharFormat {
 export type Inline =
   | string
   | ({ text: string; link?: string } & CharFormat)
-  | { tab: true };
+  | { tab: true }
+  /** The page number ("page") or the page count ("pages") — what a header
+   *  or footer shows, kept current by the layout. */
+  | { field: 'page' | 'pages' };
 
 /**
  * A link target an agent may write: http(s), mailto, tel, or a bookmark in
@@ -553,6 +556,11 @@ function inlineNodes(
       if (run.length > 0) out.push(schema.text(run, marksFor(schema, base)));
     } else if ('tab' in run) {
       out.push(schema.text('\t', marksFor(schema, base)));
+    } else if ('field' in run) {
+      const field = schema.nodes['page_field'];
+      if (!field)
+        throw new ContentError('This document cannot hold page numbers.');
+      out.push(field.create({ kind: run.field }, null, marksFor(schema, base)));
     } else {
       if (run.text.includes('\n')) {
         throw new ContentError(

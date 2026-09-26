@@ -34,6 +34,7 @@ import type {
   InsertAnchor,
   MutationOptions,
   MutationResult,
+  ChromeEdit,
   PageSetup,
   SessionCapabilities,
 } from './contract.js';
@@ -241,6 +242,12 @@ export class HeadlessSession implements DocumentSession {
     opts?: MutationOptions,
   ): Promise<MutationResult & { sections: number }> {
     return this.inner.pageSetup(setup, opts);
+  }
+  editChrome(
+    edit: ChromeEdit,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { sections: number[] }> {
+    return this.inner.editChrome(edit, opts);
   }
   save(): Promise<void> {
     return this.inner.save();

@@ -69,7 +69,11 @@ export type CommandArgs<Shape extends z.ZodRawShape> = z.objectOutputType<
 >;
 
 /** A host capability a command needs; hosts without it leave it out. */
-export type CommandRequirement = 'selection' | 'images' | 'pageSetup';
+export type CommandRequirement =
+  | 'selection'
+  | 'images'
+  | 'pageSetup'
+  | 'headerFooter';
 
 /**
  * One command, as data. `Ports` is whatever the host gives commands to act
@@ -157,6 +161,9 @@ export interface HostCapabilities {
   /** The host's documents can change their page setup — enables
    *  page_setup. */
   pageSetup?: boolean;
+  /** The host's documents know their headers and footers — enables
+   *  edit_header_footer. */
+  headerFooter?: boolean;
 }
 
 /** Does the host offer everything this command needs? */

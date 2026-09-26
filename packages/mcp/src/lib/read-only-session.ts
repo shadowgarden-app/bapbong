@@ -88,6 +88,9 @@ export class ReadOnlySession implements DocumentSession {
   pageSetup(): Promise<MutationResult & { sections: number }> {
     this.refuse('change the page setup of this document');
   }
+  editChrome(): Promise<MutationResult & { sections: number[] }> {
+    this.refuse('change the headers and footers of this document');
+  }
   save(): Promise<void> {
     this.refuse('save this document');
   }

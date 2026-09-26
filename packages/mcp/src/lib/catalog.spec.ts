@@ -19,7 +19,7 @@ const byName = (name: string) => {
 };
 
 describe('agent catalog', () => {
-  it('ships the fourteen document commands as data, in reading order', () => {
+  it('ships the fifteen document commands as data, in reading order', () => {
     expect(documentCommands.map((c) => c.name)).toEqual([
       'get_document',
       'find_text',
@@ -33,6 +33,7 @@ describe('agent catalog', () => {
       'replace_image',
       'delete_image',
       'page_setup',
+      'edit_header_footer',
       'save_document',
       'get_selection',
     ]);
@@ -55,6 +56,7 @@ describe('agent catalog', () => {
       replace_image: 'edit',
       delete_image: 'edit',
       page_setup: 'edit',
+      edit_header_footer: 'edit',
       save_document: 'save',
       get_selection: 'read',
     });

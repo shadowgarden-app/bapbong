@@ -245,6 +245,20 @@ export interface PageSetupChange {
   removeSectionBreak?: number;
 }
 
+/** A change to a header or footer (see edit_header_footer). */
+export interface ChromeEdit {
+  part: 'header' | 'footer';
+  /** "default" (every page, the usual one), "first" or "even" — the last
+   *  two only where the document already has one. */
+  variant?: 'default' | 'first' | 'even';
+  /** 1-based section; absent = every section. */
+  section?: number;
+  /** Rewrite the whole header / footer ("" empties it). */
+  content?: Content;
+  /** Or replace text inside it, formatting kept. */
+  replace?: { oldText: string; newText: string; occurrence?: number };
+}
+
 /** Line spacing: a multiple of single, or a height in points. */
 export type LineSpacing = number | { exact: number } | { atLeast: number };
 
@@ -294,6 +308,9 @@ export interface SessionCapabilities {
   /** The session can change page geometry and sections — enables
    *  page_setup. */
   pageSetup?: boolean;
+  /** The session knows its headers and footers — enables
+   *  edit_header_footer. */
+  headerFooter?: boolean;
 }
 
 /** The port every document host implements. */
@@ -371,6 +388,12 @@ export interface DocumentSession {
     setup: PageSetup,
     opts?: MutationOptions,
   ): Promise<MutationResult & { sections: number }>;
+  /** Rewrite, or replace text in, a header or footer of one section or of
+   *  every section. Only when capabilities.headerFooter. One transaction. */
+  editChrome(
+    edit: ChromeEdit,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { sections: number[] }>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */

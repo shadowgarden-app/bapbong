@@ -74,7 +74,7 @@ export const getDocument = defineCommand({
     'Read the whole document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
     'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
     'Hyperlinks are listed per block (links: [{ text, href }]). Headers and footers with text come as chrome ' +
-    '(part, variant, the sections showing it, text) — readable, not yet editable. ' +
+    '(part, variant, the sections showing it, text; {page} is a page number) — edit them with edit_header_footer. ' +
     'Returns docVersion: pass it as expectedVersion to mutation tools so concurrent edits are detected. ' +
     'Block indexes are only stable within one docVersion.',
   input: { documentId },
@@ -914,6 +914,69 @@ export const pageSetup = defineCommand({
     }),
 });
 
+export const editHeaderFooter = defineCommand({
+  name: 'edit_header_footer',
+  title: 'Edit a header or footer',
+  description:
+    'Rewrite a header or footer — content is text or blocks, like insert_content, where { field: "page" } is ' +
+    'the page number and { field: "pages" } the page count — or replace text inside it (old_text, new_text; ' +
+    'formatting kept, same matching rules as replace_text). For one section (1-based) or, without section, ' +
+    'every section. get_document lists them under chrome ({page} marks a page number). variant "first" or ' +
+    '"even" edits a first-page or even-page one the document already has. No lists inside.',
+  input: {
+    documentId,
+    part: z.enum(['header', 'footer']),
+    variant: z.enum(['default', 'first', 'even']).optional(),
+    section: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('The section, 1-based; omit for every section.'),
+    content: contentSchema
+      .optional()
+      .describe('The new header / footer, replacing it whole ("" empties it).'),
+    old_text: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Instead of content: exact text inside it to replace.'),
+    new_text: z.string().optional().describe('The replacement for old_text.'),
+    occurrence,
+    expectedVersion,
+  },
+  effect: 'edit',
+  requires: 'headerFooter',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) => {
+      if (a.old_text !== undefined && a.new_text === undefined)
+        return errorText('old_text needs new_text ("" deletes it).');
+      return json(
+        await s.editChrome(
+          {
+            part: a.part,
+            ...(a.variant ? { variant: a.variant } : {}),
+            ...(a.section !== undefined ? { section: a.section } : {}),
+            ...(a.content !== undefined ? { content: a.content } : {}),
+            ...(a.old_text !== undefined
+              ? {
+                  replace: {
+                    oldText: a.old_text,
+                    newText: a.new_text ?? '',
+                    ...(a.occurrence !== undefined
+                      ? { occurrence: a.occurrence }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
+          { expectedVersion: a.expectedVersion },
+        ),
+      );
+    }),
+});
+
 export const saveDocument = defineCommand({
   name: 'save_document',
   title: 'Save the document',
@@ -946,8 +1009,8 @@ export const getSelection = defineCommand({
 
 /** Every document command, in the order an agent reads them. `get_selection`
  *  needs the `selection` capability, the three picture commands need
- *  `images` and `page_setup` needs `pageSetup`; hosts without one leave them
- *  out. */
+ *  `images`, `page_setup` needs `pageSetup` and `edit_header_footer`
+ *  `headerFooter`; hosts without one leave them out. */
 export const documentCommands: readonly AgentCommand<
   z.ZodRawShape,
   SessionProvider
@@ -964,6 +1027,7 @@ export const documentCommands: readonly AgentCommand<
   replaceImage,
   deleteImage,
   pageSetup,
+  editHeaderFooter,
   saveDocument,
   getSelection,
 ];

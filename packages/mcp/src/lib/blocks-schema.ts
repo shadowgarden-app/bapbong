@@ -31,6 +31,7 @@ export const inlineSchema = z.union([
     .object({ text: z.string(), link: z.string().min(1).optional(), ...marks })
     .strict(),
   z.object({ tab: z.literal(true) }).strict(),
+  z.object({ field: z.enum(['page', 'pages']) }).strict(),
 ]);
 
 export const lengthSchema = z.union([z.number(), z.string()]);
@@ -191,7 +192,8 @@ export const CONTENT_GRAMMAR =
   'indent?: { left?, right?, firstLine?, hanging?: cm | "1cm" }, …format }, ' +
   'or { table: rows, widths?: [cm | "%" per column], borders?: "grid"|"none"|"outer", header?: true, align?: "center" } ' +
   'where a row is a list of cells and a cell is text | inlines | { text, colspan?, align?, shading?: "#RRGGBB", …format }. ' +
-  'Inlines: text | { text, link?: "https://…" | "mailto:…" | "#bookmark", …format } | { tab: true }. ' +
+  'Inlines: text | { text, link?: "https://…" | "mailto:…" | "#bookmark", …format } | { tab: true } | ' +
+  '{ field: "page" | "pages" } (the page number / count, for headers and footers). ' +
   'Format (on an inline, a paragraph or a cell): bold?, italic?, ' +
   'underline?, strike?, superscript?, subscript?, color?: "#RRGGBB", highlight?: "#RRGGBB", font?: name, size?: pt. ' +
   'Never draw a table, a column or a dotted line with characters: use a table block ' +
