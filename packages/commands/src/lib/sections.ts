@@ -55,10 +55,28 @@ export function sectionAt(
 export function insertSectionBreak(opts: { newPage: boolean }): Command {
   return {
     name: opts.newPage ? 'section-break-next-page' : 'section-break-continuous',
+    run: (state, dispatch) =>
+      insertSectionBreakAfter(headBlockIndex(state), opts).run(state, dispatch),
+    isEnabled: (state) => state.doc.childCount > 1,
+  };
+}
+
+/**
+ * {@link insertSectionBreak} after an explicit top-level block (0-based)
+ * rather than the caret's — for a caller that addresses blocks, not a
+ * selection (an agent). False when there is nothing after that block in its
+ * section to split off.
+ */
+export function insertSectionBreakAfter(
+  bi: number,
+  opts: { newPage: boolean },
+): Command {
+  return {
+    name: opts.newPage ? 'section-break-next-page' : 'section-break-continuous',
     run(state, dispatch) {
       if (state.doc.childCount < 2) return false;
+      if (bi < 0 || bi >= state.doc.childCount - 1) return false;
       const sections = currentSections(state);
-      const bi = headBlockIndex(state);
       const { i, start } = sectionAt(sections, bi);
       const S = sections[i];
       const firstCount = bi + 1 - start; // [start, bi] stays with the section
@@ -157,8 +175,28 @@ export function setColumns(count: number): Command {
     name: `columns-${count}`,
     run(state, dispatch) {
       if (state.doc.childCount === 0) return false;
+      const { i } = sectionAt(currentSections(state), headBlockIndex(state));
+      return setSectionColumns(i, count).run(state, dispatch);
+    },
+    isActive: (state) => {
       const sections = currentSections(state);
-      const { i } = sectionAt(sections, headBlockIndex(state));
+      return (
+        sections[sectionAt(sections, headBlockIndex(state)).i].columns.count ===
+        count
+      );
+    },
+  };
+}
+
+/** {@link setColumns} for section `i` (0-based) instead of the caret's. */
+export function setSectionColumns(i: number, count: number): Command {
+  return {
+    name: `section-columns-${count}`,
+    run(state, dispatch) {
+      if (state.doc.childCount === 0) return false;
+      const sections = currentSections(state);
+      if (i < 0 || i >= sections.length) return false;
+      if (sections[i].columns.count === count) return true; // no undo step
       if (dispatch) {
         const gap =
           count > 1
@@ -171,12 +209,6 @@ export function setColumns(count: number): Command {
       }
       return true;
     },
-    isActive: (state) => {
-      const sections = currentSections(state);
-      return (
-        sections[sectionAt(sections, headBlockIndex(state)).i].columns.count ===
-        count
-      );
-    },
+    isActive: (state) => currentSections(state)[i]?.columns.count === count,
   };
 }

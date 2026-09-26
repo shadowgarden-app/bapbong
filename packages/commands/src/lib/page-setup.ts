@@ -137,25 +137,34 @@ export function setMargins(preset: MarginPreset): Command {
  */
 export function setPageMargins(margin: PageConfig['margin']): Command {
   return applyPage('page-margins-custom', (page) => {
-    const fit = (a: number, b: number, extent: number): [number, number] => {
-      const lo = Math.max(0, a);
-      const hi = Math.max(0, b);
-      if (extent - lo - hi >= MIN_CONTENT) return [lo, hi];
-      // Shrink both sides proportionally rather than rejecting the input.
-      const room = Math.max(0, extent - MIN_CONTENT);
-      const total = lo + hi || 1;
-      return [(lo / total) * room, (hi / total) * room];
-    };
-    const [left, right] = fit(margin.left, margin.right, page.width);
-    const [top, bottom] = fit(margin.top, margin.bottom, page.height);
-    const next = {
-      top: Math.round(top),
-      right: Math.round(right),
-      bottom: Math.round(bottom),
-      left: Math.round(left),
-    };
+    const next = fitMargins(page, margin);
     return sameMargin(page.margin, next) ? null : { ...page, margin: next };
   });
+}
+
+/** Margins clamped so the content box stays layout-able on both axes:
+ *  too much on one axis shrinks both sides proportionally rather than
+ *  rejecting the input. */
+function fitMargins(
+  page: PageConfig,
+  margin: PageConfig['margin'],
+): PageConfig['margin'] {
+  const fit = (a: number, b: number, extent: number): [number, number] => {
+    const lo = Math.max(0, a);
+    const hi = Math.max(0, b);
+    if (extent - lo - hi >= MIN_CONTENT) return [lo, hi];
+    const room = Math.max(0, extent - MIN_CONTENT);
+    const total = lo + hi || 1;
+    return [(lo / total) * room, (hi / total) * room];
+  };
+  const [left, right] = fit(margin.left, margin.right, page.width);
+  const [top, bottom] = fit(margin.top, margin.bottom, page.height);
+  return {
+    top: Math.round(top),
+    right: Math.round(right),
+    bottom: Math.round(bottom),
+    left: Math.round(left),
+  };
 }
 
 /**
@@ -272,6 +281,26 @@ export function setSectionPageDimensions(
     if (page.width === w && page.height === h) return null;
     return { ...page, width: w, height: h };
   });
+}
+
+/** Per-section {@link setPageMargins}. A side left out keeps its value. */
+export function setSectionPageMargins(
+  sectionIndex: number,
+  margin: Partial<PageConfig['margin']>,
+): Command {
+  return applySectionPage('section-page-margins', sectionIndex, (page) => {
+    const next = fitMargins(page, { ...page.margin, ...definedSides(margin) });
+    return sameMargin(page.margin, next) ? null : { ...page, margin: next };
+  });
+}
+
+/** The sides a partial margin actually sets (undefined is "keep"). */
+export function definedSides(
+  margin: Partial<PageConfig['margin']>,
+): Partial<PageConfig['margin']> {
+  return Object.fromEntries(
+    Object.entries(margin).filter(([, v]) => typeof v === 'number'),
+  );
 }
 
 /**

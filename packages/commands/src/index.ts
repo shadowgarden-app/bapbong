@@ -10,3 +10,4 @@ export * from './lib/edit.js';
 export * from './lib/sections.js';
 export * from './lib/page-setup.js';
 export * from './lib/registry.js';
+export * from './lib/page-setup-change.js';
