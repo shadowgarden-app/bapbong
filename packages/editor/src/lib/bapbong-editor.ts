@@ -799,6 +799,12 @@ export class BapbongEditor {
       : [this.core.flatChrome()];
   }
 
+  /** Every footnote body the document shows, by its reference's num — for
+   *  a reader outside the view (an agent reading the footnotes). */
+  footnoteStories(): Record<number, ProseMirrorNode> {
+    return this.core.footnoteStories(this.bridge?.state.doc ?? null);
+  }
+
   /** The styles this document's file defines — Word's built-ins and its
    *  own — for a reader outside the view (an agent choosing a style). */
   documentStyles(): ReturnType<RenderCore['documentStyles']> {

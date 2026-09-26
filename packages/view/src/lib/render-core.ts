@@ -1,5 +1,6 @@
 import { Node as ProseMirrorNode, Schema } from 'prosemirror-model';
 import {
+  effectiveFootnotes,
   effectiveSectionChrome,
   schema as baseSchema,
 } from '@shadow-garden/bapbong-model';
@@ -119,6 +120,8 @@ export class RenderCore {
   private readonly chromeOverrideCache = new WeakMap<object, ProseMirrorNode>();
   // Footnote bodies keyed by display number (laid out at the page bottom).
   private footnotes: Record<number, ProseMirrorNode> | undefined;
+  /** Parsed bodies of footnotes written in bapbong, by their JSON object. */
+  private readonly footnoteCache = new WeakMap<object, ProseMirrorNode>();
   // The imported source package — passed to exportDocx({ carry }) so styles /
   // numbering / headers / media survive a round-trip.
   private importedRaw: DocxImport['raw'] | null = null;
@@ -368,7 +371,7 @@ export class RenderCore {
               : undefined;
           })(),
         },
-        this.footnotes,
+        effectiveFootnotes(doc, this.footnotes, this.footnoteCache),
       ),
     );
   }
@@ -390,6 +393,18 @@ export class RenderCore {
         titlePg: this.chromeTitlePg,
       },
       (json) => this.parseChromeStory(json),
+    );
+  }
+
+  /** Every footnote body `doc` shows, by its reference's num: the imported
+   *  ones and the ones written in bapbong. */
+  footnoteStories(
+    doc: ProseMirrorNode | null = this.doc,
+  ): Record<number, ProseMirrorNode> {
+    return (
+      (doc
+        ? effectiveFootnotes(doc, this.footnotes, this.footnoteCache)
+        : this.footnotes) ?? {}
     );
   }
 

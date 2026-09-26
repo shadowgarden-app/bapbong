@@ -151,6 +151,12 @@ export const schema = new Schema({
         // section's inherited story (Word's "unlink from previous"), rides the
         // doc so it undoes cleanly, and exports as a real header/footer part.
         sectionChromeOverrides: { default: null },
+        // Footnote BODIES written in bapbong, keyed by their reference's
+        // `num` (the footnote mark) → the story doc as JSON. An imported
+        // footnote's body lives beside the doc (DocxImport.footnotes); a new
+        // one has nowhere else to live, so it rides the doc and undoes with
+        // it. The exporter writes these into word/footnotes.xml.
+        footnoteBodies: { default: null },
       },
     },
 
