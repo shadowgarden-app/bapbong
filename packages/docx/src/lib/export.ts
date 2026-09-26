@@ -986,8 +986,68 @@ function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
     open += `<w:bookmarkStart w:id="${id}" w:name="${esc(name)}"/>`;
     close += `<w:bookmarkEnd w:id="${id}"/>`;
   }
-  return `<w:p>${pPr}${open}${inlineContent(node, ctx)}${close}</w:p>`;
+  // A table of contents is a field spanning its entry paragraphs: it opens
+  // before the first one's text and closes after the last one's.
+  const toc = TOC_SPANS.get(node);
+  const begin = toc?.begin ? fieldBeginXml(toc.begin) : '';
+  const end = toc?.end ? FIELD_END_XML : '';
+  return `<w:p>${pPr}${open}${begin}${inlineContent(node, ctx)}${end}${close}</w:p>`;
 }
+
+// ── fields ──────────────────────────────────────────────────────────
+// Only the table of contents is modelled: every entry paragraph carries the
+// same `field` ({ kind: 'toc', instr }). Written back as the complex field
+// Word itself writes — begin + instruction + separate before the first
+// entry, end after the last — so the file keeps a real, updatable TOC
+// rather than a list of links. `dirty` asks Word to recompute it on open
+// (a TOC whose page numbers bapbong could not lay out).
+
+const TOC_SPANS = new WeakMap<
+  PMNode,
+  { begin?: { instr: string; dirty: boolean }; end?: true }
+>();
+
+interface TocField {
+  kind: string;
+  instr: string;
+  dirty?: boolean;
+}
+
+const tocFieldOf = (n: PMNode | undefined): TocField | null => {
+  const f =
+    n?.type.name === 'paragraph' ? (n.attrs['field'] as TocField | null) : null;
+  return f?.kind === 'toc' && f.instr ? f : null;
+};
+
+const sameField = (a: TocField | null, b: TocField | null): boolean =>
+  !!a && !!b && (a === b || a.instr === b.instr);
+
+/** Mark the paragraphs that open and close each TOC among the body's
+ *  top-level blocks (a span is consecutive paragraphs with one field). */
+function planTocFields(blocks: readonly PMNode[]): void {
+  blocks.forEach((b, i) => {
+    const f = tocFieldOf(b);
+    if (!f) return;
+    const opens = !sameField(tocFieldOf(blocks[i - 1]), f);
+    const closes = !sameField(tocFieldOf(blocks[i + 1]), f);
+    if (opens || closes) {
+      TOC_SPANS.set(b, {
+        ...(opens ? { begin: { instr: f.instr, dirty: !!f.dirty } } : {}),
+        ...(closes ? { end: true as const } : {}),
+      });
+    }
+  });
+}
+
+function fieldBeginXml(f: { instr: string; dirty: boolean }): string {
+  return (
+    `<w:r><w:fldChar w:fldCharType="begin"${f.dirty ? ' w:dirty="true"' : ''}/></w:r>` +
+    `<w:r><w:instrText xml:space="preserve"> ${esc(f.instr)} </w:instrText></w:r>` +
+    '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+  );
+}
+
+const FIELD_END_XML = '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
 
 // ── tables ──────────────────────────────────────────────────────────
 
@@ -1411,6 +1471,9 @@ const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 // Title/Subtitle run bases), so Word renders what the canvas showed.
 
 const STYLE_DEFS: Record<string, string> = (() => {
+  const toc = (level: number) =>
+    `<w:style w:type="paragraph" w:styleId="TOC${level}"><w:name w:val="toc ${level}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="39"/><w:unhideWhenUsed/>` +
+    `<w:pPr><w:spacing w:after="100"/>${level > 1 ? `<w:ind w:left="${(level - 1) * 220}"/>` : ''}</w:pPr></w:style>`;
   const heading = (level: number, halfPt: number) =>
     `<w:style w:type="paragraph" w:styleId="Heading${level}"><w:name w:val="heading ${level}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
     `<w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="${level - 1}"/></w:pPr>` +
@@ -1428,6 +1491,10 @@ const STYLE_DEFS: Record<string, string> = (() => {
     Subtitle:
       `<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
       `<w:rPr><w:i/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>`,
+    // A table of contents' entry levels (Word's latent "toc N" styles).
+    TOC1: toc(1),
+    TOC2: toc(2),
+    TOC3: toc(3),
   };
 })();
 
@@ -1504,7 +1571,9 @@ async function carriedParagraphStyles(
  *  unknown name would mean Normal anyway. */
 function ownStyleId(node: PMNode, ctx: ExportCtx): string | null {
   const styleId = node.attrs['styleId'] as string | null;
-  return styleId && !node.attrs['heading'] && ctx.paragraphStyles.has(styleId)
+  return styleId &&
+    !node.attrs['heading'] &&
+    (ctx.paragraphStyles.has(styleId) || STYLE_DEFS[styleId])
     ? styleId
     : null;
 }
@@ -1901,6 +1970,7 @@ export async function exportDocx(
   const boundaries = sectionBoundaries(doc, origSectPrs, chromePlan?.refPatch);
   const bodyBlocks: PMNode[] = [];
   doc.forEach((b) => bodyBlocks.push(b));
+  planTocFields(bodyBlocks);
   const sdt = sdtPlan(bodyBlocks);
   let body = '';
   perf.span('export.body', () =>

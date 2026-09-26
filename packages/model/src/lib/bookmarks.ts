@@ -17,6 +17,9 @@ export interface FieldInfo {
   kind: string;
   /** The field instruction, e.g. `TOC \o "1-3" \h \z \u`. */
   instr: string;
+  /** Its shown result may be stale (page numbers not laid out yet): the
+   *  export asks Word to recompute it on open (w:dirty). */
+  dirty?: boolean;
 }
 
 /** An href pointing inside this document (`#name`) → the bookmark name, or
