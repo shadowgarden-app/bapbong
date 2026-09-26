@@ -287,10 +287,12 @@ export const editTable = defineCommand({
   name: 'edit_table',
   title: 'Edit a table',
   description:
-    'Change an existing table: insert or delete rows, merge cells in a row, set column widths, borders ' +
-    '(grid/outer/none), a repeated header row, or the table alignment. Address the table by its 0-based index: ' +
-    'get_document marks every block inside a table with table: { index, row, cell }. Rows and cells are 0-based. ' +
-    'Order within one call: delete_rows, insert_rows, merge, widths, then borders/header/align. ' +
+    'Change an existing table: insert or delete rows and columns, merge cells in a row, set column widths, borders ' +
+    '(grid/outer/none), a repeated header row, or the table alignment — or remove the whole table with ' +
+    'delete_table. Address the table by its 0-based index: get_document marks every block inside a table with ' +
+    'table: { index, row, cell }. Rows, columns and cells are 0-based. Inserted columns are empty and the table ' +
+    'keeps its width unless you pass widths. Order within one call: delete_rows, delete_columns, insert_columns, ' +
+    'insert_rows (rows cover the columns the table has by then), merge, widths, then borders/header/align. ' +
     'Cell text is edited with replace_text like any paragraph.',
   input: {
     documentId,
@@ -309,6 +311,9 @@ export const editTable = defineCommand({
     {
       documentId: id,
       table,
+      delete_table,
+      insert_columns,
+      delete_columns,
       insert_rows,
       delete_rows,
       merge,
@@ -321,6 +326,9 @@ export const editTable = defineCommand({
   ) =>
     withSession(provider, id, async (s) => {
       if (
+        !delete_table &&
+        !insert_columns &&
+        !delete_columns?.length &&
         !insert_rows &&
         !delete_rows?.length &&
         !merge &&
@@ -330,13 +338,19 @@ export const editTable = defineCommand({
         align === undefined
       ) {
         return errorText(
-          'Pass at least one change: insert_rows, delete_rows, merge, widths, borders, header, align.',
+          'Pass at least one change: insert_rows, delete_rows, insert_columns, delete_columns, merge, widths, ' +
+            'borders, header, align — or delete_table.',
         );
       }
       return json(
         await s.editTable(
           table,
           {
+            ...(delete_table ? { deleteTable: true } : {}),
+            ...(insert_columns ? { insertColumns: insert_columns } : {}),
+            ...(delete_columns?.length
+              ? { deleteColumns: delete_columns }
+              : {}),
             ...(insert_rows ? { insertRows: insert_rows } : {}),
             ...(delete_rows ? { deleteRows: delete_rows } : {}),
             ...(merge ? { merge } : {}),

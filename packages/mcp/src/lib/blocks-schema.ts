@@ -83,6 +83,27 @@ export const blockSchema = z.union([
 
 /** The edit_table input pieces (see TableEdit in ./blocks). */
 export const tableEditShape = {
+  delete_table: z
+    .boolean()
+    .optional()
+    .describe('Remove the whole table (pass nothing else with it).'),
+  insert_columns: z
+    .object({
+      at: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe('Insert before this 0-based column; omit to append.'),
+      count: z.number().int().min(1).optional().describe('Default 1.'),
+    })
+    .strict()
+    .optional()
+    .describe('Empty columns; the table keeps its width.'),
+  delete_columns: z
+    .array(z.number().int().min(0))
+    .optional()
+    .describe('0-based columns to remove.'),
   insert_rows: z
     .object({
       at: z

@@ -92,11 +92,19 @@ export type Block = string | ParagraphBlock | TableBlock;
 /** What insert_content / create_document accept. */
 export type Content = string | Block[];
 
-/** One edit_table call. Applied in this order: deleteRows, insertRows,
- *  merge, widths, then borders / header / align — so indexes in one call
- *  refer to the table as get_document showed it, except that insertRows.at
- *  counts rows AFTER the deletions. */
+/** One edit_table call. Applied in this order: deleteRows, deleteColumns,
+ *  insertColumns, insertRows, merge, widths, then borders / header / align —
+ *  so indexes in one call refer to the table as get_document showed it,
+ *  except that insertColumns.at and insertRows.at count AFTER the deletions,
+ *  and inserted rows cover the columns the table has by then. */
 export interface TableEdit {
+  /** Remove the whole table. Alone in its call. */
+  deleteTable?: boolean;
+  /** Empty columns inserted before grid column `at` (omit to append),
+   *  `count` of them (default 1). The table keeps its width. */
+  insertColumns?: { at?: number; count?: number };
+  /** 0-based grid columns to remove (at least one must remain). */
+  deleteColumns?: number[];
   /** Rows (same cell grammar as a table block) inserted before row `at`;
    *  omit `at` to append. */
   insertRows?: { at?: number; rows: Cell[][] };

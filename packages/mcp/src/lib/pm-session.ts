@@ -564,15 +564,48 @@ export class PmDocSession implements DocumentSession {
       return { node: table.child(r), pos: rowPos };
     };
 
+    if (edit.deleteTable) {
+      const others = Object.entries(edit).filter(
+        ([k, v]) => k !== 'deleteTable' && v !== undefined,
+      );
+      if (others.length > 0) {
+        throw new ContentError(
+          'delete_table takes the whole table away — pass it on its own.',
+        );
+      }
+      const { node, pos } = locate();
+      const $pos = state.doc.resolve(pos);
+      // Whatever held the table (the page, a cell) must still hold a block.
+      tr =
+        $pos.parent.childCount === 1
+          ? tr.replaceWith(
+              pos,
+              pos + node.nodeSize,
+              schema.nodes['paragraph'].create(),
+            )
+          : tr.delete(pos, pos + node.nodeSize);
+      this.host.apply(keepSections(state.doc, tr, 1));
+      return {
+        docVersion: this.host.getVersion(),
+        range: { from: pos, to: pos },
+        rows: 0,
+        cols: 0,
+      };
+    }
     if (edit.deleteRows?.length) {
       const { node, pos } = locate();
       const rows = [...new Set(edit.deleteRows)].sort((a, b) => b - a);
       if (rows.length >= node.childCount)
-        throw new ContentError('A table must keep at least one row.');
+        throw new ContentError(
+          'A table must keep at least one row — pass delete_table to remove the whole table.',
+        );
       for (const r of rows) {
         const row = rowAt(node, pos, r);
         tr = tr.delete(row.pos, row.pos + row.node.nodeSize);
       }
+    }
+    if (edit.deleteColumns?.length || edit.insertColumns) {
+      tr = this.editColumns(tr, locate, edit, width, !edit.widths);
     }
     if (edit.insertRows) {
       const { node, pos } = locate();
@@ -631,19 +664,12 @@ export class PmDocSession implements DocumentSession {
     if (edit.widths) {
       const { node, pos } = locate();
       const grid = tableGrid(node, width);
-      const widths = columnWidths(edit.widths, grid.cols, width);
-      node.forEach((row, rowOffset) => {
-        let col = 0;
-        row.forEach((cell, cellOffset) => {
-          const span = Math.max(1, Number(cell.attrs['colspan']) || 1);
-          const cellPos = pos + 1 + rowOffset + 1 + cellOffset;
-          tr = tr.setNodeMarkup(cellPos, undefined, {
-            ...cell.attrs,
-            colwidth: widths.slice(col, col + span),
-          });
-          col += span;
-        });
-      });
+      tr = columnWidthsTr(
+        tr,
+        node,
+        pos,
+        columnWidths(edit.widths, grid.cols, width),
+      );
     }
     if (edit.borders || edit.align !== undefined || edit.header !== undefined) {
       const { node, pos } = locate();
@@ -705,6 +731,159 @@ export class PmDocSession implements DocumentSession {
   }
 
   // ── internals ────────────────────────────────────────────────────────
+
+  /**
+   * Delete, then insert, grid columns of the table `locate` finds in `tr`.
+   * Cells are addressed by the grid, merged cells included: a cell that spans
+   * a deleted column narrows (it goes only when every column it spans does),
+   * one that spans the insertion point widens, and a cell merged down from a
+   * row above is changed once, in its own row. With `keepWidth` the columns
+   * are rescaled afterwards so the table is as wide as it was.
+   */
+  private editColumns(
+    tr: Transaction,
+    locate: () => { node: PMNode; pos: number },
+    edit: TableEdit,
+    contentWidth: number,
+    keepWidth: boolean,
+  ): Transaction {
+    const { schema } = tr.doc.type;
+    const start = locate();
+    let widths = tableGrid(start.node, contentWidth).widths;
+    const total = widths.reduce((a, b) => a + b, 0);
+
+    if (edit.deleteColumns?.length) {
+      const { node, pos } = locate();
+      const map = gridMap(node, pos);
+      const doomed = new Set(edit.deleteColumns);
+      for (const c of doomed) {
+        if (c < 0 || c >= map.cols)
+          throw new ContentError(
+            `Column ${c} is out of range — the table has ${map.cols} column(s).`,
+          );
+      }
+      if (doomed.size >= map.cols) {
+        throw new ContentError(
+          'A table must keep at least one column — pass delete_table to remove the whole table.',
+        );
+      }
+      const ops: { pos: number; run: (t: Transaction) => Transaction }[] = [];
+      map.rows.forEach((row, r) => {
+        let kept = 0;
+        for (const cell of row.cells) {
+          let hit = 0;
+          for (let c = cell.start; c < cell.start + cell.span; c++)
+            if (doomed.has(c)) hit++;
+          if (hit === 0) {
+            kept++;
+            continue;
+          }
+          if (hit === cell.span) {
+            ops.push({
+              pos: cell.pos,
+              run: (t) => t.delete(cell.pos, cell.pos + cell.node.nodeSize),
+            });
+            continue;
+          }
+          kept++;
+          const cw = cell.node.attrs['colwidth'] as number[] | null;
+          ops.push({
+            pos: cell.pos,
+            run: (t) =>
+              t.setNodeMarkup(cell.pos, undefined, {
+                ...cell.node.attrs,
+                colspan: cell.span - hit,
+                colwidth:
+                  cw && cw.length === cell.span
+                    ? cw.filter((_w, i) => !doomed.has(cell.start + i))
+                    : null,
+              }),
+          });
+        }
+        if (row.cells.length > 0 && kept === 0) {
+          throw new ContentError(
+            `Deleting those columns would leave row ${r} with no cell of its own (the rest of it is merged from ` +
+              'the row above). Delete that row too, or fewer columns.',
+          );
+        }
+      });
+      for (const op of ops.sort((a, b) => b.pos - a.pos)) tr = op.run(tr);
+      widths = widths.filter((_w, i) => !doomed.has(i));
+    }
+
+    if (edit.insertColumns) {
+      const { node, pos } = locate();
+      const map = gridMap(node, pos);
+      const n = edit.insertColumns.count ?? 1;
+      const at = edit.insertColumns.at ?? map.cols;
+      if (!Number.isInteger(at) || at < 0 || at > map.cols) {
+        throw new ContentError(
+          `Cannot insert columns at ${at} — the table has ${map.cols} column(s); omit at to append.`,
+        );
+      }
+      const w = Math.max(
+        1,
+        Math.round(widths.reduce((a, b) => a + b, 0) / widths.length),
+      );
+      const blank = () =>
+        schema.nodes['table_cell'].create(
+          { colspan: 1, colwidth: [w] },
+          schema.nodes['paragraph'].create(),
+        );
+      const ops: { pos: number; run: (t: Transaction) => Transaction }[] = [];
+      map.rows.forEach((row, r) => {
+        const left = at > 0 ? map.occ[r][at - 1] : undefined;
+        if (left && at < map.cols && left === map.occ[r][at]) {
+          // A merged cell spans the insertion point: it widens, in its own row.
+          if (left.row !== r) return;
+          const cw = left.node.attrs['colwidth'] as number[] | null;
+          const k = at - left.start;
+          ops.push({
+            pos: left.pos,
+            run: (t) =>
+              t.setNodeMarkup(left.pos, undefined, {
+                ...left.node.attrs,
+                colspan: left.span + n,
+                colwidth:
+                  cw && cw.length === left.span
+                    ? [...cw.slice(0, k), ...Array(n).fill(w), ...cw.slice(k)]
+                    : null,
+              }),
+          });
+          return;
+        }
+        const next = row.cells.find((c) => c.start >= at);
+        const insertAt = next ? next.pos : row.pos + row.node.nodeSize - 1;
+        ops.push({
+          pos: insertAt,
+          run: (t) =>
+            t.insert(
+              insertAt,
+              Array.from({ length: n }, () => blank()),
+            ),
+        });
+      });
+      for (const op of ops.sort((a, b) => b.pos - a.pos)) tr = op.run(tr);
+      widths = [
+        ...widths.slice(0, at),
+        ...Array(n).fill(w),
+        ...widths.slice(at),
+      ];
+    }
+
+    if (keepWidth) {
+      const sum = widths.reduce((a, b) => a + b, 0);
+      const scale = sum > 0 ? total / sum : 1;
+      const { node, pos } = locate();
+      tr = columnWidthsTr(
+        tr,
+        node,
+        pos,
+        widths.map((x) => Math.max(1, Math.round(x * scale))),
+      );
+    }
+    return tr;
+  }
 
   /** The document's numbering definitions (`doc.attrs.numbering`). */
   private numbering(): NumberingDefs | null {
@@ -1120,6 +1299,82 @@ export function keepSections(
     return blockCount === s.blockCount ? s : { ...s, blockCount };
   });
   return changed ? tr.setDocAttribute('sections', next) : tr;
+}
+
+/** One cell on a table's grid: where it starts, how many columns it spans,
+ *  and the row it belongs to (a cell merged down covers rows below it). */
+interface GridCell {
+  node: PMNode;
+  pos: number;
+  row: number;
+  start: number;
+  span: number;
+}
+
+/** A table laid out on its grid: every row's own cells, and for every
+ *  (row, column) the cell that covers it — including one merged down from
+ *  a row above, which that row does not contain. */
+function gridMap(
+  table: PMNode,
+  tablePos: number,
+): {
+  cols: number;
+  rows: { node: PMNode; pos: number; cells: GridCell[] }[];
+  occ: (GridCell | undefined)[][];
+} {
+  const rows: { node: PMNode; pos: number; cells: GridCell[] }[] = [];
+  const occ: (GridCell | undefined)[][] = [];
+  let cols = 0;
+  let rowPos = tablePos + 1;
+  table.forEach((row, _offset, r) => {
+    const here = (occ[r] ??= []);
+    const cells: GridCell[] = [];
+    let col = 0;
+    let cellPos = rowPos + 1;
+    row.forEach((cell) => {
+      while (here[col]) col++;
+      const span = Math.max(1, Number(cell.attrs['colspan']) || 1);
+      const down = Math.max(1, Number(cell.attrs['rowspan']) || 1);
+      const g: GridCell = {
+        node: cell,
+        pos: cellPos,
+        row: r,
+        start: col,
+        span,
+      };
+      cells.push(g);
+      for (let rr = r; rr < Math.min(r + down, table.childCount); rr++) {
+        const line = (occ[rr] ??= []);
+        for (let c = col; c < col + span; c++) line[c] = g;
+      }
+      col += span;
+      cellPos += cell.nodeSize;
+    });
+    cols = Math.max(cols, here.length);
+    rows.push({ node: row, pos: rowPos, cells });
+    rowPos += row.nodeSize;
+  });
+  return { cols, rows, occ };
+}
+
+/** Give every cell of the table at `tablePos` the widths (px, one per grid
+ *  column) of the columns it spans — by the grid, so a row that continues a
+ *  cell merged from above lines up with the rest. */
+function columnWidthsTr(
+  tr: Transaction,
+  table: PMNode,
+  tablePos: number,
+  widths: number[],
+): Transaction {
+  for (const row of gridMap(table, tablePos).rows) {
+    for (const cell of row.cells) {
+      tr = tr.setNodeMarkup(cell.pos, undefined, {
+        ...cell.node.attrs,
+        colwidth: widths.slice(cell.start, cell.start + cell.span),
+      });
+    }
+  }
+  return tr;
 }
 
 /** A paragraph's list membership (0-based level), or null for body text. */
