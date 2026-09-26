@@ -983,6 +983,62 @@ export const editHeaderFooter = defineCommand({
     }),
 });
 
+export const insertToc = defineCommand({
+  name: 'insert_toc',
+  title: 'Insert a table of contents',
+  description:
+    "A table of contents of the document's headings (levels 1..levels, default 3), where you anchor it " +
+    '(position before/after anchor_text, or document_end) — a real Word TOC: each entry links to its heading, ' +
+    'dotted leaders run to the page number, and Word can update it. Headings must BE headings (heading 1-6), ' +
+    'not bold text. The result says whether the page numbers were filled in ("updated") or are waiting for ' +
+    'the document to be laid out ("pending": bapbong fills them when the user opens it and updates the TOC, ' +
+    'Word when it opens the file). title adds a "Contents" line above it.',
+  input: {
+    documentId,
+    position: z.enum(['before', 'after', 'document_end']),
+    anchor_text: z
+      .string()
+      .optional()
+      .describe(
+        'Required for before/after: exact text inside the anchor paragraph.',
+      ),
+    levels: z.number().int().min(1).max(9).optional(),
+    title: z
+      .string()
+      .optional()
+      .describe('A title line above the entries, e.g. "Contents".'),
+    occurrence,
+    expectedVersion,
+  },
+  effect: 'edit',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) => {
+      if (a.position !== 'document_end' && !a.anchor_text)
+        return errorText(
+          'anchor_text is required when position is before/after.',
+        );
+      const anchor =
+        a.position === 'document_end'
+          ? ({ position: 'document_end' } as const)
+          : ({
+              position: a.position,
+              text: a.anchor_text as string,
+              occurrence: a.occurrence,
+            } as const);
+      return json(
+        await s.insertToc(
+          {
+            ...(a.levels !== undefined ? { levels: a.levels } : {}),
+            ...(a.title !== undefined ? { title: a.title } : {}),
+          },
+          anchor,
+          { expectedVersion: a.expectedVersion },
+        ),
+      );
+    }),
+});
+
 export const listStyles = defineCommand({
   name: 'list_styles',
   title: "List the document's paragraph styles",
@@ -1044,6 +1100,7 @@ export const documentCommands: readonly AgentCommand<
   listStyles,
   replaceText,
   insertContent,
+  insertToc,
   deleteBlock,
   applyFormatting,
   editTable,

@@ -247,6 +247,14 @@ export interface PageSetupChange {
   removeSectionBreak?: number;
 }
 
+/** How insert_toc builds a table of contents. */
+export interface TocOptions {
+  /** Headings 1..levels are listed (default 3). */
+  levels?: number;
+  /** A title paragraph above the entries ("Contents"); none by default. */
+  title?: string;
+}
+
 /** One of the document's paragraph styles, as list_styles reports it. */
 export interface DocStyle {
   id: string;
@@ -411,6 +419,17 @@ export interface DocumentSession {
     edit: ChromeEdit,
     opts?: MutationOptions,
   ): Promise<MutationResult & { sections: number[] }>;
+  /** A table of contents of the document's headings, as a real TOC field
+   *  (entries linked to bookmarks on the headings). Page numbers are filled
+   *  in when the host can lay the document out, else left for Word / the
+   *  editor to update ("pending"). One transaction. */
+  insertToc(
+    options: TocOptions,
+    anchor: InsertAnchor,
+    opts?: MutationOptions,
+  ): Promise<
+    MutationResult & { entries: number; pageNumbers: 'updated' | 'pending' }
+  >;
   /** The document's paragraph styles (hidden ones only when in use). Only
    *  when capabilities.styles. */
   listStyles(): Promise<DocStyle[]>;

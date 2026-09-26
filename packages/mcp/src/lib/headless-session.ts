@@ -40,6 +40,7 @@ import type {
   DocStyle,
   PageSetup,
   SessionCapabilities,
+  TocOptions,
 } from './contract.js';
 import { PmDocSession, type PmSessionHost } from './pm-session.js';
 
@@ -260,6 +261,15 @@ export class HeadlessSession implements DocumentSession {
   }
   listStyles(): Promise<DocStyle[]> {
     return this.inner.listStyles();
+  }
+  insertToc(
+    options: TocOptions,
+    anchor: InsertAnchor,
+    opts?: MutationOptions,
+  ): Promise<
+    MutationResult & { entries: number; pageNumbers: 'updated' | 'pending' }
+  > {
+    return this.inner.insertToc(options, anchor, opts);
   }
   save(): Promise<void> {
     return this.inner.save();

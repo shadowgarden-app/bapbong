@@ -36,6 +36,7 @@ import {
   type MutationResult,
   type ChromeEdit,
   type DocStyle,
+  type TocOptions,
   type PageSetup,
   type PageSetupChange,
   type SessionCapabilities,
@@ -94,6 +95,10 @@ export interface PmSessionHost {
    *  be done. This tier carries no commands of its own. Absent → page_setup
    *  is not offered. */
   pageSetup?(state: EditorState, change: PageSetupChange): Transaction | null;
+  /** Lay the document out and fill in the page numbers of the table of
+   *  contents at `pos` (the editor's own "Update table of contents"); true
+   *  when it did. Absent → a new TOC's numbers are left pending. */
+  refreshToc?(pos: number): Promise<boolean>;
   /** The styles the document's file defines (docx `documentStyles`).
    *  Absent → only Title / Subtitle / Normal, and no list_styles. */
   styles?(): Promise<
@@ -895,6 +900,122 @@ export class PmDocSession implements DocumentSession {
     return {
       docVersion: this.host.getVersion(),
       sections: [...changed.keys()].map((i) => i + 1),
+    };
+  }
+
+  async insertToc(
+    options: TocOptions,
+    anchor: InsertAnchor,
+    opts: MutationOptions = {},
+  ): Promise<
+    MutationResult & { entries: number; pageNumbers: 'updated' | 'pending' }
+  > {
+    this.checkVersion(opts.expectedVersion);
+    const levels = options.levels ?? 3;
+    if (!Number.isInteger(levels) || levels < 1 || levels > 9) {
+      throw new ContentError(`levels is 1 to 9 — not ${levels}.`);
+    }
+    const state = this.host.getState();
+    const { schema } = state;
+    const link = schema.marks['link'];
+    const pAttrs = schema.nodes['paragraph'].spec.attrs ?? {};
+    if (!link || !('field' in pAttrs) || !('bookmarks' in pAttrs)) {
+      throw new ContentError('This document cannot hold a table of contents.');
+    }
+    const insertAt = this.anchorPos(anchor);
+    if (state.doc.resolve(insertAt).depth > 0) {
+      throw new ContentError(
+        'A table of contents goes between paragraphs, not inside a table — anchor it on a paragraph outside tables.',
+      );
+    }
+    const headings = this.textblocks().filter(({ node }) => {
+      const h = node.attrs['heading'] as number | null;
+      return !!h && h <= levels && node.textContent.trim().length > 0;
+    });
+    if (headings.length === 0) {
+      throw new ContentError(
+        `There are no headings (levels 1-${levels}) to list. Make the section titles headings first (apply_formatting heading).`,
+      );
+    }
+
+    // Every listed heading needs a bookmark for its entry to jump to —
+    // Word's own "_Toc" names, reused when a heading already has one.
+    const taken = new Set<string>();
+    state.doc.descendants((n) => {
+      for (const b of (n.attrs['bookmarks'] as string[] | null) ?? [])
+        taken.add(b);
+      return true;
+    });
+    const mint = () => {
+      let name: string;
+      do name = `_Toc${Math.floor(1e8 + Math.random() * 9e8)}`;
+      while (taken.has(name));
+      taken.add(name);
+      return name;
+    };
+    let tr = state.tr;
+    const anchors = headings.map(({ node, pos }) => {
+      const own = (node.attrs['bookmarks'] as string[] | null) ?? [];
+      const existing = own.find((b) => b.startsWith('_Toc'));
+      if (existing) return existing;
+      const name = mint();
+      tr = tr.setNodeMarkup(pos, undefined, {
+        ...node.attrs,
+        bookmarks: [...own, name],
+      });
+      return name;
+    });
+
+    // The entries: one field shared by all of them (it is what makes them
+    // one TOC), a right tab with a dot leader to the page number, and the
+    // whole entry a link to its heading. The number is a placeholder until
+    // something lays the document out; `dirty` asks Word to redo it.
+    const field = {
+      kind: 'toc',
+      instr: `TOC \\o "1-${levels}" \\h \\z \\u`,
+      dirty: true,
+    };
+    const width = Math.round(this.contentWidth());
+    const entries = headings.map(({ node }, i) => {
+      const level = node.attrs['heading'] as number;
+      return schema.nodes['paragraph'].create(
+        {
+          field,
+          styleId: `TOC${level}`,
+          indent: level > 1 ? { left: (level - 1) * 15 } : null,
+          spacing: { after: 7 },
+          tabs: [{ pos: width, val: 'right', leader: 'dot' }],
+        },
+        schema.text(`${node.textContent.trim()}\t1`, [
+          link.create({ href: `#${anchors[i]}` }),
+        ]),
+      );
+    });
+    const title = options.title?.trim()
+      ? schema.nodes['paragraph'].create({ spacing: { after: 11 } }, [
+          schema.text(options.title.trim(), [
+            schema.marks['strong'].create(),
+            ...(schema.marks['fontSize']
+              ? [schema.marks['fontSize'].create({ size: 16 })]
+              : []),
+          ]),
+        ])
+      : null;
+    const nodes = title ? [title, ...entries] : entries;
+    tr = tr.insert(insertAt, nodes);
+    this.host.apply(
+      keepSections(state.doc, tr, anchor.position === 'before' ? -1 : 1),
+    );
+    const size = nodes.reduce((n, node) => n + node.nodeSize, 0);
+    const firstEntry = insertAt + (title ? title.nodeSize : 0) + 1;
+    const updated = this.host.refreshToc
+      ? await this.host.refreshToc(firstEntry).catch(() => false)
+      : false;
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: insertAt, to: insertAt + size },
+      entries: entries.length,
+      pageNumbers: updated ? 'updated' : 'pending',
     };
   }
 

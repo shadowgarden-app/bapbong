@@ -29,6 +29,7 @@ import {
   type ChromeEdit,
   type PageSetup,
   type SessionCapabilities,
+  type TocOptions,
 } from './contract.js';
 
 export type SessionOpName =
@@ -46,6 +47,7 @@ export type SessionOpName =
   | 'pageSetup'
   | 'editChrome'
   | 'listStyles'
+  | 'insertToc'
   | 'getSelection'
   | 'save'
   // Host-level, handled by the caller before executeOp (see its note):
@@ -174,6 +176,12 @@ function run(
       );
     case 'listStyles':
       return session.listStyles();
+    case 'insertToc':
+      return session.insertToc(
+        args[0] as TocOptions,
+        args[1] as InsertAnchor,
+        args[2] as MutationOptions | undefined,
+      );
     case 'editChrome':
       return session.editChrome(
         args[0] as ChromeEdit,
@@ -322,6 +330,12 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['pageSetup']>>>(
       'pageSetup',
       [setup, opts],
+    );
+  }
+  insertToc(options: TocOptions, anchor: InsertAnchor, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['insertToc']>>>(
+      'insertToc',
+      [options, anchor, opts],
     );
   }
   listStyles() {

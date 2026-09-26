@@ -19,13 +19,14 @@ const byName = (name: string) => {
 };
 
 describe('agent catalog', () => {
-  it('ships the sixteen document commands as data, in reading order', () => {
+  it('ships the seventeen document commands as data, in reading order', () => {
     expect(documentCommands.map((c) => c.name)).toEqual([
       'get_document',
       'find_text',
       'list_styles',
       'replace_text',
       'insert_content',
+      'insert_toc',
       'delete_block',
       'apply_formatting',
       'edit_table',
@@ -50,6 +51,7 @@ describe('agent catalog', () => {
       list_styles: 'read',
       replace_text: 'edit',
       insert_content: 'edit',
+      insert_toc: 'edit',
       delete_block: 'edit',
       apply_formatting: 'edit',
       edit_table: 'edit',
