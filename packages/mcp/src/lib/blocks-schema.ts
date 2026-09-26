@@ -6,10 +6,21 @@
 import { z } from 'zod';
 import { LIST_LEVELS } from './blocks.js';
 
+export const hexColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, 'a colour is "#RRGGBB"');
+
 const marks = {
   bold: z.boolean().optional(),
   italic: z.boolean().optional(),
   underline: z.boolean().optional(),
+  strike: z.boolean().optional(),
+  superscript: z.boolean().optional(),
+  subscript: z.boolean().optional(),
+  color: hexColor.optional(),
+  highlight: hexColor.optional(),
+  font: z.string().min(1).max(100).optional(),
+  size: z.number().positive().max(400).optional(),
 };
 
 const align = z.enum(['left', 'center', 'right', 'justify']);
@@ -55,10 +66,7 @@ export const cellSchema = z.union([
       text: z.union([z.string(), z.array(inlineSchema)]),
       colspan: z.number().int().min(1).optional(),
       align: align.optional(),
-      shading: z
-        .string()
-        .regex(/^#[0-9a-fA-F]{6}$/)
-        .optional(),
+      shading: hexColor.optional(),
       vAlign: z.enum(['center', 'bottom']).optional(),
       ...marks,
     })
@@ -158,10 +166,11 @@ export const CONTENT_GRAMMAR =
   'A block is a string (a paragraph), ' +
   '{ paragraph: text | inlines, heading?: 1-6, style?: "Title"|"Subtitle", align?, ' +
   'tabs?: [{ at: cm | "100%", align?: "right"|"center", leader?: "dot"|"underscore" }], pageBreakBefore?, ' +
-  'list?: "bullet"|"number", level?: 1-3 }, ' +
+  'list?: "bullet"|"number", level?: 1-3, …format }, ' +
   'or { table: rows, widths?: [cm | "%" per column], borders?: "grid"|"none"|"outer", header?: true, align?: "center" } ' +
-  'where a row is a list of cells and a cell is text | inlines | { text, colspan?, align?, bold?, shading?: "#RRGGBB" }. ' +
-  'Inlines: text | { text, bold?, italic?, underline? } | { tab: true }. ' +
+  'where a row is a list of cells and a cell is text | inlines | { text, colspan?, align?, shading?: "#RRGGBB", …format }. ' +
+  'Inlines: text | { text, …format } | { tab: true }. Format (on an inline, a paragraph or a cell): bold?, italic?, ' +
+  'underline?, strike?, superscript?, subscript?, color?: "#RRGGBB", highlight?: "#RRGGBB", font?: name, size?: pt. ' +
   'Never draw a table, a column or a dotted line with characters: use a table block ' +
   '(borders "none" for side-by-side text such as signature areas) and a tab with a leader for fill-in lines. ' +
   'Never type "•", "-" or "1." to make a list: give each item list "bullet" or "number" — consecutive items ' +

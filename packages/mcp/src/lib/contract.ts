@@ -138,6 +138,17 @@ export interface Formatting {
   strike?: boolean;
   /** Font size in points for the target text. */
   fontSize?: number;
+  /** Font family for the target text; null removes it (the style's font). */
+  fontFamily?: string | null;
+  /** Text colour "#RRGGBB"; null removes it (automatic). */
+  color?: string | null;
+  /** Highlight colour "#RRGGBB"; null removes it. */
+  highlight?: string | null;
+  /** Raised or lowered text; null puts it back on the baseline. */
+  verticalAlign?: 'superscript' | 'subscript' | null;
+  /** Strip the target's character formatting first (links, comments and
+   *  footnotes stay), then apply whatever else this Formatting says. */
+  clear?: boolean;
   /** Paragraph alignment of the block(s) containing the target text. */
   align?: 'left' | 'center' | 'right' | 'justify';
   /** Word "Heading N" for the containing paragraph; 0 or null = body text. */

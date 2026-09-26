@@ -21,11 +21,28 @@ import { ContentError } from './contract.js';
 
 export type Align = 'left' | 'center' | 'right' | 'justify';
 
-/** A run of text with character marks, or a tab. */
-export type Inline =
-  | string
-  | { text: string; bold?: boolean; italic?: boolean; underline?: boolean }
-  | { tab: true };
+/** Character formatting a run of text (or a whole paragraph or cell) can
+ *  carry. Flags add up from paragraph to run; a value set on a run (colour,
+ *  font, size) wins over the paragraph's. */
+export interface CharFormat {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  superscript?: boolean;
+  subscript?: boolean;
+  /** Text colour, "#RRGGBB". */
+  color?: string;
+  /** Highlight (the colour behind the text), "#RRGGBB". */
+  highlight?: string;
+  /** Font family name, as Word shows it ("Arial", "Times New Roman"). */
+  font?: string;
+  /** Font size in points. */
+  size?: number;
+}
+
+/** A run of text with character formatting, or a tab. */
+export type Inline = string | ({ text: string } & CharFormat) | { tab: true };
 
 /** A tab stop of the paragraph. `at` is a length: a number is centimetres,
  *  a string may be "100%" (of the text width), "3cm", "1in", "40px". */
@@ -35,7 +52,9 @@ export interface TabStop {
   leader?: 'dot' | 'underscore' | 'hyphen';
 }
 
-export interface ParagraphBlock {
+/** Character formatting on a paragraph block applies to all its text
+ *  (inline formatting adds to it). */
+export interface ParagraphBlock extends CharFormat {
   paragraph: string | Inline[];
   /** Word "Heading N", 1–6. */
   heading?: number;
@@ -49,10 +68,6 @@ export interface ParagraphBlock {
   list?: ListKind;
   /** Nesting level of a list item, 1 (top) to {@link LIST_LEVELS}. */
   level?: number;
-  /** Marks for the whole paragraph (inline marks add to them). */
-  bold?: boolean;
-  italic?: boolean;
-  underline?: boolean;
 }
 
 /** What an agent calls the two kinds of list. */
@@ -61,7 +76,7 @@ export type ListKind = 'bullet' | 'number';
 export type Cell =
   | string
   | Inline[]
-  | {
+  | ({
       text: string | Inline[];
       /** Spans this many grid columns to the right. */
       colspan?: number;
@@ -69,10 +84,7 @@ export type Cell =
       /** Fill colour, "#RRGGBB". */
       shading?: string;
       vAlign?: 'center' | 'bottom';
-      bold?: boolean;
-      italic?: boolean;
-      underline?: boolean;
-    };
+    } & CharFormat);
 
 export interface TableBlock {
   /** Rows of cells; every row must cover the same number of grid columns. */
@@ -374,18 +386,33 @@ function linesToParagraphs(text: string, schema: Schema): PMNode[] {
     );
 }
 
-type MarkFlags = { bold?: boolean; italic?: boolean; underline?: boolean };
+type MarkFlags = CharFormat;
 
+/** The marks for a run: flags from any level add up; for a value (colour,
+ *  font, size) the last level that sets one — the run — wins. */
 function marksFor(schema: Schema, ...flags: MarkFlags[]): Mark[] {
   const on = (k: keyof MarkFlags) => flags.some((f) => f[k]);
+  const last = <K extends 'color' | 'highlight' | 'font' | 'size'>(k: K) =>
+    flags.reduce<MarkFlags[K]>((v, f) => f[k] ?? v, undefined);
   const out: Mark[] = [];
-  const add = (name: string) => {
+  const add = (name: string, attrs?: Record<string, unknown>) => {
     const type = schema.marks[name];
-    if (type) out.push(type.create());
+    if (type) out.push(type.create(attrs));
   };
   if (on('bold')) add('strong');
   if (on('italic')) add('em');
   if (on('underline')) add('underline');
+  if (on('strike')) add('strike');
+  if (on('superscript')) add('vertAlign', { value: 'super' });
+  else if (on('subscript')) add('vertAlign', { value: 'sub' });
+  const color = last('color');
+  if (color) add('textColor', { color });
+  const highlight = last('highlight');
+  if (highlight) add('highlight', { color: highlight });
+  const font = last('font');
+  if (font) add('fontFamily', { family: font });
+  const size = last('size');
+  if (size) add('fontSize', { size });
   return out;
 }
 

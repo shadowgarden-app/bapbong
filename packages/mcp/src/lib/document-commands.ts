@@ -181,7 +181,8 @@ export const applyFormatting = defineCommand({
   description:
     'Format text or a paragraph. Address it by exact text (target_text, matched once or with occurrence — same rules ' +
     'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
-    '(true applies, false removes) and font_size apply to the text; align, heading (1-6, 0 = body text), style ' +
+    '(true applies, false removes), font_size, font, color, highlight and vertical_align apply to the text ' +
+    '(clear_formatting strips the text back to plain first); align, heading (1-6, 0 = body text), style ' +
     "(Title/Subtitle/Normal), tabs (replace the paragraph's tab stops) and list apply to the containing paragraph. " +
     'list "bullet"/"number" makes it a list item — it joins a list of that kind right above it, so turning ' +
     'several paragraphs into one list is one call per paragraph, top to bottom; "none" makes it body text. ' +
@@ -208,6 +209,29 @@ export const applyFormatting = defineCommand({
     underline: z.boolean().optional(),
     strike: z.boolean().optional(),
     font_size: z.number().positive().optional().describe('Points.'),
+    font: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe('Font family, as Word shows it; "default" removes it.'),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$|^auto$/)
+      .optional()
+      .describe('Text colour "#RRGGBB", or "auto".'),
+    highlight: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$|^none$/)
+      .optional()
+      .describe('Highlight colour "#RRGGBB", or "none".'),
+    vertical_align: z.enum(['superscript', 'subscript', 'baseline']).optional(),
+    clear_formatting: z
+      .boolean()
+      .optional()
+      .describe(
+        'Strip character formatting first (links and comments stay), then apply the rest of this call.',
+      ),
     align: z.enum(['left', 'center', 'right', 'justify']).optional(),
     heading: z
       .number()
@@ -248,6 +272,11 @@ export const applyFormatting = defineCommand({
       occurrence: occ,
       expectedVersion: ver,
       font_size,
+      font,
+      color,
+      highlight,
+      vertical_align,
+      clear_formatting,
       heading,
       style,
       list,
@@ -268,6 +297,22 @@ export const applyFormatting = defineCommand({
           {
             ...format,
             ...(font_size !== undefined ? { fontSize: font_size } : {}),
+            ...(font !== undefined
+              ? { fontFamily: font === 'default' ? null : font }
+              : {}),
+            ...(color !== undefined
+              ? { color: color === 'auto' ? null : color }
+              : {}),
+            ...(highlight !== undefined
+              ? { highlight: highlight === 'none' ? null : highlight }
+              : {}),
+            ...(vertical_align !== undefined
+              ? {
+                  verticalAlign:
+                    vertical_align === 'baseline' ? null : vertical_align,
+                }
+              : {}),
+            ...(clear_formatting ? { clear: true } : {}),
             ...(heading !== undefined ? { heading } : {}),
             ...(style !== undefined
               ? { style: style === 'Normal' ? null : style }

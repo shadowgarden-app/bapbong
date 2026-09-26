@@ -96,6 +96,27 @@ interface Hit {
   context: string;
 }
 
+/** The marks that are character formatting — what "clear formatting"
+ *  strips. Links, comments, footnotes, equations and carried run
+ *  properties are content, not formatting, and stay. */
+const CHARACTER_MARKS = [
+  'strong',
+  'em',
+  'underline',
+  'strike',
+  'dstrike',
+  'smallCaps',
+  'textColor',
+  'fontSize',
+  'vertAlign',
+  'letterSpacing',
+  'kern',
+  'charScale',
+  'position',
+  'highlight',
+  'fontFamily',
+] as const;
+
 const MARK_BY_FLAG = {
   bold: 'strong',
   italic: 'em',
@@ -249,6 +270,12 @@ export class PmDocSession implements DocumentSession {
     const state = this.host.getState();
     const { schema } = state;
     let tr = state.tr;
+    if (format.clear && hit.to > hit.from) {
+      for (const name of CHARACTER_MARKS) {
+        const type = schema.marks[name];
+        if (type) tr = tr.removeMark(hit.from, hit.to, type);
+      }
+    }
     for (const [flag, markName] of Object.entries(MARK_BY_FLAG)) {
       const want = format[flag as keyof typeof MARK_BY_FLAG];
       if (want === undefined) continue;
@@ -268,6 +295,29 @@ export class PmDocSession implements DocumentSession {
         hit.to,
         schema.marks['fontSize'].create({ size: format.fontSize }),
       );
+    }
+    // A value mark: absent = keep, null = remove, a value = set.
+    const value = <T>(
+      v: T | null | undefined,
+      make: (v: T) => Record<string, unknown>,
+    ): Record<string, unknown> | null | undefined =>
+      v === undefined ? undefined : v === null ? null : make(v);
+    const valued: [string, Record<string, unknown> | null | undefined][] = [
+      ['fontFamily', value(format.fontFamily, (family) => ({ family }))],
+      ['textColor', value(format.color, (color) => ({ color }))],
+      ['highlight', value(format.highlight, (color) => ({ color }))],
+      [
+        'vertAlign',
+        value(format.verticalAlign, (v) => ({
+          value: v === 'subscript' ? 'sub' : 'super',
+        })),
+      ],
+    ];
+    for (const [name, attrs] of valued) {
+      const type = schema.marks[name];
+      if (attrs === undefined || !type || hit.to <= hit.from) continue;
+      tr = tr.removeMark(hit.from, hit.to, type);
+      if (attrs) tr = tr.addMark(hit.from, hit.to, type.create(attrs));
     }
     const pAttrs: Record<string, unknown> = {};
     if (format.align) pAttrs['align'] = format.align;
