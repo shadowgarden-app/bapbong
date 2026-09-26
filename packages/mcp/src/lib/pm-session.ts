@@ -230,7 +230,9 @@ export class PmDocSession implements DocumentSession {
         }
       }
     }
-    this.host.apply(tr);
+    this.host.apply(
+      keepSections(state.doc, tr, anchor.position === 'before' ? -1 : 1),
+    );
     return {
       docVersion: this.host.getVersion(),
       range: { from: insertAt, to: insertAt + inserted },
@@ -372,7 +374,13 @@ export class PmDocSession implements DocumentSession {
       }),
     ]);
     const at = this.anchorPos(anchor);
-    this.host.apply(state.tr.insert(at, node));
+    this.host.apply(
+      keepSections(
+        state.doc,
+        state.tr.insert(at, node),
+        anchor.position === 'before' ? -1 : 1,
+      ),
+    );
     return {
       docVersion: this.host.getVersion(),
       range: { from: at, to: at + node.nodeSize },
@@ -983,6 +991,66 @@ function blockImages(block: PMNode): { node: PMNode; offset: number }[] {
     if (child.type.name === 'image') out.push({ node: child, offset });
   });
   return out;
+}
+
+/**
+ * Keep `doc.attrs.sections` where it was across a transaction that adds or
+ * removes top-level blocks.
+ *
+ * Sections are stored by COUNT of top-level blocks, so a block added above a
+ * section break, or taken away, moves every break below it — a landscape
+ * section would start a paragraph early. The boundaries (the positions
+ * between the last block of one section and the first of the next) are
+ * mapped through the transaction instead, and the counts re-read from where
+ * they land. `assoc` decides a block added exactly at a boundary: 1 keeps it
+ * in the section above (inserted after that section's last block), -1 in the
+ * one below (inserted before its first block).
+ *
+ * A change that would empty a section is refused: the break would go with it,
+ * and whatever is keyed by section (headers, page numbers) would shift.
+ */
+export function keepSections(
+  before: PMNode,
+  tr: Transaction,
+  assoc: -1 | 1,
+): Transaction {
+  const sections = before.attrs['sections'] as
+    | ({ blockCount: number } & Record<string, unknown>)[]
+    | null
+    | undefined;
+  if (!sections || sections.length < 2 || !tr.docChanged) return tr;
+  const offsets: number[] = []; // start offset of every top-level block, + the end
+  before.forEach((_child, offset) => offsets.push(offset));
+  offsets.push(before.content.size);
+  const after: number[] = [];
+  tr.doc.forEach((_child, offset) => after.push(offset));
+  after.push(tr.doc.content.size);
+
+  let start = 0;
+  let prevIndex = 0;
+  let changed = false;
+  const next = sections.map((s, i) => {
+    start += s.blockCount;
+    const last = i === sections.length - 1;
+    const index = last
+      ? tr.doc.childCount
+      : after.findIndex(
+          (o) =>
+            o >=
+            tr.mapping.map(offsets[Math.min(start, offsets.length - 1)], assoc),
+        );
+    const blockCount = (index < 0 ? tr.doc.childCount : index) - prevIndex;
+    prevIndex += blockCount;
+    if (blockCount <= 0) {
+      throw new ContentError(
+        `That would empty section ${i + 1} of the document, taking its section break with it. ` +
+          'Leave at least one of its paragraphs, or ask the user to remove the section break.',
+      );
+    }
+    if (blockCount !== s.blockCount) changed = true;
+    return blockCount === s.blockCount ? s : { ...s, blockCount };
+  });
+  return changed ? tr.setDocAttribute('sections', next) : tr;
 }
 
 /** A paragraph's list membership (0-based level), or null for body text. */
