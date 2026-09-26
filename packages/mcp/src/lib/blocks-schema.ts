@@ -4,6 +4,7 @@
  * never read a SKILL.md, so the tool text must teach the shape by itself.
  */
 import { z } from 'zod';
+import { LIST_LEVELS } from './blocks.js';
 
 const marks = {
   bold: z.boolean().optional(),
@@ -40,6 +41,8 @@ export const paragraphBlockSchema = z
     align: align.optional(),
     tabs: z.array(tabStopSchema).optional(),
     pageBreakBefore: z.boolean().optional(),
+    list: z.enum(['bullet', 'number']).optional(),
+    level: z.number().int().min(1).max(LIST_LEVELS).optional(),
     ...marks,
   })
   .strict();
@@ -133,9 +136,12 @@ export const CONTENT_GRAMMAR =
   'Plain text (every line one paragraph) or an array of blocks. ' +
   'A block is a string (a paragraph), ' +
   '{ paragraph: text | inlines, heading?: 1-6, style?: "Title"|"Subtitle", align?, ' +
-  'tabs?: [{ at: cm | "100%", align?: "right"|"center", leader?: "dot"|"underscore" }], pageBreakBefore? }, ' +
+  'tabs?: [{ at: cm | "100%", align?: "right"|"center", leader?: "dot"|"underscore" }], pageBreakBefore?, ' +
+  'list?: "bullet"|"number", level?: 1-3 }, ' +
   'or { table: rows, widths?: [cm | "%" per column], borders?: "grid"|"none"|"outer", header?: true, align?: "center" } ' +
   'where a row is a list of cells and a cell is text | inlines | { text, colspan?, align?, bold?, shading?: "#RRGGBB" }. ' +
   'Inlines: text | { text, bold?, italic?, underline? } | { tab: true }. ' +
   'Never draw a table, a column or a dotted line with characters: use a table block ' +
-  '(borders "none" for side-by-side text such as signature areas) and a tab with a leader for fill-in lines.';
+  '(borders "none" for side-by-side text such as signature areas) and a tab with a leader for fill-in lines. ' +
+  'Never type "•", "-" or "1." to make a list: give each item list "bullet" or "number" — consecutive items ' +
+  'are one list, numbered for you.';

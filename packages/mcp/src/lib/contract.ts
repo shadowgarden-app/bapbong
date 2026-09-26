@@ -105,6 +105,9 @@ export interface DocBlock {
   /** Set when the block sits in a table cell: the table's 0-based index in
    *  the document (what edit_table addresses), the row and the cell. */
   table?: { index: number; row: number; cell: number };
+  /** Set when the block is a list item: which kind, and its nesting level
+   *  (1 = top). The number or bullet itself is drawn, not part of `text`. */
+  list?: { kind: 'bullet' | 'number'; level: number };
 }
 
 export interface DocSnapshot {
@@ -143,6 +146,12 @@ export interface Formatting {
   style?: 'Title' | 'Subtitle' | null;
   /** The containing paragraph's tab stops (replaces them all). */
   tabs?: TabStop[];
+  /** Make the containing paragraph a list item of this kind (it joins a list
+   *  of the same kind right above it, else starts one), or null to make it
+   *  body text again. */
+  list?: 'bullet' | 'number' | null;
+  /** Nesting level of the containing list item, 1 (top) to 3. */
+  listLevel?: number;
 }
 
 /** What applyFormatting addresses: exact text (matched once, or with

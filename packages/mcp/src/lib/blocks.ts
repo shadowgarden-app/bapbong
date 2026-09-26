@@ -44,11 +44,19 @@ export interface ParagraphBlock {
   align?: Align;
   tabs?: TabStop[];
   pageBreakBefore?: boolean;
+  /** A list item: a real Word list, never a typed "•" or "1.". Consecutive
+   *  items of one kind are one list — numbers count on from the item above. */
+  list?: ListKind;
+  /** Nesting level of a list item, 1 (top) to {@link LIST_LEVELS}. */
+  level?: number;
   /** Marks for the whole paragraph (inline marks add to them). */
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
 }
+
+/** What an agent calls the two kinds of list. */
+export type ListKind = 'bullet' | 'number';
 
 export type Cell =
   | string
@@ -116,6 +124,98 @@ export interface BuildOptions {
   /** Width of the text area in CSS px — what "100%" and equal columns mean. */
   contentWidth: number;
   tableStyle?: TableStyleSource;
+  /** The document's numbering definitions (`doc.attrs.numbering`), so a new
+   *  list gets an id nobody uses and joins the right definitions. */
+  numbering?: NumberingDefs | null;
+  /** The list item right before the insertion point: a first list item of
+   *  the same kind joins its list instead of starting a new one. */
+  continueList?: { kind: ListKind; numId: string } | null;
+}
+
+/** The subset of the model's NumberingDefs this tier reads and writes
+ *  (plain data; the model package owns the full type). */
+export type NumberingDefs = Record<
+  string,
+  {
+    key: string;
+    levels: Record<
+      number,
+      { numFmt: string; lvlText: string; start?: number } | undefined
+    >;
+  }
+>;
+
+/** How deep a list an agent makes may nest: the editor's own lists define
+ *  three levels, and Tab in the editor stops there too. */
+export const LIST_LEVELS = 3;
+
+/** Indent per nesting level — what Tab in the editor adds (0.25"). */
+export const LIST_LEVEL_INDENT = 24;
+
+/**
+ * The definitions a new list is born with — the editor's own defaults
+ * (commands `listPresets(…)[0]`: • ◦ ▪ and 1. a. i.), repeated here because
+ * this tier carries no runtime dependency; a spec pins them to the presets.
+ *
+ * Bullets share the editor's `bb-bullet` id (nothing counts). Every numbered
+ * list gets an id and a counter of its own, so a second list starts at 1
+ * again instead of counting on from the first; the `bb-ordered` prefix is
+ * what tells the editor's list buttons it is numbered.
+ */
+export const LIST_DEFS = {
+  bullet: {
+    numId: 'bb-bullet',
+    levels: {
+      0: { numFmt: 'bullet', lvlText: '•', start: 1 },
+      1: { numFmt: 'bullet', lvlText: '◦', start: 1 },
+      2: { numFmt: 'bullet', lvlText: '▪', start: 1 },
+    },
+  },
+  number: {
+    numId: 'bb-ordered',
+    levels: {
+      0: { numFmt: 'decimal', lvlText: '%1.', start: 1 },
+      1: { numFmt: 'lowerLetter', lvlText: '%2.', start: 1 },
+      2: { numFmt: 'lowerRoman', lvlText: '%3.', start: 1 },
+    },
+  },
+} as const;
+
+/** Which kind a list paragraph's definition is, at `level` (0-based):
+ *  bullet when that level draws a glyph, number otherwise. */
+export function listKindOf(
+  numId: string,
+  level: number,
+  defs: NumberingDefs | null | undefined,
+): ListKind {
+  if (numId.startsWith('bb-bullet')) return 'bullet';
+  if (numId.startsWith('bb-ordered')) return 'number';
+  const d = defs?.[numId]?.levels;
+  const fmt = d?.[level]?.numFmt ?? d?.[0]?.numFmt;
+  return fmt === 'bullet' ? 'bullet' : 'number';
+}
+
+/** Add a new list of `kind` to `defs` (mutated) and return its id. */
+export function mintList(kind: ListKind, defs: NumberingDefs): string {
+  const base = LIST_DEFS[kind];
+  let numId: string = base.numId;
+  if (kind === 'number') {
+    for (let n = 2; defs[numId]; n++) numId = `${base.numId}-n${n}`;
+  }
+  if (!defs[numId]) {
+    defs[numId] = {
+      key: numId,
+      levels: { ...base.levels },
+    };
+  }
+  return numId;
+}
+
+/** Content built for a document: the nodes, and the numbering definitions
+ *  the document must carry afterwards (null when no list was added). */
+export interface BuiltContent {
+  nodes: PMNode[];
+  numbering: NumberingDefs | null;
 }
 
 const PX_PER_CM = 96 / 2.54;
@@ -155,17 +255,33 @@ export function lengthToPx(v: number | string, full: number): number {
 }
 
 /** Build the ProseMirror nodes for `content`. A plain string becomes one
- *  paragraph per line (the original behaviour); blocks become what they say. */
+ *  paragraph per line (the original behaviour); blocks become what they say.
+ *  Content with list items needs {@link buildContent}, which also hands back
+ *  the numbering definitions the document must carry. */
 export function contentToNodes(
   content: Content,
   schema: Schema,
   opts: BuildOptions,
 ): PMNode[] {
-  if (typeof content === 'string') return linesToParagraphs(content, schema);
+  return buildContent(content, schema, opts).nodes;
+}
+
+/** {@link contentToNodes}, plus the numbering definitions its lists need:
+ *  set `numbering` as the document's `numbering` attr when it is not null. */
+export function buildContent(
+  content: Content,
+  schema: Schema,
+  opts: BuildOptions,
+): BuiltContent {
+  if (typeof content === 'string')
+    return { nodes: linesToParagraphs(content, schema), numbering: null };
+  const defs: NumberingDefs = { ...(opts.numbering ?? {}) };
+  const before = Object.keys(defs).length;
+  const lists: ListRun = { current: opts.continueList ?? null, defs };
   const out: PMNode[] = [];
   content.forEach((block, i) => {
     try {
-      out.push(...blockToNodes(block, schema, opts));
+      out.push(...blockToNodes(block, schema, opts, lists));
     } catch (err) {
       if (err instanceof ContentError) {
         throw new ContentError(`Block ${i}: ${err.message}`);
@@ -173,20 +289,69 @@ export function contentToNodes(
       throw err;
     }
   });
-  return out;
+  return {
+    nodes: out,
+    numbering: Object.keys(defs).length > before ? defs : null,
+  };
+}
+
+/** The list being built while blocks are read: consecutive items of one
+ *  kind are one list; anything else between them ends it. */
+interface ListRun {
+  current: { kind: ListKind; numId: string } | null;
+  defs: NumberingDefs;
 }
 
 function blockToNodes(
   block: Block,
   schema: Schema,
   opts: BuildOptions,
+  lists: ListRun,
 ): PMNode[] {
-  if (typeof block === 'string') return linesToParagraphs(block, schema);
-  if ('table' in block) return [tableNode(block, schema, opts)];
-  if ('paragraph' in block) return [paragraphNode(block, schema, opts)];
+  if (typeof block === 'string') {
+    lists.current = null;
+    return linesToParagraphs(block, schema);
+  }
+  if ('table' in block) {
+    lists.current = null;
+    return [tableNode(block, schema, opts)];
+  }
+  if ('paragraph' in block) {
+    return [paragraphNode(block, schema, opts, listAttrs(block, lists))];
+  }
   throw new ContentError(
     'A block is a string, { paragraph: … } or { table: … }.',
   );
+}
+
+/** The `list` + `indent` attrs of a paragraph block (none when it is not a
+ *  list item), joining or starting the list it belongs to. */
+function listAttrs(p: ParagraphBlock, lists: ListRun): Record<string, unknown> {
+  if (!p.list) {
+    if (p.level !== undefined)
+      throw new ContentError('level is for list items — add list too.');
+    lists.current = null;
+    return {};
+  }
+  const level = listLevel(p.level);
+  if (lists.current?.kind !== p.list) {
+    lists.current = { kind: p.list, numId: mintList(p.list, lists.defs) };
+  }
+  return {
+    list: { numId: lists.current.numId, level },
+    ...(level > 0 ? { indent: { left: level * LIST_LEVEL_INDENT } } : {}),
+  };
+}
+
+/** A 1-based level from an agent → the model's 0-based one. */
+export function listLevel(level: number | undefined): number {
+  const l = level ?? 1;
+  if (!Number.isInteger(l) || l < 1 || l > LIST_LEVELS) {
+    throw new ContentError(
+      `List level ${level} is out of range — lists go 1 to ${LIST_LEVELS} levels deep.`,
+    );
+  }
+  return l - 1;
 }
 
 function linesToParagraphs(text: string, schema: Schema): PMNode[] {
@@ -277,10 +442,11 @@ function paragraphNode(
   p: ParagraphBlock,
   schema: Schema,
   opts: BuildOptions,
+  list: Record<string, unknown> = {},
 ): PMNode {
   return schema.node(
     'paragraph',
-    paragraphAttrs(p, opts),
+    { ...paragraphAttrs(p, opts), ...list },
     inlineNodes(p.paragraph, schema, p),
   );
 }

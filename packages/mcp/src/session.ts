@@ -7,14 +7,17 @@
 export * from './lib/contract.js';
 export { PmDocSession, type PmSessionHost } from './lib/pm-session.js';
 export {
+  buildContent,
   contentToNodes,
   lengthToPx,
   referencedTableStyles,
   type Block,
   type BuildOptions,
+  type BuiltContent,
   type Cell,
   type Content,
   type Inline,
+  type ListKind,
   type ParagraphBlock,
   type TableBlock,
   type TableEdit,

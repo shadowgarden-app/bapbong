@@ -37,14 +37,19 @@ import {
 } from './contract.js';
 import { dataUrl, sniffImage } from './image-bytes.js';
 import {
+  buildContent,
   columnWidths,
-  contentToNodes,
   lengthToPx,
+  listKindOf,
+  mintList,
   referencedTableStyles,
   rowNode,
   tableChrome,
   tableGrid,
+  LIST_LEVEL_INDENT,
   type Content,
+  type ListKind,
+  type NumberingDefs,
   type TableEdit,
   type TableStyleSource,
 } from './blocks.js';
@@ -112,6 +117,7 @@ export class PmDocSession implements DocumentSession {
   // ── reads ────────────────────────────────────────────────────────────
 
   async snapshot(): Promise<DocSnapshot> {
+    const defs = this.numbering();
     const blocks: DocBlock[] = this.textblocks().map(
       ({ node, table }, index) => {
         const block: DocBlock = {
@@ -120,6 +126,13 @@ export class PmDocSession implements DocumentSession {
           text: node.textContent,
         };
         if (table) block.table = table;
+        const list = listOf(node);
+        if (list) {
+          block.list = {
+            kind: listKindOf(list.numId, list.level, defs),
+            level: list.level + 1,
+          };
+        }
         const images = blockImages(node).map(({ node: img }, i) => {
           const image: DocImage = {
             index: i,
@@ -189,14 +202,18 @@ export class PmDocSession implements DocumentSession {
     const state = this.host.getState();
     const { schema } = state;
     const tableStyle = this.host.tableStyle?.();
-    const paragraphs = contentToNodes(content, schema, {
+    const insertAt = this.anchorPos(anchor);
+    const defs = this.numbering();
+    const { nodes: paragraphs, numbering } = buildContent(content, schema, {
       contentWidth: this.contentWidth(),
       tableStyle,
+      numbering: defs,
+      continueList: this.listBefore(state.doc.resolve(insertAt).nodeBefore),
     });
 
-    const insertAt = this.anchorPos(anchor);
     const inserted = paragraphs.reduce((size, node) => size + node.nodeSize, 0);
     let tr = state.tr.insert(insertAt, paragraphs);
+    if (numbering) tr = tr.setDocAttribute('numbering', numbering);
     // A table born with a style needs its definition in the document's
     // sheet for the layout to paint it (the same move insertTable makes).
     if (tableStyle?.style && schema.nodes['doc'].spec.attrs?.['tableStyles']) {
@@ -269,6 +286,13 @@ export class PmDocSession implements DocumentSession {
             ...(t.leader ? { leader: t.leader } : {}),
           }))
         : null;
+    }
+    if (format.list !== undefined || format.listLevel !== undefined) {
+      const block = this.textblocks()[hit.blockIndex];
+      const change = this.listChange(block.node, block.pos, format);
+      Object.assign(pAttrs, change.attrs);
+      if (change.numbering)
+        tr = tr.setDocAttribute('numbering', change.numbering);
     }
     if (Object.keys(pAttrs).length > 0) {
       const block = this.textblocks()[hit.blockIndex];
@@ -605,6 +629,108 @@ export class PmDocSession implements DocumentSession {
 
   // ── internals ────────────────────────────────────────────────────────
 
+  /** The document's numbering definitions (`doc.attrs.numbering`). */
+  private numbering(): NumberingDefs | null {
+    return (
+      (this.host.getState().doc.attrs['numbering'] as NumberingDefs | null) ??
+      null
+    );
+  }
+
+  /** The list a paragraph right before an insertion point belongs to — the
+   *  list new items of the same kind join (so numbers count on). */
+  private listBefore(
+    node: PMNode | null | undefined,
+  ): { kind: ListKind; numId: string } | null {
+    const list = node ? listOf(node) : null;
+    if (!list) return null;
+    return {
+      kind: listKindOf(list.numId, list.level, this.numbering()),
+      numId: list.numId,
+    };
+  }
+
+  /** The paragraph attrs (and numbering, when a list is born) for a
+   *  Formatting's `list` / `listLevel` on the paragraph at `pos`. The indent
+   *  moves with the level the way Tab moves it in the editor. */
+  private listChange(
+    node: PMNode,
+    pos: number,
+    format: Formatting,
+  ): { attrs: Record<string, unknown>; numbering: NumberingDefs | null } {
+    const current = listOf(node);
+    const defs = this.numbering();
+    const indent =
+      (node.attrs['indent'] as Record<string, number> | null) ?? null;
+    const shifted = (from: number, to: number): Record<string, unknown> => {
+      if (from === to) return {};
+      const left = Math.max(
+        0,
+        (indent?.['left'] ?? 0) + (to - from) * LIST_LEVEL_INDENT,
+      );
+      const next: Record<string, number> = { ...(indent ?? {}), left };
+      if (left === 0) delete next['left'];
+      return { indent: Object.keys(next).length > 0 ? next : null };
+    };
+
+    if (format.list === null) {
+      if (!current) return { attrs: {}, numbering: null };
+      return {
+        attrs: { list: null, ...shifted(current.level, 0) },
+        numbering: null,
+      };
+    }
+    const kind =
+      format.list ??
+      (current ? listKindOf(current.numId, current.level, defs) : undefined);
+    if (!kind) {
+      throw new ContentError(
+        'That paragraph is not a list item — pass list ("bullet" or "number") to make it one.',
+      );
+    }
+    let numId: string;
+    let numbering: NumberingDefs | null = null;
+    if (current && listKindOf(current.numId, current.level, defs) === kind) {
+      numId = current.numId;
+    } else {
+      const above = this.listBefore(
+        this.host.getState().doc.resolve(pos).nodeBefore,
+      );
+      if (above?.kind === kind) numId = above.numId;
+      else {
+        numbering = { ...(defs ?? {}) };
+        numId = mintList(kind, numbering);
+      }
+    }
+    const from = current?.level ?? 0;
+    const to =
+      format.listLevel !== undefined
+        ? this.listLevelFor(numId, format.listLevel, numbering ?? defs)
+        : from;
+    return {
+      attrs: { list: { numId, level: to }, ...shifted(from, to) },
+      numbering,
+    };
+  }
+
+  /** A 1-based level an agent asked for → 0-based, within what the list's
+   *  definition defines (the editor's lists: three). */
+  private listLevelFor(
+    numId: string,
+    level: number,
+    defs: NumberingDefs | null,
+  ): number {
+    const levels = defs?.[numId]?.levels;
+    const defined = levels ? Object.keys(levels).map(Number) : [];
+    const max = defined.length > 0 ? Math.max(...defined) + 1 : 9;
+    if (!Number.isInteger(level) || level < 1 || level > max) {
+      throw new ContentError(
+        `List level ${level} is out of range — this list goes 1 to ${max} levels deep.`,
+      );
+    }
+    return level - 1;
+  }
+
   /** Resolve a formatting target to absolute positions. */
   private formatHit(target: FormatTarget, occurrence?: number): Hit {
     if (typeof target === 'string') return this.uniqueHit(target, occurrence);
@@ -857,6 +983,16 @@ function blockImages(block: PMNode): { node: PMNode; offset: number }[] {
     if (child.type.name === 'image') out.push({ node: child, offset });
   });
   return out;
+}
+
+/** A paragraph's list membership (0-based level), or null for body text. */
+function listOf(node: PMNode): { numId: string; level: number } | null {
+  const list = node.attrs['list'] as
+    | { numId?: string; level?: number }
+    | null
+    | undefined;
+  if (!list?.numId) return null;
+  return { numId: list.numId, level: list.level ?? 0 };
 }
 
 function blockType(node: PMNode): string {

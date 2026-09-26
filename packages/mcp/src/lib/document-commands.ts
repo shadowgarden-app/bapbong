@@ -48,6 +48,7 @@ export const getDocument = defineCommand({
   title: 'Read the document',
   description:
     'Read the whole document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
+    'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
     'Returns docVersion: pass it as expectedVersion to mutation tools so concurrent edits are detected. ' +
     'Block indexes are only stable within one docVersion.',
   input: { documentId },
@@ -181,7 +182,10 @@ export const applyFormatting = defineCommand({
     'Format text or a paragraph. Address it by exact text (target_text, matched once or with occurrence — same rules ' +
     'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
     '(true applies, false removes) and font_size apply to the text; align, heading (1-6, 0 = body text), style ' +
-    "(Title/Subtitle/Normal) and tabs (replace the paragraph's tab stops) apply to the containing paragraph.",
+    "(Title/Subtitle/Normal), tabs (replace the paragraph's tab stops) and list apply to the containing paragraph. " +
+    'list "bullet"/"number" makes it a list item — it joins a list of that kind right above it, so turning ' +
+    'several paragraphs into one list is one call per paragraph, top to bottom; "none" makes it body text. ' +
+    'list_level (1-3) nests a list item.',
   input: {
     documentId,
     target_text: z
@@ -219,6 +223,17 @@ export const applyFormatting = defineCommand({
       .describe(
         "The paragraph's tab stops, replacing any it had; [] removes them.",
       ),
+    list: z
+      .enum(['bullet', 'number', 'none'])
+      .optional()
+      .describe('Make the paragraph a list item, or "none" for body text.'),
+    list_level: z
+      .number()
+      .int()
+      .min(1)
+      .max(9)
+      .optional()
+      .describe('Nesting level of a list item, 1 = top.'),
     occurrence,
     expectedVersion,
   },
@@ -235,6 +250,8 @@ export const applyFormatting = defineCommand({
       font_size,
       heading,
       style,
+      list,
+      list_level,
       ...format
     },
   ) =>
@@ -255,6 +272,10 @@ export const applyFormatting = defineCommand({
             ...(style !== undefined
               ? { style: style === 'Normal' ? null : style }
               : {}),
+            ...(list !== undefined
+              ? { list: list === 'none' ? null : list }
+              : {}),
+            ...(list_level !== undefined ? { listLevel: list_level } : {}),
           },
           { occurrence: occ, expectedVersion: ver },
         ),
