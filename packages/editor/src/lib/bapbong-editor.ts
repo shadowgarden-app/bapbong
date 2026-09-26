@@ -783,6 +783,22 @@ export class BapbongEditor {
     this.dispatch(state.tr.setDocAttribute('sectionChromeOverrides', next));
   }
 
+  /** Every section's header and footer stories as they are shown — the
+   *  imported chrome with this document's overrides applied — or a single
+   *  entry when all sections share it. For readers outside the view: an
+   *  agent asking what the headers say. */
+  chromeStories(): {
+    headers: Record<string, ProseMirrorNode>;
+    footers: Record<string, ProseMirrorNode>;
+  }[] {
+    const merged = this.core.effectiveSectionChrome(
+      this.bridge?.state.doc ?? null,
+    );
+    return merged
+      ? merged.map((s) => ({ headers: s.headers, footers: s.footers }))
+      : [this.core.flatChrome()];
+  }
+
   /** Section `sectionIndex`'s effective stories (overrides > per-section
    *  chrome > the flat document chrome). */
   private sectionStories(sectionIndex: number): {
