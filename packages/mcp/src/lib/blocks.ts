@@ -76,7 +76,7 @@ export interface TabStop {
 
 /** Character formatting on a paragraph block applies to all its text
  *  (inline formatting adds to it). */
-export interface ParagraphBlock extends CharFormat {
+export interface ParagraphBlock extends CharFormat, ParagraphLayout {
   paragraph: string | Inline[];
   /** Word "Heading N", 1–6. */
   heading?: number;
@@ -90,6 +90,102 @@ export interface ParagraphBlock extends CharFormat {
   list?: ListKind;
   /** Nesting level of a list item, 1 (top) to {@link LIST_LEVELS}. */
   level?: number;
+}
+
+/** Paragraph spacing and indents as an agent writes them (see
+ *  {@link spacingAttr} / {@link indentAttr}). */
+export interface ParagraphLayout {
+  /** Space above / below, points. */
+  spaceBefore?: number;
+  spaceAfter?: number;
+  /** A multiple of single (1, 1.15, 1.5, 2) or an exact / minimum height in
+   *  points. */
+  lineSpacing?: number | { exact: number } | { atLeast: number };
+  /** Lengths: cm as a number, or "1cm", "0.5in", "12pt". 0 removes one. */
+  indent?: {
+    left?: number | string;
+    right?: number | string;
+    firstLine?: number | string;
+    hanging?: number | string;
+  };
+}
+
+const PX_PER_PT = 96 / 72;
+
+/** The paragraph's `spacing` attr (px; line a multiple under lineRule
+ *  auto) with `p`'s changes over `old`, or undefined when `p` changes none.
+ *  A side set here drops its "auto" flag: it is direct formatting now. */
+export function spacingAttr(
+  old: Record<string, unknown> | null | undefined,
+  p: ParagraphLayout,
+): Record<string, unknown> | null | undefined {
+  if (
+    p.spaceBefore === undefined &&
+    p.spaceAfter === undefined &&
+    p.lineSpacing === undefined
+  )
+    return undefined;
+  const next: Record<string, unknown> = { ...(old ?? {}) };
+  const pt = (v: number, what: string) => {
+    if (!Number.isFinite(v) || v < 0 || v > 1584)
+      throw new ContentError(`${what} is points, 0 to 1584 — not ${v}.`);
+    return Math.round(v * PX_PER_PT);
+  };
+  if (p.spaceBefore !== undefined) {
+    next['before'] = pt(p.spaceBefore, 'space_before');
+    delete next['beforeAuto'];
+  }
+  if (p.spaceAfter !== undefined) {
+    next['after'] = pt(p.spaceAfter, 'space_after');
+    delete next['afterAuto'];
+  }
+  const ls = p.lineSpacing;
+  if (typeof ls === 'number') {
+    if (!Number.isFinite(ls) || ls < 0.5 || ls > 10)
+      throw new ContentError(
+        `line_spacing is a multiple of single line spacing, 0.5 to 10 — not ${ls}. For a height in points, pass "18pt".`,
+      );
+    next['line'] = ls;
+    next['lineRule'] = 'auto';
+  } else if (ls && 'exact' in ls) {
+    next['line'] = pt(ls.exact, 'line_spacing');
+    next['lineRule'] = 'exact';
+  } else if (ls && 'atLeast' in ls) {
+    next['line'] = pt(ls.atLeast, 'line_spacing');
+    next['lineRule'] = 'atLeast';
+  }
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+/** The paragraph's `indent` attr (px) with `change` over `old`, or
+ *  undefined when it changes nothing. 0 removes a side; firstLine and
+ *  hanging exclude each other. */
+export function indentAttr(
+  old: Record<string, unknown> | null | undefined,
+  change: ParagraphLayout['indent'],
+  contentWidth: number,
+): Record<string, unknown> | null | undefined {
+  if (!change) return undefined;
+  const next: Record<string, unknown> = { ...(old ?? {}) };
+  let touched = false;
+  for (const side of ['left', 'right', 'firstLine', 'hanging'] as const) {
+    const v = change[side];
+    if (v === undefined) continue;
+    touched = true;
+    const px = Math.round(lengthToPx(v, contentWidth));
+    if (side === 'firstLine' || side === 'hanging') {
+      delete next['firstLine'];
+      delete next['hanging'];
+      if (px < 0)
+        throw new ContentError(
+          `${side === 'firstLine' ? 'first_line' : 'hanging'} is a length of 0 or more — for the other direction use ${side === 'firstLine' ? 'hanging' : 'first_line'}.`,
+        );
+    }
+    if (px === 0) delete next[side];
+    else next[side] = px;
+  }
+  if (!touched) return undefined;
+  return Object.keys(next).length > 0 ? next : null;
 }
 
 /** What an agent calls the two kinds of list. */
@@ -482,7 +578,7 @@ function paragraphAttrs(
     align?: Align;
     tabs?: TabStop[];
     pageBreakBefore?: boolean;
-  },
+  } & ParagraphLayout,
   opts: BuildOptions,
 ): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
@@ -497,6 +593,10 @@ function paragraphAttrs(
       ...(t.leader ? { leader: t.leader } : {}),
     }));
   }
+  const spacing = spacingAttr(null, p);
+  if (spacing) attrs['spacing'] = spacing;
+  const indent = indentAttr(null, p.indent, opts.contentWidth);
+  if (indent) attrs['indent'] = indent;
   return attrs;
 }
 
@@ -506,9 +606,18 @@ function paragraphNode(
   opts: BuildOptions,
   list: Record<string, unknown> = {},
 ): PMNode {
+  const attrs = paragraphAttrs(p, opts);
+  // A list level's indent is the base; an explicit indent on the block wins.
+  const indent =
+    list['indent'] || attrs['indent']
+      ? {
+          ...((list['indent'] as object | undefined) ?? {}),
+          ...((attrs['indent'] as object | undefined) ?? {}),
+        }
+      : undefined;
   return schema.node(
     'paragraph',
-    { ...paragraphAttrs(p, opts), ...list },
+    { ...attrs, ...list, ...(indent ? { indent } : {}) },
     inlineNodes(p.paragraph, schema, p),
   );
 }

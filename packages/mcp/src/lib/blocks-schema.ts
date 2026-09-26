@@ -46,6 +46,21 @@ export const tabStopSchema = z
   })
   .strict();
 
+export const lineSpacingSchema = z.union([
+  z.number(),
+  z.object({ exact: z.number().positive() }).strict(),
+  z.object({ atLeast: z.number().positive() }).strict(),
+]);
+
+export const indentSchema = z
+  .object({
+    left: lengthSchema.optional(),
+    right: lengthSchema.optional(),
+    firstLine: lengthSchema.optional(),
+    hanging: lengthSchema.optional(),
+  })
+  .strict();
+
 export const paragraphBlockSchema = z
   .object({
     paragraph: z.union([z.string(), z.array(inlineSchema)]),
@@ -56,6 +71,10 @@ export const paragraphBlockSchema = z
     pageBreakBefore: z.boolean().optional(),
     list: z.enum(['bullet', 'number']).optional(),
     level: z.number().int().min(1).max(LIST_LEVELS).optional(),
+    spaceBefore: z.number().min(0).optional(),
+    spaceAfter: z.number().min(0).optional(),
+    lineSpacing: lineSpacingSchema.optional(),
+    indent: indentSchema.optional(),
     ...marks,
   })
   .strict();
@@ -168,7 +187,8 @@ export const CONTENT_GRAMMAR =
   'A block is a string (a paragraph), ' +
   '{ paragraph: text | inlines, heading?: 1-6, style?: "Title"|"Subtitle", align?, ' +
   'tabs?: [{ at: cm | "100%", align?: "right"|"center", leader?: "dot"|"underscore" }], pageBreakBefore?, ' +
-  'list?: "bullet"|"number", level?: 1-3, …format }, ' +
+  'list?: "bullet"|"number", level?: 1-3, spaceBefore?/spaceAfter?: pt, lineSpacing?: 1.15 | { exact: pt } | { atLeast: pt }, ' +
+  'indent?: { left?, right?, firstLine?, hanging?: cm | "1cm" }, …format }, ' +
   'or { table: rows, widths?: [cm | "%" per column], borders?: "grid"|"none"|"outer", header?: true, align?: "center" } ' +
   'where a row is a list of cells and a cell is text | inlines | { text, colspan?, align?, shading?: "#RRGGBB", …format }. ' +
   'Inlines: text | { text, link?: "https://…" | "mailto:…" | "#bookmark", …format } | { tab: true }. ' +

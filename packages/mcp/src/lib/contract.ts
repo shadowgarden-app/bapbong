@@ -173,6 +173,15 @@ export interface Formatting {
   /** Make the target text a hyperlink to this address (http(s), mailto,
    *  tel, "#bookmark"); null unlinks it. */
   link?: string | null;
+  /** Space above / below the containing paragraph, in points. */
+  spaceBefore?: number;
+  spaceAfter?: number;
+  /** Line spacing of the containing paragraph: a multiple of single
+   *  (1, 1.15, 1.5, 2), or an exact / minimum line height in points. */
+  lineSpacing?: LineSpacing;
+  /** Indents of the containing paragraph (0 removes one). `firstLine` and
+   *  `hanging` exclude each other: setting one clears the other. */
+  indent?: IndentChange;
   /** Paragraph alignment of the block(s) containing the target text. */
   align?: 'left' | 'center' | 'right' | 'justify';
   /** Word "Heading N" for the containing paragraph; 0 or null = body text. */
@@ -234,6 +243,17 @@ export interface PageSetupChange {
   columns?: number;
   sectionBreak?: { after: number; newPage: boolean };
   removeSectionBreak?: number;
+}
+
+/** Line spacing: a multiple of single, or a height in points. */
+export type LineSpacing = number | { exact: number } | { atLeast: number };
+
+/** Paragraph indents as lengths (cm as a number, or "1cm", "0.5in"). */
+export interface IndentChange {
+  left?: Length;
+  right?: Length;
+  firstLine?: Length;
+  hanging?: Length;
 }
 
 /** What applyFormatting addresses: exact text (matched once, or with

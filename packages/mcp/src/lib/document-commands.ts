@@ -5,7 +5,7 @@
  * here; {@link createMcpServer} and any other adapter read these records.
  */
 import { z } from 'zod';
-import type { SessionProvider } from './contract.js';
+import { ContentError, type SessionProvider } from './contract.js';
 import {
   defineCommand,
   errorText,
@@ -33,6 +33,30 @@ const expectedVersion = z
   .describe(
     'docVersion you last read. If the document changed since, the call fails and you must re-read.',
   );
+
+const lengthArg = z
+  .union([z.number(), z.string()])
+  .describe('cm as a number, or "2cm", "1in", "25mm".');
+
+/** "1.15" → a multiple; "18pt" → exact; "at least 12pt" → a minimum. */
+function lineSpacingOf(
+  v: number | string,
+): number | { exact: number } | { atLeast: number } {
+  if (typeof v === 'number') return v;
+  const t = v.trim();
+  const least = /^at\s*least\s+(.+)$/i.exec(t);
+  const pt = (x: string) => {
+    const m = /^(\d+(?:\.\d+)?)\s*pt$/i.exec(x.trim());
+    if (!m)
+      throw new ContentError(
+        `line_spacing ${JSON.stringify(v)}: a height is in points, like "18pt".`,
+      );
+    return Number(m[1]);
+  };
+  if (least) return { atLeast: pt(least[1]) };
+  if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
+  return { exact: pt(t) };
+}
 
 const occurrence = z
   .number()
@@ -185,7 +209,8 @@ export const applyFormatting = defineCommand({
     'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
     '(true applies, false removes), font_size, font, color, highlight, vertical_align and link apply to the text ' +
     '(clear_formatting strips the text back to plain first); align, heading (1-6, 0 = body text), style ' +
-    "(Title/Subtitle/Normal), tabs (replace the paragraph's tab stops) and list apply to the containing paragraph. " +
+    "(Title/Subtitle/Normal), tabs (replace the paragraph's tab stops), list, space_before/space_after (pt), " +
+    'line_spacing, indent_left/indent_right/first_line/hanging (cm or "1cm", 0 removes) apply to the containing paragraph. ' +
     'list "bullet"/"number" makes it a list item — it joins a list of that kind right above it, so turning ' +
     'several paragraphs into one list is one call per paragraph, top to bottom; "none" makes it body text. ' +
     'list_level (1-3) nests a list item.',
@@ -256,6 +281,30 @@ export const applyFormatting = defineCommand({
       .describe(
         "The paragraph's tab stops, replacing any it had; [] removes them.",
       ),
+    space_before: z
+      .number()
+      .min(0)
+      .optional()
+      .describe('Space above the paragraph, points.'),
+    space_after: z
+      .number()
+      .min(0)
+      .optional()
+      .describe('Space below the paragraph, points.'),
+    line_spacing: z
+      .union([z.number(), z.string()])
+      .optional()
+      .describe(
+        'A multiple of single (1, 1.15, 1.5, 2), an exact height ("18pt") or a minimum ("at least 12pt").',
+      ),
+    indent_left: lengthArg.optional(),
+    indent_right: lengthArg.optional(),
+    first_line: lengthArg
+      .optional()
+      .describe('First-line indent; clears hanging. 0 removes it.'),
+    hanging: lengthArg
+      .optional()
+      .describe('Hanging indent; clears first_line. 0 removes it.'),
     list: z
       .enum(['bullet', 'number', 'none'])
       .optional()
@@ -291,6 +340,13 @@ export const applyFormatting = defineCommand({
       style,
       list,
       list_level,
+      space_before,
+      space_after,
+      line_spacing,
+      indent_left,
+      indent_right,
+      first_line,
+      hanging,
       ...format
     },
   ) =>
@@ -334,6 +390,30 @@ export const applyFormatting = defineCommand({
               ? { list: list === 'none' ? null : list }
               : {}),
             ...(list_level !== undefined ? { listLevel: list_level } : {}),
+            ...(space_before !== undefined
+              ? { spaceBefore: space_before }
+              : {}),
+            ...(space_after !== undefined ? { spaceAfter: space_after } : {}),
+            ...(line_spacing !== undefined
+              ? { lineSpacing: lineSpacingOf(line_spacing) }
+              : {}),
+            ...(indent_left !== undefined ||
+            indent_right !== undefined ||
+            first_line !== undefined ||
+            hanging !== undefined
+              ? {
+                  indent: {
+                    ...(indent_left !== undefined ? { left: indent_left } : {}),
+                    ...(indent_right !== undefined
+                      ? { right: indent_right }
+                      : {}),
+                    ...(first_line !== undefined
+                      ? { firstLine: first_line }
+                      : {}),
+                    ...(hanging !== undefined ? { hanging } : {}),
+                  },
+                }
+              : {}),
           },
           { occurrence: occ, expectedVersion: ver },
         ),
@@ -727,10 +807,6 @@ export const deleteBlock = defineCommand({
       ),
     ),
 });
-
-const lengthArg = z
-  .union([z.number(), z.string()])
-  .describe('cm as a number, or "2cm", "1in", "25mm".');
 
 export const pageSetup = defineCommand({
   name: 'page_setup',

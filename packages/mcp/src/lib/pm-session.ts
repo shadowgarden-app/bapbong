@@ -42,12 +42,14 @@ import { dataUrl, sniffImage } from './image-bytes.js';
 import {
   buildContent,
   columnWidths,
+  indentAttr,
   lengthToPx,
   linkTarget,
   listKindOf,
   mintList,
   referencedTableStyles,
   rowNode,
+  spacingAttr,
   tableChrome,
   tableGrid,
   LIST_LEVEL_INDENT,
@@ -399,6 +401,28 @@ export class PmDocSession implements DocumentSession {
       Object.assign(pAttrs, change.attrs);
       if (change.numbering)
         tr = tr.setDocAttribute('numbering', change.numbering);
+    }
+    if (
+      format.spaceBefore !== undefined ||
+      format.spaceAfter !== undefined ||
+      format.lineSpacing !== undefined ||
+      format.indent !== undefined
+    ) {
+      const block = this.textblocks()[hit.blockIndex];
+      const spacing = spacingAttr(
+        block.node.attrs['spacing'] as Record<string, unknown> | null,
+        format,
+      );
+      if (spacing !== undefined) pAttrs['spacing'] = spacing;
+      // After a list change, from the indent it left (its level shift).
+      const indent = indentAttr(
+        ('indent' in pAttrs
+          ? pAttrs['indent']
+          : block.node.attrs['indent']) as Record<string, unknown> | null,
+        format.indent,
+        this.contentWidth(),
+      );
+      if (indent !== undefined) pAttrs['indent'] = indent;
     }
     if (Object.keys(pAttrs).length > 0) {
       const block = this.textblocks()[hit.blockIndex];
