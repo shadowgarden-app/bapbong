@@ -56,7 +56,10 @@ describe('get_document reports headers and footers', () => {
       getVersion: () => 'v',
       meta: () => ({}),
       save: async () => undefined,
-      chrome: () => [
+      chrome: (): {
+        headers: Record<string, PMNode>;
+        footers: Record<string, PMNode>;
+      }[] => [
         { headers: { default: shared }, footers: { default: story('') } },
         { headers: { default: shared, first: story('Cover') }, footers: {} },
       ],
