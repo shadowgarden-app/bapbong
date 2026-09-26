@@ -66,7 +66,13 @@ export const paragraphBlockSchema = z
   .object({
     paragraph: z.union([z.string(), z.array(inlineSchema)]),
     heading: z.number().int().min(1).max(6).optional(),
-    style: z.enum(['Title', 'Subtitle']).optional(),
+    style: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Title, Subtitle, or a style the document defines (list_styles).',
+      ),
     align: align.optional(),
     tabs: z.array(tabStopSchema).optional(),
     pageBreakBefore: z.boolean().optional(),
@@ -186,7 +192,7 @@ export const contentSchema = z.union([z.string(), z.array(blockSchema)]);
 export const CONTENT_GRAMMAR =
   'Plain text (every line one paragraph) or an array of blocks. ' +
   'A block is a string (a paragraph), ' +
-  '{ paragraph: text | inlines, heading?: 1-6, style?: "Title"|"Subtitle", align?, ' +
+  '{ paragraph: text | inlines, heading?: 1-6, style?: "Title" | "Subtitle" | a document style from list_styles, align?, ' +
   'tabs?: [{ at: cm | "100%", align?: "right"|"center", leader?: "dot"|"underscore" }], pageBreakBefore?, ' +
   'list?: "bullet"|"number", level?: 1-3, spaceBefore?/spaceAfter?: pt, lineSpacing?: 1.15 | { exact: pt } | { atLeast: pt }, ' +
   'indent?: { left?, right?, firstLine?, hanging?: cm | "1cm" }, …format }, ' +

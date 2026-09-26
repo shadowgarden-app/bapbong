@@ -209,7 +209,7 @@ export const applyFormatting = defineCommand({
     'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
     '(true applies, false removes), font_size, font, color, highlight, vertical_align and link apply to the text ' +
     '(clear_formatting strips the text back to plain first); align, heading (1-6, 0 = body text), style ' +
-    "(Title/Subtitle/Normal), tabs (replace the paragraph's tab stops), list, space_before/space_after (pt), " +
+    "(Title, Subtitle, Normal or any style of the document — list_styles), tabs (replace the paragraph's tab stops), list, space_before/space_after (pt), " +
     'line_spacing, indent_left/indent_right/first_line/hanging (cm or "1cm", 0 removes) apply to the containing paragraph. ' +
     'list "bullet"/"number" makes it a list item — it joins a list of that kind right above it, so turning ' +
     'several paragraphs into one list is one call per paragraph, top to bottom; "none" makes it body text. ' +
@@ -274,7 +274,13 @@ export const applyFormatting = defineCommand({
       .max(6)
       .optional()
       .describe('Word Heading level; 0 makes it body text.'),
-    style: z.enum(['Title', 'Subtitle', 'Normal']).optional(),
+    style: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Title, Subtitle, Normal, or a style the document defines, by name or id (list_styles) — its look comes with it.',
+      ),
     tabs: z
       .array(tabStopSchema)
       .optional()
@@ -977,6 +983,23 @@ export const editHeaderFooter = defineCommand({
     }),
 });
 
+export const listStyles = defineCommand({
+  name: 'list_styles',
+  title: "List the document's paragraph styles",
+  description:
+    "The paragraph styles this document defines — Word's built-ins and its own (custom: true) — with how many " +
+    "paragraphs use each. Use a name with apply_formatting style or a block's style: the paragraph takes the " +
+    "style's look, and Word shows it under that style. Prefer the document's own styles over formatting by hand.",
+  input: { documentId },
+  effect: 'read',
+  requires: 'styles',
+  targets: (a) => [a.documentId],
+  run: (provider, { documentId: id }) =>
+    withSession(provider, id, async (s) =>
+      json({ styles: await s.listStyles() }),
+    ),
+});
+
 export const saveDocument = defineCommand({
   name: 'save_document',
   title: 'Save the document',
@@ -1009,14 +1032,16 @@ export const getSelection = defineCommand({
 
 /** Every document command, in the order an agent reads them. `get_selection`
  *  needs the `selection` capability, the three picture commands need
- *  `images`, `page_setup` needs `pageSetup` and `edit_header_footer`
- *  `headerFooter`; hosts without one leave them out. */
+ *  `images`, `page_setup` needs `pageSetup`, `edit_header_footer`
+ *  `headerFooter` and `list_styles` `styles`; hosts without one leave them
+ *  out. */
 export const documentCommands: readonly AgentCommand<
   z.ZodRawShape,
   SessionProvider
 >[] = [
   getDocument,
   findText,
+  listStyles,
   replaceText,
   insertContent,
   deleteBlock,

@@ -35,6 +35,7 @@ import {
   type MutationOptions,
   type MutationResult,
   type ChromeEdit,
+  type DocStyle,
   type PageSetup,
   type PageSetupChange,
   type SessionCapabilities,
@@ -54,7 +55,11 @@ import {
   tableChrome,
   tableGrid,
   LIST_LEVEL_INDENT,
+  headingStyleLevel,
+  isBuiltInStyle,
+  STYLE_ATTRS,
   type Content,
+  type ResolvedStyle,
   type ListKind,
   type NumberingDefs,
   type TableEdit,
@@ -89,6 +94,24 @@ export interface PmSessionHost {
    *  be done. This tier carries no commands of its own. Absent → page_setup
    *  is not offered. */
   pageSetup?(state: EditorState, change: PageSetupChange): Transaction | null;
+  /** The styles the document's file defines (docx `documentStyles`).
+   *  Absent → only Title / Subtitle / Normal, and no list_styles. */
+  styles?(): Promise<
+    {
+      id: string;
+      name: string;
+      type: string;
+      basedOn?: string;
+      custom: boolean;
+      isDefault: boolean;
+      hidden: boolean;
+    }[]
+  >;
+  /** What paragraph style `id` gives a paragraph (docx `styleFormatting`). */
+  styleFormatting?(id: string): Promise<{
+    attrs: Record<string, unknown>;
+    marks: { type: string; attrs?: Record<string, unknown> }[];
+  } | null>;
   /** Every section's header and footer stories as the pages show them (one
    *  entry when the sections share them). Absent → get_document reports no
    *  chrome. */
@@ -154,6 +177,9 @@ export class PmDocSession implements DocumentSession {
         typeof host.readImage === 'function' ? (host.imageSources ?? []) : [],
       pageSetup: typeof host.pageSetup === 'function',
       headerFooter: typeof host.chrome === 'function',
+      styles:
+        typeof host.styles === 'function' &&
+        typeof host.styleFormatting === 'function',
     };
   }
 
@@ -284,11 +310,13 @@ export class PmDocSession implements DocumentSession {
     const tableStyle = this.host.tableStyle?.();
     const insertAt = this.anchorPos(anchor);
     const defs = this.numbering();
+    const paragraphStyles = await this.stylesNamedIn(content);
     const { nodes: paragraphs, numbering } = buildContent(content, schema, {
       contentWidth: this.contentWidth(),
       tableStyle,
       numbering: defs,
       continueList: this.listBefore(state.doc.resolve(insertAt).nodeBefore),
+      paragraphStyles,
     });
 
     const inserted = paragraphs.reduce((size, node) => size + node.nodeSize, 0);
@@ -326,9 +354,36 @@ export class PmDocSession implements DocumentSession {
   ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
     const hit = this.formatHit(target, opts.occurrence);
+    const docStyle =
+      format.style && !isBuiltInStyle(format.style)
+        ? await this.resolveStyle(format.style)
+        : null;
     const state = this.host.getState();
     const { schema } = state;
     let tr = state.tr;
+    const styled = this.textblocks()[hit.blockIndex];
+    const styleAttrs: Record<string, unknown> = {};
+    if (docStyle) {
+      // The style's look replaces the paragraph's: its character formatting
+      // over the whole paragraph (links, comments, footnotes stay), its
+      // paragraph formatting in place of what the paragraph had.
+      const from = styled.pos + 1;
+      const to = from + styled.node.content.size;
+      if (to > from) {
+        for (const name of CHARACTER_MARKS) {
+          const type = schema.marks[name];
+          if (type) tr = tr.removeMark(from, to, type);
+        }
+        for (const m of docStyle.marks)
+          tr = tr.addMark(from, to, schema.markFromJSON(m));
+      }
+      for (const key of STYLE_ATTRS)
+        if (key in styled.node.attrs)
+          styleAttrs[key] = docStyle.attrs[key] ?? null;
+      const heading = docStyle.attrs['heading'] as number | null | undefined;
+      styleAttrs['heading'] = heading ?? null;
+      styleAttrs['styleId'] = heading ? null : docStyle.id;
+    }
     if (format.clear && hit.to > hit.from) {
       for (const name of CHARACTER_MARKS) {
         const type = schema.marks[name];
@@ -379,15 +434,21 @@ export class PmDocSession implements DocumentSession {
       tr = tr.removeMark(hit.from, hit.to, type);
       if (attrs) tr = tr.addMark(hit.from, hit.to, type.create(attrs));
     }
-    const pAttrs: Record<string, unknown> = {};
+    const pAttrs: Record<string, unknown> = { ...styleAttrs };
     if (format.align) pAttrs['align'] = format.align;
     if (format.heading !== undefined) {
       pAttrs['heading'] = format.heading ? format.heading : null;
       if (format.heading) pAttrs['styleId'] = null;
     }
-    if (format.style !== undefined) {
-      pAttrs['styleId'] = format.style;
-      if (format.style) pAttrs['heading'] = null;
+    const headingStyle = format.style ? headingStyleLevel(format.style) : null;
+    if (headingStyle) {
+      pAttrs['heading'] = headingStyle;
+      pAttrs['styleId'] = null;
+    } else if (format.style !== undefined && !docStyle) {
+      // Built in: Title / Subtitle (the layout sizes them), Normal = none.
+      const id = format.style === 'Normal' ? null : format.style;
+      pAttrs['styleId'] = id;
+      if (id) pAttrs['heading'] = null;
     }
     if (format.tabs !== undefined) {
       const width = this.contentWidth();
@@ -835,6 +896,70 @@ export class PmDocSession implements DocumentSession {
       docVersion: this.host.getVersion(),
       sections: [...changed.keys()].map((i) => i + 1),
     };
+  }
+
+  async listStyles(): Promise<DocStyle[]> {
+    const all = (await this.host.styles?.()) ?? [];
+    const used = new Map<string, number>();
+    for (const { node } of this.textblocks()) {
+      const heading = node.attrs['heading'] as number | null;
+      const id = heading
+        ? `Heading${heading}`
+        : ((node.attrs['styleId'] as string | null) ?? null);
+      if (id) used.set(id, (used.get(id) ?? 0) + 1);
+    }
+    return all
+      .filter(
+        (st) => st.type === 'paragraph' && (!st.hidden || used.has(st.id)),
+      )
+      .map((st) => ({
+        id: st.id,
+        name: st.name,
+        custom: st.custom,
+        ...(st.basedOn ? { basedOn: st.basedOn } : {}),
+        used: used.get(st.id) ?? 0,
+      }));
+  }
+
+  /** A document paragraph style by id, or by name (any case), with its look. */
+  private async resolveStyle(nameOrId: string): Promise<ResolvedStyle> {
+    const all = ((await this.host.styles?.()) ?? []).filter(
+      (st) => st.type === 'paragraph',
+    );
+    const wanted = nameOrId.trim().toLowerCase();
+    const style =
+      all.find((st) => st.id === nameOrId) ??
+      all.find((st) => st.name.toLowerCase() === wanted) ??
+      all.find((st) => st.id.toLowerCase() === wanted);
+    const look = style ? await this.host.styleFormatting?.(style.id) : null;
+    if (!style || !look) {
+      const names = all
+        .filter((st) => !st.hidden)
+        .map((st) => st.name)
+        .slice(0, 20);
+      throw new ContentError(
+        `No paragraph style ${JSON.stringify(nameOrId)} in this document.` +
+          (names.length
+            ? ` It has: ${names.map((n) => JSON.stringify(n)).join(', ')}${all.length > names.length ? ', …' : ''} (list_styles).`
+            : ' Title and Subtitle are always there.'),
+      );
+    }
+    return { id: style.id, attrs: look.attrs, marks: look.marks };
+  }
+
+  /** Resolve every document style `content` names (by the name used). */
+  private async stylesNamedIn(
+    content: Content,
+  ): Promise<Record<string, ResolvedStyle> | undefined> {
+    if (typeof content === 'string') return undefined;
+    const names = new Set<string>();
+    for (const b of content)
+      if (typeof b === 'object' && 'paragraph' in b && b.style)
+        if (!isBuiltInStyle(b.style)) names.add(b.style);
+    if (names.size === 0) return undefined;
+    const out: Record<string, ResolvedStyle> = {};
+    for (const name of names) out[name] = await this.resolveStyle(name);
+    return out;
   }
 
   async save(): Promise<void> {

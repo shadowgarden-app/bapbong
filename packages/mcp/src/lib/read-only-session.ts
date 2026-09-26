@@ -10,6 +10,7 @@
  * actually has open is writable.
  */
 import type {
+  DocStyle,
   DocSnapshot,
   DocumentSession,
   FindMatch,
@@ -49,6 +50,9 @@ export class ReadOnlySession implements DocumentSession {
   }
   find(query: string): Promise<FindMatch[]> {
     return this.inner.find(query);
+  }
+  listStyles(): Promise<DocStyle[]> {
+    return this.inner.listStyles();
   }
   getSelection(): Promise<{ text: string; blockIndex: number } | null> {
     return this.inner.getSelection?.() ?? Promise.resolve(null);

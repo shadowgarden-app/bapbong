@@ -45,6 +45,7 @@ export type SessionOpName =
   | 'deleteBlocks'
   | 'pageSetup'
   | 'editChrome'
+  | 'listStyles'
   | 'getSelection'
   | 'save'
   // Host-level, handled by the caller before executeOp (see its note):
@@ -171,6 +172,8 @@ function run(
         args[0] as PageSetup,
         args[1] as MutationOptions | undefined,
       );
+    case 'listStyles':
+      return session.listStyles();
     case 'editChrome':
       return session.editChrome(
         args[0] as ChromeEdit,
@@ -319,6 +322,11 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['pageSetup']>>>(
       'pageSetup',
       [setup, opts],
+    );
+  }
+  listStyles() {
+    return this.call<Awaited<ReturnType<DocumentSession['listStyles']>>>(
+      'listStyles',
     );
   }
   editChrome(edit: ChromeEdit, opts?: MutationOptions) {

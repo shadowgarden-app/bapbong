@@ -23,6 +23,8 @@ export interface CreateMcpServerOptions {
   pageSetup?: boolean;
   /** Offer edit_header_footer (hosts whose sessions know their chrome). */
   headerFooter?: boolean;
+  /** Offer list_styles (hosts whose sessions can read their styles). */
+  styles?: boolean;
 }
 
 export function createMcpServer(
@@ -39,6 +41,7 @@ export function createMcpServer(
     images: opts.images,
     pageSetup: opts.pageSetup,
     headerFooter: opts.headerFooter,
+    styles: opts.styles,
   });
 
   registerDocumentResource(server, provider);

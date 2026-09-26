@@ -9,7 +9,9 @@
  */
 import {
   catalogTableStyles,
+  documentStyles,
   effectiveSectionChrome,
+  styleFormatting,
   importDocx,
   exportDocx,
   pageSetupTransaction,
@@ -35,6 +37,7 @@ import type {
   MutationOptions,
   MutationResult,
   ChromeEdit,
+  DocStyle,
   PageSetup,
   SessionCapabilities,
 } from './contract.js';
@@ -103,6 +106,12 @@ export class HeadlessSession implements DocumentSession {
         : {}),
       // The editor's own Layout commands, composed.
       pageSetup: (state, change) => pageSetupTransaction(state, change),
+      styles: async () => {
+        const xml = await this.raw?.file('word/styles.xml')?.async('string');
+        return xml ? documentStyles(xml) : [];
+      },
+      styleFormatting: (id) =>
+        this.raw ? styleFormatting(this.raw, id) : Promise.resolve(null),
       chrome: () => {
         const imported = this.imported;
         if (!imported) return [];
@@ -248,6 +257,9 @@ export class HeadlessSession implements DocumentSession {
     opts?: MutationOptions,
   ): Promise<MutationResult & { sections: number[] }> {
     return this.inner.editChrome(edit, opts);
+  }
+  listStyles(): Promise<DocStyle[]> {
+    return this.inner.listStyles();
   }
   save(): Promise<void> {
     return this.inner.save();

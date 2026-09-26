@@ -83,8 +83,9 @@ export interface ParagraphBlock extends CharFormat, ParagraphLayout {
   paragraph: string | Inline[];
   /** Word "Heading N", 1–6. */
   heading?: number;
-  /** Named paragraph style without an outline level. */
-  style?: 'Title' | 'Subtitle';
+  /** A paragraph style by name or id: Title, Subtitle, or one the document
+   *  defines (see list_styles) — its look comes with it. */
+  style?: string;
   align?: Align;
   tabs?: TabStop[];
   pageBreakBefore?: boolean;
@@ -271,7 +272,45 @@ export interface BuildOptions {
   /** The list item right before the insertion point: a first list item of
    *  the same kind joins its list instead of starting a new one. */
   continueList?: { kind: ListKind; numId: string } | null;
+  /** The document's own paragraph styles the content names, resolved by the
+   *  host (keyed by the name the block used): a block in one gets its look. */
+  paragraphStyles?: Record<string, ResolvedStyle>;
 }
+
+/** A document paragraph style, resolved to what a paragraph in it gets. */
+export interface ResolvedStyle {
+  id: string;
+  /** Paragraph attrs the style gives (align, indent, spacing, …). */
+  attrs: Record<string, unknown>;
+  /** Run marks the style gives, as JSON. */
+  marks: { type: string; attrs?: Record<string, unknown> }[];
+}
+
+/** The paragraph attrs a style sets; the rest of a paragraph's attrs are
+ *  content or structure, not style. */
+export const STYLE_ATTRS = [
+  'align',
+  'indent',
+  'spacing',
+  'tabs',
+  'markFont',
+  'keepNext',
+  'keepLines',
+] as const;
+
+/** Styles every document has, handled without the document's styles.xml. */
+export const BUILT_IN_STYLES = new Set(['Title', 'Subtitle', 'Normal']);
+
+/** "Heading 2" / "heading2" / "Heading2" → 2: a heading the exporter can
+ *  always define, whatever the document's styles.xml holds. */
+export function headingStyleLevel(style: string): number | null {
+  const m = /^heading\s*([1-6])$/i.exec(style.trim());
+  return m ? Number(m[1]) : null;
+}
+
+/** A style name the builder or a session handles itself. */
+export const isBuiltInStyle = (style: string): boolean =>
+  BUILT_IN_STYLES.has(style) || headingStyleLevel(style) !== null;
 
 /** The subset of the model's NumberingDefs this tier reads and writes
  *  (plain data; the model package owns the full type). */
@@ -543,7 +582,14 @@ function inlineNodes(
   text: string | Inline[],
   schema: Schema,
   base: MarkFlags,
+  styleMarks: Mark[] = [],
 ): PMNode[] {
+  // A style's marks are the floor; formatting written on the block or the
+  // run replaces the style's mark of the same kind.
+  const withStyle = (marks: Mark[]): Mark[] => [
+    ...styleMarks.filter((m) => !marks.some((f) => f.type === m.type)),
+    ...marks,
+  ];
   const runs = typeof text === 'string' ? [text] : text;
   const out: PMNode[] = [];
   for (const run of runs) {
@@ -553,9 +599,10 @@ function inlineNodes(
           'No "\\n" inside a paragraph — make separate blocks instead.',
         );
       }
-      if (run.length > 0) out.push(schema.text(run, marksFor(schema, base)));
+      if (run.length > 0)
+        out.push(schema.text(run, withStyle(marksFor(schema, base))));
     } else if ('tab' in run) {
-      out.push(schema.text('\t', marksFor(schema, base)));
+      out.push(schema.text('\t', withStyle(marksFor(schema, base))));
     } else if ('field' in run) {
       const field = schema.nodes['page_field'];
       if (!field)
@@ -568,7 +615,7 @@ function inlineNodes(
         );
       }
       if (run.text.length > 0) {
-        const marks = marksFor(schema, base, run);
+        const marks = withStyle(marksFor(schema, base, run));
         const link = schema.marks['link'];
         if (run.link && link)
           marks.push(link.create({ href: linkTarget(run.link) }));
@@ -590,8 +637,22 @@ function paragraphAttrs(
   opts: BuildOptions,
 ): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
+  const headingStyle = p.style ? headingStyleLevel(p.style) : null;
   if (p.heading) attrs['heading'] = p.heading;
-  else if (p.style) attrs['styleId'] = p.style;
+  else if (headingStyle) attrs['heading'] = headingStyle;
+  else if (p.style === 'Title' || p.style === 'Subtitle')
+    attrs['styleId'] = p.style;
+  else if (p.style && p.style !== 'Normal') {
+    const style = opts.paragraphStyles?.[p.style];
+    if (!style)
+      throw new ContentError(
+        `No paragraph style ${JSON.stringify(p.style)} in this document — list_styles shows the ones it has; Title and Subtitle are always there.`,
+      );
+    for (const key of STYLE_ATTRS)
+      if (style.attrs[key] != null) attrs[key] = style.attrs[key];
+    if (style.attrs['heading']) attrs['heading'] = style.attrs['heading'];
+    else attrs['styleId'] = style.id;
+  }
   if (p.align) attrs['align'] = p.align;
   if (p.pageBreakBefore) attrs['pageBreakBefore'] = true;
   if (p.tabs?.length) {
@@ -623,10 +684,15 @@ function paragraphNode(
           ...((attrs['indent'] as object | undefined) ?? {}),
         }
       : undefined;
+  const style =
+    p.style && !isBuiltInStyle(p.style)
+      ? opts.paragraphStyles?.[p.style]
+      : undefined;
+  const styleMarks = (style?.marks ?? []).map((m) => schema.markFromJSON(m));
   return schema.node(
     'paragraph',
     { ...attrs, ...list, ...(indent ? { indent } : {}) },
-    inlineNodes(p.paragraph, schema, p),
+    inlineNodes(p.paragraph, schema, p, styleMarks),
   );
 }
 

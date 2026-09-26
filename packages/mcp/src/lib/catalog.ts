@@ -73,7 +73,8 @@ export type CommandRequirement =
   | 'selection'
   | 'images'
   | 'pageSetup'
-  | 'headerFooter';
+  | 'headerFooter'
+  | 'styles';
 
 /**
  * One command, as data. `Ports` is whatever the host gives commands to act
@@ -164,6 +165,8 @@ export interface HostCapabilities {
   /** The host's documents know their headers and footers — enables
    *  edit_header_footer. */
   headerFooter?: boolean;
+  /** The host's documents can read their styles — enables list_styles. */
+  styles?: boolean;
 }
 
 /** Does the host offer everything this command needs? */

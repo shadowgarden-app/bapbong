@@ -186,8 +186,10 @@ export interface Formatting {
   align?: 'left' | 'center' | 'right' | 'justify';
   /** Word "Heading N" for the containing paragraph; 0 or null = body text. */
   heading?: number | null;
-  /** Named paragraph style; null = body text. Clears `heading`. */
-  style?: 'Title' | 'Subtitle' | null;
+  /** A paragraph style by name or id — Title, Subtitle, or one the document
+   *  defines, whose look comes with it; null = body text. Clears `heading`
+   *  (a style with an outline level sets it instead). */
+  style?: string | null;
   /** The containing paragraph's tab stops (replaces them all). */
   tabs?: TabStop[];
   /** Make the containing paragraph a list item of this kind (it joins a list
@@ -243,6 +245,18 @@ export interface PageSetupChange {
   columns?: number;
   sectionBreak?: { after: number; newPage: boolean };
   removeSectionBreak?: number;
+}
+
+/** One of the document's paragraph styles, as list_styles reports it. */
+export interface DocStyle {
+  id: string;
+  /** The name Word shows. */
+  name: string;
+  /** Defined by the document's author rather than built into Word. */
+  custom: boolean;
+  basedOn?: string;
+  /** How many paragraphs are in it now. */
+  used: number;
 }
 
 /** A change to a header or footer (see edit_header_footer). */
@@ -311,6 +325,9 @@ export interface SessionCapabilities {
   /** The session knows its headers and footers — enables
    *  edit_header_footer. */
   headerFooter?: boolean;
+  /** The session can read its document's styles — enables list_styles and
+   *  document styles in apply_formatting / insert_content. */
+  styles?: boolean;
 }
 
 /** The port every document host implements. */
@@ -394,6 +411,9 @@ export interface DocumentSession {
     edit: ChromeEdit,
     opts?: MutationOptions,
   ): Promise<MutationResult & { sections: number[] }>;
+  /** The document's paragraph styles (hidden ones only when in use). Only
+   *  when capabilities.styles. */
+  listStyles(): Promise<DocStyle[]>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */
