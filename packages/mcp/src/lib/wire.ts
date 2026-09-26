@@ -26,6 +26,7 @@ import {
   type ImageSource,
   type InsertAnchor,
   type MutationOptions,
+  type PageSetup,
   type SessionCapabilities,
 } from './contract.js';
 
@@ -41,6 +42,7 @@ export type SessionOpName =
   | 'replaceImage'
   | 'deleteImage'
   | 'deleteBlocks'
+  | 'pageSetup'
   | 'getSelection'
   | 'save'
   // Host-level, handled by the caller before executeOp (see its note):
@@ -161,6 +163,11 @@ function run(
         args[0] as number,
         args[1] as number,
         args[2] as MutationOptions | undefined,
+      );
+    case 'pageSetup':
+      return session.pageSetup(
+        args[0] as PageSetup,
+        args[1] as MutationOptions | undefined,
       );
     case 'getSelection':
       return session.getSelection?.() ?? Promise.resolve(null);
@@ -299,6 +306,12 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['deleteBlocks']>>>(
       'deleteBlocks',
       [blockIndex, count, opts],
+    );
+  }
+  pageSetup(setup: PageSetup, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['pageSetup']>>>(
+      'pageSetup',
+      [setup, opts],
     );
   }
   async getSelection() {

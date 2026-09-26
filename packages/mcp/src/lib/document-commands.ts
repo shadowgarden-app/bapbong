@@ -715,6 +715,116 @@ export const deleteBlock = defineCommand({
     ),
 });
 
+const lengthArg = z
+  .union([z.number(), z.string()])
+  .describe('cm as a number, or "2cm", "1in", "25mm".');
+
+export const pageSetup = defineCommand({
+  name: 'page_setup',
+  title: 'Page setup',
+  description:
+    'Orientation, paper size, margins and text columns — for one section (1-based) or, without section, for ' +
+    'every section — and section breaks. get_document marks each block with its section once there is more ' +
+    "than one; check_document reports each section's page. To turn a few pages landscape: a section break " +
+    'before them and one after (section_break_after: the block index, one call each), then page_setup with ' +
+    'that section and orientation. A break goes in or out on its own call, since the sections are numbered ' +
+    'anew after it. margins is "normal" | "narrow" | "moderate" | "wide" or { top, right, bottom, left } lengths.',
+  input: {
+    documentId,
+    section: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('The section to change, 1-based; omit for all of them.'),
+    orientation: z.enum(['portrait', 'landscape']).optional(),
+    paper: z
+      .enum(['A3', 'A4', 'A5', 'Letter', 'Legal', 'Executive'])
+      .optional(),
+    margins: z
+      .union([
+        z.enum(['normal', 'narrow', 'moderate', 'wide']),
+        z
+          .object({
+            top: lengthArg.optional(),
+            right: lengthArg.optional(),
+            bottom: lengthArg.optional(),
+            left: lengthArg.optional(),
+          })
+          .strict(),
+      ])
+      .optional()
+      .describe(
+        'A preset, or lengths per side (a side left out keeps its value).',
+      ),
+    columns: z.number().int().min(1).max(3).optional(),
+    section_break_after: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Start a new section after this block (index from get_document, a paragraph outside tables).',
+      ),
+    new_page: z
+      .boolean()
+      .optional()
+      .describe(
+        'With section_break_after: the new section starts on a new page (default) or, false, continues on the same one.',
+      ),
+    remove_section_break: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        'Remove the break that ends this section (1-based), joining it with the next.',
+      ),
+    expectedVersion,
+  },
+  effect: 'edit',
+  requires: 'pageSetup',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) => {
+      if (
+        a.orientation === undefined &&
+        a.paper === undefined &&
+        a.margins === undefined &&
+        a.columns === undefined &&
+        a.section_break_after === undefined &&
+        a.remove_section_break === undefined
+      ) {
+        return errorText(
+          'Pass at least one change: orientation, paper, margins, columns, section_break_after or remove_section_break.',
+        );
+      }
+      return json(
+        await s.pageSetup(
+          {
+            ...(a.section !== undefined ? { section: a.section } : {}),
+            ...(a.orientation ? { orientation: a.orientation } : {}),
+            ...(a.paper ? { paper: a.paper } : {}),
+            ...(a.margins !== undefined ? { margins: a.margins } : {}),
+            ...(a.columns !== undefined ? { columns: a.columns } : {}),
+            ...(a.section_break_after !== undefined
+              ? {
+                  sectionBreakAfter: {
+                    blockIndex: a.section_break_after,
+                    newPage: a.new_page ?? true,
+                  },
+                }
+              : {}),
+            ...(a.remove_section_break !== undefined
+              ? { removeSectionBreak: a.remove_section_break }
+              : {}),
+          },
+          { expectedVersion: a.expectedVersion },
+        ),
+      );
+    }),
+});
+
 export const saveDocument = defineCommand({
   name: 'save_document',
   title: 'Save the document',
@@ -746,8 +856,9 @@ export const getSelection = defineCommand({
 });
 
 /** Every document command, in the order an agent reads them. `get_selection`
- *  needs the `selection` capability and the three picture commands need
- *  `images`; hosts without one leave them out. */
+ *  needs the `selection` capability, the three picture commands need
+ *  `images` and `page_setup` needs `pageSetup`; hosts without one leave them
+ *  out. */
 export const documentCommands: readonly AgentCommand<
   z.ZodRawShape,
   SessionProvider
@@ -763,6 +874,7 @@ export const documentCommands: readonly AgentCommand<
   insertImage,
   replaceImage,
   deleteImage,
+  pageSetup,
   saveDocument,
   getSelection,
 ];

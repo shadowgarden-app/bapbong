@@ -19,6 +19,8 @@ export interface CreateMcpServerOptions {
   selection?: boolean;
   /** Offer the picture commands (hosts that can fetch image bytes). */
   images?: boolean;
+  /** Offer page_setup (hosts whose sessions can change page geometry). */
+  pageSetup?: boolean;
 }
 
 export function createMcpServer(
@@ -33,6 +35,7 @@ export function createMcpServer(
   registerCommands(server, documentCommands, provider, {
     selection: opts.selection,
     images: opts.images,
+    pageSetup: opts.pageSetup,
   });
 
   registerDocumentResource(server, provider);

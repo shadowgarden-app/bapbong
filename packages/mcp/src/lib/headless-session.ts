@@ -11,6 +11,7 @@ import {
   catalogTableStyles,
   importDocx,
   exportDocx,
+  pageSetupTransaction,
   type DocxImport,
 } from '@shadow-garden/bapbong-headless';
 import { EditorState, type Transaction } from 'prosemirror-state';
@@ -31,6 +32,7 @@ import type {
   InsertAnchor,
   MutationOptions,
   MutationResult,
+  PageSetup,
   SessionCapabilities,
 } from './contract.js';
 import { PmDocSession, type PmSessionHost } from './pm-session.js';
@@ -91,6 +93,8 @@ export class HeadlessSession implements DocumentSession {
             imageSources: this.opts.imageSources ?? [],
           }
         : {}),
+      // The editor's own Layout commands, composed.
+      pageSetup: (state, change) => pageSetupTransaction(state, change),
       tableStyle: () => {
         const grid = catalogTableStyles().find((t) => t.id === 'TableGrid');
         return grid ? { styleId: grid.id, style: grid.style } : undefined;
@@ -197,6 +201,12 @@ export class HeadlessSession implements DocumentSession {
     opts?: MutationOptions,
   ): Promise<MutationResult & { deleted: number }> {
     return this.inner.deleteBlocks(blockIndex, count, opts);
+  }
+  pageSetup(
+    setup: PageSetup,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { sections: number }> {
+    return this.inner.pageSetup(setup, opts);
   }
   save(): Promise<void> {
     return this.inner.save();

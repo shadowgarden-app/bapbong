@@ -108,6 +108,9 @@ export interface DocBlock {
   /** Set when the block is a list item: which kind, and its nesting level
    *  (1 = top). The number or bullet itself is drawn, not part of `text`. */
   list?: { kind: 'bullet' | 'number'; level: number };
+  /** The section (1-based) the block is in — set only when the document has
+   *  more than one, which is when page_setup's `section` means something. */
+  section?: number;
 }
 
 export interface DocSnapshot {
@@ -165,6 +168,53 @@ export interface Formatting {
   listLevel?: number;
 }
 
+/** A length as an agent writes it: a number is centimetres, or a string
+ *  such as "2cm", "1in", "25mm". */
+export type Length = number | string;
+
+/** Word's paper sizes, by the names Word shows. */
+export type PaperName = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | 'Executive';
+
+/** A page-setup request as an agent makes it (see page_setup). Section
+ *  numbers are 1-based, like the ones get_document reports. */
+export interface PageSetup {
+  /** The section to change; absent = every section. */
+  section?: number;
+  orientation?: 'portrait' | 'landscape';
+  paper?: PaperName;
+  /** A Word preset, or lengths per side (a side left out keeps its value). */
+  margins?:
+    | 'normal'
+    | 'narrow'
+    | 'moderate'
+    | 'wide'
+    | { top?: Length; right?: Length; bottom?: Length; left?: Length };
+  /** Text columns, 1-3. */
+  columns?: number;
+  /** Start a new section after this block (an index from get_document; a
+   *  paragraph outside tables). `newPage` false makes it continuous. */
+  sectionBreakAfter?: { blockIndex: number; newPage?: boolean };
+  /** Remove section break n (1-based: the one ending section n). */
+  removeSectionBreak?: number;
+}
+
+/** What a host's page-setup port takes: {@link PageSetup} resolved to the
+ *  model — 0-based indexes, px, the model's paper keys. */
+export interface PageSetupChange {
+  section?: number;
+  orientation?: 'portrait' | 'landscape';
+  paper?: 'a3' | 'a4' | 'a5' | 'letter' | 'legal' | 'executive';
+  margins?:
+    | 'normal'
+    | 'narrow'
+    | 'moderate'
+    | 'wide'
+    | { top?: number; right?: number; bottom?: number; left?: number };
+  columns?: number;
+  sectionBreak?: { after: number; newPage: boolean };
+  removeSectionBreak?: number;
+}
+
 /** What applyFormatting addresses: exact text (matched once, or with
  *  occurrence) or a whole block by index from the latest snapshot. */
 export type FormatTarget = string | { blockIndex: number };
@@ -200,6 +250,9 @@ export interface SessionCapabilities {
   /** Which image sources the host can fetch. Empty (or absent) means it
    *  cannot take new pictures at all, and the image tools aren't offered. */
   images?: readonly ImageSourceKind[];
+  /** The session can change page geometry and sections — enables
+   *  page_setup. */
+  pageSetup?: boolean;
 }
 
 /** The port every document host implements. */
@@ -271,6 +324,12 @@ export interface DocumentSession {
     count: number,
     opts?: MutationOptions,
   ): Promise<MutationResult & { deleted: number }>;
+  /** Page geometry, columns and section breaks — for one section or all
+   *  of them. Only when capabilities.pageSetup. One transaction. */
+  pageSetup(
+    setup: PageSetup,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { sections: number }>;
   /** Only when capabilities.selection — the user's current selection. */
   getSelection?(): Promise<{ text: string; blockIndex: number } | null>;
   /** Persist to the host's backing store (file, DB…). */

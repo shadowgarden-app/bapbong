@@ -33,6 +33,8 @@ import {
   type InsertAnchor,
   type MutationOptions,
   type MutationResult,
+  type PageSetup,
+  type PageSetupChange,
   type SessionCapabilities,
 } from './contract.js';
 import { dataUrl, sniffImage } from './image-bytes.js';
@@ -76,6 +78,12 @@ export interface PmSessionHost {
   /** Which sources `readImage` accepts. Absent → none, and the image tools
    *  are not offered. */
   imageSources?: readonly ImageSourceKind[];
+  /** A transaction for a page-setup change (the editor's own Layout
+   *  commands, composed — `pageSetupTransaction` in the commands package),
+   *  or null when it is already in effect; throws a sentence when it cannot
+   *  be done. This tier carries no commands of its own. Absent → page_setup
+   *  is not offered. */
+  pageSetup?(state: EditorState, change: PageSetupChange): Transaction | null;
 }
 
 /** A4 with 1in margins — what the layout shows when the doc has no page
@@ -132,6 +140,7 @@ export class PmDocSession implements DocumentSession {
       selection: typeof host.selection === 'function',
       images:
         typeof host.readImage === 'function' ? (host.imageSources ?? []) : [],
+      pageSetup: typeof host.pageSetup === 'function',
     };
   }
 
@@ -139,14 +148,17 @@ export class PmDocSession implements DocumentSession {
 
   async snapshot(): Promise<DocSnapshot> {
     const defs = this.numbering();
+    const sectionOf = this.sectionOfTopLevel();
+    const doc = this.host.getState().doc;
     const blocks: DocBlock[] = this.textblocks().map(
-      ({ node, table }, index) => {
+      ({ node, pos, table }, index) => {
         const block: DocBlock = {
           index,
           type: blockType(node),
           text: node.textContent,
         };
         if (table) block.table = table;
+        if (sectionOf) block.section = sectionOf(doc.resolve(pos).index(0));
         const list = listOf(node);
         if (list) {
           block.list = {
@@ -567,6 +579,75 @@ export class PmDocSession implements DocumentSession {
     };
   }
 
+  async pageSetup(
+    setup: PageSetup,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & { sections: number }> {
+    this.checkVersion(opts.expectedVersion);
+    if (!this.host.pageSetup) {
+      throw new ContentError('This document cannot change its page setup.');
+    }
+    const state = this.host.getState();
+    const change: PageSetupChange = {};
+    if (setup.section !== undefined) change.section = setup.section - 1;
+    if (setup.orientation) change.orientation = setup.orientation;
+    if (setup.paper)
+      change.paper = setup.paper.toLowerCase() as PageSetupChange['paper'];
+    if (setup.columns !== undefined) change.columns = setup.columns;
+    if (setup.removeSectionBreak !== undefined)
+      change.removeSectionBreak = setup.removeSectionBreak - 1;
+    if (setup.margins !== undefined) {
+      if (typeof setup.margins === 'string') change.margins = setup.margins;
+      else {
+        const m: Record<string, number> = {};
+        for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+          const v = setup.margins[side];
+          if (v === undefined) continue;
+          if (typeof v === 'string' && v.trim().endsWith('%')) {
+            throw new ContentError(
+              `A margin is a length ("2cm", "1in"), not a share of the page: ${JSON.stringify(v)}.`,
+            );
+          }
+          m[side] = Math.round(lengthToPx(v, 0));
+        }
+        change.margins = m;
+      }
+    }
+    if (setup.sectionBreakAfter) {
+      const { blockIndex, newPage } = setup.sectionBreakAfter;
+      const blocks = this.textblocks();
+      const block = blocks[blockIndex];
+      if (!block) {
+        throw new AnchorError(
+          `blockIndex ${blockIndex} is out of range — the document has ${blocks.length} block(s).`,
+        );
+      }
+      if (block.table) {
+        throw new ContentError(
+          `Block ${blockIndex} is inside a table — a section break goes after a paragraph outside tables (or after the table: use the block right after it).`,
+        );
+      }
+      change.sectionBreak = {
+        after: state.doc.resolve(block.pos).index(0),
+        newPage: newPage ?? true,
+      };
+    }
+    let tr: Transaction | null;
+    try {
+      tr = this.host.pageSetup(state, change);
+    } catch (err) {
+      throw new ContentError(err instanceof Error ? err.message : String(err));
+    }
+    if (tr) this.host.apply(tr);
+    const sections = this.host.getState().doc.attrs['sections'] as
+      | unknown[]
+      | null;
+    return {
+      docVersion: this.host.getVersion(),
+      sections: sections?.length || 1,
+    };
+  }
+
   async save(): Promise<void> {
     await this.host.save();
   }
@@ -933,6 +1014,23 @@ export class PmDocSession implements DocumentSession {
       );
     }
     return tr;
+  }
+
+  /** 1-based section of a top-level block index, when the document has
+   *  more than one section; null otherwise (nothing to tell apart). */
+  private sectionOfTopLevel(): ((topIndex: number) => number) | null {
+    const sections = this.host.getState().doc.attrs['sections'] as
+      | { blockCount: number }[]
+      | null
+      | undefined;
+    if (!sections || sections.length < 2) return null;
+    const ends: number[] = [];
+    let end = 0;
+    for (const s of sections) ends.push((end += s.blockCount));
+    return (i) => {
+      const k = ends.findIndex((e) => i < e);
+      return (k < 0 ? sections.length - 1 : k) + 1;
+    };
   }
 
   /** The document's numbering definitions (`doc.attrs.numbering`). */

@@ -85,6 +85,9 @@ export class ReadOnlySession implements DocumentSession {
   deleteBlocks(): Promise<MutationResult & { deleted: number }> {
     this.refuse('delete paragraphs from this document');
   }
+  pageSetup(): Promise<MutationResult & { sections: number }> {
+    this.refuse('change the page setup of this document');
+  }
   save(): Promise<void> {
     this.refuse('save this document');
   }
