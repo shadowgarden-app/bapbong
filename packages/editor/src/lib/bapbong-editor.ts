@@ -799,6 +799,20 @@ export class BapbongEditor {
       : [this.core.flatChrome()];
   }
 
+  /** The styles this document's file defines — Word's built-ins and its
+   *  own — for a reader outside the view (an agent choosing a style). */
+  documentStyles(): ReturnType<RenderCore['documentStyles']> {
+    return this.core.documentStyles();
+  }
+
+  /** What one of the document's paragraph styles looks like on a paragraph
+   *  (its attrs and run marks, as the importer resolves them), or null. */
+  paragraphStyleFormatting(
+    id: string,
+  ): ReturnType<RenderCore['paragraphStyleFormatting']> {
+    return this.core.paragraphStyleFormatting(id);
+  }
+
   /** Section `sectionIndex`'s effective stories (overrides > per-section
    *  chrome > the flat document chrome). */
   private sectionStories(sectionIndex: number): {

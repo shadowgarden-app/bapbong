@@ -4,10 +4,14 @@ import {
   schema as baseSchema,
 } from '@shadow-garden/bapbong-model';
 import {
+  documentStyles,
   importDocx,
   exportDocx,
+  styleFormatting,
+  type DocumentStyle,
   type DocxImport,
   type SectionChrome,
+  type StyleFormatting,
 } from '@shadow-garden/bapbong-docx';
 import {
   createLayoutCache,
@@ -387,6 +391,23 @@ export class RenderCore {
       },
       (json) => this.parseChromeStory(json),
     );
+  }
+
+  /** The styles the loaded document's package defines (empty for a
+   *  document that was not imported). */
+  async documentStyles(): Promise<DocumentStyle[]> {
+    const xml = await this.importedRaw
+      ?.file('word/styles.xml')
+      ?.async('string');
+    return xml ? documentStyles(xml) : [];
+  }
+
+  /** What paragraph style `id` of the loaded document looks like on a
+   *  paragraph, or null when the document has no such style. */
+  paragraphStyleFormatting(id: string): Promise<StyleFormatting | null> {
+    return this.importedRaw
+      ? styleFormatting(this.importedRaw, id)
+      : Promise.resolve(null);
   }
 
   /** Header/footer stories shared by every section (the imported flat set) —
