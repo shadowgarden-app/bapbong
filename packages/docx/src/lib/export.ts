@@ -640,7 +640,7 @@ function inlineXml(node: PMNode, ctx: ExportCtx): string {
       // footnotes.xml rides the carry package byte-for-byte, so the
       // reference must name the ORIGINAL w:id — the display number only
       // coincides with it when the source ids happen to be 1..N.
-      return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${(fn.attrs['id'] as string | null) ?? fn.attrs['num']}"/></w:r>`;
+      return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${(fn.attrs['id'] as string | null) ?? NEW_NOTE_IDS.get(ctx)?.get(Number(fn.attrs['num'])) ?? fn.attrs['num']}"/></w:r>`;
     return `<w:r>${runProps(node.marks)}<w:t xml:space="preserve">${esc(node.text ?? '')}</w:t></w:r>`;
   }
   return '';
@@ -1048,6 +1048,101 @@ function fieldBeginXml(f: { instr: string; dirty: boolean }): string {
 }
 
 const FIELD_END_XML = '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+
+// ── footnotes written in bapbong ────────────────────────────────────
+// An imported footnote's body rides the carried footnotes.xml untouched; a
+// new one (a footnote mark with no id, its body in doc.attrs.footnoteBodies)
+// gets a fresh w:id above every id the carried part uses, and its body is
+// appended to that part — or to a new part, with the separators Word
+// expects, when the source had none.
+
+/** num → minted w:id, for the references the body export writes. */
+const NEW_NOTE_IDS = new WeakMap<ExportCtx, Map<number, string>>();
+
+const FOOTNOTES_CT =
+  '<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>';
+
+interface NewNote {
+  num: number;
+  id: string;
+  json: unknown;
+}
+
+async function planNewFootnotes(
+  doc: PMNode,
+  ctx: ExportCtx,
+  carry: JSZip | undefined,
+): Promise<{ notes: NewNote[]; carriedXml: string | null } | null> {
+  const bodies = doc.attrs['footnoteBodies'] as Record<string, unknown> | null;
+  if (!bodies || Object.keys(bodies).length === 0) return null;
+  const wanted: number[] = [];
+  doc.descendants((n) => {
+    const fn = n.isText
+      ? n.marks.find((m) => m.type.name === 'footnote')
+      : null;
+    const num = fn ? Number(fn.attrs['num']) : NaN;
+    if (
+      fn &&
+      fn.attrs['id'] == null &&
+      bodies[String(num)] != null &&
+      !wanted.includes(num)
+    )
+      wanted.push(num);
+    return true;
+  });
+  if (wanted.length === 0) return null;
+  const carriedXml =
+    (await carry?.file('word/footnotes.xml')?.async('string')) ?? null;
+  let next = 1;
+  for (const m of carriedXml?.matchAll(/\bw:id="(-?\d+)"/g) ?? [])
+    next = Math.max(next, Number(m[1]) + 1);
+  const ids = new Map<number, string>();
+  const notes = wanted.map((num) => {
+    const id = String(next++);
+    ids.set(num, id);
+    return { num, id, json: bodies[String(num)] };
+  });
+  NEW_NOTE_IDS.set(ctx, ids);
+  if (!carriedXml)
+    ctx.rels.push(
+      `<Relationship Id="rIdFootnotesB" Type="${R_NS}/footnotes" Target="footnotes.xml"/>`,
+    );
+  return { notes, carriedXml };
+}
+
+/** One new footnote: its paragraphs, the first opening with the reference
+ *  mark Word numbers. */
+function footnoteXml(note: NewNote, doc: PMNode, ctx: ExportCtx): string {
+  let story: PMNode;
+  try {
+    story = doc.type.schema.nodeFromJSON(note.json);
+  } catch {
+    return ''; // malformed attr data must not take the export down
+  }
+  const mark =
+    '<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:footnoteRef/></w:r>' +
+    '<w:r><w:t xml:space="preserve"> </w:t></w:r>';
+  let body = '';
+  story.forEach((block, _o, i) => {
+    if (block.type.name !== 'paragraph') return;
+    const xml = paragraphXml(block, ctx);
+    body +=
+      i === 0
+        ? xml.replace(/^<w:p>(<w:pPr>[\s\S]*?<\/w:pPr>)?/, `$&${mark}`)
+        : xml;
+  });
+  return `<w:footnote w:id="${note.id}">${body || `<w:p>${mark}</w:p>`}</w:footnote>`;
+}
+
+function freshFootnotesXml(notes: string): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<w:footnotes xmlns:w="${W_NS}" xmlns:r="${R_NS}">` +
+    '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>' +
+    '<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>' +
+    `${notes}</w:footnotes>`
+  );
+}
 
 // ── tables ──────────────────────────────────────────────────────────
 
@@ -1971,6 +2066,9 @@ export async function exportDocx(
   const bodyBlocks: PMNode[] = [];
   doc.forEach((b) => bodyBlocks.push(b));
   planTocFields(bodyBlocks);
+  // Footnotes written in bapbong get their w:ids before the body is written
+  // (their references need them); the bodies are written further down.
+  const newNotes = await planNewFootnotes(doc, ctx, opts?.carry);
   const sdt = sdtPlan(bodyBlocks);
   let body = '';
   perf.span('export.body', () =>
@@ -2092,6 +2190,26 @@ export async function exportDocx(
   if (hasComments) {
     zip.file('word/comments.xml', commentsXml(comments));
     zip.file('word/commentsExtended.xml', commentsExtendedXml(comments));
+  }
+  if (newNotes) {
+    const notes = newNotes.notes.map((n) => footnoteXml(n, doc, ctx)).join('');
+    zip.file(
+      'word/footnotes.xml',
+      newNotes.carriedXml
+        ? newNotes.carriedXml.replace(
+            '</w:footnotes>',
+            `${notes}</w:footnotes>`,
+          )
+        : freshFootnotesXml(notes),
+    );
+    if (!newNotes.carriedXml) {
+      const ct = await zip.file('[Content_Types].xml')?.async('string');
+      if (ct && !ct.includes('PartName="/word/footnotes.xml"'))
+        zip.file(
+          '[Content_Types].xml',
+          ct.replace('</Types>', `${FOOTNOTES_CT}</Types>`),
+        );
+    }
   }
   perf.span('export.media', () => {
     for (const { path, base64 } of ctx.media)
