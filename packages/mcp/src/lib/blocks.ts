@@ -41,8 +41,30 @@ export interface CharFormat {
   size?: number;
 }
 
-/** A run of text with character formatting, or a tab. */
-export type Inline = string | ({ text: string } & CharFormat) | { tab: true };
+/** A run of text with character formatting — and, optionally, a hyperlink
+ *  (a web address, "mailto:…", or "#bookmark") — or a tab. */
+export type Inline =
+  | string
+  | ({ text: string; link?: string } & CharFormat)
+  | { tab: true };
+
+/**
+ * A link target an agent may write: http(s), mailto, tel, or a bookmark in
+ * the document ("#name"). A bare address gets https:// the way the editor's
+ * link panel adds it. Anything else — javascript:, file:, data: — is refused:
+ * the user will click it.
+ */
+export function linkTarget(href: string): string {
+  const t = href.trim();
+  if (!t) throw new ContentError('A link needs an address.');
+  if (t.startsWith('#')) return t;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(t)?.[1]?.toLowerCase();
+  if (!scheme) return `https://${t}`;
+  if (['http', 'https', 'mailto', 'tel'].includes(scheme)) return t;
+  throw new ContentError(
+    `A link goes to a web address, "mailto:", "tel:" or "#bookmark" — not ${JSON.stringify(`${scheme}:`)}.`,
+  );
+}
 
 /** A tab stop of the paragraph. `at` is a length: a number is centimetres,
  *  a string may be "100%" (of the text width), "3cm", "1in", "40px". */
@@ -441,8 +463,13 @@ function inlineNodes(
           'No "\\n" inside a paragraph — make separate blocks instead.',
         );
       }
-      if (run.text.length > 0)
-        out.push(schema.text(run.text, marksFor(schema, base, run)));
+      if (run.text.length > 0) {
+        const marks = marksFor(schema, base, run);
+        const link = schema.marks['link'];
+        if (run.link && link)
+          marks.push(link.create({ href: linkTarget(run.link) }));
+        out.push(schema.text(run.text, marks));
+      }
     }
   }
   return out;

@@ -111,6 +111,8 @@ export interface DocBlock {
   /** The section (1-based) the block is in — set only when the document has
    *  more than one, which is when page_setup's `section` means something. */
   section?: number;
+  /** The hyperlinks in the block: the linked text and where it goes. */
+  links?: { text: string; href: string }[];
 }
 
 export interface DocSnapshot {
@@ -152,6 +154,9 @@ export interface Formatting {
   /** Strip the target's character formatting first (links, comments and
    *  footnotes stay), then apply whatever else this Formatting says. */
   clear?: boolean;
+  /** Make the target text a hyperlink to this address (http(s), mailto,
+   *  tel, "#bookmark"); null unlinks it. */
+  link?: string | null;
   /** Paragraph alignment of the block(s) containing the target text. */
   align?: 'left' | 'center' | 'right' | 'justify';
   /** Word "Heading N" for the containing paragraph; 0 or null = body text. */

@@ -49,6 +49,7 @@ export const getDocument = defineCommand({
   description:
     'Read the whole document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
     'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
+    'Hyperlinks are listed per block (links: [{ text, href }]). ' +
     'Returns docVersion: pass it as expectedVersion to mutation tools so concurrent edits are detected. ' +
     'Block indexes are only stable within one docVersion.',
   input: { documentId },
@@ -181,7 +182,7 @@ export const applyFormatting = defineCommand({
   description:
     'Format text or a paragraph. Address it by exact text (target_text, matched once or with occurrence — same rules ' +
     'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
-    '(true applies, false removes), font_size, font, color, highlight and vertical_align apply to the text ' +
+    '(true applies, false removes), font_size, font, color, highlight, vertical_align and link apply to the text ' +
     '(clear_formatting strips the text back to plain first); align, heading (1-6, 0 = body text), style ' +
     "(Title/Subtitle/Normal), tabs (replace the paragraph's tab stops) and list apply to the containing paragraph. " +
     'list "bullet"/"number" makes it a list item — it joins a list of that kind right above it, so turning ' +
@@ -226,6 +227,13 @@ export const applyFormatting = defineCommand({
       .optional()
       .describe('Highlight colour "#RRGGBB", or "none".'),
     vertical_align: z.enum(['superscript', 'subscript', 'baseline']).optional(),
+    link: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Make the text a hyperlink: a web address, "mailto:…", "tel:…" or "#bookmark"; "none" unlinks it.',
+      ),
     clear_formatting: z
       .boolean()
       .optional()
@@ -277,6 +285,7 @@ export const applyFormatting = defineCommand({
       highlight,
       vertical_align,
       clear_formatting,
+      link,
       heading,
       style,
       list,
@@ -313,6 +322,9 @@ export const applyFormatting = defineCommand({
                 }
               : {}),
             ...(clear_formatting ? { clear: true } : {}),
+            ...(link !== undefined
+              ? { link: link === 'none' ? null : link }
+              : {}),
             ...(heading !== undefined ? { heading } : {}),
             ...(style !== undefined
               ? { style: style === 'Normal' ? null : style }

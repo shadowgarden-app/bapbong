@@ -27,7 +27,9 @@ const align = z.enum(['left', 'center', 'right', 'justify']);
 
 export const inlineSchema = z.union([
   z.string(),
-  z.object({ text: z.string(), ...marks }).strict(),
+  z
+    .object({ text: z.string(), link: z.string().min(1).optional(), ...marks })
+    .strict(),
   z.object({ tab: z.literal(true) }).strict(),
 ]);
 
@@ -169,7 +171,8 @@ export const CONTENT_GRAMMAR =
   'list?: "bullet"|"number", level?: 1-3, …format }, ' +
   'or { table: rows, widths?: [cm | "%" per column], borders?: "grid"|"none"|"outer", header?: true, align?: "center" } ' +
   'where a row is a list of cells and a cell is text | inlines | { text, colspan?, align?, shading?: "#RRGGBB", …format }. ' +
-  'Inlines: text | { text, …format } | { tab: true }. Format (on an inline, a paragraph or a cell): bold?, italic?, ' +
+  'Inlines: text | { text, link?: "https://…" | "mailto:…" | "#bookmark", …format } | { tab: true }. ' +
+  'Format (on an inline, a paragraph or a cell): bold?, italic?, ' +
   'underline?, strike?, superscript?, subscript?, color?: "#RRGGBB", highlight?: "#RRGGBB", font?: name, size?: pt. ' +
   'Never draw a table, a column or a dotted line with characters: use a table block ' +
   '(borders "none" for side-by-side text such as signature areas) and a tab with a leader for fill-in lines. ' +

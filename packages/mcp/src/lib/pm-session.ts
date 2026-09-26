@@ -42,6 +42,7 @@ import {
   buildContent,
   columnWidths,
   lengthToPx,
+  linkTarget,
   listKindOf,
   mintList,
   referencedTableStyles,
@@ -179,6 +180,8 @@ export class PmDocSession implements DocumentSession {
           return image;
         });
         if (images.length > 0) block.images = images;
+        const links = blockLinks(node);
+        if (links.length > 0) block.links = links;
         return block;
       },
     );
@@ -315,6 +318,7 @@ export class PmDocSession implements DocumentSession {
     ): Record<string, unknown> | null | undefined =>
       v === undefined ? undefined : v === null ? null : make(v);
     const valued: [string, Record<string, unknown> | null | undefined][] = [
+      ['link', value(format.link, (href) => ({ href: linkTarget(href) }))],
       ['fontFamily', value(format.fontFamily, (family) => ({ family }))],
       ['textColor', value(format.color, (color) => ({ color }))],
       ['highlight', value(format.highlight, (color) => ({ color }))],
@@ -1523,6 +1527,27 @@ function columnWidthsTr(
     }
   }
   return tr;
+}
+
+/** The hyperlinks of a block, adjacent runs to one address read as one. */
+function blockLinks(block: PMNode): { text: string; href: string }[] {
+  const out: { text: string; href: string }[] = [];
+  let open: { text: string; href: string } | null = null;
+  block.forEach((child) => {
+    const href = child.marks.find((m) => m.type.name === 'link')?.attrs[
+      'href'
+    ] as string | undefined;
+    if (!href || !child.isText) {
+      open = null;
+      return;
+    }
+    if (open && open.href === href) open.text += child.text ?? '';
+    else {
+      open = { text: child.text ?? '', href };
+      out.push(open);
+    }
+  });
+  return out;
 }
 
 /** A paragraph's list membership (0-based level), or null for body text. */
