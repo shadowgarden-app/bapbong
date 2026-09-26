@@ -1245,79 +1245,13 @@ export class PmDocSession implements DocumentSession {
   /** All textblocks (paragraphs, incl. inside table cells) in reading order,
    *  each knowing which table cell holds it. */
   private textblocks(): TextBlock[] {
-    const out: TextBlock[] = [];
-    let tables = 0;
-    const walk = (node: PMNode, base: number, ctx: TextBlock['table']) => {
-      node.forEach((child, offset, i) => {
-        const pos = base + offset;
-        if (child.isTextblock) {
-          out.push(
-            ctx ? { node: child, pos, table: ctx } : { node: child, pos },
-          );
-          return;
-        }
-        let next = ctx;
-        if (child.type.name === 'table')
-          next = { index: tables++, row: 0, cell: 0 };
-        else if (child.type.name === 'table_row' && ctx)
-          next = { ...ctx, row: i, cell: 0 };
-        else if (child.type.name === 'table_cell' && ctx)
-          next = { ...ctx, cell: i };
-        walk(child, pos + 1, next);
-      });
-    };
-    walk(this.host.getState().doc, 0, undefined);
-    return out;
+    return textblocksOf(this.host.getState().doc);
   }
 
   /** Every occurrence of `query`, atom-safe (matches never span images/fields
    *  or block boundaries), in document order with absolute PM positions. */
   private hits(query: string): Hit[] {
-    if (query.length === 0) return [];
-    const out: Hit[] = [];
-    this.textblocks().forEach(({ node, pos }, blockIndex) => {
-      // Concatenate the block's text children, breaking the searchable string
-      // at non-text inlines so a match can't pretend to span an atom. Each
-      // segment records where it starts in the joined string AND in the doc.
-      const segments: {
-        joinedStart: number;
-        length: number;
-        startPos: number;
-      }[] = [];
-      let joined = '';
-      node.forEach((child, offset) => {
-        if (child.isText && child.text) {
-          segments.push({
-            joinedStart: joined.length,
-            length: child.text.length,
-            startPos: pos + 1 + offset,
-          });
-          joined += child.text;
-        } else {
-          joined += '￿'; // unmatchable atom sentinel
-        }
-      });
-      let at = joined.indexOf(query);
-      while (at !== -1) {
-        // A match may span adjacent text segments (mark changes split runs);
-        // adjacency in `joined` implies adjacency in the doc, so mapping the
-        // START offset to a position is enough.
-        const seg = segments.find(
-          (s) => at >= s.joinedStart && at < s.joinedStart + s.length,
-        );
-        if (seg) {
-          const from = seg.startPos + (at - seg.joinedStart);
-          out.push({
-            from,
-            to: from + query.length,
-            blockIndex,
-            context: contextAround(joined.replace(/￿/g, ' '), at, query.length),
-          });
-        }
-        at = joined.indexOf(query, at + 1);
-      }
-    });
-    return out;
+    return hitsIn(this.textblocks(), query);
   }
 
   /** Where an {@link InsertAnchor} puts new blocks, in PM positions. */
@@ -1410,30 +1344,116 @@ export class PmDocSession implements DocumentSession {
   }
 
   private uniqueHit(text: string, occurrence?: number): Hit {
-    const all = this.hits(text);
-    if (all.length === 0) {
-      throw new AnchorError(
-        `Text not found in the document: ${JSON.stringify(clip(text))}. ` +
-          `Anchors match within one paragraph — check get_document for the exact text.`,
-      );
-    }
-    if (occurrence !== undefined) {
-      const hit = all[occurrence - 1];
-      if (!hit) {
-        throw new AnchorError(
-          `occurrence ${occurrence} is out of range — the text matches ${all.length} time(s).`,
-        );
-      }
-      return hit;
-    }
-    if (all.length > 1) {
-      throw new AnchorError(
-        `The text matches ${all.length} times — pass occurrence (1-${all.length}) to pick one, ` +
-          `or use a longer, unique anchor.`,
-      );
-    }
-    return all[0];
+    return pickHit(this.hits(text), text, occurrence, 'the document');
   }
+}
+
+/** All textblocks of `doc` (paragraphs, incl. inside table cells) in reading
+ *  order, each knowing which table cell holds it. */
+function textblocksOf(doc: PMNode): TextBlock[] {
+  const out: TextBlock[] = [];
+  let tables = 0;
+  const walk = (node: PMNode, base: number, ctx: TextBlock['table']) => {
+    node.forEach((child, offset, i) => {
+      const pos = base + offset;
+      if (child.isTextblock) {
+        out.push(ctx ? { node: child, pos, table: ctx } : { node: child, pos });
+        return;
+      }
+      let next = ctx;
+      if (child.type.name === 'table')
+        next = { index: tables++, row: 0, cell: 0 };
+      else if (child.type.name === 'table_row' && ctx)
+        next = { ...ctx, row: i, cell: 0 };
+      else if (child.type.name === 'table_cell' && ctx)
+        next = { ...ctx, cell: i };
+      walk(child, pos + 1, next);
+    });
+  };
+  walk(doc, 0, undefined);
+  return out;
+}
+
+/** Every occurrence of `query` in `blocks`, atom-safe: matches never span
+ *  images, fields or block boundaries. */
+function hitsIn(blocks: TextBlock[], query: string): Hit[] {
+  if (query.length === 0) return [];
+  const out: Hit[] = [];
+  blocks.forEach(({ node, pos }, blockIndex) => {
+    // Concatenate the block's text children, breaking the searchable string
+    // at non-text inlines so a match can't pretend to span an atom. Each
+    // segment records where it starts in the joined string AND in the doc.
+    const segments: {
+      joinedStart: number;
+      length: number;
+      startPos: number;
+    }[] = [];
+    let joined = '';
+    node.forEach((child, offset) => {
+      if (child.isText && child.text) {
+        segments.push({
+          joinedStart: joined.length,
+          length: child.text.length,
+          startPos: pos + 1 + offset,
+        });
+        joined += child.text;
+      } else {
+        joined += '￿'; // unmatchable atom sentinel
+      }
+    });
+    let at = joined.indexOf(query);
+    while (at !== -1) {
+      // A match may span adjacent text segments (mark changes split runs);
+      // adjacency in `joined` implies adjacency in the doc, so mapping the
+      // START offset to a position is enough.
+      const seg = segments.find(
+        (s) => at >= s.joinedStart && at < s.joinedStart + s.length,
+      );
+      if (seg) {
+        const from = seg.startPos + (at - seg.joinedStart);
+        out.push({
+          from,
+          to: from + query.length,
+          blockIndex,
+          context: contextAround(joined.replace(/￿/g, ' '), at, query.length),
+        });
+      }
+      at = joined.indexOf(query, at + 1);
+    }
+  });
+  return out;
+}
+
+/** The one hit an anchor means: unique, or picked by occurrence — with the
+ *  sentence that teaches the retry when it is neither. */
+function pickHit(
+  all: Hit[],
+  text: string,
+  occurrence: number | undefined,
+  where: string,
+): Hit {
+  if (all.length === 0) {
+    throw new AnchorError(
+      `Text not found in ${where}: ${JSON.stringify(clip(text))}. ` +
+        `Anchors match within one paragraph — check get_document for the exact text.`,
+    );
+  }
+  if (occurrence !== undefined) {
+    const hit = all[occurrence - 1];
+    if (!hit) {
+      throw new AnchorError(
+        `occurrence ${occurrence} is out of range — the text matches ${all.length} time(s).`,
+      );
+    }
+    return hit;
+  }
+  if (all.length > 1) {
+    throw new AnchorError(
+      `The text matches ${all.length} times — pass occurrence (1-${all.length}) to pick one, ` +
+        `or use a longer, unique anchor.`,
+    );
+  }
+  return all[0];
 }
 
 /** What an image box actually holds — an agent about to swap one out needs
