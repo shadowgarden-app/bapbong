@@ -48,6 +48,7 @@ export type SessionOpName =
   | 'editChrome'
   | 'listStyles'
   | 'insertToc'
+  | 'insertFootnote'
   | 'getSelection'
   | 'save'
   // Host-level, handled by the caller before executeOp (see its note):
@@ -176,6 +177,12 @@ function run(
       );
     case 'listStyles':
       return session.listStyles();
+    case 'insertFootnote':
+      return session.insertFootnote(
+        args[0] as { text: string; occurrence?: number },
+        args[1] as Content,
+        args[2] as MutationOptions | undefined,
+      );
     case 'insertToc':
       return session.insertToc(
         args[0] as TocOptions,
@@ -330,6 +337,16 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['pageSetup']>>>(
       'pageSetup',
       [setup, opts],
+    );
+  }
+  insertFootnote(
+    anchor: { text: string; occurrence?: number },
+    content: Content,
+    opts?: MutationOptions,
+  ) {
+    return this.call<Awaited<ReturnType<DocumentSession['insertFootnote']>>>(
+      'insertFootnote',
+      [anchor, content, opts],
     );
   }
   insertToc(options: TocOptions, anchor: InsertAnchor, opts?: MutationOptions) {

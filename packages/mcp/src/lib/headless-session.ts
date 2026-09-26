@@ -10,6 +10,7 @@
 import {
   catalogTableStyles,
   documentStyles,
+  effectiveFootnotes,
   effectiveSectionChrome,
   styleFormatting,
   importDocx,
@@ -67,6 +68,8 @@ export class HeadlessSession implements DocumentSession {
 
   private state: EditorState;
   private version = 1;
+  /** Parsed bodies of footnotes written here, by their JSON object. */
+  private readonly footnoteCache = new WeakMap<object, PMNode>();
   private dirty = false;
   private readonly inner: PmDocSession;
 
@@ -77,7 +80,7 @@ export class HeadlessSession implements DocumentSession {
     /** The header and footer stories the file came with. */
     private readonly imported: Pick<
       DocxImport,
-      'headers' | 'footers' | 'sectionChrome' | 'titlePg'
+      'headers' | 'footers' | 'sectionChrome' | 'titlePg' | 'footnotes'
     > | null = null,
   ) {
     this.state = state;
@@ -113,6 +116,12 @@ export class HeadlessSession implements DocumentSession {
       },
       styleFormatting: (id) =>
         this.raw ? styleFormatting(this.raw, id) : Promise.resolve(null),
+      footnotes: () =>
+        effectiveFootnotes(
+          this.state.doc,
+          this.imported?.footnotes,
+          this.footnoteCache,
+        ) ?? {},
       chrome: () => {
         const imported = this.imported;
         if (!imported) return [];
@@ -261,6 +270,13 @@ export class HeadlessSession implements DocumentSession {
   }
   listStyles(): Promise<DocStyle[]> {
     return this.inner.listStyles();
+  }
+  insertFootnote(
+    anchor: { text: string; occurrence?: number },
+    content: Content,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { number: string }> {
+    return this.inner.insertFootnote(anchor, content, opts);
   }
   insertToc(
     options: TocOptions,

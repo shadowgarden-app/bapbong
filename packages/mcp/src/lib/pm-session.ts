@@ -18,6 +18,7 @@ import {
   VersionConflictError,
   type DocBlock,
   type DocChrome,
+  type DocFootnote,
   type DocImage,
   type DocImageKind,
   type DocSnapshot,
@@ -95,6 +96,10 @@ export interface PmSessionHost {
    *  be done. This tier carries no commands of its own. Absent → page_setup
    *  is not offered. */
   pageSetup?(state: EditorState, change: PageSetupChange): Transaction | null;
+  /** Every footnote body the document shows, by its reference's num (the
+   *  model's effectiveFootnotes). Absent → only bodies written in bapbong
+   *  are read. */
+  footnotes?(): Record<number, PMNode>;
   /** Lay the document out and fill in the page numbers of the table of
    *  contents at `pos` (the editor's own "Update table of contents"); true
    *  when it did. Absent → a new TOC's numbers are left pending. */
@@ -229,12 +234,41 @@ export class PmDocSession implements DocumentSession {
       },
     );
     const chrome = this.chrome();
+    const footnotes = this.footnoteList();
     return {
       docVersion: this.host.getVersion(),
       blocks,
       ...(chrome.length > 0 ? { chrome } : {}),
+      ...(footnotes.length > 0 ? { footnotes } : {}),
       meta: this.host.meta(),
     };
+  }
+
+  /** The footnotes in reference order: the number shown, and the text. */
+  private footnoteList(): DocFootnote[] {
+    const doc = this.host.getState().doc;
+    const bodies: Record<number, PMNode> = {
+      ...(this.host.footnotes?.() ?? {}),
+    };
+    const own =
+      (doc.attrs['footnoteBodies'] as Record<string, unknown> | null) ?? {};
+    for (const [key, json] of Object.entries(own)) {
+      if (bodies[Number(key)] || json == null) continue;
+      try {
+        bodies[Number(key)] = doc.type.schema.nodeFromJSON(json);
+      } catch {
+        /* malformed attr data: not listed */
+      }
+    }
+    const out: DocFootnote[] = [];
+    for (const { num, shown } of footnoteRefs(doc)) {
+      const body = bodies[num];
+      if (!body) continue;
+      let text = body.textBetween(0, body.content.size, '\n').trim();
+      if (text.startsWith(shown)) text = text.slice(shown.length).trimStart();
+      out.push({ number: shown, text });
+    }
+    return out;
   }
 
   /** The headers and footers with text in them, each story once with the
@@ -900,6 +934,95 @@ export class PmDocSession implements DocumentSession {
     return {
       docVersion: this.host.getVersion(),
       sections: [...changed.keys()].map((i) => i + 1),
+    };
+  }
+
+  async insertFootnote(
+    anchor: { text: string; occurrence?: number },
+    content: Content,
+    opts: MutationOptions = {},
+  ): Promise<MutationResult & { number: string }> {
+    this.checkVersion(opts.expectedVersion);
+    const state = this.host.getState();
+    const { schema } = state;
+    const footnote = schema.marks['footnote'];
+    const sup = schema.marks['vertAlign'];
+    if (
+      !footnote ||
+      !sup ||
+      !schema.nodes['doc'].spec.attrs?.['footnoteBodies']
+    ) {
+      throw new ContentError('This document cannot hold footnotes.');
+    }
+    const { nodes, numbering } = buildContent(content, schema, {
+      contentWidth: this.contentWidth(),
+    });
+    if (numbering || nodes.some((n) => n.type.name !== 'paragraph')) {
+      throw new ContentError(
+        'A footnote holds paragraphs of text — no tables or lists.',
+      );
+    }
+    let linked = false;
+    for (const n of nodes)
+      n.descendants((c) => {
+        if (c.marks.some((m) => m.type.name === 'link')) linked = true;
+        return !linked;
+      });
+    if (linked) {
+      throw new ContentError(
+        'A footnote cannot hold a link yet — write the address as text.',
+      );
+    }
+    const hit = this.uniqueHit(anchor.text, anchor.occurrence);
+    const at = hit.to;
+
+    const refs = footnoteRefs(state.doc);
+    const bodies =
+      (state.doc.attrs['footnoteBodies'] as Record<string, unknown> | null) ??
+      {};
+    const num =
+      Math.max(
+        0,
+        ...refs.map((r) => r.num),
+        ...Object.keys(bodies).map(Number),
+      ) + 1;
+    // Word numbers footnotes in order; a reference shows its place.
+    const numbered = (r: { shown: string }) => /^\d+$/.test(r.shown);
+    const display = refs.filter((r) => r.pos < at && numbered(r)).length + 1;
+    let tr = state.tr.insert(
+      at,
+      schema.text(String(display), [
+        sup.create({ value: 'super' }),
+        footnote.create({ num, id: null }),
+      ]),
+    );
+    // The ones after it move up one.
+    const later = footnoteRefs(tr.doc).filter(
+      (r) => r.pos > at && r.num !== num && numbered(r),
+    );
+    for (const r of later.reverse()) {
+      const node = tr.doc.nodeAt(r.pos);
+      if (!node) continue;
+      tr = tr.replaceWith(
+        r.pos,
+        r.pos + node.nodeSize,
+        schema.text(String(Number(r.shown) + 1), node.marks),
+      );
+    }
+    const story = schema.node(
+      'doc',
+      null,
+      nodes.length > 0 ? nodes : [schema.nodes['paragraph'].create()],
+    );
+    tr = tr.setDocAttribute('footnoteBodies', {
+      ...bodies,
+      [String(num)]: story.toJSON(),
+    });
+    this.host.apply(tr);
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: at, to: at + String(display).length },
+      number: String(display),
     };
   }
 
@@ -1997,6 +2120,21 @@ function blockLinks(block: PMNode): { text: string; href: string }[] {
       open = { text: child.text ?? '', href };
       out.push(open);
     }
+  });
+  return out;
+}
+
+/** The footnote references of `doc` in order: num, the number shown, pos. */
+function footnoteRefs(
+  doc: PMNode,
+): { num: number; shown: string; pos: number }[] {
+  const out: { num: number; shown: string; pos: number }[] = [];
+  doc.descendants((n, pos) => {
+    if (!n.isText) return true;
+    const fn = n.marks.find((m) => m.type.name === 'footnote');
+    if (fn)
+      out.push({ num: Number(fn.attrs['num']), shown: n.text ?? '', pos });
+    return false;
   });
   return out;
 }

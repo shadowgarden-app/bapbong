@@ -290,6 +290,7 @@ describe('createMcpServer (end-to-end over MCP)', () => {
       'find_text',
       'get_document',
       'insert_content',
+      'insert_footnote',
       'insert_toc',
       'replace_text',
       'save_document',

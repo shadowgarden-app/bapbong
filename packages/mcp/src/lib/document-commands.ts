@@ -75,6 +75,7 @@ export const getDocument = defineCommand({
     'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
     'Hyperlinks are listed per block (links: [{ text, href }]). Headers and footers with text come as chrome ' +
     '(part, variant, the sections showing it, text; {page} is a page number) — edit them with edit_header_footer. ' +
+    'Footnotes come as footnotes: [{ number, text }]. ' +
     'Returns docVersion: pass it as expectedVersion to mutation tools so concurrent edits are detected. ' +
     'Block indexes are only stable within one docVersion.',
   input: { documentId },
@@ -983,6 +984,42 @@ export const editHeaderFooter = defineCommand({
     }),
 });
 
+export const insertFootnote = defineCommand({
+  name: 'insert_footnote',
+  title: 'Add a footnote',
+  description:
+    'A footnote whose reference number goes right after anchor_text (exact text, matched once or with ' +
+    'occurrence) and whose note is content — text, or paragraph blocks with formatting (no tables, lists or ' +
+    'links). Numbers follow the order in the document: the ones after it move up. get_document lists the ' +
+    'footnotes. Never write a note as a superscript number and a line at the end of the page.',
+  input: {
+    documentId,
+    anchor_text: z
+      .string()
+      .min(1)
+      .describe(
+        'Exact text the reference follows (the word or sentence it annotates).',
+      ),
+    content: contentSchema.describe(
+      'The note: plain text, or paragraph blocks.',
+    ),
+    occurrence,
+    expectedVersion,
+  },
+  effect: 'edit',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) =>
+      json(
+        await s.insertFootnote(
+          { text: a.anchor_text, occurrence: a.occurrence },
+          a.content,
+          { expectedVersion: a.expectedVersion },
+        ),
+      ),
+    ),
+});
+
 export const insertToc = defineCommand({
   name: 'insert_toc',
   title: 'Insert a table of contents',
@@ -1100,6 +1137,7 @@ export const documentCommands: readonly AgentCommand<
   listStyles,
   replaceText,
   insertContent,
+  insertFootnote,
   insertToc,
   deleteBlock,
   applyFormatting,

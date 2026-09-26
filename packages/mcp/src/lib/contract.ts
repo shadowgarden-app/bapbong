@@ -129,11 +129,21 @@ export interface DocChrome {
   text: string;
 }
 
+/** A footnote as get_document reports it. */
+export interface DocFootnote {
+  /** The number its reference shows. */
+  number: string;
+  /** Its text (without the number). */
+  text: string;
+}
+
 export interface DocSnapshot {
   docVersion: string;
   blocks: DocBlock[];
   /** Headers and footers with text in them, when the host can read them. */
   chrome?: DocChrome[];
+  /** The footnotes, in the order their references appear. */
+  footnotes?: DocFootnote[];
   /** Host metadata (file name, dirty state…) — informational only. */
   meta: { name?: string; dirty?: boolean };
 }
@@ -419,6 +429,14 @@ export interface DocumentSession {
     edit: ChromeEdit,
     opts?: MutationOptions,
   ): Promise<MutationResult & { sections: number[] }>;
+  /** A footnote whose reference goes right after `anchor` (exact text,
+   *  matched once or with occurrence) and whose body is `content`. The
+   *  references after it are numbered on. One transaction. */
+  insertFootnote(
+    anchor: { text: string; occurrence?: number },
+    content: Content,
+    opts?: MutationOptions,
+  ): Promise<MutationResult & { number: string }>;
   /** A table of contents of the document's headings, as a real TOC field
    *  (entries linked to bookmarks on the headings). Page numbers are filled
    *  in when the host can lay the document out, else left for Word / the
