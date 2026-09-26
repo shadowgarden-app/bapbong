@@ -17,6 +17,7 @@ import {
   ContentError,
   VersionConflictError,
   type DocBlock,
+  type DocChrome,
   type DocImage,
   type DocImageKind,
   type DocSnapshot,
@@ -85,6 +86,13 @@ export interface PmSessionHost {
    *  be done. This tier carries no commands of its own. Absent → page_setup
    *  is not offered. */
   pageSetup?(state: EditorState, change: PageSetupChange): Transaction | null;
+  /** Every section's header and footer stories as the pages show them (one
+   *  entry when the sections share them). Absent → get_document reports no
+   *  chrome. */
+  chrome?(): {
+    headers: Record<string, PMNode>;
+    footers: Record<string, PMNode>;
+  }[];
 }
 
 /** A4 with 1in margins — what the layout shows when the doc has no page
@@ -185,11 +193,41 @@ export class PmDocSession implements DocumentSession {
         return block;
       },
     );
+    const chrome = this.chrome();
     return {
       docVersion: this.host.getVersion(),
       blocks,
+      ...(chrome.length > 0 ? { chrome } : {}),
       meta: this.host.meta(),
     };
+  }
+
+  /** The headers and footers with text in them, each story once with the
+   *  sections that show it. */
+  private chrome(): DocChrome[] {
+    const perSection = this.host.chrome?.() ?? [];
+    const out: DocChrome[] = [];
+    const seen = new Map<string, DocChrome>();
+    perSection.forEach((stories, i) => {
+      for (const [part, set] of [
+        ['header', stories.headers],
+        ['footer', stories.footers],
+      ] as const) {
+        for (const [variant, story] of Object.entries(set)) {
+          const text = story.textBetween(0, story.content.size, '\n').trim();
+          if (!text) continue;
+          const key = `${part}\u0000${variant}\u0000${text}`;
+          const known = seen.get(key);
+          if (known) known.sections.push(i + 1);
+          else {
+            const entry: DocChrome = { part, variant, sections: [i + 1], text };
+            seen.set(key, entry);
+            out.push(entry);
+          }
+        }
+      }
+    });
+    return out;
   }
 
   async find(query: string): Promise<FindMatch[]> {

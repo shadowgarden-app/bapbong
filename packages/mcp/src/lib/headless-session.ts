@@ -9,11 +9,13 @@
  */
 import {
   catalogTableStyles,
+  effectiveSectionChrome,
   importDocx,
   exportDocx,
   pageSetupTransaction,
   type DocxImport,
 } from '@shadow-garden/bapbong-headless';
+import type { Node as PMNode } from 'prosemirror-model';
 import { EditorState, type Transaction } from 'prosemirror-state';
 import type {
   Content,
@@ -67,6 +69,11 @@ export class HeadlessSession implements DocumentSession {
     state: EditorState,
     private readonly raw: DocxImport['raw'],
     private readonly opts: HeadlessSessionOptions,
+    /** The header and footer stories the file came with. */
+    private readonly imported: Pick<
+      DocxImport,
+      'headers' | 'footers' | 'sectionChrome' | 'titlePg'
+    > | null = null,
   ) {
     this.state = state;
     const host: PmSessionHost = {
@@ -95,6 +102,28 @@ export class HeadlessSession implements DocumentSession {
         : {}),
       // The editor's own Layout commands, composed.
       pageSetup: (state, change) => pageSetupTransaction(state, change),
+      chrome: () => {
+        const imported = this.imported;
+        if (!imported) return [];
+        const flat = { headers: imported.headers, footers: imported.footers };
+        const merged = effectiveSectionChrome<PMNode>(
+          this.state.doc,
+          {
+            sectionChrome: imported.sectionChrome ?? null,
+            headers: imported.headers,
+            footers: imported.footers,
+            titlePg: imported.titlePg,
+          },
+          (json) => {
+            try {
+              return this.state.schema.nodeFromJSON(json);
+            } catch {
+              return null;
+            }
+          },
+        );
+        return merged ?? [flat];
+      },
       tableStyle: () => {
         const grid = catalogTableStyles().find((t) => t.id === 'TableGrid');
         return grid ? { styleId: grid.id, style: grid.style } : undefined;
@@ -107,12 +136,17 @@ export class HeadlessSession implements DocumentSession {
     bytes: ArrayBuffer | Uint8Array,
     opts: HeadlessSessionOptions = {},
   ): Promise<HeadlessSession> {
-    const { doc, raw } = await importDocx(
+    const imported = await importDocx(
       bytes instanceof Uint8Array
         ? (bytes.slice().buffer as ArrayBuffer)
         : bytes,
     );
-    return new HeadlessSession(EditorState.create({ doc }), raw, opts);
+    return new HeadlessSession(
+      EditorState.create({ doc: imported.doc }),
+      imported.raw,
+      opts,
+      imported,
+    );
   }
 
   /** Optimistic-lock token. Prefixed with the document id when the host gave

@@ -49,7 +49,8 @@ export const getDocument = defineCommand({
   description:
     'Read the whole document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
     'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
-    'Hyperlinks are listed per block (links: [{ text, href }]). ' +
+    'Hyperlinks are listed per block (links: [{ text, href }]). Headers and footers with text come as chrome ' +
+    '(part, variant, the sections showing it, text) — readable, not yet editable. ' +
     'Returns docVersion: pass it as expectedVersion to mutation tools so concurrent edits are detected. ' +
     'Block indexes are only stable within one docVersion.',
   input: { documentId },

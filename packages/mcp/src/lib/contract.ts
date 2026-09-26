@@ -115,9 +115,25 @@ export interface DocBlock {
   links?: { text: string; href: string }[];
 }
 
+/** A header or footer as the pages show it. Read-only here: no command
+ *  edits one yet. */
+export interface DocChrome {
+  part: 'header' | 'footer';
+  /** "default" (every page), "first" (a section's first page) or "even". */
+  variant: string;
+  /** The 1-based sections that show it — a story linked to the previous
+   *  section's is listed once, with both. */
+  sections: number[];
+  /** Its text, one line per paragraph; a page number shows as the field's
+   *  placeholder. */
+  text: string;
+}
+
 export interface DocSnapshot {
   docVersion: string;
   blocks: DocBlock[];
+  /** Headers and footers with text in them, when the host can read them. */
+  chrome?: DocChrome[];
   /** Host metadata (file name, dirty state…) — informational only. */
   meta: { name?: string; dirty?: boolean };
 }
