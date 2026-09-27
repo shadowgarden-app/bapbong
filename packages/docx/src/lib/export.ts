@@ -23,6 +23,16 @@ import { audit } from './audit.js';
 import { catalogStyleXml } from './table-style-catalog.js';
 import { parsePageGeometry } from './docx.js';
 import { child, parseXml } from './ooxml.js';
+import {
+  carriedVerbatim,
+  parseRels,
+  partSink,
+  relativeTarget,
+  writePartClosure,
+  type CarriedPart,
+  type CarriedRel,
+  type PartSink,
+} from './package-parts.js';
 
 /**
  * DOCX export (round-trip). Phases:
@@ -75,6 +85,30 @@ interface ExportCtx {
   lastRun: Map<number, number>;
   openComments: Set<number>;
   runIdx: number;
+  /** Package parts carried drawings bring along (a chart's part, workbook,
+   *  theme override…), written beside the body. Shared by every story. */
+  parts: PartSink;
+  /** Body only: which carried relationships the source package still holds
+   *  verbatim, so the drawing keeps its original id (see planPartReuse).
+   *  Null in a story written as a new part — its rels start empty. */
+  reuse: PartReuse | null;
+}
+
+/** A carried drawing's attr: its XML plus what the XML references. */
+interface RawDrawing {
+  xml: string;
+  float?: Record<string, unknown> | null;
+  rels?: CarriedRel[];
+  parts?: CarriedPart[];
+}
+
+interface PartReuse {
+  /** Per drawing attr: the ids of its rels the carried package holds with
+   *  exactly the same parts. */
+  verbatim: WeakMap<RawDrawing, Set<string>>;
+  /** Ids already taken by a drawing: a second copy of the same chart (a
+   *  paste) must not share the first one's parts, so it writes its own. */
+  claimed: Set<string>;
 }
 
 const commentIdsOf = (node: PMNode): number[] =>
@@ -415,12 +449,8 @@ function shapeXml(node: PMNode, ctx: ExportCtx): string {
  * Not moved: the VML Fallback twin's position (style margins). Word reads
  * the Choice; only a pre-2010 consumer would see the old spot.
  */
-function rawDrawingXml(
-  node: PMNode,
-  raw: { xml: string; float?: Record<string, unknown> | null },
-  ctx: ExportCtx,
-): string {
-  let xml = raw.xml.replace(
+function rawDrawingXml(node: PMNode, raw: RawDrawing, ctx: ExportCtx): string {
+  let xml = carriedRelIds(raw, ctx).replace(
     /(<wp:docPr\b[^>]*?\bid=")\d+(")/g,
     (_m, a: string, b: string) => `${a}${ctx.nextId++}${b}`,
   );
@@ -442,11 +472,88 @@ function rawDrawingXml(
   return `<w:r>${xml}</w:r>`;
 }
 
+/**
+ * The drawing's XML with each relationship it references re-established in
+ * the package being written: kept as-is where the carried source still holds
+ * that relationship and its parts verbatim, else pointed at a copy of the
+ * parts written under fresh names (a chart pasted in from another document,
+ * a second copy of one, a header written as a new part).
+ */
+function carriedRelIds(raw: RawDrawing, ctx: ExportCtx): string {
+  const ids = new Map<string, string>();
+  for (const rel of raw.rels ?? []) {
+    if (
+      !rel.external &&
+      ctx.reuse?.verbatim.get(raw)?.has(rel.id) &&
+      !ctx.reuse.claimed.has(rel.id)
+    ) {
+      ctx.reuse.claimed.add(rel.id);
+      continue;
+    }
+    const target = rel.external
+      ? rel.target
+      : writePartClosure(rel.target, raw.parts ?? [], ctx.parts);
+    // Parts the import could not load stay referenced as they were.
+    if (target === null) continue;
+    const id = `rId${ctx.nextId++}`;
+    ctx.rels.push(
+      `<Relationship Id="${id}" Type="${esc(rel.type)}" Target="${esc(
+        rel.external ? target : relativeTarget('word/document.xml', target),
+      )}"${rel.external ? ' TargetMode="External"' : ''}/>`,
+    );
+    ids.set(rel.id, id);
+  }
+  if (ids.size === 0) return raw.xml;
+  return raw.xml.replace(
+    /(\sr:[A-Za-z]+=")([^"]*)(")/g,
+    (m, a: string, id: string, b: string) =>
+      ids.has(id) ? `${a}${ids.get(id)}${b}` : m,
+  );
+}
+
+/**
+ * Before the body is written: for each carried drawing, which of its
+ * relationships the carried source package still holds exactly — same id,
+ * same target, same parts byte for byte. Those keep their ids; the parts are
+ * in the package already. Anything else (a drawing pasted from another
+ * document whose ids mean something else here) is written fresh.
+ */
+async function planPartReuse(doc: PMNode, carry: JSZip): Promise<PartReuse> {
+  const verbatim = new WeakMap<RawDrawing, Set<string>>();
+  const drawings: RawDrawing[] = [];
+  doc.descendants((n) => {
+    const raw = n.attrs['rawDrawing'] as RawDrawing | null | undefined;
+    if (n.type.name === 'image' && raw?.rels?.length) drawings.push(raw);
+  });
+  if (drawings.length > 0) {
+    const source = new Map(
+      parseRels(
+        'word/document.xml',
+        await carry.file('word/_rels/document.xml.rels')?.async('string'),
+      ).map((r) => [r.id, r]),
+    );
+    for (const raw of drawings) {
+      const ok = new Set<string>();
+      for (const rel of raw.rels ?? []) {
+        const had = source.get(rel.id);
+        if (
+          !rel.external &&
+          had &&
+          !had.external &&
+          had.type === rel.type &&
+          had.target === rel.target &&
+          (await carriedVerbatim(rel.target, raw.parts ?? [], carry))
+        )
+          ok.add(rel.id);
+      }
+      verbatim.set(raw, ok);
+    }
+  }
+  return { verbatim, claimed: new Set() };
+}
+
 function imageXml(node: PMNode, ctx: ExportCtx): string {
-  const raw = node.attrs['rawDrawing'] as {
-    xml: string;
-    float?: Record<string, unknown> | null;
-  } | null;
+  const raw = node.attrs['rawDrawing'] as RawDrawing | null;
   if (raw?.xml) return rawDrawingXml(node, raw, ctx);
   if (node.attrs['shape']) return shapeXml(node, ctx);
   const src = String(node.attrs['src'] ?? '');
@@ -2040,6 +2147,8 @@ export async function exportDocx(
     lastRun,
     openComments: new Set(),
     runIdx: 0,
+    parts: partSink(opts?.carry ? Object.keys(opts.carry.files) : []),
+    reuse: opts?.carry ? await planPartReuse(doc, opts.carry) : null,
   };
   const origDocXml = opts?.carry
     ? await opts.carry.file('word/document.xml')?.async('string')
@@ -2103,7 +2212,10 @@ export async function exportDocx(
     );
 
   const zip = new JSZip();
-  const chromeCt = (chromePlan?.parts ?? []).map((p) => p.ctOverride);
+  const chromeCt = [
+    ...(chromePlan?.parts ?? []).map((p) => p.ctOverride),
+    ...ctx.parts.overrides,
+  ];
   const styleIds = usedStyleIds(doc);
   let sectPr = ''; // re-attached from the original (carry) for page setup + headers
   if (opts?.carry) {
@@ -2162,6 +2274,8 @@ export async function exportDocx(
     zip.file(part.path, part.xml);
     if (part.relsPath && part.relsXml) zip.file(part.relsPath, part.relsXml);
   }
+  for (const f of ctx.parts.files)
+    zip.file(f.path, f.data, f.base64 ? { base64: true } : undefined);
 
   // Page setup: the modelled geometry (doc.attrs.page) wins over the carried
   // sectPr — but only a real edit rewrites it (byte fidelity otherwise). No
@@ -2389,6 +2503,8 @@ function chromeStoryPart(
     lastRun: new Map(),
     openComments: new Set(),
     runIdx: 0,
+    parts: ctx.parts,
+    reuse: null,
   };
   const storyBlocks: PMNode[] = [];
   node.forEach((b) => storyBlocks.push(b));

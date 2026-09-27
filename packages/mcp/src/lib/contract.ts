@@ -27,8 +27,10 @@ export type { Block, Cell, Content, TableEdit, TabStop } from './blocks.js';
  *
  * - `shape`   a drawn shape (rect, line, …) the editor models;
  * - `drawing` art we paint but do not model — a group of freeform shapes
- *             from the file, kept verbatim so a save never loses it.
- *             Replacing one turns editable art into a flat picture;
+ *             or a chart from the file, kept verbatim (a chart with its
+ *             data) so a save never loses it. Replacing one turns editable
+ *             art, or a chart Word redraws from its data, into a flat
+ *             picture;
  * - `equation` a MathType/OLE object whose picture is only its preview.
  */
 export type DocImageKind = 'bitmap' | 'shape' | 'drawing' | 'equation';

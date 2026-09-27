@@ -96,6 +96,15 @@ import { wmfVectorSpec, WmfVectorResult } from './wmf-vector.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
 import { buildRels, Relationship } from './rels.js';
 import {
+  loadPartClosure,
+  parseContentTypes,
+  parseRels,
+  resolveTarget,
+  type CarriedPart,
+  type CarriedRel,
+} from './package-parts.js';
+import { chartPlaceholder } from './chart.js';
+import {
   parseGradient,
   buildThemeFillResolver,
   buildThemeFontResolver,
@@ -310,6 +319,10 @@ interface Ctx {
    *  declare for itself inside a generated document. */
   nsDecls?: Map<string, string>;
   ignorable?: string[];
+  /** Parts a carried drawing reaches, preloaded because parsing is
+   *  synchronous: each chart part's closure (see loadChartParts), keyed by
+   *  the chart part's path. */
+  carriedParts?: Map<string, CarriedPart[]>;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -506,6 +519,7 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
   // registerVmlShapeTypes for why this cannot live in the shape parser.
   registerVmlShapeTypes(run, ctx);
   const image =
+    parseChart(run, ctx) ??
     parseImage(run, ctx) ??
     parseShape(run, ctx) ??
     parseVmlImage(run, ctx) ??
@@ -906,6 +920,114 @@ function parseCarriedGroup(run: OoxmlNode, ctx: Ctx): PMNode[] | null {
       rawDrawing: { xml, float },
     }),
   ];
+}
+
+const CHART_URI = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+const CHART_REL =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart';
+
+/**
+ * Every relationship a drawing container references (any `r:*` attribute),
+ * with the parts the internal ones reach. Null when one cannot travel: an
+ * id the story's rels do not declare, or an internal target whose parts
+ * were not preloaded (only chart closures are — see loadChartParts).
+ */
+function drawingRels(
+  container: OoxmlNode,
+  ctx: Ctx,
+): { rels: CarriedRel[]; parts: CarriedPart[] } | null {
+  const ids = new Set<string>();
+  const walk = (n: OoxmlNode): void => {
+    for (const [k, v] of Object.entries(n.attrs))
+      if (k.startsWith('r:')) ids.add(v);
+    n.children.forEach(walk);
+  };
+  walk(container);
+  const rels: CarriedRel[] = [];
+  const parts = new Map<string, CarriedPart>();
+  for (const id of ids) {
+    const rel = ctx.rels.get(id);
+    if (!rel) return null;
+    if (rel.external) {
+      rels.push({ id, type: rel.type, target: rel.target, external: true });
+      continue;
+    }
+    // Story parts (document, headers, footers) all sit in word/.
+    const target = resolveTarget('word/document.xml', rel.target);
+    const closure = ctx.carriedParts?.get(target);
+    if (!closure) return null;
+    rels.push({ id, type: rel.type, target });
+    for (const p of closure) parts.set(p.path, p);
+  }
+  return { rels, parts: [...parts.values()] };
+}
+
+/**
+ * A DrawingML chart, carried rather than modelled: one image box the size of
+ * the chart's frame, where the frame sits (inline or floating), holding the
+ * run's drawing XML verbatim plus every part the chart reaches — the chart
+ * part, its embedded workbook, theme override, style and colour parts. The
+ * exporter writes them back, so a save keeps the chart Word will redraw
+ * from its own data (D-2609-LSTQ lost five on every save). What the box
+ * paints is a placeholder (see chart.ts): the chart is not rendered yet.
+ */
+function parseChart(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const container =
+    child(run, 'mc:AlternateContent') ?? child(run, 'w:drawing');
+  const drawing = runDrawing(run);
+  if (!container || !drawing) return null;
+  if (attrOf(findDescendant(drawing, 'a:graphicData'), 'uri') !== CHART_URI)
+    return null;
+  const refs = drawingRels(container, ctx);
+  if (!refs) return null;
+  const xml = carryDrawingXml(container, ctx);
+  if (!xml) return null;
+  const extent = findDescendant(drawing, 'wp:extent');
+  const width = emuToPx(attrOf(extent, 'cx')) ?? 1;
+  const height = emuToPx(attrOf(extent, 'cy')) ?? 1;
+  const docPr = findDescendant(drawing, 'wp:docPr');
+  const descr = attrOf(docPr, 'descr');
+  const title = attrOf(docPr, 'title');
+  const float = parseAnchorFloat(drawing);
+  // Carried verbatim: everything under the run's drawing goes back as read.
+  audit.markSubtree(container);
+  return ctx.schema.nodes['image'].create({
+    src: '',
+    width,
+    height,
+    alt: descr ?? '',
+    ...(title != null && { title }),
+    float,
+    vector: chartPlaceholder(width, height),
+    rawDrawing: { xml, float, rels: refs.rels, parts: refs.parts },
+  });
+}
+
+/**
+ * Every chart part the package's stories relate to, each with the parts it
+ * reaches, loaded up front: the body is parsed synchronously. Keyed by the
+ * chart part's path; stories are the word/ parts (document, headers,
+ * footers, notes) whose rels live in word/_rels.
+ */
+async function loadChartParts(zip: JSZip): Promise<Map<string, CarriedPart[]>> {
+  const out = new Map<string, CarriedPart[]>();
+  const relsFiles = Object.keys(zip.files).filter((p) =>
+    /^word\/_rels\/[^/]+\.rels$/.test(p),
+  );
+  if (relsFiles.length === 0) return out;
+  let types: ReturnType<typeof parseContentTypes> | undefined;
+  for (const relsPath of relsFiles) {
+    const part = `word/${relsPath.slice('word/_rels/'.length, -'.rels'.length)}`;
+    const rels = parseRels(part, await readPart(zip, relsPath));
+    for (const rel of rels) {
+      if (rel.external || rel.type !== CHART_REL || out.has(rel.target))
+        continue;
+      types ??= parseContentTypes(await readPart(zip, '[Content_Types].xml'));
+      const closure = await loadPartClosure(zip, rel.target, types);
+      if (closure) out.set(rel.target, closure);
+    }
+  }
+  return out;
 }
 
 /** Rotation (clockwise degrees) from a subtree's a:xfrm@rot (1/60000 deg). */
@@ -5149,6 +5271,7 @@ async function importDocxImpl(
     ? parsePart('word/numbering.xml', numberingXml)
     : undefined;
   const { media, vectorMedia } = await extractMedia(zip);
+  const carriedParts = await loadChartParts(zip);
   const notes = await buildNotesRegistry(zip);
   const comments = await buildCommentsRegistry(zip);
   // Page geometry up front: pct-based table widths need the content width
@@ -5196,6 +5319,7 @@ async function importDocxImpl(
     openFields: [],
     nsDecls,
     ignorable,
+    carriedParts,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
