@@ -20,12 +20,15 @@ type MarkFont = {
   sizePt?: number;
   bold?: boolean;
   italic?: boolean;
+  color?: string;
 };
 type MarkFontPatch = Partial<Record<keyof MarkFont, unknown>>;
 
 /** What a mark set on the selection means for the paragraph mark's font:
  *  the value to carry (`undefined` = clear that key), or null when the mark
- *  has no bearing on the ¶ (colour, underline, …). */
+ *  has no bearing on the ¶ (underline, highlight, …). Colour has one: a list
+ *  label is drawn in the ¶'s colour, and Word recolours the number with the
+ *  text when the selection takes the ¶ in. */
 function markFontPatch(
   markName: string,
   attrs: Record<string, unknown> | null,
@@ -39,6 +42,8 @@ function markFontPatch(
       return { bold: attrs ? true : undefined };
     case 'em':
       return { italic: attrs ? true : undefined };
+    case 'textColor':
+      return { color: attrs ? attrs['color'] : undefined };
     default:
       return null;
   }

@@ -369,7 +369,8 @@ function propsToMarks(p: RunProps, ctx: Ctx): Mark[] {
   if (p.strike) marks.push(ctx.schema.marks['strike'].create());
   if (p.dstrike) marks.push(ctx.schema.marks['dstrike'].create());
   if (p.smallCaps) marks.push(ctx.schema.marks['smallCaps'].create());
-  if (p.color)
+  // Automatic is the absence of a colour mark (see RunProps.color).
+  if (p.color && p.color !== 'auto')
     marks.push(ctx.schema.marks['textColor'].create({ color: p.color }));
   if (p.sizePt !== undefined)
     marks.push(ctx.schema.marks['fontSize'].create({ size: p.sizePt }));
@@ -1968,10 +1969,16 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
 // attr) and spliced back by the exporter. See model.ts `carryRPr` / `carry`.
 
 /** The paragraph MARK's rPr children whose value lives in `markFont` (family,
- *  size, bold, italic — re-emitted from it on export, so a font command that
- *  re-sizes the mark is what the file says too). Everything else on the mark
- *  is carried verbatim. */
-const MARK_CONSUMED_RPR = new Set(['w:rFonts', 'w:sz', 'w:b', 'w:i']);
+ *  size, bold, italic, colour — re-emitted from it on export, so a font
+ *  command that re-sizes the mark is what the file says too). Everything
+ *  else on the mark is carried verbatim. */
+const MARK_CONSUMED_RPR = new Set([
+  'w:rFonts',
+  'w:sz',
+  'w:b',
+  'w:i',
+  'w:color',
+]);
 
 /** rPr children whose VALUE already lives in the model (re-emitted from
  *  marks on export) — carrying them too would duplicate or contradict. */
@@ -2899,6 +2906,10 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
       ...(eff.sizePt !== undefined && { sizePt: eff.sizePt }),
       ...(eff.bold !== undefined && { bold: eff.bold }),
       ...(eff.italic !== undefined && { italic: eff.italic }),
+      // The list label's colour too: Word draws the number in the mark's
+      // run properties (Automatic = no colour, as for runs).
+      ...(eff.color !== undefined &&
+        eff.color !== 'auto' && { color: eff.color }),
     };
     if (Object.keys(markFont).length > 0) attrs.markFont = markFont;
   }
@@ -3860,7 +3871,7 @@ function styleFontOf(p: RunProps): TableStyleFont | undefined {
   if (p.sizePt !== undefined) f.sizePt = p.sizePt;
   if (p.bold !== undefined) f.bold = p.bold;
   if (p.italic !== undefined) f.italic = p.italic;
-  if (p.color !== undefined) f.color = p.color;
+  if (p.color !== undefined && p.color !== 'auto') f.color = p.color;
   return Object.keys(f).length > 0 ? f : undefined;
 }
 

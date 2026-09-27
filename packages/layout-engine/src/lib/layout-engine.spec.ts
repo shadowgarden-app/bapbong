@@ -3888,6 +3888,160 @@ describe('live list numbering', () => {
       '3.',
     ]);
   });
+
+  // Word 365, probe S1–S6: an EMPTY list paragraph that holds a section
+  // break is no list item — no label, no count, and the levels below it are
+  // not restarted.
+  describe('an empty list paragraph ending a section', () => {
+    const outline = {
+      '1': {
+        key: 'a0',
+        levels: {
+          0: { numFmt: 'decimal', lvlText: '%1.', start: 1 },
+          1: { numFmt: 'decimal', lvlText: '%1.%2.', start: 1 },
+        },
+      },
+    };
+    const secSchema = new Schema({
+      nodes: {
+        doc: {
+          content: 'block+',
+          attrs: {
+            numbering: { default: null },
+            sections: { default: null },
+          },
+        },
+        paragraph: {
+          group: 'block',
+          content: 'inline*',
+          attrs: { list: { default: null }, markFont: { default: null } },
+        },
+        text: { group: 'inline' },
+      },
+      marks: {},
+    });
+    const item = (level: number, text = '') =>
+      secSchema.node(
+        'paragraph',
+        { list: { numId: '1', level } },
+        text ? [secSchema.text(text)] : [],
+      );
+    const section = (blockCount: number, newPage: boolean) => ({
+      blockCount,
+      columns: { count: 1, gap: 0 },
+      newPage,
+    });
+    /** Every line's marker, page by page (undefined: a line without one). */
+    const allMarkers = (resolved: ReturnType<typeof layout>) =>
+      resolved.pages.flatMap((p) =>
+        p.lines.map((l) =>
+          /^\d/.test(l.segments[0]?.text ?? '') ? l.segments[0].text : null,
+        ),
+      );
+
+    it.each([
+      ['next-page', true],
+      ['continuous', false],
+    ])('takes no number before a %s section', (_kind, newPage) => {
+      const doc = secSchema.node(
+        'doc',
+        {
+          numbering: outline,
+          sections: [section(3, false), section(3, newPage)],
+        },
+        [
+          item(0, 'first'),
+          item(1, 'sub one'),
+          item(0), // ends section 1
+          item(1, 'sub two'),
+          item(0, 'after'),
+          secSchema.node('paragraph', null, [secSchema.text('tail')]),
+        ],
+      );
+      expect(allMarkers(layout(doc, config())).filter(Boolean)).toEqual([
+        '1.',
+        '1.1.',
+        '1.2.',
+        '2.',
+      ]);
+    });
+
+    it('still numbers an empty item that ends no section', () => {
+      const doc = secSchema.node('doc', { numbering: outline }, [
+        item(0, 'first'),
+        item(0),
+        item(0, 'after'),
+      ]);
+      expect(allMarkers(layout(doc, config()))).toEqual(['1.', '2.', '3.']);
+    });
+
+    it('numbers a section-ending item that has text', () => {
+      const doc = secSchema.node(
+        'doc',
+        { numbering: outline, sections: [section(2, false), section(1, true)] },
+        [item(0, 'first'), item(0, 'middle'), item(0, 'after')],
+      );
+      expect(allMarkers(layout(doc, config()))).toEqual(['1.', '2.', '3.']);
+    });
+  });
+
+  // Word 365, probe L1–L5: the label is drawn in the paragraph MARK's run
+  // properties with the level's w:rPr on top; the text runs play no part.
+  describe('the label font', () => {
+    const labelled = (
+      rPr: Record<string, unknown> | undefined,
+      markFont: Record<string, unknown> | null,
+    ) => {
+      const defs = {
+        '1': {
+          key: 'a0',
+          levels: {
+            0: {
+              numFmt: 'decimal',
+              lvlText: '%1.',
+              start: 1,
+              ...(rPr && { rPr }),
+            },
+          },
+        },
+      };
+      const doc = listSchema.node('doc', { numbering: defs }, [
+        listSchema.node(
+          'paragraph',
+          { list: { numId: '1', level: 0 }, markFont },
+          [listSchema.text('text')],
+        ),
+      ]);
+      return layout(doc, config()).pages[0].lines[0].segments[0];
+    };
+
+    it('is the mark font, the level overriding what it says', () => {
+      const label = labelled(
+        { bold: true },
+        { family: 'Courier New', sizePt: 16, italic: true, color: '#C00000' },
+      );
+      expect(label.text).toBe('1.');
+      expect(label.font).toMatchObject({
+        family: 'Courier New',
+        sizePt: 16,
+        bold: true,
+        italic: true,
+      });
+      expect(label.color).toBe('#C00000');
+    });
+
+    it('takes the level colour over the mark colour', () => {
+      expect(labelled({ color: '#00B050' }, { color: '#C00000' }).color).toBe(
+        '#00B050',
+      );
+    });
+
+    it('is Automatic when the level says auto, whatever the mark says', () => {
+      expect(
+        labelled({ color: 'auto' }, { color: '#C00000' }).color,
+      ).toBeUndefined();
+    });
+  });
 });
 
 describe('layout with LayoutCache', () => {

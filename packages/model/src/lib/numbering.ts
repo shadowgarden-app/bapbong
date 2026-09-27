@@ -6,12 +6,14 @@
  * list items renumbers everything, like Word.
  */
 
-/** Label (marker) run formatting from the lvl's w:rPr (plain data). */
+/** Label (marker) run formatting from the lvl's w:rPr (plain data). It is
+ *  applied OVER the paragraph mark's own formatting (`markFont`). */
 export interface MarkerRunProps {
   bold?: boolean;
   italic?: boolean;
   sizePt?: number;
   family?: string;
+  /** "#RRGGBB", or 'auto': Automatic, overriding the mark's colour. */
   color?: string;
 }
 

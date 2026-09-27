@@ -22,7 +22,9 @@ import type {
 import { audit } from './audit.js';
 import { catalogStyleXml } from './table-style-catalog.js';
 import { parsePageGeometry } from './docx.js';
-import { child, parseXml } from './ooxml.js';
+import { child, mergeRunProps, parseXml } from './ooxml.js';
+import { buildStyleRegistry } from './styles.js';
+import { buildThemeResolver } from './theme.js';
 import {
   carriedVerbatim,
   parseRels,
@@ -92,6 +94,13 @@ interface ExportCtx {
    *  verbatim, so the drawing keeps its original id (see planPartReuse).
    *  Null in a story written as a new part — its rels start empty. */
   reuse: PartReuse | null;
+  /** Does the paragraph style a paragraph is WRITTEN with (its w:pStyle, or
+   *  the default paragraph style) colour its text in the carried styles
+   *  part? Null when nothing carried can (a package built from scratch). */
+  coloursText: ((styleId: string | null) => boolean) | null;
+  /** The paragraph being written takes a colour from its style that the
+   *  model does not show: its runs without a colour write Automatic. */
+  autoColor: boolean;
 }
 
 /** A carried drawing's attr: its XML plus what the XML references. */
@@ -200,7 +209,14 @@ const KNOWN_MARKS = new Set([
 ]);
 
 /** A run's w:rPr from its marks (character marks only; link is a wrapper). */
-function runProps(marks: readonly Mark[]): string {
+/**
+ * `autoColor`: the paragraph's style would colour this run in Word. Runs
+ * carry their whole formatting as marks — the importer resolves the style
+ * cascade into them — so a run with no colour mark IS Automatic (an explicit
+ * `w:color="auto"`, or the Automatic command); written bare under that style
+ * it would come back in the style's colour, so it says auto.
+ */
+function runProps(marks: readonly Mark[], autoColor = false): string {
   for (const m of marks)
     if (!KNOWN_MARKS.has(m.type.name))
       audit.exportUnhandled('mark', m.type.name);
@@ -216,6 +232,7 @@ function runProps(marks: readonly Mark[]): string {
   if (byName.has('smallCaps')) out.push('<w:smallCaps/>');
   const color = byName.get('textColor')?.attrs['color'] as string | undefined;
   if (color) out.push(`<w:color w:val="${color.replace(/^#/, '')}"/>`);
+  else if (autoColor) out.push('<w:color w:val="auto"/>');
   const size = byName.get('fontSize')?.attrs['size'] as number | undefined;
   if (size != null) out.push(`<w:sz w:val="${Math.round(size * 2)}"/>`);
   const hl = byName.get('highlight')?.attrs['color'] as string | undefined;
@@ -512,6 +529,40 @@ function carriedRelIds(raw: RawDrawing, ctx: ExportCtx): string {
 }
 
 /**
+ * Which paragraph styles colour their text, read from the carried styles
+ * part through the importer's own cascade (docDefaults → basedOn chain;
+ * theme colours resolved, so a style naming only a theme slot counts).
+ */
+function coloursTextIn(
+  stylesXml: string,
+  themeXml: string | undefined,
+  settingsXml: string | undefined,
+): (styleId: string | null) => boolean {
+  const theme = themeXml ? parseXml(themeXml) : undefined;
+  const settings = settingsXml
+    ? child(parseXml(settingsXml), 'w:settings')
+    : undefined;
+  const registry = buildStyleRegistry(
+    parseXml(stylesXml),
+    buildThemeResolver(theme, child(settings, 'w:clrSchemeMapping')),
+  );
+  const memo = new Map<string, boolean>();
+  return (styleId) => {
+    const id = styleId ?? registry.defaultStyleIdFor('paragraph') ?? '';
+    let hit = memo.get(id);
+    if (hit === undefined) {
+      const color = mergeRunProps(
+        registry.docDefaults,
+        registry.resolveStyle(id || undefined),
+      ).color;
+      hit = color !== undefined && color !== 'auto';
+      memo.set(id, hit);
+    }
+    return hit;
+  };
+}
+
+/**
  * Before the body is written: for each carried drawing, which of its
  * relationships the carried source package still holds exactly — same id,
  * same target, same parts byte for byte. Those keep their ids; the parts are
@@ -739,7 +790,7 @@ function inlineXml(node: PMNode, ctx: ExportCtx): string {
   // run we emit is only a placeholder that carries the formatting.
   if (node.type.name === 'page_field') {
     const instr = node.attrs['kind'] === 'pages' ? ' NUMPAGES ' : ' PAGE ';
-    return `<w:fldSimple w:instr="${instr}"><w:r>${runProps(node.marks)}<w:t>1</w:t></w:r></w:fldSimple>`;
+    return `<w:fldSimple w:instr="${instr}"><w:r>${runProps(node.marks, ctx.autoColor)}<w:t>1</w:t></w:r></w:fldSimple>`;
   }
   if (node.isText) {
     const fn = node.marks.find((m) => m.type.name === 'footnote');
@@ -747,8 +798,8 @@ function inlineXml(node: PMNode, ctx: ExportCtx): string {
       // footnotes.xml rides the carry package byte-for-byte, so the
       // reference must name the ORIGINAL w:id — the display number only
       // coincides with it when the source ids happen to be 1..N.
-      return `<w:r>${runProps(node.marks)}<w:footnoteReference w:id="${(fn.attrs['id'] as string | null) ?? NEW_NOTE_IDS.get(ctx)?.get(Number(fn.attrs['num'])) ?? fn.attrs['num']}"/></w:r>`;
-    return `<w:r>${runProps(node.marks)}<w:t xml:space="preserve">${esc(node.text ?? '')}</w:t></w:r>`;
+      return `<w:r>${runProps(node.marks, ctx.autoColor)}<w:footnoteReference w:id="${(fn.attrs['id'] as string | null) ?? NEW_NOTE_IDS.get(ctx)?.get(Number(fn.attrs['num'])) ?? fn.attrs['num']}"/></w:r>`;
+    return `<w:r>${runProps(node.marks, ctx.autoColor)}<w:t xml:space="preserve">${esc(node.text ?? '')}</w:t></w:r>`;
   }
   return '';
 }
@@ -828,7 +879,7 @@ function inlineContent(node: PMNode, ctx: ExportCtx): string {
       out += '<m:oMath>';
       for (let k = i; k < j; k++)
         out +=
-          `<m:r>${runProps(kids[k].marks)}` +
+          `<m:r>${runProps(kids[k].marks, ctx.autoColor)}` +
           `<m:t xml:space="preserve">${esc(kids[k].text ?? '')}</m:t></m:r>`;
       out += '</m:oMath>';
       for (let k = i; k < j; k++) out += closeEnds(ctx.runIdx++);
@@ -954,19 +1005,24 @@ function spacingXml(sp: ExportSpacing | null): string {
   return at.length ? `<w:spacing ${at.join(' ')}/>` : '';
 }
 
+/** The w:pStyle a paragraph is written with, or null for none (Word then
+ *  applies the default paragraph style). */
+function writtenStyleId(node: PMNode): string | null {
+  const heading = node.attrs['heading'] as number | null;
+  const styleId = node.attrs['styleId'] as string | null;
+  if (heading) return `Heading${heading}`;
+  if (styleId === 'Title' || styleId === 'Subtitle') return styleId;
+  return null;
+}
+
 function paraProps(node: PMNode, ctx: ExportCtx): string {
   const a = node.attrs;
   const out: string[] = [];
   // w:pStyle is the first pPr child. ensureStyleDefs() guarantees the
   // referenced style exists in styles.xml (generated from scratch, or merged
   // into a carried package that lacks it).
-  const heading = a['heading'] as number | null;
-  const styleId = a['styleId'] as string | null;
-  const own = ownStyleId(node, ctx);
-  if (heading) out.push(`<w:pStyle w:val="Heading${heading}"/>`);
-  else if (styleId === 'Title' || styleId === 'Subtitle')
-    out.push(`<w:pStyle w:val="${styleId}"/>`);
-  else if (own) out.push(`<w:pStyle w:val="${esc(own)}"/>`);
+  const pStyle = writtenStyleId(node) ?? ownStyleId(node, ctx);
+  if (pStyle) out.push(`<w:pStyle w:val="${pStyle}"/>`);
   // CT_PPr schema order: keepNext, keepLines, pageBreakBefore, widowControl.
   if (a['keepNext']) out.push('<w:keepNext/>');
   if (a['keepLines']) out.push('<w:keepLines/>');
@@ -1047,23 +1103,29 @@ function paraProps(node: PMNode, ctx: ExportCtx): string {
       sizePt?: number;
       bold?: boolean;
       italic?: boolean;
+      color?: string;
     } | null,
     carry?.markRPr,
+    ctx.autoColor,
   );
   if (markRPr) out.push(`<w:rPr>${markRPr}</w:rPr>`);
   return out.join('');
 }
 
 /** The paragraph mark's rPr children: `markFont` written the way runProps
- *  writes the same four properties from marks, followed by the carried rest. */
+ *  writes the same properties from marks (Automatic under a colouring style
+ *  included — the list label is drawn in this colour), followed by the
+ *  carried rest. */
 function markProps(
   mf: {
     family?: string;
     sizePt?: number;
     bold?: boolean;
     italic?: boolean;
+    color?: string;
   } | null,
   carry: string | undefined,
+  autoColor: boolean,
 ): string {
   const out: string[] = [];
   if (mf?.family)
@@ -1072,6 +1134,8 @@ function markProps(
     );
   if (mf?.bold) out.push('<w:b/>');
   if (mf?.italic) out.push('<w:i/>');
+  if (mf?.color) out.push(`<w:color w:val="${mf.color.replace(/^#/, '')}"/>`);
+  else if (autoColor) out.push('<w:color w:val="auto"/>');
   if (mf?.sizePt != null)
     out.push(`<w:sz w:val="${Math.round(mf.sizePt * 2)}"/>`);
   if (carry) out.push(carry);
@@ -1080,6 +1144,17 @@ function markProps(
 
 /** `sectPr` (a section break) appends inside this paragraph's pPr, last. */
 function paragraphXml(node: PMNode, ctx: ExportCtx, sectPr = ''): string {
+  // Paragraphs nest (a table cell's, a textbox's): restore the outer one's.
+  const outerAuto = ctx.autoColor;
+  ctx.autoColor = ctx.coloursText?.(writtenStyleId(node)) ?? false;
+  try {
+    return paragraphBody(node, ctx, sectPr);
+  } finally {
+    ctx.autoColor = outerAuto;
+  }
+}
+
+function paragraphBody(node: PMNode, ctx: ExportCtx, sectPr: string): string {
   const props = paraProps(node, ctx) + sectPr;
   const pPr = props ? `<w:pPr>${props}</w:pPr>` : '';
   // Named anchors wrap the paragraph's content: dropping them would break
@@ -2135,6 +2210,8 @@ export async function exportDocx(
   const carriedNumbering =
     (await opts?.carry?.file('word/numbering.xml')?.async('string')) ?? null;
   const numbering = planNumbering(doc, carriedNumbering);
+  const carriedStylesXml =
+    (await opts?.carry?.file('word/styles.xml')?.async('string')) ?? null;
 
   const ctx: ExportCtx = {
     rels: [],
@@ -2149,6 +2226,14 @@ export async function exportDocx(
     runIdx: 0,
     parts: partSink(opts?.carry ? Object.keys(opts.carry.files) : []),
     reuse: opts?.carry ? await planPartReuse(doc, opts.carry) : null,
+    coloursText: carriedStylesXml
+      ? coloursTextIn(
+          carriedStylesXml,
+          await opts?.carry?.file('word/theme/theme1.xml')?.async('string'),
+          await opts?.carry?.file('word/settings.xml')?.async('string'),
+        )
+      : null,
+    autoColor: false,
   };
   const origDocXml = opts?.carry
     ? await opts.carry.file('word/document.xml')?.async('string')
@@ -2239,9 +2324,8 @@ export async function exportDocx(
     );
     // Styles referenced by pStyle but never defined by the source (headings /
     // Title / Subtitle authored in bapbong) get their defs appended.
-    const carriedStyles = await carry.file('word/styles.xml')?.async('string');
-    if (carriedStyles)
-      zip.file('word/styles.xml', mergeStyles(carriedStyles, styleIds));
+    if (carriedStylesXml)
+      zip.file('word/styles.xml', mergeStyles(carriedStylesXml, styleIds));
     const rels = await carry
       .file('word/_rels/document.xml.rels')
       ?.async('string');
@@ -2505,6 +2589,8 @@ function chromeStoryPart(
     runIdx: 0,
     parts: ctx.parts,
     reuse: null,
+    coloursText: ctx.coloursText,
+    autoColor: false,
   };
   const storyBlocks: PMNode[] = [];
   node.forEach((b) => storyBlocks.push(b));

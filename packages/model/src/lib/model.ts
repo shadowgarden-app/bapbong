@@ -225,11 +225,12 @@ export const schema = new Schema({
         // null). Painted behind the paragraph's lines, in the same box the
         // borders use.
         shading: { default: null },
-        // The paragraph MARK's own font ({ family?, sizePt?, bold?, italic? }
-        // or null) — w:pPr/w:rPr resolved through the same cascade a run gets.
-        // The mark is a glyph on the paragraph's LAST line (the only glyph
-        // when the paragraph is empty), so it takes part in that line's
-        // height. Importer-set on every paragraph; the font commands edit it
+        // The paragraph MARK's own font ({ family?, sizePt?, bold?, italic?,
+        // color? } or null) — w:pPr/w:rPr resolved through the same cascade a
+        // run gets. The mark is a glyph on the paragraph's LAST line (the only
+        // glyph when the paragraph is empty), so it takes part in that line's
+        // height; and a list label is drawn in it (the level's own w:rPr on
+        // top) — Word formats the number like the ¶. Importer-set on every paragraph; the font commands edit it
         // when the selection takes the mark in (Word: a ¶ inside the
         // selection is re-sized with the text); the exporter writes it back
         // into w:pPr/w:rPr ahead of `carry.markRPr` (the rest of that rPr).

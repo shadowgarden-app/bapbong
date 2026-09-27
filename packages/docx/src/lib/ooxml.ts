@@ -180,7 +180,10 @@ export interface RunProps {
   strike?: boolean;
   dstrike?: boolean; // w:dstrike — double strikethrough
   smallCaps?: boolean; // w:smallCaps
-  color?: string; // "#RRGGBB"
+  /** "#RRGGBB", or 'auto' — Word's Automatic colour, which REPLACES any
+   *  colour the cascade brought in (a heading style's blue under a run that
+   *  says `w:color="auto"` paints black in Word). Absent = inherit. */
+  color?: string;
   sizePt?: number; // points
   fontFamily?: string;
   highlight?: string; // background "#RRGGBB" (w:highlight / w:shd w:fill)
@@ -293,13 +296,20 @@ export function parseRunProps(
   const themeColor = attrOf(colorEl, 'w:themeColor');
   const themeTint = attrOf(colorEl, 'w:themeTint');
   const themeShade = attrOf(colorEl, 'w:themeShade');
+  const themeHex =
+    resolveTheme && themeColor
+      ? resolveTheme(themeColor, themeTint, themeShade)
+      : undefined;
   if (colorVal && colorVal.toLowerCase() !== 'auto') {
     props.color = colorVal.startsWith('#')
       ? colorVal.toUpperCase()
       : `#${colorVal.toUpperCase()}`;
-  } else if (resolveTheme && themeColor) {
-    const hex = resolveTheme(themeColor, themeTint, themeShade);
-    if (hex) props.color = hex;
+  } else if (themeHex) {
+    props.color = themeHex;
+  } else if (colorVal) {
+    // Explicit Automatic: it overrides the style's colour, it does not
+    // defer to it.
+    props.color = 'auto';
   }
 
   const sz = attrOf(child(rPr, 'w:sz'), 'w:val');

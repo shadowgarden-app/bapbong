@@ -464,8 +464,14 @@ function paragraphToFlow(
   // line's runs (and the whole line of a run-less paragraph). A stale value
   // left by an edit cannot shrink text — the mark only ever RAISES a line's
   // maxima — so it is carried whether or not the paragraph has runs.
-  const markFont = node.attrs['markFont'] as Partial<FontFace> | null;
-  if (markFont) flow.markFont = markFont;
+  const markFont = node.attrs['markFont'] as
+    | (Partial<FontFace> & { color?: string })
+    | null;
+  if (markFont) {
+    // Its colour is the list label's business (markerFor), not the line's.
+    const { color: _color, ...font } = markFont;
+    flow.markFont = font;
+  }
   const tabs = node.attrs['tabs'] as TabStop[] | null;
   if (tabs) flow.tabs = tabs;
   const spacing = effectiveSpacing(
@@ -496,7 +502,12 @@ function nodeHasFloats(node: PMNode): boolean {
 
 /** The live marker for a list paragraph: counted from the doc's numbering
  *  defs, falling back to a legacy pre-resolved marker on the attr. Carries
- *  the level's label styling (lvlJc / suff / label rPr) alongside the text. */
+ *  the label styling alongside the text: lvlJc / suff, and the label's run
+ *  properties — the paragraph MARK's (`markFont`), with the level's w:rPr on
+ *  top. That is Word's rule, measured in Word 365: a ¶ in Courier 16pt dark
+ *  red italic under a level saying only bold gives a Courier 16pt dark red
+ *  bold italic "1."; a level colour beats the mark's; the text runs' own
+ *  formatting plays no part. */
 function markerFor(
   node: PMNode,
   counter: NumberingCounter | undefined,
@@ -511,22 +522,27 @@ function markerFor(
     (counter?.next(list.numId, list.level) || list.marker) ?? undefined;
   if (text === undefined) return undefined;
   const def = counter?.def(list.numId, list.level);
-  if (!def || (!def.jc && !def.suff && !def.rPr)) return { text };
+  const mark = node.attrs['markFont'] as
+    | (Partial<FontFace> & { color?: string })
+    | null;
   const style: MarkerStyle = {};
-  if (def.jc) style.jc = def.jc;
-  if (def.suff) style.suff = def.suff;
-  if (def.rPr) {
-    const { bold, italic, sizePt, family, color } = def.rPr;
-    const font: Partial<FontSpec> = {
-      ...(bold !== undefined && { bold }),
-      ...(italic !== undefined && { italic }),
-      ...(sizePt !== undefined && { sizePt }),
-      ...(family !== undefined && { family }),
-    };
-    if (Object.keys(font).length > 0) style.font = font;
-    if (color) style.color = color;
-  }
-  return { text, style };
+  if (def?.jc) style.jc = def.jc;
+  if (def?.suff) style.suff = def.suff;
+  const lvl = def?.rPr ?? {};
+  const font: Partial<FontSpec> = {};
+  const bold = lvl.bold ?? mark?.bold;
+  const italic = lvl.italic ?? mark?.italic;
+  const sizePt = lvl.sizePt ?? mark?.sizePt;
+  const family = lvl.family ?? mark?.family;
+  if (bold !== undefined) font.bold = bold;
+  if (italic !== undefined) font.italic = italic;
+  if (sizePt !== undefined) font.sizePt = sizePt;
+  if (family !== undefined) font.family = family;
+  if (Object.keys(font).length > 0) style.font = font;
+  // 'auto' on the level is Automatic: it overrides a coloured mark.
+  const color = lvl.color ?? mark?.color;
+  if (color && color !== 'auto') style.color = color;
+  return Object.keys(style).length > 0 ? { text, style } : { text };
 }
 
 /** A paragraph's spacing with the layers under its attribute stacked in:
@@ -5564,7 +5580,16 @@ export function layout(
       return item;
     };
     if (node.type.name === 'paragraph') {
-      const m = markerFor(node, counter); // advances numbering every pass
+      // An EMPTY list paragraph whose mark is a section break is not a list
+      // item to Word: no label, no count, no restart of the levels below —
+      // measured in Word 365 for continuous and next-page breaks alike (the
+      // item after it keeps the next number; a level-1 item after it goes on
+      // 1.2, not 2.1). A thesis in D-2609-LSTQ keeps one before its first
+      // chapter, and every chapter number came out one too high.
+      const sectionMark =
+        node.content.size === 0 && (bs.breakMark || bs.pageBreakMark);
+      // Advances numbering every pass.
+      const m = sectionMark ? undefined : markerFor(node, counter);
       const marker = m?.text;
       const markerStyle = m?.style;
       const contentStart = offset + 1;

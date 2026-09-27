@@ -281,8 +281,15 @@ describe('commands (headless / Node — backend-shaped usage)', () => {
       const it_ = apply(s0, toggleMarkCommand('italic', 'em'));
       expect(markOf(it_, 0)).toEqual({ ...mark, italic: true });
       expect(markOf(apply(s0, clearMarks()), 0)).toBeNull();
-      // Colour has no bearing on the ¶'s font.
-      expect(markOf(apply(s0, setTextColor('#ff0000')), 0)).toEqual(mark);
+    });
+
+    it('colour recolours the ¶ too — a list label is drawn in it', () => {
+      const red = apply(select(twoParas(), 1, 5), setTextColor('#ff0000'));
+      expect(markOf(red, 0)).toEqual({ ...mark, color: '#ff0000' });
+      expect(markOf(red, 1)).toEqual(mark);
+      // Automatic takes the colour off again.
+      const auto = apply(select(red, 1, 5), setTextColor(null));
+      expect(markOf(auto, 0)).toEqual(mark);
     });
 
     it('the Font dialog applies family/size/bold/italic to the ¶ in one go', () => {
