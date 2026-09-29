@@ -19,7 +19,10 @@ import {
 } from './catalog.js';
 import {
   CONTENT_GRAMMAR,
+  CONTENT_SEE_INSERT,
+  contentRefSchema,
   contentSchema,
+  parseContent,
   tableEditShape,
   tabStopSchema,
 } from './blocks-schema.js';
@@ -1058,9 +1061,11 @@ export const editHeaderFooter = defineCommand({
       .min(1)
       .optional()
       .describe('The section, 1-based; omit for every section.'),
-    content: contentSchema
+    content: contentRefSchema
       .optional()
-      .describe('The new header / footer, replacing it whole ("" empties it).'),
+      .describe(
+        `The new header / footer, replacing it whole ("" empties it). ${CONTENT_SEE_INSERT}`,
+      ),
     old_text: z
       .string()
       .min(1)
@@ -1083,7 +1088,9 @@ export const editHeaderFooter = defineCommand({
             part: a.part,
             ...(a.variant ? { variant: a.variant } : {}),
             ...(a.section !== undefined ? { section: a.section } : {}),
-            ...(a.content !== undefined ? { content: a.content } : {}),
+            ...(a.content !== undefined
+              ? { content: parseContent(a.content) }
+              : {}),
             ...(a.old_text !== undefined
               ? {
                   replace: {
@@ -1118,8 +1125,8 @@ export const insertFootnote = defineCommand({
       .describe(
         'Exact text the reference follows (the word or sentence it annotates).',
       ),
-    content: contentSchema.describe(
-      'The note: plain text, or paragraph blocks.',
+    content: contentRefSchema.describe(
+      `The note: plain text, or paragraph blocks. ${CONTENT_SEE_INSERT}`,
     ),
     occurrence,
     expectedVersion,
@@ -1131,7 +1138,7 @@ export const insertFootnote = defineCommand({
       json(
         await s.insertFootnote(
           { text: a.anchor_text, occurrence: a.occurrence },
-          a.content,
+          parseContent(a.content),
           { expectedVersion: a.expectedVersion },
         ),
       ),

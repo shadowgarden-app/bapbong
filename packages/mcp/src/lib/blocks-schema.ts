@@ -4,7 +4,8 @@
  * never read a SKILL.md, so the tool text must teach the shape by itself.
  */
 import { z } from 'zod';
-import { LIST_LEVELS } from './blocks.js';
+import { LIST_LEVELS, type Content } from './blocks.js';
+import { ContentError } from './contract.js';
 
 export const hexColor = z
   .string()
@@ -187,6 +188,35 @@ export const tableEditShape = {
 
 /** `content` as commands accept it: plain text, or blocks. */
 export const contentSchema = z.union([z.string(), z.array(blockSchema)]);
+
+/**
+ * `content` for every tool but insert_content: the same grammar, with only
+ * its outline in the schema. The full schema is some 7K characters, and a
+ * model is sent every tool's schema on every call — spelled out once
+ * (insert_content) is enough. The command checks it in full when it runs
+ * ({@link parseContent}), so a wrong block is still refused, in words.
+ */
+export const contentRefSchema = z.union([
+  z.string(),
+  z.array(z.union([z.string(), z.object({}).passthrough()])),
+]);
+
+/** Where a tool's description points for the grammar. */
+export const CONTENT_SEE_INSERT =
+  "The same content as insert_content's content (its description has the grammar).";
+
+/** Check content given through {@link contentRefSchema} against the full grammar. */
+export function parseContent(raw: unknown): Content {
+  const r = contentSchema.safeParse(raw);
+  if (r.success) return r.data as Content;
+  const issues = r.error.issues
+    .slice(0, 3)
+    .map(
+      (i) =>
+        `${i.path.length ? `content.${i.path.join('.')}` : 'content'}: ${i.message}`,
+    );
+  throw new ContentError(`${issues.join('; ')}. ${CONTENT_SEE_INSERT}`);
+}
 
 /** The grammar, for tool descriptions. One paragraph; keep it in step with ./blocks. */
 export const CONTENT_GRAMMAR =

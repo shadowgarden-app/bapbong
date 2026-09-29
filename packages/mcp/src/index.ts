@@ -27,8 +27,11 @@ export {
 } from './lib/blocks.js';
 export {
   CONTENT_GRAMMAR,
+  CONTENT_SEE_INSERT,
   blockSchema,
+  contentRefSchema,
   contentSchema,
+  parseContent,
 } from './lib/blocks-schema.js';
 export {
   HeadlessSession,
