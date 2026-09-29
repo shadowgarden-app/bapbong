@@ -5,7 +5,11 @@
  * here; {@link createMcpServer} and any other adapter read these records.
  */
 import { z } from 'zod';
-import { ContentError, type SessionProvider } from './contract.js';
+import {
+  ContentError,
+  type DocSnapshot,
+  type SessionProvider,
+} from './contract.js';
 import {
   defineCommand,
   errorText,
@@ -67,22 +71,96 @@ const occurrence = z
     '1-based pick when the anchor text matches more than once (document order).',
   );
 
+/** One page of get_document, in characters of its JSON. A long document
+ *  comes in pages the agent walks with from_block: one result a transport
+ *  clips (an MCP client's cap, the chat server's) hides the rest, and the
+ *  agent is left probing for text it cannot see. */
+export const DOCUMENT_PAGE_CHARS = 30_000;
+
+/** The blocks from `from` on that fit `budget`, with where to read on.
+ *  Headers, footers and footnotes come with the first page only. At least
+ *  one block per page, however long. */
+export function documentPage(
+  snap: DocSnapshot,
+  from: number,
+  budget = DOCUMENT_PAGE_CHARS,
+): Record<string, unknown> {
+  const total = snap.blocks.length;
+  const first = from === 0;
+  const extras = {
+    ...(first && snap.chrome ? { chrome: snap.chrome } : {}),
+    ...(first && snap.footnotes ? { footnotes: snap.footnotes } : {}),
+    meta: snap.meta,
+  };
+  let used = JSON.stringify(
+    {
+      docVersion: snap.docVersion,
+      totalBlocks: total,
+      nextFromBlock: total,
+      blocks: [],
+      ...extras,
+    },
+    null,
+    1,
+  ).length;
+  const blocks: DocSnapshot['blocks'] = [];
+  for (let i = from; i < total; i++) {
+    // Inside the page's blocks array it sits two levels deeper than on
+    // its own: two spaces more on every line.
+    const text = JSON.stringify(snap.blocks[i], null, 1);
+    const size = text.length + 2 * text.split('\n').length + 4;
+    if (blocks.length > 0 && used + size > budget) break;
+    blocks.push(snap.blocks[i]);
+    used += size;
+  }
+  const next = from + blocks.length;
+  return {
+    docVersion: snap.docVersion,
+    totalBlocks: total,
+    // Ahead of the blocks, so a result clipped on the way still says it.
+    ...(next < total ? { nextFromBlock: next } : {}),
+    blocks,
+    ...extras,
+  };
+}
+
 export const getDocument = defineCommand({
   name: 'get_document',
   title: 'Read the document',
   description:
-    'Read the whole document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
+    'Read the document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
+    'A long document comes in pages: when the result has nextFromBlock, call again with from_block = nextFromBlock ' +
+    'to read on, until it is absent (totalBlocks counts them all). Read every page before judging or rewriting the whole ' +
+    'document; find_text is for locating a phrase, not for reading. ' +
     'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
     'Hyperlinks are listed per block (links: [{ text, href }]). Headers and footers with text come as chrome ' +
     '(part, variant, the sections showing it, text; {page} is a page number) — edit them with edit_header_footer. ' +
-    'Footnotes come as footnotes: [{ number, text }]. ' +
+    'Footnotes come as footnotes: [{ number, text }]. Chrome and footnotes come with the first page. ' +
     'Returns docVersion: pass it as expectedVersion to mutation tools so concurrent edits are detected. ' +
     'Block indexes are only stable within one docVersion.',
-  input: { documentId },
+  input: {
+    documentId,
+    from_block: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'First block to return — nextFromBlock of the page before. Default 0.',
+      ),
+  },
   effect: 'read',
   targets: (a) => [a.documentId],
-  run: (provider, { documentId: id }) =>
-    withSession(provider, id, async (s) => json(await s.snapshot())),
+  run: (provider, { documentId: id, from_block }) =>
+    withSession(provider, id, async (s) => {
+      const snap = await s.snapshot();
+      const from = from_block ?? 0;
+      if (from > 0 && from >= snap.blocks.length)
+        return errorText(
+          `from_block ${from} is past the end — the document has ${snap.blocks.length} block(s), 0 to ${snap.blocks.length - 1}.`,
+        );
+      return json(documentPage(snap, from));
+    }),
 });
 
 export const findText = defineCommand({
@@ -206,8 +284,11 @@ export const applyFormatting = defineCommand({
   name: 'apply_formatting',
   title: 'Apply formatting',
   description:
-    'Format text or a paragraph. Address it by exact text (target_text, matched once or with occurrence — same rules ' +
-    'as replace_text) or a whole block (block_index from get_document). Character marks bold/italic/underline/strike ' +
+    'Format text or paragraphs. Address it by exact text (target_text, matched once or with occurrence — same rules ' +
+    'as replace_text), a whole block (block_index from get_document), or a run of blocks in ONE call: from_block ' +
+    '(to_block inclusive, default the last block; only "body" or "headings" filters the run — Title and Subtitle ' +
+    'count as headings). To make the whole document or all body text one size or font, use one from_block: 0 call, ' +
+    'never a call per block. Character marks bold/italic/underline/strike ' +
     '(true applies, false removes), font_size, font, color, highlight, vertical_align and link apply to the text ' +
     '(clear_formatting strips the text back to plain first); align, heading (1-6, 0 = body text), style ' +
     "(Title, Subtitle, Normal or any style of the document — list_styles), tabs (replace the paragraph's tab stops), list, space_before/space_after (pt), " +
@@ -231,6 +312,26 @@ export const applyFormatting = defineCommand({
       .optional()
       .describe(
         'Instead of target_text: the whole block with this index (from get_document).',
+      ),
+    from_block: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Instead of target_text / block_index: format every block from this index on (to to_block). One undo step.',
+      ),
+    to_block: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Last block of the run, inclusive. Default: the last block.'),
+    only: z
+      .enum(['all', 'body', 'headings'])
+      .optional()
+      .describe(
+        'With from_block: format only body text, or only headings (Title/Subtitle included). Default all.',
       ),
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
@@ -334,6 +435,9 @@ export const applyFormatting = defineCommand({
       documentId: id,
       target_text,
       block_index,
+      from_block,
+      to_block,
+      only,
       occurrence: occ,
       expectedVersion: ver,
       font_size,
@@ -358,15 +462,29 @@ export const applyFormatting = defineCommand({
     },
   ) =>
     withSession(provider, id, async (s) => {
-      if (target_text === undefined && block_index === undefined)
+      const named = [target_text, block_index, from_block].filter(
+        (v) => v !== undefined,
+      ).length;
+      if (named !== 1)
         return errorText(
-          'Pass target_text (exact text) or block_index (a whole block).',
+          'Pass exactly one of target_text (exact text), block_index (a whole block) or from_block (a run of blocks).',
         );
+      if (
+        (to_block !== undefined || only !== undefined) &&
+        from_block === undefined
+      )
+        return errorText('to_block and only go with from_block.');
       return json(
         await s.applyFormatting(
           target_text !== undefined
             ? target_text
-            : { blockIndex: block_index as number },
+            : from_block !== undefined
+              ? {
+                  fromBlock: from_block,
+                  ...(to_block !== undefined ? { toBlock: to_block } : {}),
+                  ...(only !== undefined ? { only } : {}),
+                }
+              : { blockIndex: block_index as number },
           {
             ...format,
             ...(font_size !== undefined ? { fontSize: font_size } : {}),

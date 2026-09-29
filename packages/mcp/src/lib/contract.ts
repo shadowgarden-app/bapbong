@@ -305,8 +305,13 @@ export interface IndentChange {
 }
 
 /** What applyFormatting addresses: exact text (matched once, or with
- *  occurrence) or a whole block by index from the latest snapshot. */
-export type FormatTarget = string | { blockIndex: number };
+ *  occurrence), a whole block by index from the latest snapshot, or a run
+ *  of blocks — `toBlock` inclusive, the last block when absent; `only`
+ *  keeps the headings (Title and Subtitle count) or the body text. */
+export type FormatTarget =
+  | string
+  | { blockIndex: number }
+  | { fromBlock: number; toBlock?: number; only?: 'all' | 'body' | 'headings' };
 
 /** Partial image update — absent fields keep their current value. */
 export interface ImageChanges {
@@ -324,6 +329,8 @@ export interface MutationResult {
    *  surface the edit (the desktop selects + scrolls to it). Positions are
    *  only stable within the returned docVersion. */
   range?: { from: number; to: number };
+  /** applyFormatting over a run of blocks: how many it formatted. */
+  formatted?: number;
 }
 
 export interface MutationOptions {

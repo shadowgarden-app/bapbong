@@ -392,22 +392,117 @@ export class PmDocSession implements DocumentSession {
     opts: MutationOptions = {},
   ): Promise<MutationResult> {
     this.checkVersion(opts.expectedVersion);
+    if (typeof target === 'object' && 'fromBlock' in target) {
+      return this.formatBlocks(target, format);
+    }
     const hit = this.formatHit(target, opts.occurrence);
-    const docStyle =
-      format.style && !isBuiltInStyle(format.style)
-        ? await this.resolveStyle(format.style)
-        : null;
-    const state = this.host.getState();
-    const { schema } = state;
-    let tr = state.tr;
-    const styled = this.textblocks()[hit.blockIndex];
+    const docStyle = await this.docStyleOf(format);
+    const tr = this.formatInto(
+      this.host.getState().tr,
+      hit,
+      this.textblocks()[hit.blockIndex],
+      format,
+      docStyle,
+    );
+    if (tr.steps.length === 0) {
+      // Formatting that named no supported change — a no-op success.
+      return { docVersion: this.host.getVersion() };
+    }
+    this.host.apply(tr);
+    return {
+      docVersion: this.host.getVersion(),
+      range: { from: hit.from, to: hit.to },
+    };
+  }
+
+  /** One formatting over a run of blocks — the whole document, the body
+   *  text, the headings — in ONE transaction: a single undo step, however
+   *  many paragraphs it touches. List changes stay one paragraph per call:
+   *  an item joins the list right above it, which this run would read from
+   *  the document as it was before the call. */
+  private async formatBlocks(
+    target: Extract<FormatTarget, { fromBlock: number }>,
+    format: Formatting,
+  ): Promise<MutationResult> {
+    if (format.list !== undefined || format.listLevel !== undefined) {
+      throw new ContentError(
+        'list and list_level go one paragraph per call (block_index), top to bottom — each item joins the list right above it.',
+      );
+    }
+    const blocks = this.textblocks();
+    const last = blocks.length - 1;
+    const to = target.toBlock ?? last;
+    if (target.fromBlock > last || to > last) {
+      throw new AnchorError(
+        `Block ${Math.max(target.fromBlock, to)} is out of range — the document has ${blocks.length} block(s), 0 to ${last}.`,
+      );
+    }
+    if (to < target.fromBlock) {
+      throw new ContentError(
+        `to_block ${to} comes before from_block ${target.fromBlock}.`,
+      );
+    }
+    const only = target.only ?? 'all';
+    const picked = blocks
+      .slice(target.fromBlock, to + 1)
+      .filter(
+        (b) =>
+          only === 'all' || (only === 'headings') === isHeadingBlock(b.node),
+      );
+    if (picked.length === 0)
+      return { docVersion: this.host.getVersion(), formatted: 0 };
+    const docStyle = await this.docStyleOf(format);
+    let tr = this.host.getState().tr;
+    for (const block of picked) {
+      const from = block.pos + 1;
+      const hit: Hit = {
+        from,
+        to: from + block.node.content.size,
+        blockIndex: blocks.indexOf(block),
+        context: '',
+      };
+      tr = this.formatInto(tr, hit, block, format, docStyle);
+    }
+    if (tr.steps.length === 0) {
+      return { docVersion: this.host.getVersion(), formatted: 0 };
+    }
+    this.host.apply(tr);
+    const end = picked[picked.length - 1];
+    return {
+      docVersion: this.host.getVersion(),
+      range: {
+        from: picked[0].pos,
+        to: end.pos + end.node.nodeSize,
+      },
+      formatted: picked.length,
+    };
+  }
+
+  /** The document's own style a formatting names, resolved once. */
+  private async docStyleOf(format: Formatting): Promise<ResolvedStyle | null> {
+    return format.style && !isBuiltInStyle(format.style)
+      ? await this.resolveStyle(format.style)
+      : null;
+  }
+
+  /** Add one block's formatting to `tr`. Marks and paragraph attributes
+   *  only — no step moves a position, so blocks read before the first step
+   *  stay addressable after it. */
+  private formatInto(
+    tr: Transaction,
+    hit: Hit,
+    block: TextBlock,
+    format: Formatting,
+    docStyle: ResolvedStyle | null,
+  ): Transaction {
+    const { schema } = this.host.getState();
     const styleAttrs: Record<string, unknown> = {};
     if (docStyle) {
       // The style's look replaces the paragraph's: its character formatting
       // over the whole paragraph (links, comments, footnotes stay), its
       // paragraph formatting in place of what the paragraph had.
-      const from = styled.pos + 1;
-      const to = from + styled.node.content.size;
+      const from = block.pos + 1;
+      const to = from + block.node.content.size;
       if (to > from) {
         for (const name of CHARACTER_MARKS) {
           const type = schema.marks[name];
@@ -417,7 +512,7 @@ export class PmDocSession implements DocumentSession {
           tr = tr.addMark(from, to, schema.markFromJSON(m));
       }
       for (const key of STYLE_ATTRS)
-        if (key in styled.node.attrs)
+        if (key in block.node.attrs)
           styleAttrs[key] = docStyle.attrs[key] ?? null;
       const heading = docStyle.attrs['heading'] as number | null | undefined;
       styleAttrs['heading'] = heading ?? null;
@@ -500,7 +595,6 @@ export class PmDocSession implements DocumentSession {
         : null;
     }
     if (format.list !== undefined || format.listLevel !== undefined) {
-      const block = this.textblocks()[hit.blockIndex];
       const change = this.listChange(block.node, block.pos, format);
       Object.assign(pAttrs, change.attrs);
       if (change.numbering)
@@ -512,7 +606,6 @@ export class PmDocSession implements DocumentSession {
       format.lineSpacing !== undefined ||
       format.indent !== undefined
     ) {
-      const block = this.textblocks()[hit.blockIndex];
       const spacing = spacingAttr(
         block.node.attrs['spacing'] as Record<string, unknown> | null,
         format,
@@ -529,21 +622,12 @@ export class PmDocSession implements DocumentSession {
       if (indent !== undefined) pAttrs['indent'] = indent;
     }
     if (Object.keys(pAttrs).length > 0) {
-      const block = this.textblocks()[hit.blockIndex];
       tr = tr.setNodeMarkup(block.pos, undefined, {
         ...block.node.attrs,
         ...pAttrs,
       });
     }
-    if (tr.steps.length === 0) {
-      // Formatting that named no supported change — a no-op success.
-      return { docVersion: this.host.getVersion() };
-    }
-    this.host.apply(tr);
-    return {
-      docVersion: this.host.getVersion(),
-      range: { from: hit.from, to: hit.to },
-    };
+    return tr;
   }
 
   async updateImage(
@@ -1694,7 +1778,10 @@ export class PmDocSession implements DocumentSession {
   }
 
   /** Resolve a formatting target to absolute positions. */
-  private formatHit(target: FormatTarget, occurrence?: number): Hit {
+  private formatHit(
+    target: Exclude<FormatTarget, { fromBlock: number }>,
+    occurrence?: number,
+  ): Hit {
     if (typeof target === 'string') return this.uniqueHit(target, occurrence);
     const blocks = this.textblocks();
     const block = blocks[target.blockIndex];
@@ -2168,6 +2255,15 @@ function listOf(node: PMNode): { numId: string; level: number } | null {
     | undefined;
   if (!list?.numId) return null;
   return { numId: list.numId, level: list.level ?? 0 };
+}
+
+/** A heading, a Title or a Subtitle — what apply_formatting's
+ *  only: "headings" picks, and "body" leaves out. */
+function isHeadingBlock(node: PMNode): boolean {
+  const heading = node.attrs['heading'] as number | null | undefined;
+  if (typeof heading === 'number' && heading >= 1) return true;
+  const style = node.attrs['styleId'] as string | null | undefined;
+  return style === 'Title' || style === 'Subtitle';
 }
 
 function blockType(node: PMNode): string {
