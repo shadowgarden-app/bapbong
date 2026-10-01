@@ -1,6 +1,7 @@
 import { Mark, Node as PMNode } from 'prosemirror-model';
 import { glyphKey, perf, sameGlyphRun } from '@shadow-garden/bapbong-contracts';
 import { layoutEquation } from './equation-layout.js';
+import { renderChart } from './chart-render.js';
 import { isEqRow } from '@shadow-garden/bapbong-contracts';
 import {
   createNumberingCounter,
@@ -12,6 +13,8 @@ import {
   mergeParagraphSpacing,
 } from '@shadow-garden/bapbong-contracts';
 import type {
+  ChartSpec,
+  VectorImageSpec,
   Align,
   BorderSide,
   CellDiagonals,
@@ -285,6 +288,34 @@ function resolveEquation(node: PMNode, pos: number): InlineImage {
   };
 }
 
+/** A chart node's drawing, laid out against the current measurer — one
+ *  per spec and size: the spec object is the node's attr, so an unchanged
+ *  chart is never laid out twice. Without a measurer (or a spec) the
+ *  node's own `vector`, the placeholder, stands. */
+const chartDrawings = new WeakMap<object, Map<string, VectorImageSpec>>();
+function chartVector(
+  a: PMNode['attrs'],
+  width: number,
+  height: number,
+): VectorImageSpec | undefined {
+  const spec = a['chart'] as ChartSpec | null;
+  if (!spec || !eqCtx)
+    return (a['vector'] as VectorImageSpec | null) ?? undefined;
+  let bySize = chartDrawings.get(spec);
+  if (!bySize) chartDrawings.set(spec, (bySize = new Map()));
+  const key = `${width}x${height}`;
+  let v = bySize.get(key);
+  if (!v) {
+    try {
+      v = renderChart(spec, width, height, eqCtx.measure);
+    } catch {
+      v = (a['vector'] as VectorImageSpec | null) ?? undefined;
+    }
+    if (v) bySize.set(key, v);
+  }
+  return v;
+}
+
 function resolveImage(node: PMNode, pos: number): InlineImage {
   const a = node.attrs;
   const link = findMark(node.marks, 'link');
@@ -298,7 +329,17 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
     height: Number(a['height']) || fallback,
     link: link ? String(link.attrs['href']) : undefined,
     ...(a['shape'] ? { shape: a['shape'] as InlineImage['shape'] } : {}),
-    ...(a['vector'] ? { vector: a['vector'] as InlineImage['vector'] } : {}),
+    ...(a['chart']
+      ? {
+          vector: chartVector(
+            a,
+            Number(a['width']) || fallback,
+            Number(a['height']) || fallback,
+          ),
+        }
+      : a['vector']
+        ? { vector: a['vector'] as InlineImage['vector'] }
+        : {}),
     ...(Number(a['raise']) ? { raise: Number(a['raise']) } : {}),
     ...(a['crop'] ? { crop: a['crop'] as ImageCrop } : {}),
     ...(a['outline'] ? { outline: a['outline'] as BorderSide } : {}),
@@ -380,9 +421,17 @@ function paragraphToFlow(
           ...(child.attrs['shape']
             ? { shape: child.attrs['shape'] as FlowFloat['shape'] }
             : {}),
-          ...(child.attrs['vector']
-            ? { vector: child.attrs['vector'] as FlowFloat['vector'] }
-            : {}),
+          ...(child.attrs['chart']
+            ? {
+                vector: chartVector(
+                  child.attrs,
+                  Number(child.attrs['width']) || floatFallback,
+                  Number(child.attrs['height']) || floatFallback,
+                ),
+              }
+            : child.attrs['vector']
+              ? { vector: child.attrs['vector'] as FlowFloat['vector'] }
+              : {}),
           ...(child.attrs['crop']
             ? { crop: child.attrs['crop'] as ImageCrop }
             : {}),
