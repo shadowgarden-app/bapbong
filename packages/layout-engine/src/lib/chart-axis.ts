@@ -1,18 +1,16 @@
 /**
- * Automatic value-axis scaling, Word/Excel's way.
+ * Automatic value-axis scaling, Word/Excel's way — measured in Word 365
+ * (the chart probe: 14 data sets, 3 chart heights; and D-2609-LSTQ).
  *
- * Measured on the five charts of D-2609-LSTQ (Word 365 PDF):
- *   0…0.862 → 0…100% step 10%   0…0.688 → 0…80% step 10%
- *   0…0.40  → 0…45% step 5%     0…1521  → 0…1600 step 200
- *   0…1914  → 0…2500 step 500
- * One rule reproduces all five: pad the data range by 5% beyond its far
- * end, then take the SMALLEST major unit of the 1-2-5 series whose ticks
- * cover the padded range in at most 10 intervals; the ends are the unit
- * multiples that enclose it.
- *
- * The minimum snaps to zero when the data sits far enough from it — the
- * documented Excel rule: all values ≥ 0 and the spread is more than a sixth
- * of the maximum (mirror image for all-negative data).
+ *  - The far end gets 5% headroom beyond the data.
+ *  - The near end snaps to zero when the data sits far enough from it —
+ *    all values ≥ 0 and the spread is more than a sixth of the maximum
+ *    (mirror image for all-negative data). Otherwise it drops by half the
+ *    spread: 50…55 → 47…56, 1000…1002 → 999…1002.5.
+ *  - The major unit is the SMALLEST of the 1-2-5 series whose ticks cover
+ *    that range in at most 10 intervals — and, on a short axis, intervals
+ *    no closer than `minSpacing` (888…1521 is 0…1600 by 200 on a 216pt
+ *    plot, but 0…2000 by 500 on a 108pt one).
  */
 
 export interface AxisScale {
@@ -27,7 +25,7 @@ const MAX_INTERVALS = 10;
 function unitsFrom(x: number): number[] {
   const p = 10 ** Math.floor(Math.log10(x));
   const out: number[] = [];
-  for (let k = 0; k < 6; k++)
+  for (let k = 0; k < 8; k++)
     for (const m of [1, 2, 5]) out.push(m * p * 10 ** (k - 1));
   return out;
 }
@@ -37,10 +35,19 @@ const floorTo = (v: number, u: number) => Math.floor(v / u + 1e-9) * u;
 const ceilTo = (v: number, u: number) => Math.ceil(v / u - 1e-9) * u;
 const clean = (v: number) => Number(v.toPrecision(12));
 
+export interface ScaleOptions {
+  min?: number;
+  max?: number;
+  major?: number;
+  /** Axis length and the closest two ticks may sit (same unit). */
+  length?: number;
+  minSpacing?: number;
+}
+
 export function autoScale(
   dataMin: number,
   dataMax: number,
-  fixed: { min?: number; max?: number; major?: number } = {},
+  fixed: ScaleOptions = {},
 ): AxisScale {
   let lo = Math.min(dataMin, dataMax);
   let hi = Math.max(dataMin, dataMax);
@@ -54,19 +61,21 @@ export function autoScale(
     else if (hi < 0) hi = 0;
     else hi = 1;
   }
-  // Snap the far end to zero.
-  let snapLo = lo;
-  let snapHi = hi;
-  if (lo >= 0 && (hi - lo) / hi > 1 / 6) snapLo = 0;
-  if (hi <= 0 && (hi - lo) / -lo > 1 / 6) snapHi = 0;
-  if (fixed.min !== undefined) snapLo = fixed.min;
-  if (fixed.max !== undefined) snapHi = fixed.max;
-  const span = snapHi - snapLo || Math.abs(snapHi) || 1;
-  // The 5% headroom goes beyond whichever end the data reaches past zero.
-  const padHi =
-    fixed.max !== undefined ? snapHi : hi > 0 ? hi + 0.05 * span : snapHi;
-  const padLo =
-    fixed.min !== undefined ? snapLo : lo < 0 ? lo - 0.05 * span : snapLo;
+  const spread = hi - lo;
+  let padLo: number;
+  let padHi: number;
+  if (lo >= 0) {
+    padLo = spread / hi > 1 / 6 ? 0 : lo - spread / 2;
+    padHi = hi + 0.05 * (hi - padLo);
+  } else if (hi <= 0) {
+    padHi = spread / -lo > 1 / 6 ? 0 : hi + spread / 2;
+    padLo = lo - 0.05 * (padHi - lo);
+  } else {
+    padHi = hi + 0.05 * spread;
+    padLo = lo - 0.05 * spread;
+  }
+  if (fixed.min !== undefined) padLo = fixed.min;
+  if (fixed.max !== undefined) padHi = fixed.max;
 
   const pick = (u: number): AxisScale => ({
     min: fixed.min !== undefined ? fixed.min : clean(floorTo(padLo, u)),
@@ -74,14 +83,17 @@ export function autoScale(
     major: u,
   });
   if (fixed.major !== undefined && fixed.major > 0) return pick(fixed.major);
+  const fits =
+    fixed.length && fixed.minSpacing
+      ? Math.max(1, Math.floor(fixed.length / fixed.minSpacing + 1e-9))
+      : MAX_INTERVALS;
+  const maxIntervals = Math.min(MAX_INTERVALS, fits);
   const range = padHi - padLo || 1;
   for (const u of unitsFrom(range / MAX_INTERVALS)) {
     const s = pick(u);
-    // Data exactly on a tick stays inside: ceil already includes it.
-    if ((s.max - s.min) / u <= MAX_INTERVALS + 1e-9) return s;
+    if ((s.max - s.min) / u <= maxIntervals + 1e-9) return s;
   }
-  const u = 10 ** Math.ceil(Math.log10(range));
-  return pick(u);
+  return pick(10 ** Math.ceil(Math.log10(range)));
 }
 
 /** The tick values of a scale, min to max inclusive. */
