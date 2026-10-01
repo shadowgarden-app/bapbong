@@ -29,44 +29,75 @@ import type {
   VectorOp,
 } from '@shadow-garden/bapbong-contracts';
 import { formatNumber } from '@shadow-garden/bapbong-contracts';
-import { autoScale, ticks, type AxisScale } from './chart-axis.js';
+import {
+  autoScale,
+  ticks,
+  type AxisScale,
+  type ScaleOptions,
+} from './chart-axis.js';
 
 const PX_PER_PT = 96 / 72;
 
 // ── measured layout constants (points) ─────────────────────────────────────
 /** Chart edge → content, left/right and bottom. */
 const PAD_X = 6.5;
+/** A plot with nothing beside it on the right keeps this much more room
+ *  there (measured: 11pt right vs 6.5pt left with a top/bottom legend). */
+const PAD_RIGHT_EXTRA = 4.5;
 const PAD_BOTTOM = 6.4;
 /** Chart edge → the top value label (or the title). */
-const PAD_TOP = 4.2;
+const PAD_TOP = 5;
 /** Title → what is below it. */
 const TITLE_GAP = 6;
 /** Value tick label → plot edge. */
 const VAL_LABEL_GAP = 9.2;
 /** Category axis → its labels. */
 const CAT_LABEL_GAP = 6.4;
-/** Axis title → tick labels. */
-const AXIS_TITLE_GAP = 4;
-/** Widest a side legend may grow, as a fraction of the chart width. */
-const LEGEND_MAX = 0.282;
-/** Legend frame inset, and legend → plot gap. */
+/** Room an axis title adds beyond its own line (chart probe: 21.3pt in
+ *  all for a 10pt title, either axis). */
+const AXIS_TITLE_GAP = 9.1;
+/** A horizontal axis title's top below the tick labels' line box. */
+const AXIS_TITLE_DROP = 3.1;
+/** A vertical axis title's centre → the tick labels' left edge. */
+const AXIS_TITLE_INSET = 8.3;
+/** Widest a side legend may grow: a third of the chart (chart probe —
+ *  "A rather longer legend entry" fits a 6in chart, "… name" does not). */
+const LEGEND_MAX = 1 / 3;
+/** Legend frame inset, and legend → plot gap (plot edge → legend key is
+ *  16pt in Word). */
 const LEGEND_PAD = 3;
-const LEGEND_GAP = 6;
+/** Legend frame → plot, by side (measured): right 13 (16 to the key), left
+ *  9.4 (to the value labels), top/bottom 6. */
+const LEGEND_GAP = { r: 13, l: 9.4, tb: 6 };
+/** Extra space between stacked legend entries, in ems (18pt pitch for
+ *  one-line 10pt entries). */
+const ENTRY_GAP_EM = 0.58;
+/** Closest two value-axis ticks may sit, in ems of the tick labels: a
+ *  short plot spaces its gridlines out (0…1600 by 200 → 0…2000 by 500). */
+const MIN_TICK_SPACING_EM = 1.5;
 /** A line series' legend key and the gap before its text. */
 const LINE_KEY = 19.2;
+/** …shortened when the legend also holds square keys (a combo chart):
+ *  Word keeps one text column 14.2pt of key wide (measured). */
+const MIXED_LINE_KEY = 14.2;
 const KEY_GAP = 2.2;
 /** A filled series' legend square, in ems of the legend font. */
 const BOX_KEY_EM = 0.55;
 /** Gap between legend entries laid out in a row (top/bottom legends). */
-const LEGEND_ROW_GAP = 10;
+const LEGEND_ROW_GAP = 9.4;
+/** A top/bottom legend row sits this far right of the chart's centre. */
+const LEGEND_ROW_SHIFT = 2;
 /** Line box of chart text, in ems (Calibri's ascender+descender+gap). */
 const LINE_HEIGHT = 1.22;
 /** Major tick mark length. */
 const TICK = 3.2;
 /** Data label → the point/marker edge it labels. */
 const LABEL_GAP = 6;
-/** Data label above a column's end. */
-const BAR_LABEL_GAP = 2;
+/** A column end → its data label's line box (measured). */
+const BAR_LABEL_GAP = 4.6;
+/** A value label → the plot edge, for an axis on the right (measured; the
+ *  room reserved for it is still the left side's). */
+const VAL_LABEL_GAP_RIGHT = 6.3;
 /** Corner radius of a rounded chart area. */
 const CORNER = 8;
 
@@ -235,7 +266,15 @@ interface LegendEntry {
   lineKey: boolean;
 }
 
-function legendEntries(spec: ChartSpec): LegendEntry[] {
+/** Whether a vertical legend lists this group bottom-up, the way its series
+ *  stack on the page — stacked columns and areas, horizontal clustered bars
+ *  (measured: Word reverses exactly those, not stacked horizontal bars). */
+const stacksUpward = (g: ChartGroup): boolean =>
+  (isStacked(g) &&
+    ((g.type === 'bar' && g.barDir !== 'bar') || g.type === 'area')) ||
+  (g.type === 'bar' && g.barDir === 'bar' && !isStacked(g));
+
+function legendEntries(spec: ChartSpec, vertical: boolean): LegendEntry[] {
   const out: LegendEntry[] = [];
   for (const g of spec.groups) {
     const pieLike = g.type === 'pie' || g.type === 'doughnut';
@@ -259,14 +298,15 @@ function legendEntries(spec: ChartSpec): LegendEntry[] {
     }
     const lineKey =
       g.type === 'line' || g.type === 'scatter' || g.type === 'radar';
-    for (const s of g.series)
-      out.push({
-        name: s.name,
-        fill: s.fill,
-        line: s.line,
-        marker: s.marker,
-        lineKey,
-      });
+    const entries = g.series.map((s) => ({
+      name: s.name,
+      fill: s.fill,
+      line: s.line,
+      marker: s.marker,
+      lineKey,
+    }));
+    if (vertical && stacksUpward(g)) entries.reverse();
+    out.push(...entries);
   }
   const del = new Set(spec.legend?.deleted ?? []);
   return out.filter((_, i) => !del.has(i));
@@ -285,27 +325,37 @@ function layoutLegend(
 ): LegendLayout | null {
   const lg = spec.legend;
   if (!lg) return null;
-  const entries = legendEntries(spec);
+  const vertical =
+    lg.position === 'r' || lg.position === 'l' || lg.position === 'tr';
+  const entries = legendEntries(spec, vertical);
   if (entries.length === 0) return null;
   const f = lg.font;
   const lh = c.lineHeight(f);
+  const entryGap = f.sizePt * ENTRY_GAP_EM;
+  const mixed =
+    entries.some((e) => e.lineKey) && entries.some((e) => !e.lineKey);
   const keyW = (e: LegendEntry) =>
-    e.lineKey ? LINE_KEY : f.sizePt * BOX_KEY_EM;
-  const vertical =
-    lg.position === 'r' || lg.position === 'l' || lg.position === 'tr';
+    e.lineKey ? (mixed ? MIXED_LINE_KEY : LINE_KEY) : f.sizePt * BOX_KEY_EM;
   type Placed = { e: LegendEntry; lines: string[]; w: number; h: number };
   let placedEntries: Placed[];
   let box: Box;
   if (vertical) {
     const maxW = LEGEND_MAX * W;
+    // One key column for all entries: a combo's bar and line entries keep
+    // their texts aligned (measured).
+    const column = Math.max(...entries.map(keyW));
     placedEntries = entries.map((e) => {
-      const kw = keyW(e) + KEY_GAP;
-      const lines = c.wrap(e.name, f, Math.max(10, maxW - kw - 2 * LEGEND_PAD));
+      const kw = column + KEY_GAP;
+      // The third bounds key + text; the frame's inset rides outside it.
+      const lines = c.wrap(e.name, f, Math.max(10, maxW - kw));
       const tw = Math.max(...lines.map((l) => c.width(l, f)));
       return { e, lines, w: kw + tw, h: lines.length * lh };
     });
     const w = Math.max(...placedEntries.map((p) => p.w)) + 2 * LEGEND_PAD;
-    const h = placedEntries.reduce((s, p) => s + p.h, 0) + 2 * LEGEND_PAD;
+    const h =
+      placedEntries.reduce((s, p) => s + p.h, 0) +
+      entryGap * (placedEntries.length - 1) +
+      2 * LEGEND_PAD;
     const x = lg.position === 'l' ? area.x : area.x + area.w - w;
     const y = lg.position === 'tr' ? area.y : area.y + (area.h - h) / 2;
     box = { x, y, w, h };
@@ -338,7 +388,7 @@ function layoutLegend(
     const rowHeights = rows.map((r) => Math.max(...r.map((p) => p.h)));
     const w = Math.max(...rowWidths) + 2 * LEGEND_PAD;
     const h = rowHeights.reduce((s, v) => s + v, 0) + 2 * LEGEND_PAD;
-    const x = area.x + (area.w - w) / 2;
+    const x = area.x + (area.w - w) / 2 + LEGEND_ROW_SHIFT;
     const y = lg.position === 't' ? area.y : area.y + area.h - h;
     box = { x, y, w, h };
     const auto = box;
@@ -372,10 +422,21 @@ function layoutLegend(
     box,
     draw: () => {
       c.rect(box, lg.box);
+      const column = Math.max(...placedEntries.map((p) => keyW(p.e)));
       let y = box.y + LEGEND_PAD;
       for (const p of placedEntries) {
-        drawEntry(c, p.e, p.lines, f, box.x + LEGEND_PAD, y, keyW(p.e));
-        y += p.h;
+        const kw = keyW(p.e);
+        drawEntry(
+          c,
+          p.e,
+          p.lines,
+          f,
+          box.x + LEGEND_PAD + (column - kw) / 2,
+          y,
+          kw,
+          column,
+        );
+        y += p.h + entryGap;
       }
     },
   };
@@ -389,6 +450,8 @@ function drawEntry(
   x: number,
   top: number,
   kw: number,
+  /** Width of the key column the text follows (≥ kw). */
+  column = kw,
 ): void {
   const lh = c.lineHeight(f);
   const mid = top + (lines.length * lh) / 2;
@@ -399,7 +462,8 @@ function drawEntry(
     const s = kw;
     c.rect({ x, y: mid - s / 2, w: s, h: s }, { fill: e.fill, line: e.line });
   }
-  lines.forEach((l, i) => c.text(l, f, x + kw + KEY_GAP, top + i * lh));
+  const textX = x - (column - kw) / 2 + column + KEY_GAP;
+  lines.forEach((l, i) => c.text(l, f, textX, top + i * lh));
 }
 
 // ── markers ─────────────────────────────────────────────────────────────────
@@ -530,12 +594,14 @@ function scaleFor(
   axis: ChartAxis | undefined,
   groups: ChartGroup[],
   blanksZero: boolean,
+  fit: Pick<ScaleOptions, 'length' | 'minSpacing'> = {},
 ): AxisScale {
   if (groups.some((g) => g.grouping === 'percentStacked')) {
     const hasNeg = groups.some((g) =>
       g.series.some((s) => s.values.some((v) => (v ?? 0) < 0)),
     );
     return autoScale(hasNeg ? -1 : 0, 1, {
+      ...fit,
       min: axis?.min ?? (hasNeg ? -1 : 0),
       max: axis?.max ?? 1,
       ...(axis?.majorUnit !== undefined && { major: axis.majorUnit }),
@@ -543,6 +609,7 @@ function scaleFor(
   }
   const [lo, hi] = dataRange(groups, blanksZero);
   return autoScale(lo, hi, {
+    ...fit,
     ...(axis?.min !== undefined && { min: axis.min }),
     ...(axis?.max !== undefined && { max: axis.max }),
     ...(axis?.majorUnit !== undefined && { major: axis.majorUnit }),
@@ -668,22 +735,33 @@ export function renderChart(
       case 'l':
         area = {
           ...area,
-          x: b.x + b.w + LEGEND_GAP,
-          w: area.w - b.w - LEGEND_GAP,
+          x: b.x + b.w + LEGEND_GAP.l,
+          w: area.w - b.w - LEGEND_GAP.l,
         };
         break;
       case 't':
         area = {
           ...area,
-          y: b.y + b.h + LEGEND_GAP,
-          h: area.h - b.h - LEGEND_GAP,
+          y: b.y + b.h + LEGEND_GAP.tb,
+          h: area.h - b.h - LEGEND_GAP.tb,
         };
         break;
       case 'b':
-        area = { ...area, h: b.y - LEGEND_GAP - area.y };
+        area = { ...area, h: b.y - LEGEND_GAP.tb - area.y };
         break;
+      case 'tr': {
+        // Top right: beside the plot, and the plot starts below it.
+        const below = b.y + b.h;
+        area = {
+          x: area.x,
+          y: below,
+          w: b.x - LEGEND_GAP.r - area.x,
+          h: area.y + area.h - below,
+        };
+        break;
+      }
       default:
-        area = { ...area, w: b.x - LEGEND_GAP - area.x };
+        area = { ...area, w: b.x - LEGEND_GAP.r - area.x };
     }
   }
 
@@ -696,7 +774,17 @@ export function renderChart(
   } else if (radar.length && radar.length === spec.groups.length) {
     drawRadar(c, spec, radar, area);
   } else {
-    drawCartesian(c, spec, area, W, H);
+    const besideRight =
+      !!legend &&
+      !spec.legend?.overlay &&
+      (spec.legend?.position === 'r' || spec.legend?.position === 'tr');
+    drawCartesian(
+      c,
+      spec,
+      besideRight ? area : { ...area, w: area.w - PAD_RIGHT_EXTRA },
+      W,
+      H,
+    );
   }
   legend?.draw();
   drawTitle?.();
@@ -727,9 +815,44 @@ function drawCartesian(
     axis: axisById.get(id),
     groups: groups.filter((g) => g.axisIds[1] === id),
   }));
-  const primary = valAxes[0];
   const catAxis = axisById.get(groups[0].axisIds[0]);
-  const scales = valAxes.map((v) => scaleFor(v.axis, v.groups, blanksZero));
+  const nCats = Math.max(1, ...groups.map(nCategories));
+  const categories =
+    groups.flatMap((g) => g.series).find((s) => s.categories.length)
+      ?.categories ?? Array.from({ length: nCats }, (_, i) => String(i + 1));
+  const valFmt = (axis: ChartAxis | undefined, g: ChartGroup[]) =>
+    g.some((x) => x.grouping === 'percentStacked') &&
+    (!axis || axis.formatCode === 'General')
+      ? '0%'
+      : (axis?.formatCode ?? 'General');
+  const catShown =
+    !!catAxis && !catAxis.deleted && catAxis.tickLabelPosition !== 'none';
+  const maxW = (labels: string[], f?: ChartFont) =>
+    f ? Math.max(0, ...labels.map((l) => c.width(l, f))) : 0;
+  const titleRoom = (a: ChartAxis | undefined) =>
+    a?.title && !a.deleted ? c.lineHeight(a.title.font) + AXIS_TITLE_GAP : 0;
+  const valLh = (i: number) => {
+    const f = valAxes[i]?.axis?.font;
+    return f ? c.lineHeight(f) : 0;
+  };
+
+  // Scales depend on the plot's length (a short axis spaces its ticks out),
+  // and the plot's size on the tick labels: lay out twice.
+  const scalesFor = (length?: number) =>
+    valAxes.map((v) =>
+      scaleFor(
+        v.axis,
+        v.groups,
+        blanksZero,
+        length === undefined
+          ? {}
+          : {
+              length,
+              minSpacing: (v.axis?.font.sizePt ?? 10) * MIN_TICK_SPACING_EM,
+            },
+      ),
+    );
+  let scales = scalesFor();
   const xScale = scatter
     ? (() => {
         const [lo, hi] = xRange(groups);
@@ -740,49 +863,56 @@ function drawCartesian(
         });
       })()
     : null;
-  const nCats = Math.max(1, ...groups.map(nCategories));
-  const categories =
-    groups.flatMap((g) => g.series).find((s) => s.categories.length)
-      ?.categories ?? Array.from({ length: nCats }, (_, i) => String(i + 1));
-
-  const valFmt = (axis: ChartAxis | undefined, g: ChartGroup[]) =>
-    g.some((x) => x.grouping === 'percentStacked') &&
-    (!axis || axis.formatCode === 'General')
-      ? '0%'
-      : (axis?.formatCode ?? 'General');
-  const valLabels = valAxes.map((v, i) =>
-    v.axis && !v.axis.deleted && v.axis.tickLabelPosition !== 'none'
-      ? ticks(scales[i]).map((tv) => formatNumber(tv, valFmt(v.axis, v.groups)))
-      : [],
-  );
-  const catShown =
-    catAxis && !catAxis.deleted && catAxis.tickLabelPosition !== 'none';
   const xLabels =
     scatter && xScale && catShown
       ? ticks(xScale).map((tv) =>
           formatNumber(tv, catAxis?.formatCode ?? 'General'),
         )
       : [];
+  const labelsOf = (sc: AxisScale[]) =>
+    valAxes.map((v, i) =>
+      v.axis && !v.axis.deleted && v.axis.tickLabelPosition !== 'none'
+        ? ticks(sc[i]).map((tv) => formatNumber(tv, valFmt(v.axis, v.groups)))
+        : [],
+    );
+  /** Where the category axis crosses the primary value axis. */
+  const crossValue = (sc: AxisScale) =>
+    catAxis?.crosses === 'max'
+      ? sc.max
+      : catAxis?.crosses === 'min'
+        ? sc.min
+        : typeof catAxis?.crosses === 'number'
+          ? catAxis.crosses
+          : Math.min(Math.max(0, sc.min), sc.max);
+  /** Category labels sit next to the axis — at the plot's edge only when
+   *  the axis runs along it (a negative range puts it mid-plot, and Word
+   *  then reserves no band below the plot for them). */
+  const labelsAtEdge = (sc: AxisScale) => {
+    if (
+      catAxis?.tickLabelPosition === 'low' ||
+      catAxis?.tickLabelPosition === 'high'
+    )
+      return true;
+    // Only an axis along the bottom (the top, reversed) pushes its labels
+    // out of the plot; all-negative data puts it along the top, labels
+    // inside.
+    const v = crossValue(sc);
+    const bottomEnd = valAxes[0]?.axis?.reversed ? sc.max : sc.min;
+    return Math.abs(v - bottomEnd) < 1e-12;
+  };
+  const catFont = catAxis?.font;
+  const lhCat = catFont ? c.lineHeight(catFont) : 0;
+  const SIN45 = Math.SQRT1_2;
+  /** Slant category labels that cannot sit side by side (Word: −45°). */
+  let catRotation = 0;
 
-  // Reserve room for tick labels and axis titles around the inner plot.
-  let inner: Box;
-  const titleRoom = (a: ChartAxis | undefined) =>
-    a?.title && !a.deleted ? c.lineHeight(a.title.font) + AXIS_TITLE_GAP : 0;
-  if (spec.plotArea.layout && spec.plotArea.layout.target !== 'outer') {
-    inner = placed(spec.plotArea.layout, outer, W, H);
-  } else {
-    const valFont = primary.axis?.font;
-    const lhVal = valFont ? c.lineHeight(valFont) : 0;
-    const maxW = (labels: string[], f?: ChartFont) =>
-      f ? Math.max(0, ...labels.map((l) => c.width(l, f))) : 0;
+  const reserve = (sc: AxisScale[]) => {
+    const valLabels = labelsOf(sc);
     let left = 0;
     let right = 0;
     let top = 0;
     let bottom = 0;
-    const catFont = catAxis?.font;
-    const lhCat = catFont ? c.lineHeight(catFont) : 0;
     if (!horizontal) {
-      // Values on the left (and a secondary on the right); categories below.
       valAxes.forEach((v, i) => {
         if (!v.axis || v.axis.deleted) return;
         const room =
@@ -790,21 +920,56 @@ function drawCartesian(
         if (v.axis.position === 'r') right = Math.max(right, room);
         else left = Math.max(left, room);
       });
-      top = lhVal / 2;
-      if (catShown) bottom = lhCat + CAT_LABEL_GAP + titleRoom(catAxis);
+      top = valLh(0) / 2;
+      const atEdge = labelsAtEdge(sc[0]);
       if (scatter && xLabels.length) {
         bottom = lhCat + CAT_LABEL_GAP + titleRoom(catAxis);
         right = Math.max(
           right,
           maxW([xLabels[xLabels.length - 1]], catFont) / 2,
         );
+      } else if (catShown && atEdge) {
+        const catW = (outer.w - left - right) / nCats;
+        const widest = maxW(categories, catFont);
+        catRotation =
+          catAxis?.labelRotation ??
+          (widest > catW &&
+          categories.some((l) =>
+            c
+              .wrap(l, catFont as ChartFont, catW)
+              .some((x) => c.width(x, catFont as ChartFont) > catW),
+          )
+            ? -45
+            : 0);
+        if (catRotation) {
+          const band = widest * SIN45 + lhCat * SIN45;
+          bottom = band + CAT_LABEL_GAP + titleRoom(catAxis);
+          // The first label slants left past its category: keep it inside
+          // (its far corner, as drawCategoryLabels anchors it).
+          const first = c.width(categories[0] ?? '', catFont as ChartFont);
+          const asc = (catFont as ChartFont).sizePt * 0.75;
+          left = Math.max(left, first * SIN45 + asc * 0.5 - catW / 2);
+        } else {
+          const lines = Math.max(
+            1,
+            ...categories.map((l) =>
+              widest > catW ? c.wrap(l, catFont as ChartFont, catW).length : 1,
+            ),
+          );
+          bottom = lines * lhCat + CAT_LABEL_GAP + titleRoom(catAxis);
+        }
+      } else {
+        // Labels ride the axis inside the plot; only the bottom tick
+        // label's half line needs room.
+        bottom = valLh(0) / 2 - (PAD_BOTTOM - PAD_TOP) + titleRoom(catAxis);
       }
     } else {
       if (catShown)
         left = maxW(categories, catFont) + VAL_LABEL_GAP + titleRoom(catAxis);
+      top = valLh(0) / 2;
       valAxes.forEach((v, i) => {
         if (!v.axis || v.axis.deleted) return;
-        const room = lhVal + CAT_LABEL_GAP + titleRoom(v.axis);
+        const room = valLh(i) + CAT_LABEL_GAP + titleRoom(v.axis);
         if (v.axis.position === 't') top = Math.max(top, room);
         else bottom = Math.max(bottom, room);
         right = Math.max(
@@ -813,22 +978,34 @@ function drawCartesian(
         );
       });
     }
-    inner = {
-      x: outer.x + left,
-      y: outer.y + top,
-      w: Math.max(10, outer.w - left - right),
-      h: Math.max(10, outer.h - top - bottom),
-    };
-    if (spec.plotArea.layout) {
-      // An "outer" manual layout places the box tick labels included.
-      const o = placed(spec.plotArea.layout, outer, W, H);
-      inner = {
-        x: o.x + left,
-        y: o.y + top,
-        w: Math.max(10, o.w - left - right),
-        h: Math.max(10, o.h - top - bottom),
-      };
+    return { left, right, top, bottom, valLabels };
+  };
+
+  let inner: Box;
+  let valLabels: string[][];
+  if (spec.plotArea.layout && spec.plotArea.layout.target !== 'outer') {
+    inner = placed(spec.plotArea.layout, outer, W, H);
+    scales = scalesFor(horizontal ? undefined : inner.h);
+    valLabels = labelsOf(scales);
+  } else {
+    const box = spec.plotArea.layout
+      ? placed(spec.plotArea.layout, outer, W, H)
+      : outer;
+    const fit = (r: ReturnType<typeof reserve>): Box => ({
+      x: box.x + r.left,
+      y: box.y + r.top,
+      w: Math.max(10, box.w - r.left - r.right),
+      h: Math.max(10, box.h - r.top - r.bottom),
+    });
+    let r = reserve(scales);
+    inner = fit(r);
+    if (!horizontal) {
+      // Second pass: the scale the plot's real height allows.
+      scales = scalesFor(inner.h);
+      r = reserve(scales);
+      inner = fit(r);
     }
+    valLabels = r.valLabels;
   }
 
   c.rect(inner, spec.plotArea);
@@ -961,7 +1138,7 @@ function drawCartesian(
         c.text(
           label,
           a.font,
-          onRight ? edge + VAL_LABEL_GAP : edge - VAL_LABEL_GAP,
+          onRight ? edge + VAL_LABEL_GAP_RIGHT : edge - VAL_LABEL_GAP,
           p - lh / 2,
           onRight ? 'left' : 'right',
         );
@@ -999,7 +1176,19 @@ function drawCartesian(
           : catAxis.majorTickMark === 'cross'
             ? [-TICK, TICK]
             : null;
-    const labelEdge = horizontal ? inner.x : inner.y + inner.h;
+    // Next to the axis — which runs mid-plot when the range spans zero.
+    const labelEdge =
+      catAxis.tickLabelPosition === 'low'
+        ? horizontal
+          ? inner.x
+          : inner.y + inner.h
+        : catAxis.tickLabelPosition === 'high'
+          ? horizontal
+            ? inner.x + inner.w
+            : inner.y
+          : horizontal
+            ? Math.min(p, inner.x + inner.w)
+            : p;
     if (xScale) {
       for (const [k, tv] of ticks(xScale).entries()) {
         const x = xPos(tv);
@@ -1029,6 +1218,7 @@ function drawCartesian(
           catW,
           horizontal,
           labelEdge,
+          catRotation,
         );
     }
     if (catAxis.title)
@@ -1057,6 +1247,7 @@ function drawCategoryLabels(
   catW: number,
   horizontal: boolean,
   edge: number,
+  rotation: number,
 ): void {
   const f = axis.font;
   const lh = c.lineHeight(f);
@@ -1067,26 +1258,33 @@ function drawCategoryLabels(
     return;
   }
   const widest = Math.max(0, ...categories.map((l) => c.width(l, f)));
-  const rotation =
-    axis.labelRotation ??
-    (widest > catW &&
-    categories.some((l) => !l.includes(' ') || c.width(l, f) > catW * 2)
-      ? -45
-      : 0);
   categories.forEach((cat, i) => {
     const x = catPos(i);
     if (rotation) {
-      // Slanted labels hang from the axis, ending at their category.
+      // Slanted labels hang from the axis: each one's upper end meets its
+      // category, the text running down and left from there (Word, −45°).
       const w = c.width(cat, f);
       const a = (rotation * Math.PI) / 180;
-      c.text(
-        cat,
-        f,
-        x - w * Math.cos(a) - lh * 0.3,
-        edge + CAT_LABEL_GAP - w * Math.sin(a),
-        'left',
+      const asc = f.sizePt * 0.75;
+      // Baseline start = top-right corner − the run − the ascent normal.
+      const ux = Math.cos(a);
+      const uy = Math.sin(a);
+      const nx = Math.sin(a);
+      const ny = -Math.cos(a);
+      const cornerX = x + asc * 0.5;
+      const cornerY = edge + CAT_LABEL_GAP * 0.5;
+      c.ops.push({
+        kind: 'text',
+        x: cornerX - w * ux - asc * nx,
+        y: cornerY - w * uy - asc * ny,
+        text: cat,
+        size: f.sizePt,
+        family: f.family,
+        ...(f.bold && { bold: true }),
+        ...(f.italic && { italic: true }),
+        color: f.color,
         rotation,
-      );
+      });
       return;
     }
     const lines = widest > catW ? c.wrap(cat, f, catW) : [cat];
@@ -1112,7 +1310,7 @@ function drawAxisTitle(
       t.text,
       t.font,
       inner.x + inner.w / 2,
-      inner.y + inner.h + CAT_LABEL_GAP + labelLh + AXIS_TITLE_GAP,
+      inner.y + inner.h + CAT_LABEL_GAP + labelLh + AXIS_TITLE_DROP,
       'center',
       t.rotation,
     );
@@ -1121,16 +1319,18 @@ function drawAxisTitle(
   const labelW = Math.max(0, ...labels.map((l) => c.width(l, a.font)));
   const w = c.width(t.text, t.font);
   const rot = t.rotation ?? -90;
-  const x =
+  // The title's centre line, measured from the tick labels' outer edge.
+  const centre =
     side === 'l'
-      ? inner.x - VAL_LABEL_GAP - labelW - AXIS_TITLE_GAP - lh
-      : inner.x + inner.w + VAL_LABEL_GAP + labelW + AXIS_TITLE_GAP;
+      ? inner.x - VAL_LABEL_GAP - labelW - AXIS_TITLE_INSET
+      : inner.x + inner.w + VAL_LABEL_GAP + labelW + AXIS_TITLE_INSET;
   if (rot === -90 || rot === 270) {
-    // Rotated a quarter turn counter-clockwise: the baseline runs upward.
+    // Turned a quarter counter-clockwise, the baseline runs upward and the
+    // glyphs stand to its left: centre the ascent/descent box on the line.
     const cy = inner.y + inner.h / 2;
     c.ops.push({
       kind: 'text',
-      x: x + lh - t.font.sizePt * 0.25,
+      x: centre + t.font.sizePt * 0.25,
       y: cy + w / 2,
       text: t.text,
       size: t.font.sizePt,
@@ -1141,7 +1341,7 @@ function drawAxisTitle(
       rotation: -90,
     });
   } else {
-    c.text(t.text, t.font, x, inner.y + inner.h / 2 - lh / 2, 'left');
+    c.text(t.text, t.font, centre, inner.y + inner.h / 2 - lh / 2, 'center');
   }
 }
 
@@ -1371,7 +1571,31 @@ function drawScatter(
 // ── pie & doughnut ──────────────────────────────────────────────────────────
 
 /** Proportion of the plot box's smaller side a pie's diameter takes. */
-const PIE_FILL = 0.9;
+/** Proportion of the plot box's smaller side a pie's diameter takes —
+ *  less when it carries data labels (measured: 0.81 with percentages,
+ *  0.956 for a bare doughnut). */
+const PIE_FILL = { labelled: 0.81, bare: 0.956 };
+
+/** Whole percentages that add up to 100 — Word labels 58/23/10/9, not
+ *  59/23/10/9 (largest remainder; ties go to the smaller slice). */
+function wholePercents(vals: number[]): number[] {
+  const total = vals.reduce((a, b) => a + b, 0);
+  if (!total) return vals.map(() => 0);
+  const exact = vals.map((v) => (v / total) * 100);
+  const out = exact.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  const order = exact
+    .map((e, i) => ({ i, r: e - Math.floor(e), v: vals[i] }))
+    // Remainders equal to the 9th place count as a tie (8.2/14 and 1.2/14
+    // differ only in floating-point noise).
+    .sort((a, b) => (Math.abs(b.r - a.r) > 1e-9 ? b.r - a.r : a.v - b.v));
+  for (const { i } of order) {
+    if (left <= 0) break;
+    out[i]++;
+    left--;
+  }
+  return out;
+}
 
 function drawPies(
   c: Ctx,
@@ -1384,11 +1608,14 @@ function drawPies(
     : area;
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
-  const R = (Math.min(box.w, box.h) / 2) * PIE_FILL;
   const g = groups[0];
   const s = g.series[0];
   if (!s) return;
+  const R =
+    (Math.min(box.w, box.h) / 2) *
+    (s.labels ? PIE_FILL.labelled : PIE_FILL.bare);
   const vals = s.values.map((v) => Math.max(0, v ?? 0));
+  const pcts = wholePercents(vals);
   const total = vals.reduce((a, b) => a + b, 0) || 1;
   const hole = g.type === 'doughnut' ? (g.holeSize ?? 50) / 100 : 0;
   // Degrees clockwise from 12 o'clock.
@@ -1419,7 +1646,7 @@ function drawPies(
         })
       : [{ x: ox, y: oy }];
     if (v > 0) c.poly([...outer, ...innerPts], fill, line);
-    const text = labelText(s, i, s.values[i] ?? 0, v / total);
+    const text = labelText(s, i, s.values[i] ?? 0, pcts[i] / 100);
     if (text && s.labels) {
       const lb = s.labels;
       labels.push(() => {
@@ -1427,7 +1654,8 @@ function drawPies(
         const w = c.width(text, lb.font);
         const pos = lb.position ?? 'bestFit';
         // Inside the slice when it fits (bestFit), else just outside.
-        const rIn = hole ? (R * (1 + hole)) / 2 : R * 0.65;
+        // Measured: a pie's inside labels sit a line in from the rim.
+        const rIn = hole ? (R * (1 + hole)) / 2 : Math.max(R * 0.5, R - lh - 2);
         const fits = sweep * rIn > w * 0.9 || pos === 'ctr' || pos === 'inEnd';
         const rr =
           pos === 'outEnd' || !fits ? R + LABEL_GAP + Math.max(w, lh) / 2 : rIn;

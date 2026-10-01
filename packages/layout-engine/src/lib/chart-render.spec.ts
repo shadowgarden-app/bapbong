@@ -215,6 +215,48 @@ describe('renderChart', () => {
     expect(hi.points[2].y).toBeCloseTo(lo.points[0].y);
   });
 
+  it('labels a pie in whole percentages that add up to 100', () => {
+    // 8.2 / 3.2 / 1.4 / 1.2 — Word: 58% 23% 10% 9%, not 59 23 10 9.
+    const pie = chart({
+      type: 'pie',
+      varyColors: true,
+      series: [
+        series({
+          values: [8.2, 3.2, 1.4, 1.2],
+          categories: ['a', 'b', 'c', 'd'],
+          labels: {
+            showVal: false,
+            showPercent: true,
+            showCatName: false,
+            showSerName: false,
+            separator: ', ',
+            font,
+          },
+        }),
+      ],
+    });
+    const t = texts(renderChart(pie, 576, 336, measure).ops);
+    expect(t).toEqual(expect.arrayContaining(['58%', '23%', '10%', '9%']));
+    expect(t).not.toContain('59%');
+  });
+
+  it('lists a stacked chart legend bottom-up, the way it stacks', () => {
+    const stacked = chart({
+      type: 'bar',
+      barDir: 'col',
+      grouping: 'stacked',
+      overlap: 100,
+      series: [
+        series({ name: 'First', values: [1, 2, 3], fill: '#111111' }),
+        series({ name: 'Second', values: [1, 2, 3], fill: '#222222' }),
+      ],
+    });
+    const ops = renderChart(stacked, 576, 336, measure).ops;
+    const y = (name: string) =>
+      (ops.find((o) => o.kind === 'text' && o.text === name) as VectorTextOp).y;
+    expect(y('Second')).toBeLessThan(y('First'));
+  });
+
   it('cuts a pie into one slice per point', () => {
     const pie = chart({
       type: 'pie',
