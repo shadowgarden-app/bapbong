@@ -31,6 +31,7 @@ import type {
   EditorPlugin,
   EditorPluginHandles,
   EditorPointerEvent,
+  FontAvailable,
   MeasureMetrics,
   MeasureText,
   EditorKeyEvent,
@@ -118,6 +119,10 @@ export interface BapbongEditorOptions {
   measureText?: MeasureText;
   /** Vertical-metrics provider paired with {@link measureText}. */
   measureMetrics?: MeasureMetrics;
+  /** Which font families can be drawn here (see RenderCore's option of the
+   *  same name). Pair with a registry measurer:
+   *  `createFontAvailability(registry)`. */
+  fontAvailable?: FontAvailable;
   /** Vertical gap between pages in layout px (painter default when omitted).
    *  Widen it when the host draws chrome in the gap (section-break markers);
    *  read back via {@link BapbongEditor.getPageGap}. */
@@ -290,6 +295,7 @@ export class BapbongEditor {
       viewport: opts.viewport,
       measureText: opts.measureText,
       measureMetrics: opts.measureMetrics,
+      fontAvailable: opts.fontAvailable,
       pageGap: opts.pageGap,
     });
     // The core resolves plugin decorations to page rects at paint time.

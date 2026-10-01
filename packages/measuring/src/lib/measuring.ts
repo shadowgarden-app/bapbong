@@ -2,10 +2,12 @@ import {
   applyGlyphSpec,
   fontShorthand,
   glyphCount,
+  type FontAvailable,
   type FontSpec,
   type MeasureMetrics,
   type MeasureText,
 } from '@shadow-garden/bapbong-contracts';
+import type { FontRegistry } from './font-registry.js';
 
 const PT_TO_PX = 96 / 72;
 
@@ -170,4 +172,51 @@ export async function ensureFontsLoaded(
     }
   }
   await Promise.all(loads);
+}
+
+/** The generic families a missing family falls back to. */
+const PROBE_GENERICS = ['monospace', 'serif', 'sans-serif'];
+/** Wide and narrow glyphs side by side, so any two faces differ in width. */
+const PROBE_TEXT = 'mmmmmmmmmmlli1WQ@';
+
+/**
+ * Which font families this host can really draw: a face the registry holds,
+ * or one the canvas paints as itself — asked of the canvas the painter uses,
+ * by the classic test: list the family ahead of a generic one and see whether
+ * the width moves. Unknown families fall straight through to the generic, so
+ * it never does for them; checking three generics catches the family that
+ * happens to BE one of them (Courier as the monospace default).
+ *
+ * This is the answer to "will text in this family come out in this family?",
+ * the question font substitution needs (see the layout's `fontAvailable`) —
+ * not `document.fonts.check()`, which reports true for any name with no
+ * @font-face to wait on, installed or not.
+ *
+ * Only positive answers are remembered: a face still loading answers no now
+ * and yes on the relayout its arrival triggers. Without a DOM the registry
+ * alone answers.
+ */
+export function createFontAvailability(registry?: FontRegistry): FontAvailable {
+  const drawable = new Set<string>();
+  let ctx: CanvasRenderingContext2D | null | undefined;
+  return (family) => {
+    if (registry?.hasFamily(family)) return true;
+    const key = family.toLowerCase();
+    if (drawable.has(key)) return true;
+    if (ctx === undefined) {
+      const doc = (globalThis as { document?: Document }).document;
+      ctx = doc?.createElement('canvas').getContext('2d') ?? null;
+    }
+    const c = ctx;
+    if (!c) return false;
+    const quoted = `"${family.replace(/["\\]/g, '\\$&')}"`;
+    const drawn = PROBE_GENERICS.some((generic) => {
+      c.font = `72px ${generic}`;
+      const fallback = c.measureText(PROBE_TEXT).width;
+      c.font = `72px ${quoted}, ${generic}`;
+      return c.measureText(PROBE_TEXT).width !== fallback;
+    });
+    if (drawn) drawable.add(key);
+    return drawn;
+  };
 }

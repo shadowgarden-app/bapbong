@@ -264,6 +264,33 @@ export interface FontMetrics {
  *  cannot read a glyph adjustment, so it cannot let one move a baseline. */
 export type MeasureMetrics = (font: FontFace) => FontMetrics;
 
+/** Whether text in `family` would really be drawn in that family here — a
+ *  face the font registry holds or one the canvas can paint. Injected like
+ *  the measurers: only the host knows which fonts it has. */
+export type FontAvailable = (family: string) => boolean;
+
+/**
+ * What the document's font table (word/fontTable.xml) says about a font it
+ * names — read only when that font is missing here, to pick what Word would
+ * draw instead. A PDF converter's "Arial MT" is no installed family anywhere,
+ * but its entry says `w:altName="Arial"`.
+ */
+export interface FontSubstitute {
+  /** w:altName — the names to try instead, in order. */
+  altNames?: string[];
+  /** w:family — the generic class, the last resort when no alternative is
+   *  available. Never set for a symbol or East Asian charset: a "roman"
+   *  Wingdings 2 must not become Times New Roman, nor MS Mincho Courier. */
+  generic?: 'roman' | 'swiss' | 'modern';
+  /** w:pitch="fixed" — a monospaced face, whatever its class. */
+  fixedPitch?: boolean;
+}
+
+/** {@link FontSubstitute}s keyed by the font's name (w:font/@w:name). Rides
+ *  `doc.attrs.fontSubstitutes`; the model's runs keep the name they were
+ *  written with, so a document saves the fonts it came with. */
+export type FontSubstitutes = Record<string, FontSubstitute>;
+
 // ── Flow input (document flattened, ready for layout) ──────────────
 
 /** A contiguous run of inline text sharing one font/color/link. */
@@ -1104,6 +1131,11 @@ export interface LayoutConfig {
    *  takes `doc.attrs.compat` first (importer-set); this is the flat path's
    *  and the fallback. Absent → current Word's rules. */
   compat?: Partial<DocCompat>;
+  /** Which font families this host can draw. With it, a run whose family is
+   *  missing is laid out AND painted in the substitute the document's font
+   *  table names (`doc.attrs.fontSubstitutes`). Absent → every family is
+   *  taken as named. */
+  fontAvailable?: FontAvailable;
 }
 
 // ── Resolved (paint-ready) output ──────────────────────────────────

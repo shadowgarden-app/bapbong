@@ -109,6 +109,14 @@ export class FontRegistry {
     );
   }
 
+  /** Whether the registry holds any face of `family`. */
+  hasFamily(family: string): boolean {
+    const prefix = `${family.toLowerCase()}|`;
+    for (const key of this.faces.keys())
+      if (key.startsWith(prefix)) return true;
+    return false;
+  }
+
   /** Whether any registered file can serve this spec's WIDTHS. */
   has(spec: FontSpec): boolean {
     return this.files(spec).length > 0;

@@ -83,6 +83,7 @@ import type {
   BorderStyle,
   ColumnConfig,
   DocCompat,
+  FontSubstitutes,
   ChartSpec,
   ShapeSpec,
   TableBorders,
@@ -93,6 +94,7 @@ import { parseVmlPath, vmlGroupDrawing, vmlShapeDrawing } from './vml-group.js';
 import { symbolChar, symbolFontText, symbolTable } from './symbol-fonts.js';
 import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
 import { parseCompat } from './compat.js';
+import { parseFontTable } from './font-table.js';
 import { emfBitmapDataUrl, wmfBitmapDataUrl } from './emf.js';
 import { wmfVectorSpec, WmfVectorResult } from './wmf-vector.js';
 import { buildNumbering, NumberingResolver } from './numbering.js';
@@ -306,6 +308,9 @@ interface Ctx {
   /** The document's Word compatibility profile (settings.xml `w:compat`,
    *  resolved once by parseCompat). Every mode-dependent rule reads from here. */
   compat: DocCompat;
+  /** word/fontTable.xml's substitutes for fonts this machine may lack —
+   *  rides every story doc (`fontSubstitutes`), like the compat profile. */
+  fontSubstitutes: FontSubstitutes | null;
   /** VML shapetype registry (`v:shapetype` id → o:spt), filled as picts are
    *  parsed in document order — Word always defines a type before its first
    *  `type="#id"` reference. Lazily created by parseVmlShape. */
@@ -5244,6 +5249,11 @@ function storyDoc(
   // layout rule that depends on it can ask the doc, wherever it is laid out.
   if (ctx.schema.nodes['doc'].spec.attrs?.['compat'])
     attrs['compat'] = ctx.compat;
+  if (
+    ctx.fontSubstitutes &&
+    ctx.schema.nodes['doc'].spec.attrs?.['fontSubstitutes']
+  )
+    attrs['fontSubstitutes'] = ctx.fontSubstitutes;
   // The styles the story's tables actually name, resolved. Built here (not
   // once per import) because each story doc is its own layout root: a
   // header's tables read the header doc's sheet.
@@ -5385,6 +5395,7 @@ async function importDocxImpl(
   const numberingXml = await readPart(zip, 'word/numbering.xml');
   const themeXml = await readPart(zip, 'word/theme/theme1.xml');
   const settingsPart = await readPart(zip, 'word/settings.xml');
+  const fontTableXml = await readPart(zip, 'word/fontTable.xml');
 
   const parsePart = (name: string, xml: string): OoxmlNode => {
     const root = parseXml(xml);
@@ -5399,6 +5410,11 @@ async function importDocxImpl(
     ? child(parsePart('word/settings.xml', settingsPart), 'w:settings')
     : undefined;
   const compat = parseCompat(settingsEl);
+  // Not registered with the audit: a font's panose/sig/charset bytes are
+  // Word's matching hints, and only the substitutes are ever acted on.
+  const fontSubstitutes = fontTableXml
+    ? parseFontTable(child(parseXml(fontTableXml), 'w:fonts'))
+    : null;
 
   // Stateless/shared pieces; numbering counters are per-story (built fresh below).
   const themeRoot = themeXml
@@ -5448,6 +5464,7 @@ async function importDocxImpl(
   const numbering = buildNumbering(numberingRoot, resolveTheme, resolveFont);
   const makeCtx = (rels: Map<string, Relationship>): Ctx => ({
     compat,
+    fontSubstitutes,
     styles,
     numbering,
     rels,

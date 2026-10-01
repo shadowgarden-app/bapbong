@@ -17,10 +17,12 @@ import {
 import {
   createLayoutCache,
   layout,
+  substituteCandidates,
 } from '@shadow-garden/bapbong-layout-engine';
 import {
   createCanvasMeasurer,
   createCanvasMetrics,
+  createFontAvailability,
   ensureFontsLoaded,
 } from '@shadow-garden/bapbong-measuring';
 import { CanvasPainter } from '@shadow-garden/bapbong-painter-canvas';
@@ -36,6 +38,8 @@ import { perf } from '@shadow-garden/bapbong-contracts';
 import { fitScale, planSnapshot } from './region-snapshot.js';
 import type {
   CaretRect,
+  FontAvailable,
+  FontSubstitutes,
   MeasureMetrics,
   MeasureText,
   PageConfig,
@@ -75,6 +79,10 @@ export interface RenderCoreOptions {
   /** Vertical-metrics provider, paired with {@link measureText}. Defaults to a
    *  canvas-backed one. */
   measureMetrics?: MeasureMetrics;
+  /** Which font families can be drawn here, so a missing one is laid out and
+   *  painted in its font-table substitute. Defaults to asking the canvas;
+   *  hosts with a FontRegistry pass `createFontAvailability(registry)`. */
+  fontAvailable?: FontAvailable;
 }
 
 /** Caret + selection to paint on the overlay layer (page-local geometry). */
@@ -100,6 +108,7 @@ export class RenderCore {
   private readonly painter: CanvasPainter;
   private readonly measureText: MeasureText;
   private readonly measureMetrics: MeasureMetrics;
+  private readonly fontAvailable: FontAvailable;
 
   private resolved: ResolvedLayout | null = null;
   private doc: ProseMirrorNode | null = null;
@@ -168,6 +177,7 @@ export class RenderCore {
     this.painter = new CanvasPainter(stack);
     this.measureText = opts.measureText ?? createCanvasMeasurer();
     this.measureMetrics = opts.measureMetrics ?? createCanvasMetrics();
+    this.fontAvailable = opts.fontAvailable ?? createFontAvailability();
     this.zoomFactor = opts.zoom ?? 1;
     this.pageGapPx = opts.pageGap ?? 24; // the painter's own default
     this.a11y =
@@ -294,11 +304,14 @@ export class RenderCore {
       ...Object.values(s.headers),
       ...Object.values(s.footers),
     ]);
-    const families = collectFontFamilies(
-      body,
-      ...Object.values(headers),
-      ...Object.values(footers),
-      ...sectionChromeDocs,
+    const families = withSubstitutes(
+      collectFontFamilies(
+        body,
+        ...Object.values(headers),
+        ...Object.values(footers),
+        ...sectionChromeDocs,
+      ),
+      body.attrs['fontSubstitutes'] as FontSubstitutes | null,
     );
     this.docFamilies = new Set(families.map(normalizeFamily));
     await perf.spanAsync('ensureFontsLoaded', () =>
@@ -344,6 +357,7 @@ export class RenderCore {
           page,
           measureText: this.measureText,
           measureMetrics: this.measureMetrics,
+          fontAvailable: this.fontAvailable,
           ...(this.tabWidth !== undefined && { tabWidth: this.tabWidth }),
         },
         this.layoutCache,
@@ -990,6 +1004,24 @@ function normalizeFamily(family: string): string {
     .replace(/^["']|["']$/g, '')
     .trim()
     .toLowerCase();
+}
+
+/** `families` plus the font-table substitutes any of them may be drawn in —
+ *  loaded up front with the rest, and a late arrival relays out like one. */
+function withSubstitutes(
+  families: string[],
+  subs: FontSubstitutes | null,
+): string[] {
+  if (!subs) return families;
+  const out = new Set(families);
+  const byName = new Map(
+    Object.entries(subs).map(([name, s]) => [name.toLowerCase(), s]),
+  );
+  for (const family of families) {
+    const sub = byName.get(family.toLowerCase());
+    if (sub) for (const c of substituteCandidates(sub)) out.add(c);
+  }
+  return [...out];
 }
 
 /** Every fontFamily mark in the given documents, plus the engine default. */

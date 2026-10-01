@@ -11,6 +11,7 @@ import { BapbongView } from '@shadow-garden/bapbong-view';
 import {
   createCanvasMeasurer,
   createCanvasMetrics,
+  createFontAvailability,
   createFontRegistryMeasurer,
   createFontRegistryMetrics,
 } from '@shadow-garden/bapbong-measuring';
@@ -173,6 +174,7 @@ export class Preview implements OnDestroy {
           a11yLabel: name,
           measureText: createFontRegistryMeasurer(reg, createCanvasMeasurer()),
           measureMetrics: createFontRegistryMetrics(reg, createCanvasMetrics()),
+          fontAvailable: createFontAvailability(reg),
         });
       }
       await this.view.loadDocx(bytes);

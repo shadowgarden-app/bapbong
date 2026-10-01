@@ -74,6 +74,7 @@ import {
 import {
   createCanvasMeasurer,
   createCanvasMetrics,
+  createFontAvailability,
   createFontRegistryMeasurer,
   createFontRegistryMetrics,
   type FontRegistry,
@@ -454,6 +455,7 @@ export class EditorPlayground implements OnDestroy {
       ...(reg && {
         measureText: createFontRegistryMeasurer(reg, createCanvasMeasurer()),
         measureMetrics: createFontRegistryMetrics(reg, createCanvasMetrics()),
+        fontAvailable: createFontAvailability(reg),
       }),
       // External plugin: a right-click context menu (find/replace and
       // table-resize are built into the editor).

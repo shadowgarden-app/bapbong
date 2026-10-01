@@ -126,6 +126,11 @@ export const schema = new Schema({
         // answers layout rules ask. Importer-set on every story doc; null
         // (an editor-authored doc) reads as current Word.
         compat: { default: null },
+        // FontSubstitutes (contracts) — word/fontTable.xml's altName/family
+        // per font name: what the layout draws a MISSING font in. Runs keep
+        // their own family, so export writes the names unchanged.
+        // Importer-set on every story doc; null → no substitution.
+        fontSubstitutes: { default: null },
         // CommentNode[] (contracts) — comment threads keyed to `comment` marks.
         // Edited via setDocAttribute so add/reply/resolve/delete undo cleanly.
         comments: { default: null },

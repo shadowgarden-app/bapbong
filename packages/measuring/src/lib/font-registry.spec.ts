@@ -1,5 +1,9 @@
 import * as opentype from 'opentype.js';
-import { createApproxMeasurer, createApproxMetrics } from './measuring.js';
+import {
+  createApproxMeasurer,
+  createApproxMetrics,
+  createFontAvailability,
+} from './measuring.js';
 import {
   FontRegistry,
   createFontRegistryMeasurer,
@@ -270,5 +274,46 @@ describe('font-registry metrics', () => {
     const { ascent, descent } = metrics(spec({ family: 'Missing' }));
     expect(ascent).toBeCloseTo(12.8); // approx 0.8·em
     expect(descent).toBeCloseTo(3.2);
+  });
+});
+
+describe('createFontAvailability', () => {
+  afterEach(() => {
+    delete (globalThis as { document?: unknown }).document;
+  });
+
+  it('knows every family the registry holds, under any of its faces', () => {
+    const reg = new FontRegistry();
+    reg.register('Arial', { bold: true }, makeFont());
+    const available = createFontAvailability(reg);
+    expect(reg.hasFamily('arial')).toBe(true);
+    expect(available('Arial')).toBe(true);
+    // No DOM to ask: anything else is missing.
+    expect(available('Arial MT')).toBe(false);
+  });
+
+  it('asks the canvas whether a family paints as itself', () => {
+    // A canvas where only "Installed" (and the generics) are real faces: an
+    // unknown family falls through to the generic and measures like it.
+    const ctx = {
+      font: '',
+      measureText(text: string) {
+        const f = this.font;
+        const per = f.includes('"Installed"')
+          ? 7
+          : f.includes('monospace')
+            ? 10
+            : f.includes('sans-serif')
+              ? 6
+              : 5;
+        return { width: text.length * per };
+      },
+    };
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({ getContext: () => ctx }),
+    };
+    const available = createFontAvailability();
+    expect(available('Installed')).toBe(true);
+    expect(available('Arial MT')).toBe(false);
   });
 });

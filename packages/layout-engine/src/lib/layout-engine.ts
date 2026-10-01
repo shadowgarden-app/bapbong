@@ -30,8 +30,11 @@ import type {
   FlowTable,
   FlowTableCell,
   FlowTableRow,
+  FontAvailable,
   FontFace,
   FontSpec,
+  FontSubstitute,
+  FontSubstitutes,
   InlineField,
   InlineImage,
   InlineRun,
@@ -165,7 +168,8 @@ function resolveRun(node: PMNode, base: FontSpec, pos: number): InlineRun {
   const size = findMark(marks, 'fontSize');
   if (size) font.sizePt = Number(size.attrs['size']) || base.sizePt;
   const family = findMark(marks, 'fontFamily');
-  if (family) font.family = String(family.attrs['family'] ?? base.family);
+  if (family)
+    font.family = drawnFamily(String(family.attrs['family'] ?? base.family));
   const color = findMark(marks, 'textColor');
   const link = findMark(marks, 'link');
   const run: InlineRun = {
@@ -244,7 +248,8 @@ function resolveField(node: PMNode, base: FontSpec, pos: number): InlineField {
   const size = findMark(marks, 'fontSize');
   if (size) font.sizePt = Number(size.attrs['size']) || base.sizePt;
   const family = findMark(marks, 'fontFamily');
-  if (family) font.family = String(family.attrs['family'] ?? base.family);
+  if (family)
+    font.family = drawnFamily(String(family.attrs['family'] ?? base.family));
   const color = findMark(marks, 'textColor');
   return {
     field: node.attrs['kind'] === 'pages' ? 'pageCount' : 'pageNumber',
@@ -267,6 +272,66 @@ function setEquationCtx(ctx: Ctx): void {
     ...(ctx.metrics && { metrics: ctx.metrics }),
   };
 }
+
+/** The face Word draws a missing font in when all the font table knows is
+ *  its class (w:family). */
+const GENERIC_FACE: Record<NonNullable<FontSubstitute['generic']>, string> = {
+  roman: 'Times New Roman',
+  swiss: 'Arial',
+  modern: 'Courier New',
+};
+
+/** The families a missing font may be drawn in, in the order they are
+ *  tried: its w:altName list, then the face of its class. */
+export function substituteCandidates(sub: FontSubstitute): string[] {
+  const generic = sub.fixedPitch
+    ? GENERIC_FACE.modern
+    : sub.generic && GENERIC_FACE[sub.generic];
+  return [...(sub.altNames ?? []), ...(generic ? [generic] : [])];
+}
+
+/**
+ * The family text in `family` is measured AND painted in: its own wherever
+ * the host can draw it, else the first substitute from the document's font
+ * table that it can — the w:altName list, then the face of its class — else
+ * its own after all (the canvas falls back exactly as it did before).
+ *
+ * Both halves have to move together, which is why this happens here and not
+ * in a measurer: a PDF converter's "Arial MT" exists nowhere, so the
+ * registry could not measure it and the canvas painted it in the browser's
+ * default face — glyphs spaced by one font's advances, drawn in another's.
+ * The model keeps the name it was written with; only the layout's FontSpec
+ * carries the stand-in, so the document saves the fonts it came with.
+ *
+ * Availability is asked, never assumed: a VNI-Times document on a machine
+ * with the VNI fonts installed keeps them. Without `available` nothing is
+ * substituted.
+ */
+export function fontFamilyResolver(
+  subs: FontSubstitutes | null | undefined,
+  available: FontAvailable | undefined,
+): (family: string) => string {
+  if (!subs || !available) return (family) => family;
+  // Word matches font names case-insensitively.
+  const byName = new Map<string, FontSubstitute>();
+  for (const [name, sub] of Object.entries(subs))
+    byName.set(name.toLowerCase(), sub);
+  const memo = new Map<string, string>();
+  return (family) => {
+    let drawn = memo.get(family);
+    if (drawn !== undefined) return drawn;
+    drawn = family;
+    const sub = byName.get(family.toLowerCase());
+    if (sub && !available(family))
+      drawn = substituteCandidates(sub).find((c) => available(c)) ?? family;
+    memo.set(family, drawn);
+    return drawn;
+  };
+}
+
+/** The resolver for the CURRENT layout call, parked like {@link eqCtx}: the
+ *  run resolvers sit under every flow builder. */
+let drawnFamily: (family: string) => string = (family) => family;
 
 /** An equation node typeset into an inline vector box: the painter replays
  *  its ops, `raise` seats its internal baseline on the line's, and the slot
@@ -590,6 +655,7 @@ function paragraphToFlow(
   if (markFont) {
     // Its colour is the list label's business (markerFor), not the line's.
     const { color: _color, ...font } = markFont;
+    if (font.family) font.family = drawnFamily(font.family);
     flow.markFont = font;
   }
   const tabs = node.attrs['tabs'] as TabStop[] | null;
@@ -657,7 +723,7 @@ function markerFor(
   if (bold !== undefined) font.bold = bold;
   if (italic !== undefined) font.italic = italic;
   if (sizePt !== undefined) font.sizePt = sizePt;
-  if (family !== undefined) font.family = family;
+  if (family !== undefined) font.family = drawnFamily(family);
   if (Object.keys(font).length > 0) style.font = font;
   // 'auto' on the level is Automatic: it overrides a coloured mark.
   const color = lvl.color ?? mark?.color;
@@ -5607,6 +5673,11 @@ export function layout(
   ctx.sheet = (doc.attrs['tableStyles'] as TableStyleSheet | null) ?? null;
   ctx.paraDefaults = paragraphDefaultsOf(doc);
   setEquationCtx(ctx);
+  drawnFamily = fontFamilyResolver(
+    doc.attrs['fontSubstitutes'] as FontSubstitutes | null,
+    config.fontAvailable,
+  );
+  ctx.base = { ...ctx.base, family: drawnFamily(ctx.base.family) };
   const { page } = config;
   const left = contentLeftOf(page);
   const right = page.width - page.margin.right;

@@ -37,6 +37,7 @@ export {
   createFontRegistryMetrics,
   createApproxMeasurer,
   createApproxMetrics,
+  createFontAvailability,
   fontToCss,
   type FontVariant,
 } from '@shadow-garden/bapbong-measuring';
