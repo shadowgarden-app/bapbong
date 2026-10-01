@@ -9,3 +9,4 @@ export * from './lib/autocorrect.js';
 export * from './lib/math.js';
 export * from './lib/math-palette.js';
 export * from './lib/table-style.js';
+export * from './lib/number-format.js';

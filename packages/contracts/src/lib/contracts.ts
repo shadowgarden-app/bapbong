@@ -381,6 +381,9 @@ export interface VectorTextOp {
   underline?: boolean;
   color: string;
   vAlign?: 'top' | 'bottom' | 'baseline';
+  /** Clockwise degrees about (x, y) — a chart's rotated axis title or
+   *  slanted category label. Absent = upright. */
+  rotation?: number;
 }
 
 /** One stroked segment (fraction bars, radical vinculums). */
@@ -393,6 +396,9 @@ export interface VectorLineOp {
   /** Stroke width in logical units; 0 = hairline (1 device px). */
   width: number;
   color: string;
+  /** Dash pattern as multiples of the stroke width (ShapeSpec.dash's
+   *  convention). Absent = solid. */
+  dash?: number[];
 }
 
 /** One filled polygon (arrowheads; a closed freeform subpath). */
@@ -418,6 +424,8 @@ export interface VectorPolylineOp {
   join?: 'round';
   /** End caps (a:ln@cap). Absent = flat. */
   cap?: 'round' | 'square';
+  /** Dash pattern as multiples of the stroke width. Absent = solid. */
+  dash?: number[];
 }
 
 export type VectorOp =
@@ -437,6 +445,205 @@ export interface VectorImageSpec {
   width: number;
   height: number;
   ops: VectorOp[];
+}
+
+// ── Charts ─────────────────────────────────────────────────────────────
+// A DrawingML chart as the importer resolves it: data from the chart part's
+// caches, every colour and font already decided — explicit c:spPr/c:txPr
+// where the file has them, the c:style defaults (Word's auto-formatting)
+// where it does not. The layout engine lays it out against real text
+// metrics and hands the painter a VectorImageSpec. Sizes are in POINTS, the
+// chart part's own unit; the renderer converts.
+
+/** A text run's look. */
+export interface ChartFont {
+  family: string;
+  sizePt: number;
+  bold: boolean;
+  italic: boolean;
+  /** "#RRGGBB" */
+  color: string;
+}
+
+/** A stroke. Absent (null) where the element draws no line. */
+export interface ChartLine {
+  color: string;
+  widthPt: number;
+  /** Multiples of the width; absent = solid. */
+  dash?: number[];
+}
+
+/** An element's frame: fill and outline, either may be absent. */
+export interface ChartBox {
+  fill: string | null;
+  line: ChartLine | null;
+}
+
+/** c:manualLayout — fractions of the chart space. */
+export interface ChartManualLayout {
+  /** inner = the plot area's axes box; outer = including tick labels. */
+  target?: 'inner' | 'outer';
+  /** edge: x/y are positions; factor: offsets from the automatic one. */
+  xMode: 'edge' | 'factor';
+  yMode: 'edge' | 'factor';
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+}
+
+export interface ChartText {
+  /** Lines as written (a:p each); empty = automatic text resolved here. */
+  text: string;
+  font: ChartFont;
+  overlay: boolean;
+  /** Clockwise degrees (a:bodyPr@rot). */
+  rotation?: number;
+  layout?: ChartManualLayout;
+  box: ChartBox;
+}
+
+export type ChartMarkerSymbol =
+  | 'none'
+  | 'circle'
+  | 'square'
+  | 'diamond'
+  | 'triangle'
+  | 'x'
+  | 'star'
+  | 'plus'
+  | 'dash'
+  | 'dot';
+
+export interface ChartMarker {
+  symbol: ChartMarkerSymbol;
+  /** Points (c:size). */
+  size: number;
+  fill: string | null;
+  line: ChartLine | null;
+}
+
+export interface ChartDataLabels {
+  showVal: boolean;
+  showPercent: boolean;
+  showCatName: boolean;
+  showSerName: boolean;
+  separator: string;
+  position?:
+    | 'ctr'
+    | 'inEnd'
+    | 'inBase'
+    | 'outEnd'
+    | 't'
+    | 'b'
+    | 'l'
+    | 'r'
+    | 'bestFit';
+  /** Number format for values; absent = the series' own. */
+  formatCode?: string;
+  font: ChartFont;
+  /** Point indices whose label is deleted (c:dLbl/c:delete). */
+  deleted?: number[];
+}
+
+/** One data point's own look (c:dPt), and a pie slice's pull-out. */
+export interface ChartPoint {
+  idx: number;
+  fill?: string | null;
+  line?: ChartLine | null;
+  /** Percent of the radius (c:explosion). */
+  explosion?: number;
+}
+
+export interface ChartSeries {
+  name: string;
+  /** Null = a blank cell. */
+  values: (number | null)[];
+  categories: string[];
+  /** Scatter / bubble X values. */
+  xValues?: (number | null)[];
+  formatCode: string;
+  /** Points that carry a format of their own (c:pt@formatCode), by index. */
+  pointFormats?: Record<number, string>;
+  /** Bar / area / pie fill. */
+  fill: string | null;
+  /** The line of a line / scatter / radar series, the outline of a filled one. */
+  line: ChartLine | null;
+  marker: ChartMarker | null;
+  smooth: boolean;
+  points?: ChartPoint[];
+  labels: ChartDataLabels | null;
+  /** c:explosion on the series (pie). */
+  explosion?: number;
+}
+
+export interface ChartGroup {
+  type: 'bar' | 'line' | 'area' | 'pie' | 'doughnut' | 'scatter' | 'radar';
+  /** Bars only: vertical columns or horizontal bars. */
+  barDir?: 'col' | 'bar';
+  grouping: 'clustered' | 'standard' | 'stacked' | 'percentStacked';
+  varyColors: boolean;
+  /** Percent of a bar's width. */
+  gapWidth: number;
+  /** -100…100 percent. */
+  overlap: number;
+  /** Doughnut hole, percent of the radius. */
+  holeSize?: number;
+  /** Degrees clockwise from 12 o'clock. */
+  firstSliceAng?: number;
+  /** Ids of the axes this group plots against: [category/x, value/y]. */
+  axisIds: number[];
+  series: ChartSeries[];
+}
+
+export interface ChartAxis {
+  id: number;
+  kind: 'cat' | 'val' | 'date';
+  position: 'b' | 'l' | 'r' | 't';
+  deleted: boolean;
+  crossAxisId: number;
+  /** autoZero / min / max, or the value on the crossing axis. */
+  crosses: 'autoZero' | 'min' | 'max' | number;
+  crossBetween: 'between' | 'midCat';
+  reversed: boolean;
+  min?: number;
+  max?: number;
+  majorUnit?: number;
+  minorUnit?: number;
+  logBase?: number;
+  formatCode: string;
+  sourceLinked: boolean;
+  majorGridlines: ChartLine | null;
+  minorGridlines: ChartLine | null;
+  line: ChartLine | null;
+  majorTickMark: 'out' | 'in' | 'cross' | 'none';
+  minorTickMark: 'out' | 'in' | 'cross' | 'none';
+  tickLabelPosition: 'nextTo' | 'low' | 'high' | 'none';
+  font: ChartFont;
+  /** Explicit label rotation (a:bodyPr@rot), clockwise degrees. */
+  labelRotation?: number;
+  title: ChartText | null;
+}
+
+export interface ChartLegend {
+  position: 'r' | 'l' | 't' | 'b' | 'tr';
+  overlay: boolean;
+  font: ChartFont;
+  layout?: ChartManualLayout;
+  box: ChartBox;
+  /** Entry indices removed (c:legendEntry/c:delete). */
+  deleted?: number[];
+}
+
+export interface ChartSpec {
+  groups: ChartGroup[];
+  axes: ChartAxis[];
+  title: ChartText | null;
+  legend: ChartLegend | null;
+  chartArea: ChartBox;
+  plotArea: ChartBox & { layout?: ChartManualLayout };
+  roundedCorners: boolean;
+  dispBlanksAs: 'gap' | 'zero' | 'span';
 }
 
 /** One editable slot of a laid-out equation, in IMAGE-LOCAL px: where a

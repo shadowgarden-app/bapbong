@@ -906,6 +906,16 @@ export class CanvasPainter {
               : op.vAlign === 'bottom'
                 ? 'bottom'
                 : 'alphabetic';
+          // A rotated run turns about its own anchor; the dx advances then
+          // run along the turned baseline.
+          const ox = px(op.x);
+          const oy = py(op.y);
+          if (op.rotation) {
+            ctx.save();
+            ctx.translate(ox, oy);
+            ctx.rotate((op.rotation * Math.PI) / 180);
+            ctx.translate(-ox, -oy);
+          }
           if (op.dx) {
             // Place every character by the source's own advances — the
             // metafile positioned each glyph; our font's metrics differ and
@@ -913,12 +923,13 @@ export class CanvasPainter {
             let cx = op.x;
             const chars = [...op.text];
             for (let i = 0; i < chars.length; i++) {
-              ctx.fillText(chars[i], px(cx), py(op.y));
+              ctx.fillText(chars[i], px(cx), oy);
               cx += op.dx[i] ?? 0;
             }
           } else {
-            ctx.fillText(op.text, px(op.x), py(op.y));
+            ctx.fillText(op.text, ox, oy);
           }
+          if (op.rotation) ctx.restore();
           break;
         }
         case 'line': {
@@ -926,10 +937,12 @@ export class CanvasPainter {
           // Pen widths are logical; a 0-width pen is GDI's hairline. Never
           // thinner than a device-visible line.
           ctx.lineWidth = Math.max(op.width * sy, 0.75);
+          ctx.setLineDash(op.dash?.map((d) => d * ctx.lineWidth) ?? []);
           ctx.beginPath();
           ctx.moveTo(px(op.x1), py(op.y1));
           ctx.lineTo(px(op.x2), py(op.y2));
           ctx.stroke();
+          ctx.setLineDash([]);
           break;
         }
         case 'polygon': {
@@ -960,7 +973,9 @@ export class CanvasPainter {
           ctx.lineWidth = Math.max(op.strokeWidth * sy, 0.75);
           ctx.lineJoin = op.join ?? 'miter';
           ctx.lineCap = op.cap ?? 'butt';
+          ctx.setLineDash(op.dash?.map((d) => d * ctx.lineWidth) ?? []);
           ctx.stroke();
+          ctx.setLineDash([]);
           break;
         }
       }
