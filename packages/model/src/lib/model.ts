@@ -368,6 +368,11 @@ export const schema = new Schema({
         // was imported at. The exporter writes the XML back as it came
         // (moving the anchor if the float moved), so a save never loses it.
         rawDrawing: { default: null },
+        // A chart's data and resolved look (ChartSpec — contracts) when the
+        // drawing is a DrawingML chart: the layout engine draws it in place
+        // of `vector` (which stays the placeholder for a chart it cannot
+        // draw). Read-only: the save writes `rawDrawing`, not this.
+        chart: { default: null },
         // The equation's LINEAR text recovered from the metafile's embedded
         // MTEF (MathType semantics) — what "Convert to editable equation"
         // replaces the picture with. Null when the picture carries none.

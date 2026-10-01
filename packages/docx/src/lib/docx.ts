@@ -83,6 +83,7 @@ import type {
   BorderStyle,
   ColumnConfig,
   DocCompat,
+  ChartSpec,
   ShapeSpec,
   TableBorders,
 } from '@shadow-garden/bapbong-contracts';
@@ -104,6 +105,7 @@ import {
   type CarriedRel,
 } from './package-parts.js';
 import { chartPlaceholder } from './chart.js';
+import { chartTheme, parseChartSpec } from './chart-spec.js';
 import {
   parseGradient,
   buildThemeFillResolver,
@@ -323,6 +325,9 @@ interface Ctx {
    *  synchronous: each chart part's closure (see loadChartParts), keyed by
    *  the chart part's path. */
   carriedParts?: Map<string, CarriedPart[]>;
+  /** The document's theme part — a chart resolves its look against it
+   *  (unless the chart carries a c:themeOverride of its own). */
+  themeRoot?: OoxmlNode;
 }
 
 /** 1440 twips = 1 inch = 96 px. */
@@ -969,8 +974,10 @@ function drawingRels(
  * run's drawing XML verbatim plus every part the chart reaches — the chart
  * part, its embedded workbook, theme override, style and colour parts. The
  * exporter writes them back, so a save keeps the chart Word will redraw
- * from its own data (D-2609-LSTQ lost five on every save). What the box
- * paints is a placeholder (see chart.ts): the chart is not rendered yet.
+ * from its own data (D-2609-LSTQ lost five on every save). The chart's
+ * data and look ride the box too (`chart`, a ChartSpec — see chart-spec.ts)
+ * and the layout engine draws it; a chart that cannot be read, or a plot
+ * type not drawn (3-D, stock…), keeps the placeholder (chart.ts).
  */
 function parseChart(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const container =
@@ -992,6 +999,7 @@ function parseChart(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const float = parseAnchorFloat(drawing);
   // Carried verbatim: everything under the run's drawing goes back as read.
   audit.markSubtree(container);
+  const spec = chartSpecOf(refs, ctx);
   return ctx.schema.nodes['image'].create({
     src: '',
     width,
@@ -1000,8 +1008,33 @@ function parseChart(run: OoxmlNode, ctx: Ctx): PMNode | null {
     ...(title != null && { title }),
     float,
     vector: chartPlaceholder(width, height),
+    ...(spec && { chart: spec }),
     rawDrawing: { xml, float, rels: refs.rels, parts: refs.parts },
   });
+}
+
+/** The ChartSpec of the chart a drawing's rels lead to, or null when the
+ *  part cannot be read or holds nothing drawn. Resolved against the
+ *  chart's own c:themeOverride when it has one — it replaces the
+ *  document theme for that chart. */
+function chartSpecOf(
+  refs: { rels: CarriedRel[]; parts: CarriedPart[] },
+  ctx: Ctx,
+): ChartSpec | null {
+  const rel = refs.rels.find((r) => r.type === CHART_REL && !r.external);
+  const part = refs.parts.find((p) => p.path === rel?.target);
+  if (!part || part.base64) return null;
+  const overrideRel = part.rels?.find((r) => r.type.endsWith('/themeOverride'));
+  const override = refs.parts.find((p) => p.path === overrideRel?.target);
+  try {
+    const theme = chartTheme(
+      override && !override.base64 ? parseXml(override.data) : ctx.themeRoot,
+    );
+    return parseChartSpec(part.data, theme);
+  } catch {
+    // A chart this reader chokes on must not cost the document its import.
+    return null;
+  }
 }
 
 /**
@@ -5331,6 +5364,7 @@ async function importDocxImpl(
     nsDecls,
     ignorable,
     carriedParts,
+    themeRoot,
   });
 
   const docRels = await readPart(zip, 'word/_rels/document.xml.rels');
