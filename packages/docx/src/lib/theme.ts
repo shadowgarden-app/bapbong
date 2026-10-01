@@ -284,6 +284,16 @@ function hslToRgb(h: number, s: number, l: number): Rgb {
   return [comp(h + 1 / 3), comp(h), comp(h - 1 / 3)];
 }
 
+const toLinear = (v: number): number =>
+  v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+const toSrgb = (v: number): number =>
+  v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055;
+
+/** Apply `fn` to each channel in linear light. */
+function linearMix(c: Rgb, fn: (v: number) => number): Rgb {
+  return c.map((v) => Math.max(0, Math.min(1, toSrgb(fn(toLinear(v)))))) as Rgb;
+}
+
 /** Apply one colour transform. Luminance/saturation modifiers go through HSL
  *  — that is the pair Word writes for every "Lighter N%" swatch, and HSL
  *  reproduces its result exactly. a:alpha is deliberately absent: the colour
@@ -306,10 +316,15 @@ function applyTransform(c: Rgb, el: OoxmlNode): Rgb {
       const [h, s, l] = hsl();
       return hslToRgb(h, s * f, l);
     }
+    // Tint and shade work on LINEAR RGB (ECMA-376 §20.1.2.3.34/.31 define
+    // them on the scRGB components). Done on sRGB bytes instead, Word's own
+    // chart line colour comes out wrong: accent1 #4F81BD under the Office
+    // theme's line style (shade 95% then satMod 105%) is #4A7EBB in Word —
+    // measured — and only the linear-space shade reproduces it exactly.
     case 'a:shade':
-      return [c[0] * f, c[1] * f, c[2] * f];
+      return linearMix(c, (v) => v * f);
     case 'a:tint':
-      return [c[0] * f + (1 - f), c[1] * f + (1 - f), c[2] * f + (1 - f)];
+      return linearMix(c, (v) => v * f + (1 - f));
     default:
       return c;
   }
