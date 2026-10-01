@@ -84,7 +84,7 @@ interface RowBox {
 
 const shift = (ops: VectorOp[], dx: number, dy: number): VectorOp[] =>
   ops.map((op) =>
-    op.kind === 'text'
+    op.kind === 'text' || op.kind === 'image'
       ? { ...op, x: op.x + dx, y: op.y + dy }
       : op.kind === 'line'
         ? {

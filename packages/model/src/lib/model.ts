@@ -393,6 +393,11 @@ export const schema = new Schema({
         // node JSON>[], inset?: {l,t,r,b} px }. The layout engine flows the
         // paragraphs inside the shape's box (paint-only, not editable v1).
         textbox: { default: null },
+        // Further text boxes placed inside the box — a VML group's frames:
+        // { x, y, width, height (box-local px), blocks, inset? }[]. Laid out
+        // and painted like `textbox`; read-only (the save writes the group's
+        // carried XML).
+        frames: { default: null },
         // Clockwise rotation in degrees around the box center (a:xfrm@rot).
         // Paint-only: the layout box stays axis-aligned.
         rotation: { default: 0 },

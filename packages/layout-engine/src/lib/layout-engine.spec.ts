@@ -2318,6 +2318,86 @@ describe('textbox floats', () => {
   });
 });
 
+describe('text frames inside a drawing', () => {
+  const label = (text: string): FlowBlock => ({
+    type: 'paragraph',
+    runs: [{ text, font: font(), pos: 7 }],
+    pos: 6,
+  });
+
+  it("lays out a VML group's frames where they sit in the box", () => {
+    // Frame 1 at (100, 0), no inset; frame 2 at (0, 50) with the default
+    // inset (l 10, t 5) and centred in its 40px height: (40 − 5 − 5 − 16)/2.
+    const host: FlowBlock = {
+      type: 'paragraph',
+      runs: [{ text: 'body', font: font() }],
+      floats: [
+        {
+          src: '',
+          width: 200,
+          height: 100,
+          wrap: 'none',
+          hOffset: 0,
+          vOffset: 0,
+          vRel: 'paragraph',
+          vector: { width: 200, height: 100, ops: [] },
+          frames: [
+            {
+              x: 100,
+              y: 0,
+              width: 100,
+              height: 20,
+              inset: { l: 0, t: 0, r: 0, b: 0 },
+              content: [label('aa')],
+            },
+            {
+              x: 0,
+              y: 50,
+              width: 100,
+              height: 40,
+              anchor: 'ctr',
+              content: [label('bb')],
+            },
+          ],
+        },
+      ],
+    };
+    const f = layoutBlocks([host], config()).pages[0].floats?.[0];
+    expect(
+      f?.lines?.map((l) => [l.segments[0].text, l.segments[0].x, l.y]),
+    ).toEqual([
+      ['aa', 100, 0],
+      ['bb', 10, 55 + 7],
+    ]);
+    // Paint-only, like a textbox.
+    expect(f?.lines?.[0].segments[0].pos).toBeUndefined();
+  });
+
+  it('keeps the text of an inline text frame (D-2609-DHQ8)', () => {
+    const block: FlowBlock = {
+      type: 'paragraph',
+      runs: [
+        {
+          src: '',
+          width: 120,
+          height: 30,
+          shape: { kind: 'rect' },
+          content: [label('aaaa bbbb')],
+          inset: { l: 0, t: 0, r: 0, b: 0 },
+          anchor: 'b',
+        },
+      ],
+    };
+    const img = layoutBlocks([block], config()).pages[0].lines[0].images?.[0];
+    // One line of 16px at the bottom of the 30px box.
+    expect(img?.lines).toHaveLength(1);
+    expect(img?.lines?.[0].segments.map((s) => s.text).join('')).toBe(
+      'aaaa bbbb',
+    );
+    expect(img?.lines?.[0].y).toBeCloseTo(14);
+  });
+});
+
 describe('floating images', () => {
   const words = (n: number, len = 9) =>
     Array.from({ length: n }, () => 'a'.repeat(len)).join(' ');

@@ -428,11 +428,35 @@ export interface VectorPolylineOp {
   dash?: number[];
 }
 
+/** A bitmap placed in the display list (a picture inside a VML group). */
+export interface VectorImageOp {
+  kind: 'image';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Data URL. */
+  src: string;
+}
+
 export type VectorOp =
   | VectorTextOp
   | VectorLineOp
   | VectorPolygonOp
-  | VectorPolylineOp;
+  | VectorPolylineOp
+  | VectorImageOp;
+
+/** A text box placed inside a drawing's box — the frames of a VML group
+ *  (captions, chart labels). Box-local px; laid out like a float's textbox. */
+export interface TextFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  content: FlowBlock[];
+  inset?: { l: number; t: number; r: number; b: number };
+  anchor?: 'ctr' | 'b';
+}
 
 /** A metafile replayed as vector ops — how MathType/OLE equation previews
  *  (WMF) paint. Rides an image box like {@link ShapeSpec} does, but as a
@@ -702,6 +726,13 @@ export interface InlineImage {
   /** Clockwise degrees around the box center — paint-only: the layout box
    *  stays axis-aligned (Word re-wraps only on commit, not live). */
   rotation?: number;
+  /** Text inside an INLINE frame (a VML text box sitting in the line, like
+   *  a float's textbox) — laid out within the box, inset from its edges. */
+  content?: FlowBlock[];
+  inset?: { l: number; t: number; r: number; b: number };
+  anchor?: 'ctr' | 'b';
+  /** Text boxes placed inside the box (a VML group's frames). */
+  frames?: TextFrame[];
   /** Absolute ProseMirror position of the image node (occupies 1 position). */
   pos?: number;
 }
@@ -807,6 +838,8 @@ export interface FlowFloat {
   /** Where the text block sits vertically in the box (wps:bodyPr @anchor).
    *  Absent → the schema default, top. */
   anchor?: 'ctr' | 'b';
+  /** Further text boxes placed inside the box (a VML group's frames). */
+  frames?: TextFrame[];
   /** Clockwise degrees around the box center — paint-only: wrap exclusions
    *  keep the axis-aligned box. */
   rotation?: number;
@@ -1134,6 +1167,10 @@ export interface LayoutImageSegment {
   background?: string;
   /** Clockwise degrees around the box center (paint-only). */
   rotation?: number;
+  /** An inline text frame's (or a group's frames') laid-out text, in
+   *  box-local px (paint-only). */
+  lines?: LayoutLine[];
+  tables?: ResolvedTable[];
   /** Absolute PM position of the image node (occupies 1 position). */
   pos?: number;
 }

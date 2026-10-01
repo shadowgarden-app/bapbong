@@ -647,6 +647,21 @@ export class CanvasPainter {
           if (img.shape) {
             // Same box the bitmap would occupy: bottom edge on the baseline.
             this.drawShape(img.shape, img.x, imgTop, img.width, img.height);
+            // An inline text frame's text, clipped to the frame like a
+            // float's textbox.
+            if (img.lines?.length || img.tables?.length) {
+              const ctx = this.ctx;
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(img.x, imgTop, img.width, img.height);
+              ctx.clip();
+              ctx.translate(img.x, imgTop);
+              for (const l of img.lines ?? [])
+                this.paintLine(l, 0, o, pageInfo);
+              for (const t of img.tables ?? [])
+                this.paintTable(t, 0, o, pageInfo);
+              ctx.restore();
+            }
             return;
           }
           if (img.vector) {
@@ -976,6 +991,19 @@ export class CanvasPainter {
           ctx.setLineDash(op.dash?.map((d) => d * ctx.lineWidth) ?? []);
           ctx.stroke();
           ctx.setLineDash([]);
+          break;
+        }
+        case 'image': {
+          // Decoded like any picture; drawn once it is (the load repaints).
+          const el = this.requestImage(op.src);
+          if (el?.complete && el.naturalWidth > 0)
+            ctx.drawImage(
+              el,
+              px(op.x),
+              py(op.y),
+              op.width * sx,
+              op.height * sy,
+            );
           break;
         }
       }

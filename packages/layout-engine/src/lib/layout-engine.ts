@@ -24,6 +24,7 @@ import type {
   DocCompat,
   FlowBlock,
   FlowFloat,
+  TextFrame,
   FlowInline,
   FlowParagraph,
   FlowTable,
@@ -349,6 +350,92 @@ function resolveImage(node: PMNode, pos: number): InlineImage {
   };
 }
 
+/** A text box's blocks (PM JSON riding an image node) as flow blocks. A
+ *  textbox is its own story: the importer empties the table-layer stack
+ *  while reading one, so an enclosing cell's slot must not reach its
+ *  paragraphs here either — the floor still does. */
+function storyBlocks(
+  node: PMNode,
+  blocks: unknown[],
+  base: FontSpec,
+  styles: FlowStyles | undefined,
+): FlowBlock[] {
+  const schema = node.type.schema;
+  const boxStyles: FlowStyles | undefined = styles && {
+    ...styles,
+    cell: undefined,
+  };
+  return blocks
+    .map((json, i) =>
+      nodeToBlock(
+        schema.nodeFromJSON(json),
+        base,
+        i,
+        false,
+        undefined,
+        boxStyles,
+      ),
+    )
+    .filter((b): b is FlowBlock => b !== null);
+}
+
+/** An image node's further text boxes (a VML group's frames). */
+function framesOf(
+  node: PMNode,
+  base: FontSpec,
+  styles: FlowStyles | undefined,
+): TextFrame[] | undefined {
+  const frames = node.attrs['frames'] as
+    | {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        blocks: unknown[];
+        inset?: { l: number; t: number; r: number; b: number };
+        anchor?: 'ctr' | 'b';
+      }[]
+    | null;
+  if (!frames?.length) return undefined;
+  return frames.map(({ blocks, ...f }) => ({
+    ...f,
+    content: storyBlocks(node, blocks, base, styles),
+  }));
+}
+
+/** An image node's textbox (wps:txbx / v:textbox) as flow blocks. It rides
+ *  the node as PM JSON; rebuilt and flattened like any other flow (no nested
+ *  floats inside the box). It is a whole story, tables included —
+ *  `nodeToBlock`, not the paragraph path, is what makes a table inside a
+ *  textbox reach the page. */
+function textboxOf(
+  node: PMNode,
+  base: FontSpec,
+  styles: FlowStyles | undefined,
+): {
+  content: FlowBlock[];
+  inset?: { l: number; t: number; r: number; b: number };
+  anchor?: 'ctr' | 'b';
+  autofit?: boolean;
+  autoWidth?: boolean;
+} | null {
+  const tb = node.attrs['textbox'] as {
+    blocks: unknown[];
+    inset?: { l: number; t: number; r: number; b: number };
+    anchor?: 'ctr' | 'b';
+    autofit?: boolean;
+    autoWidth?: boolean;
+  } | null;
+  if (!tb || tb.blocks.length === 0) return null;
+  return {
+    content: storyBlocks(node, tb.blocks, base, styles),
+    ...(tb.inset && { inset: tb.inset }),
+    ...(tb.anchor && { anchor: tb.anchor }),
+    ...(tb.autofit && { autofit: true }),
+    ...(tb.autoWidth && { autoWidth: true }),
+  };
+}
+
 /** Flatten one paragraph node into a FlowParagraph (text + inline images).
  *  `nodePos` is the absolute PM position of the paragraph node itself. With
  *  `allowFloats`, anchored images become FlowFloats instead of inline content;
@@ -445,38 +532,11 @@ function paragraphToFlow(
             ? { rotation: Number(child.attrs['rotation']) }
             : {}),
         };
-        // Textbox content rides the image node as PM JSON; rebuild it and
-        // flatten like any other flow (no nested floats inside the box). It is
-        // a whole story, tables included — `nodeToBlock`, not the paragraph
-        // path, is what makes a table inside a textbox reach the page.
-        const tb = child.attrs['textbox'] as {
-          blocks: unknown[];
-          inset?: { l: number; t: number; r: number; b: number };
-          anchor?: 'ctr' | 'b';
-          autofit?: boolean;
-          autoWidth?: boolean;
-        } | null;
-        if (tb && tb.blocks.length > 0) {
-          const schema = child.type.schema;
-          // A textbox is its own story: the importer empties the table-layer
-          // stack while reading one, so an enclosing cell's slot must not
-          // reach its paragraphs here either — the floor still does.
-          const boxStyles: FlowStyles | undefined = styles && {
-            ...styles,
-            cell: undefined,
-          };
-          f.content = tb.blocks
-            .map((json, i) =>
-              nodeToBlock(
-                schema.nodeFromJSON(json),
-                base,
-                i,
-                false,
-                undefined,
-                boxStyles,
-              ),
-            )
-            .filter((b): b is FlowBlock => b !== null);
+        const frames = framesOf(child, base, styles);
+        if (frames) f.frames = frames;
+        const tb = textboxOf(child, base, styles);
+        if (tb) {
+          f.content = tb.content;
           if (tb.inset) f.inset = tb.inset;
           if (tb.anchor) f.anchor = tb.anchor;
           if (tb.autofit) f.autofit = true;
@@ -484,7 +544,18 @@ function paragraphToFlow(
         }
         floats.push(f);
       } else {
-        runs.push(resolveImage(child, contentStart + offset));
+        const img = resolveImage(child, contentStart + offset);
+        const frames = framesOf(child, base, styles);
+        if (frames) img.frames = frames;
+        // An inline text frame keeps its text too (D-2609-DHQ8: VML frames
+        // sitting in the line drew empty boxes).
+        const tb = textboxOf(child, base, styles);
+        if (tb) {
+          img.content = tb.content;
+          if (tb.inset) img.inset = tb.inset;
+          if (tb.anchor) img.anchor = tb.anchor;
+        }
+        runs.push(img);
       }
     } else if (child.type.name === 'equation') {
       runs.push(resolveEquation(child, contentStart + offset));
@@ -1372,6 +1443,9 @@ function wrapParagraph(
           ...(t.image.outline ? { outline: t.image.outline } : {}),
           ...(t.image.background ? { background: t.image.background } : {}),
           ...(t.image.rotation ? { rotation: t.image.rotation } : {}),
+          ...(t.image.content?.length || t.image.frames?.length
+            ? inlineFrameText(t.image, ctx)
+            : {}),
           pos: t.pos,
         });
       } else {
@@ -1831,7 +1905,89 @@ function resolveFloat(
     if (lines.length > 0) rf.lines = lines;
     if (inner.tables.length > 0) rf.tables = inner.tables;
   }
+  if (f.frames?.length) {
+    const framed = framesText(f.frames, ctx);
+    if (framed.lines.length > 0)
+      rf.lines = [...(rf.lines ?? []), ...framed.lines];
+    if (framed.tables.length > 0)
+      rf.tables = [...(rf.tables ?? []), ...framed.tables];
+  }
   return rf;
+}
+
+/** Text laid out in a box the way a float's textbox is (insets, vertical
+ *  anchor), at (x, y) of the drawing's box — box-local, paint-only. */
+function boxText(
+  content: FlowBlock[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  inset: { l: number; t: number; r: number; b: number } = TEXTBOX_INSET,
+  anchor: 'ctr' | 'b' | undefined,
+  ctx: Ctx,
+): { lines: LayoutLine[]; tables: ResolvedTable[] } {
+  const left = x + inset.l;
+  const right = Math.max(left + MIN_BAND, x + width - inset.r);
+  const inner = layoutFlow(content, left, right, ctx);
+  const slack = Math.max(0, height - inset.t - inset.b - inner.height);
+  const drop =
+    y + inset.t + (anchor === 'ctr' ? slack / 2 : anchor === 'b' ? slack : 0);
+  const lines = inner.lines.map((l) => ({ ...l, y: l.y + drop }));
+  for (const t of inner.tables) offsetTable(t, drop);
+  stripPositions(lines, inner.tables);
+  return { lines, tables: inner.tables };
+}
+
+/** The text of a box's frames — a VML group's text boxes. */
+function framesText(
+  frames: TextFrame[] | undefined,
+  ctx: Ctx,
+): { lines: LayoutLine[]; tables: ResolvedTable[] } {
+  const lines: LayoutLine[] = [];
+  const tables: ResolvedTable[] = [];
+  for (const f of frames ?? []) {
+    const t = boxText(
+      f.content,
+      f.x,
+      f.y,
+      f.width,
+      f.height,
+      f.inset,
+      f.anchor,
+      ctx,
+    );
+    lines.push(...t.lines);
+    tables.push(...t.tables);
+  }
+  return { lines, tables };
+}
+
+/** An inline image's text — its own text frame's and its frames' — laid out
+ *  in its box, box-local and paint-only. */
+function inlineFrameText(
+  img: InlineImage,
+  ctx: Ctx,
+): { lines?: LayoutLine[]; tables?: ResolvedTable[] } {
+  const own = img.content?.length
+    ? boxText(
+        img.content,
+        0,
+        0,
+        img.width,
+        img.height,
+        img.inset,
+        img.anchor,
+        ctx,
+      )
+    : { lines: [], tables: [] };
+  const framed = framesText(img.frames, ctx);
+  const lines = [...own.lines, ...framed.lines];
+  const tables = [...own.tables, ...framed.tables];
+  return {
+    ...(lines.length > 0 && { lines }),
+    ...(tables.length > 0 && { tables }),
+  };
 }
 
 /** Lay out a sequence of blocks within a content box, stacking vertically from

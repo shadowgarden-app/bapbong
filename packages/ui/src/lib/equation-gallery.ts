@@ -169,6 +169,15 @@ function opElement(op: VectorOp): SVGElement {
       );
     return el;
   }
+  if (op.kind === 'image') {
+    const el = document.createElementNS(SVG_NS, 'image');
+    el.setAttribute('x', String(op.x));
+    el.setAttribute('y', String(op.y));
+    el.setAttribute('width', String(op.width));
+    el.setAttribute('height', String(op.height));
+    el.setAttribute('href', op.src);
+    return el;
+  }
   const el = document.createElementNS(SVG_NS, 'text');
   el.setAttribute('x', String(op.x));
   el.setAttribute('y', String(op.y));

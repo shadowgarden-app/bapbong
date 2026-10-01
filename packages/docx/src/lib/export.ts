@@ -617,6 +617,10 @@ function imageXml(node: PMNode, ctx: ExportCtx): string {
     ctx.exts.add(ext);
     n = ctx.nextId++;
     name = `image${n}.${ext}`;
+    // Carried parts (a VML group's pictures) are named from the same pool.
+    for (let k = 1; ctx.parts.taken.has(`word/media/${name}`); k++)
+      name = `image${n}_${k}.${ext}`;
+    ctx.parts.taken.add(`word/media/${name}`);
     ctx.media.push({ path: `word/media/${name}`, base64: m[2] });
     ctx.rels.push(
       `<Relationship Id="rId${n}" Type="${R_NS}/image" Target="media/${name}"/>`,

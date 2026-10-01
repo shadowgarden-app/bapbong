@@ -89,6 +89,7 @@ import type {
 } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
 import { freeformGroupOps } from './freeform-group.js';
+import { parseVmlPath, vmlGroupDrawing, vmlShapeDrawing } from './vml-group.js';
 import { symbolChar, symbolFontText, symbolTable } from './symbol-fonts.js';
 import { buildStyleRegistry, CondLayer, StyleRegistry } from './styles.js';
 import { parseCompat } from './compat.js';
@@ -528,7 +529,9 @@ function runInlineNodes(run: OoxmlNode, marks: Mark[], ctx: Ctx): PMNode[] {
     parseChart(run, ctx) ??
     parseImage(run, ctx) ??
     parseShape(run, ctx) ??
+    parseVmlGroup(run, ctx) ??
     parseVmlImage(run, ctx) ??
+    parseVmlFreeform(run, ctx) ??
     parseVmlShape(run, ctx);
   if (image) return [image];
 
@@ -960,12 +963,22 @@ function drawingRels(
     }
     // Story parts (document, headers, footers) all sit in word/.
     const target = resolveTarget('word/document.xml', rel.target);
-    const closure = ctx.carriedParts?.get(target);
+    const closure = ctx.carriedParts?.get(target) ?? mediaPart(target, ctx);
     if (!closure) return null;
     rels.push({ id, type: rel.type, target });
     for (const p of closure) parts.set(p.path, p);
   }
   return { rels, parts: [...parts.values()] };
+}
+
+/** A picture's part, carried from the media already loaded: its bytes as
+ *  read, unless the loader re-framed them (a bitmap-only EMF became a BMP —
+ *  not the bytes the package holds). */
+function mediaPart(path: string, ctx: Ctx): CarriedPart[] | null {
+  const url = ctx.media.get(path);
+  const m = url && /^data:([^;]+);base64,(.*)$/s.exec(url);
+  if (!m || m[1] !== mimeOf(path)) return null;
+  return [{ path, contentType: m[1], data: m[2], base64: true }];
 }
 
 /**
@@ -1862,6 +1875,37 @@ function vmlVRel(
       : 'paragraph';
 }
 
+/** A VML element's float (position:absolute), offset by `dx`/`dy` px; null
+ *  when it sits in the line. */
+function vmlFloat(
+  el: OoxmlNode,
+  st: ReturnType<typeof parseVmlStyle>,
+  dx = 0,
+  dy = 0,
+): Record<string, unknown> | null {
+  if (!st.absolute) return null;
+  const wrapEl = child(el, 'w10:wrap');
+  const wrap = vmlWrap(wrapEl);
+  const float: Record<string, unknown> = {
+    wrap,
+    hRel: vmlHRel(wrapEl, st.hRelRaw),
+    vRel: vmlVRel(wrapEl, st.vRelRaw),
+  };
+  // Only a wrapping shape keeps text at a distance; on a float the text
+  // runs through, the gaps would describe nothing.
+  if (wrap !== 'none') {
+    const d = st.wrapDist ?? {};
+    float['distL'] = Math.round(d.l ?? VML_WRAP_DIST.l);
+    float['distR'] = Math.round(d.r ?? VML_WRAP_DIST.r);
+    float['distT'] = Math.round(d.t ?? VML_WRAP_DIST.t);
+    float['distB'] = Math.round(d.b ?? VML_WRAP_DIST.b);
+  }
+  if (st.left !== undefined) float['hOffset'] = Math.round(st.left + dx);
+  if (st.top !== undefined) float['vOffset'] = Math.round(st.top + dy);
+  if ((st.zIndex ?? 0) < 0) float['behind'] = true;
+  return float;
+}
+
 /** A drawn legacy VML shape in a run's w:pict: v:roundrect / v:rect / v:oval
  *  boxes (with their v:textbox content) and straight connectors
  *  (o:connectortype, or a `type="#id"` reference to a v:shapetype with
@@ -1952,28 +1996,7 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
   const dx = rotation ? (w - h) / 2 : 0;
   const dy = rotation ? (h - w) / 2 : 0;
 
-  let float: Record<string, unknown> | null = null;
-  if (st.absolute) {
-    const wrapEl = child(el, 'w10:wrap');
-    const wrap = vmlWrap(wrapEl);
-    float = {
-      wrap,
-      hRel: vmlHRel(wrapEl, st.hRelRaw),
-      vRel: vmlVRel(wrapEl, st.vRelRaw),
-    };
-    // Only a wrapping shape keeps text at a distance; on a float the text
-    // runs through, the gaps would describe nothing.
-    if (wrap !== 'none') {
-      const d = st.wrapDist ?? {};
-      float['distL'] = Math.round(d.l ?? VML_WRAP_DIST.l);
-      float['distR'] = Math.round(d.r ?? VML_WRAP_DIST.r);
-      float['distT'] = Math.round(d.t ?? VML_WRAP_DIST.t);
-      float['distB'] = Math.round(d.b ?? VML_WRAP_DIST.b);
-    }
-    if (st.left !== undefined) float['hOffset'] = Math.round(st.left + dx);
-    if (st.top !== undefined) float['vOffset'] = Math.round(st.top + dy);
-    if ((st.zIndex ?? 0) < 0) float['behind'] = true;
-  }
+  const float = vmlFloat(el, st, dx, dy);
 
   // NB: no blanket markSubtree here — properties the model does NOT honor
   // (v:shadow, o:extrusion, …) must stay visible in the XML audit;
@@ -1992,6 +2015,88 @@ function parseVmlShape(run: OoxmlNode, ctx: Ctx): PMNode | null {
     shape,
     textbox,
     ...(rotation ? { rotation } : {}),
+  });
+}
+
+/**
+ * A VML group (v:group) — the legacy way Word drew a diagram, a framed
+ * caption with its drop shadow, a whole bar chart (D-2609-DHQ8 had 18, all
+ * dropped). One image box the size of the group, where the group sits: its
+ * geometry as a display list (`vector`), its text boxes as `frames` laid out
+ * inside the box. The w:pict goes back verbatim on save, with the pictures
+ * it references (see vml-group.ts for what is drawn).
+ */
+function parseVmlGroup(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const pict = child(run, 'w:pict');
+  const group = child(pict, 'v:group');
+  if (!pict || !group) return null;
+  return vmlDrawingNode(pict, group, ctx, vmlGroupDrawing);
+}
+
+/**
+ * A lone freeform v:shape — its own `path`, no preset: the arrows between
+ * the boxes of a diagram, a cover page's double frame (D-2609-DHQ8). Drawn
+ * and carried the way a group is. A path built from the shapetype's
+ * formulas cannot be drawn and is left to the other readers.
+ */
+function parseVmlFreeform(run: OoxmlNode, ctx: Ctx): PMNode | null {
+  const pict = child(run, 'w:pict');
+  const shape = child(pict, 'v:shape');
+  const path = attrOf(shape, 'path');
+  if (!pict || !shape || !path || !parseVmlPath(path)) return null;
+  return vmlDrawingNode(pict, shape, ctx, vmlShapeDrawing);
+}
+
+/** One image box for a VML drawing `el` (a group, a freeform) in `pict`:
+ *  its display list and text frames, its float, its XML to carry. Null when
+ *  the XML cannot travel (a relationship that does not resolve) or the box
+ *  has no size. */
+function vmlDrawingNode(
+  pict: OoxmlNode,
+  el: OoxmlNode,
+  ctx: Ctx,
+  draw: typeof vmlGroupDrawing,
+): PMNode | null {
+  const refs = drawingRels(pict, ctx);
+  if (!refs) return null;
+  const xml = carryDrawingXml(pict, ctx);
+  if (!xml) return null;
+  const st = parseVmlStyle(attrOf(el, 'style') ?? '');
+  const width = st.width ?? 0;
+  const height = st.height ?? 0;
+  if (width <= 0 || height <= 0) return null;
+  const types = ctx.vmlShapeTypes ?? new Map<string, number>();
+  const { vector, frames } = draw(el, width, height, {
+    textbox: (m) => parseVmlTextbox(m, ctx),
+    color: vmlColor,
+    length: cssLenToPx,
+    shapeType: (id) => types.get(id),
+    image: (m) => {
+      const rel = ctx.rels.get(attrOf(child(m, 'v:imagedata'), 'r:id') ?? '');
+      if (!rel || rel.external) return undefined;
+      return ctx.media.get(resolveTarget('word/document.xml', rel.target));
+    },
+    read: (n) => audit.mark(n),
+  });
+  const float = vmlFloat(el, st);
+  audit.mark(pict);
+  return ctx.schema.nodes['image'].create({
+    src: '',
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+    alt: attrOf(el, 'alt') || '',
+    float,
+    vector,
+    ...(frames.length > 0 && {
+      frames: frames.map((f) => ({
+        x: f.x,
+        y: f.y,
+        width: f.width,
+        height: f.height,
+        ...f.textbox,
+      })),
+    }),
+    rawDrawing: { xml, float, rels: refs.rels, parts: refs.parts },
   });
 }
 
