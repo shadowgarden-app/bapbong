@@ -169,6 +169,18 @@ describe('parseChartSpec', () => {
     expect(pts.map((p) => p.fill)).toEqual(['#4F81BD', '#C0504D', '#9BBB59']);
   });
 
+  it('draws a chart naming no style with black axes (measured)', () => {
+    const spec = parseChartSpec(
+      LINE.replace(/<mc:AlternateContent.*?<\/mc:AlternateContent>/, ''),
+      theme,
+    )!;
+    const val = spec.axes.find((a) => a.kind === 'val')!;
+    expect(val.line?.color).toBe('#000000');
+    expect(val.majorGridlines?.color).toBe('#000000');
+    // Everything else is style 2's.
+    expect(spec.groups[0].series[0].line?.color).toBe('#4A7EBB');
+  });
+
   it('leaves what it does not draw to the placeholder', () => {
     expect(
       parseChartSpec(

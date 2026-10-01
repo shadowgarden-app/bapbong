@@ -84,10 +84,24 @@ export function chartTheme(themeRoot: OoxmlNode | undefined): ChartTheme {
       if (!entry) return phClr;
       if (entry.name === 'a:solidFill')
         return drawingColor(entry, color, phClr) ?? phClr;
-      // A gradient entry paints as its first stop — the box model has a
-      // single colour. Close for the stock themes' subtle gradients.
-      const stop = child(child(entry, 'a:gsLst'), 'a:gs');
-      return drawingColor(stop, color, phClr) ?? phClr;
+      // A gradient entry paints as the average of its stops — the box
+      // model has a single colour, and the intense chart styles fill with
+      // the theme's strong gradients (Word paints them; the first stop
+      // alone came out far darker).
+      const stops = children(child(entry, 'a:gsLst'), 'a:gs')
+        .map((gs) => drawingColor(gs, color, phClr))
+        .filter((h): h is string => !!h);
+      if (stops.length === 0) return phClr;
+      const avg = [1, 3, 5].map((k) =>
+        Math.round(
+          stops.reduce((a, h) => a + parseInt(h.slice(k, k + 2), 16), 0) /
+            stops.length,
+        ),
+      );
+      return `#${avg
+        .map((v) => v.toString(16).padStart(2, '0'))
+        .join('')
+        .toUpperCase()}`;
     },
   };
 }
@@ -217,7 +231,11 @@ export interface StyleDefaults {
   marker: (color: string) => { fill: string; line: ChartLine };
 }
 
-export function styleDefaults(theme: ChartTheme, style: number): StyleDefaults {
+export function styleDefaults(
+  theme: ChartTheme,
+  style: number,
+  unstyled = false,
+): StyleDefaults {
   const { row, col } = styleCell(style);
   const s = (row * 8 + col) as number;
   const thin = themeLineWidth(theme, 1);
@@ -250,8 +268,8 @@ export function styleDefaults(theme: ChartTheme, style: number): StyleDefaults {
           : s <= 40
             ? scheme(theme, `accent${s - 34}`, [['tint', 20000]])
             : scheme(theme, 'dk1', [['tint', 95000]]),
-    axisLine: greyLine([['tint', 75000]]),
-    majorGrid: greyLine([['tint', 75000]]),
+    axisLine: unstyled ? greyLine([]) : greyLine([['tint', 75000]]),
+    majorGrid: unstyled ? greyLine([]) : greyLine([['tint', 75000]]),
     minorGrid: {
       color: scheme(theme, 'tx1', [['tint', s <= 40 ? 50000 : 90000]]),
       widthPt: thin,
@@ -577,7 +595,8 @@ const UNSUPPORTED = new Set([
 
 /** c:style, preferring the Office 2010 c14:style in an AlternateContent
  *  Choice (100 + the 2007 number) over its Fallback. Default 2. */
-function chartStyleNumber(space: OoxmlNode | undefined): number {
+/** The chart's c:style — null when it names none. */
+function chartStyleNumber(space: OoxmlNode | undefined): number | null {
   const direct = numOf(space, 'c:style');
   if (direct !== undefined) return direct;
   for (const alt of children(space, 'mc:AlternateContent')) {
@@ -586,7 +605,7 @@ function chartStyleNumber(space: OoxmlNode | undefined): number {
     const fb = numOf(child(alt, 'mc:Fallback'), 'c:style');
     if (fb !== undefined) return fb;
   }
-  return 2;
+  return null;
 }
 
 function parseLabels(
@@ -657,8 +676,11 @@ export function parseChartSpec(
   if (!plot) return null;
   if (plot.children.some((c) => UNSUPPORTED.has(c.name))) return null;
 
-  const style = chartStyleNumber(space);
-  const d = styleDefaults(theme, style);
+  // A chart naming no style draws like style 2 — except that its axes and
+  // gridlines are plain black (measured: chart probe B0/E2).
+  const named = chartStyleNumber(space);
+  const style = named ?? 2;
+  const d = styleDefaults(theme, style, named === null);
   const minor = theme.font('minor') ?? 'Calibri';
   // The chart-wide text, then each element's default on top of it.
   const baseFont = txFont(space, theme, {
