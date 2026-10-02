@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import {
+  hexColor,
   bigLimits,
   perf,
   radShowDeg,
@@ -230,16 +231,20 @@ function runProps(marks: readonly Mark[], autoColor = false): string {
   if (byName.has('strike')) out.push('<w:strike/>');
   if (byName.has('dstrike')) out.push('<w:dstrike/>');
   if (byName.has('smallCaps')) out.push('<w:smallCaps/>');
-  const color = byName.get('textColor')?.attrs['color'] as string | undefined;
-  if (color) out.push(`<w:color w:val="${color.replace(/^#/, '')}"/>`);
+  // Only "#RRGGBB" is a w:color: a mark that came in as CSS (a paste's
+  // `rgb(0, 0, 0)`) is written as the hex it means, never verbatim.
+  const color = hexColor(
+    byName.get('textColor')?.attrs['color'] as string | undefined,
+  );
+  if (color) out.push(`<w:color w:val="${color.slice(1)}"/>`);
   else if (autoColor) out.push('<w:color w:val="auto"/>');
   const size = byName.get('fontSize')?.attrs['size'] as number | undefined;
   if (size != null) out.push(`<w:sz w:val="${Math.round(size * 2)}"/>`);
-  const hl = byName.get('highlight')?.attrs['color'] as string | undefined;
+  const hl = hexColor(
+    byName.get('highlight')?.attrs['color'] as string | undefined,
+  );
   if (hl)
-    out.push(
-      `<w:shd w:val="clear" w:color="auto" w:fill="${hl.replace(/^#/, '')}"/>`,
-    );
+    out.push(`<w:shd w:val="clear" w:color="auto" w:fill="${hl.slice(1)}"/>`);
   const va = byName.get('vertAlign')?.attrs['value'] as string | undefined;
   if (va)
     out.push(
@@ -1138,7 +1143,8 @@ function markProps(
     );
   if (mf?.bold) out.push('<w:b/>');
   if (mf?.italic) out.push('<w:i/>');
-  if (mf?.color) out.push(`<w:color w:val="${mf.color.replace(/^#/, '')}"/>`);
+  const markColor = hexColor(mf?.color);
+  if (markColor) out.push(`<w:color w:val="${markColor.slice(1)}"/>`);
   else if (autoColor) out.push('<w:color w:val="auto"/>');
   if (mf?.sizePt != null)
     out.push(`<w:sz w:val="${Math.round(mf.sizePt * 2)}"/>`);

@@ -575,7 +575,12 @@ export class CanvasPainter {
       // Hyperlinks without an explicit color get Word's hyperlink look
       // (blue + underline) — otherwise a fresh link paints like plain text
       // and inserting one reads as "nothing happened".
-      ctx.fillStyle = seg.color ?? (seg.link ? LINK_COLOR : o.textColor);
+      // The default first: a colour the canvas cannot parse is IGNORED,
+      // and the run would take whatever the last fill was (a stray CSS
+      // `rgb()` once painted a whole document light blue).
+      const fallback = seg.link ? LINK_COLOR : o.textColor;
+      ctx.fillStyle = fallback;
+      if (seg.color) ctx.fillStyle = seg.color;
       // Page-number fields render the live value for the page being painted.
       const text =
         seg.field && pageInfo

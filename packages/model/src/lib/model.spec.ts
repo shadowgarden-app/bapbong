@@ -299,3 +299,25 @@ describe('commentSchema', () => {
     expect(node.attrs['label']).toBe('Bob');
   });
 });
+
+describe('colours pasted from a web page', () => {
+  const rule = (mark: 'textColor' | 'highlight') =>
+    schema.marks[mark].spec.parseDOM![0] as {
+      getAttrs: (v: string) => unknown;
+    };
+
+  it('keeps a browser rgb() as the hex it names — never verbatim', () => {
+    expect(rule('textColor').getAttrs('rgb(0, 0, 0)')).toEqual({
+      color: '#000000',
+    });
+    expect(rule('highlight').getAttrs('rgb(255, 255, 0)')).toEqual({
+      color: '#FFFF00',
+    });
+  });
+
+  it('drops a colour that names none, and a transparent background', () => {
+    expect(rule('textColor').getAttrs('currentcolor')).toBe(false);
+    expect(rule('highlight').getAttrs('rgba(0, 0, 0, 0)')).toBe(false);
+    expect(rule('highlight').getAttrs('transparent')).toBe(false);
+  });
+});

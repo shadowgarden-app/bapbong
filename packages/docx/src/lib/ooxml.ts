@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
+import { hexColor } from '@shadow-garden/bapbong-contracts';
 import { audit } from './audit.js';
 
 /**
@@ -223,9 +224,12 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
 };
 
 /** Normalize an OOXML hex color ("FF0000" or "#ff0000") to "#FF0000". */
+/** "#RRGGBB" for an OOXML colour value, or undefined for `auto` and for
+ *  anything that is not a colour. Files our own earlier builds saved from
+ *  a web paste hold `rgb(0, 0, 0)` — read as the colour it names rather
+ *  than passed on as "#RGB(0, 0, 0)", which the painter cannot draw. */
 export function normalizeHex(v: string | undefined): string | undefined {
-  if (!v || v.toLowerCase() === 'auto') return undefined;
-  return v.startsWith('#') ? v.toUpperCase() : `#${v.toUpperCase()}`;
+  return hexColor(v);
 }
 
 /** Resolve a `w:themeColor` (+ optional tint/shade) to "#RRGGBB". */
@@ -300,13 +304,16 @@ export function parseRunProps(
     resolveTheme && themeColor
       ? resolveTheme(themeColor, themeTint, themeShade)
       : undefined;
-  if (colorVal && colorVal.toLowerCase() !== 'auto') {
-    props.color = colorVal.startsWith('#')
-      ? colorVal.toUpperCase()
-      : `#${colorVal.toUpperCase()}`;
+  // A value that names no colour (a CSS `rgb(…)` our earlier builds saved
+  // from a paste is read as the colour it names) falls through to the
+  // theme, then to nothing — never into the model as a string the
+  // painter cannot draw.
+  const hex = normalizeHex(colorVal);
+  if (hex) {
+    props.color = hex;
   } else if (themeHex) {
     props.color = themeHex;
-  } else if (colorVal) {
+  } else if (colorVal?.toLowerCase() === 'auto') {
     // Explicit Automatic: it overrides the style's colour, it does not
     // defer to it.
     props.color = 'auto';

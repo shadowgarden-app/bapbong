@@ -1,5 +1,9 @@
 import { Schema } from 'prosemirror-model';
-import { astToLinear, isEqRow } from '@shadow-garden/bapbong-contracts';
+import {
+  astToLinear,
+  hexColor,
+  isEqRow,
+} from '@shadow-garden/bapbong-contracts';
 
 /** Structural view of a DOM element — this package has no DOM lib, so parseDOM
  *  getAttrs callbacks narrow structurally (same idiom as the footnote mark). */
@@ -659,11 +663,18 @@ export const schema = new Schema({
       toDOM: () => ['span', { style: 'font-variant-caps: small-caps' }, 0],
     },
 
-    // w:color — hex "#RRGGBB"
+    // w:color — hex "#RRGGBB". A paste brings CSS (`rgb(0, 0, 0)`): kept
+    // as the hex it names, dropped when it names none.
     textColor: {
       attrs: { color: {} },
       parseDOM: [
-        { style: 'color', getAttrs: (value) => ({ color: value as string }) },
+        {
+          style: 'color',
+          getAttrs: (value) => {
+            const color = hexColor(value as string);
+            return color ? { color } : false;
+          },
+        },
       ],
       toDOM(mark) {
         return [
@@ -807,7 +818,11 @@ export const schema = new Schema({
       parseDOM: [
         {
           style: 'background-color',
-          getAttrs: (value) => ({ color: value as string }),
+          // A page's transparent background is no highlight.
+          getAttrs: (value) => {
+            const color = hexColor(value as string);
+            return color ? { color } : false;
+          },
         },
       ],
       toDOM(mark) {
