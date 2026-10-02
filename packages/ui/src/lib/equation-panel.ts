@@ -10,6 +10,7 @@ import {
 } from '@shadow-garden/bapbong-contracts';
 import { equationPreviewSvg } from './equation-gallery.js';
 import { injectStyle, TABS_CSS } from './internal.js';
+import { SELECT_CHEVRON } from './select-style.js';
 
 export interface EquationPanelOptions {
   /**
@@ -44,7 +45,7 @@ const STYLE = `
 .bb-eqp{width:352px;display:flex;flex-direction:column;background:var(--bb-ui-menu-bg,#fff);-webkit-backdrop-filter:var(--bb-ui-pop-filter,none);backdrop-filter:var(--bb-ui-pop-filter,none);border:1px solid var(--bb-ui-pop-border,var(--bb-ui-border,#e3e3e0));border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);user-select:none;overflow:hidden}
 .bb-eqp-tabs{display:flex;padding:8px 8px 0}
 .bb-eqp-body{padding:8px}
-.bb-eqp-set{width:100%;height:30px;margin-bottom:7px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,#fff);color:inherit;font:inherit;font-size:13px;padding:0 8px}
+.bb-eqp-set{width:100%;height:30px;margin-bottom:7px;border:0.5px solid var(--bb-ui-control-border,var(--bb-ui-border,#d8d6cf));border-radius:6px;background:var(--bb-ui-control-bg,#fff);color:inherit;font:inherit;font-size:13px;padding:0 8px;${SELECT_CHEVRON}}
 .bb-eqp-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:1px;max-height:190px;overflow-y:auto}
 .bb-eqp-sym{padding:5px 0;border:0;border-radius:5px;background:transparent;color:inherit;font-family:"Cambria Math","Times New Roman",Tinos,serif;font-size:16px;line-height:1.2;cursor:pointer}
 .bb-eqp-sym:hover{background:var(--bb-ui-hover,#f1efe8)}

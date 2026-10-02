@@ -6,6 +6,7 @@ import {
   injectStyle,
   shortcutLabel,
 } from './internal.js';
+import { SELECT_CHEVRON } from './select-style.js';
 
 /** Presentation for one toolbar button — the headless {@link Command} carries
  *  no UI, so labels/icons live here. */
@@ -235,8 +236,8 @@ const STYLE = `
 .bb-toolbar-btn.bb-btn-accent{gap:5px;padding:0 9px;font-size:12.5px;white-space:nowrap;background:var(--bb-ui-active-bg,#e6f1fb);color:var(--bb-ui-active-fg,#0c447c);border-color:var(--bb-ui-active-border,#b5d4f4)}
 .bb-toolbar-btn.bb-btn-accent:hover{background:var(--bb-ui-active-bg,#e6f1fb);border-color:var(--bb-ui-active-fg,#0c447c)}
 .bb-btn-caret{font-size:9px;opacity:.7;line-height:1}
-.bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer}
-.bb-toolbar-select:hover{background:var(--bb-ui-hover,#f1efe8)}
+.bb-toolbar-select{height:30px;border:1px solid var(--bb-ui-control-border,var(--bb-ui-border,#e3e3e0));border-radius:6px;background:var(--bb-ui-control-bg,var(--bb-ui-bg,#fff));color:inherit;font-family:inherit;font-size:13px;padding:0 6px;cursor:pointer;${SELECT_CHEVRON}}
+.bb-toolbar-select:hover{background-color:var(--bb-ui-hover,#f1efe8)}
 .bb-i-bold{font-weight:700}.bb-i-italic{font-style:italic}.bb-i-underline{text-decoration:underline}.bb-i-strike{text-decoration:line-through}
 .bb-toolbar-split{display:flex;align-items:center;gap:0}
 .bb-toolbar-split .bb-toolbar-btn{min-width:26px;padding:0 5px}
