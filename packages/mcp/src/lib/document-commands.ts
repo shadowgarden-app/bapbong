@@ -87,8 +87,12 @@ export function documentPage(
   snap: DocSnapshot,
   from: number,
   budget = DOCUMENT_PAGE_CHARS,
+  /** Last block wanted, inclusive — a range such as the user's selection.
+   *  Default: the end of the document. */
+  last = snap.blocks.length - 1,
 ): Record<string, unknown> {
   const total = snap.blocks.length;
+  const end = Math.min(last, total - 1);
   const first = from === 0;
   const extras = {
     ...(first && snap.chrome ? { chrome: snap.chrome } : {}),
@@ -107,7 +111,7 @@ export function documentPage(
     1,
   ).length;
   const blocks: DocSnapshot['blocks'] = [];
-  for (let i = from; i < total; i++) {
+  for (let i = from; i <= end; i++) {
     // Inside the page's blocks array it sits two levels deeper than on
     // its own: two spaces more on every line.
     const text = JSON.stringify(snap.blocks[i], null, 1);
@@ -121,7 +125,7 @@ export function documentPage(
     docVersion: snap.docVersion,
     totalBlocks: total,
     // Ahead of the blocks, so a result clipped on the way still says it.
-    ...(next < total ? { nextFromBlock: next } : {}),
+    ...(next <= end ? { nextFromBlock: next } : {}),
     blocks,
     ...extras,
   };
@@ -133,7 +137,8 @@ export const getDocument = defineCommand({
   description:
     'Read the document as numbered blocks (paragraphs, headings — table-cell paragraphs included, in reading order). ' +
     'A long document comes in pages: when the result has nextFromBlock, call again with from_block = nextFromBlock ' +
-    'to read on, until it is absent (totalBlocks counts them all). Read every page before judging or rewriting the whole ' +
+    '(and the same to_block) to read on, until it is absent (totalBlocks counts them all). to_block stops at a block — ' +
+    'read just a range, such as the passage the user selected. Read every page before judging or rewriting the whole ' +
     'document; find_text is for locating a phrase, not for reading. ' +
     'A list item says so (list: { kind, level }); its bullet or number is drawn, not in its text. ' +
     'Hyperlinks are listed per block (links: [{ text, href }]). Headers and footers with text come as chrome ' +
@@ -151,10 +156,16 @@ export const getDocument = defineCommand({
       .describe(
         'First block to return — nextFromBlock of the page before. Default 0.',
       ),
+    to_block: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Last block to return, inclusive. Default: the last block.'),
   },
   effect: 'read',
   targets: (a) => [a.documentId],
-  run: (provider, { documentId: id, from_block }) =>
+  run: (provider, { documentId: id, from_block, to_block }) =>
     withSession(provider, id, async (s) => {
       const snap = await s.snapshot();
       const from = from_block ?? 0;
@@ -162,7 +173,11 @@ export const getDocument = defineCommand({
         return errorText(
           `from_block ${from} is past the end — the document has ${snap.blocks.length} block(s), 0 to ${snap.blocks.length - 1}.`,
         );
-      return json(documentPage(snap, from));
+      if (to_block !== undefined && to_block < from)
+        return errorText(`to_block ${to_block} is before from_block ${from}.`);
+      return json(
+        documentPage(snap, from, undefined, to_block ?? snap.blocks.length - 1),
+      );
     }),
 });
 
@@ -298,7 +313,9 @@ export const applyFormatting = defineCommand({
     'line_spacing, indent_left/indent_right/first_line/hanging (cm or "1cm", 0 removes) apply to the containing paragraph. ' +
     'list "bullet"/"number" makes it a list item — it joins a list of that kind right above it, so turning ' +
     'several paragraphs into one list is one call per paragraph, top to bottom; "none" makes it body text. ' +
-    'list_level (1-3) nests a list item.',
+    'list_level (1-3) nests a list item. Send ONLY the fields you mean: every property passed is applied ' +
+    '(bold false removes bold, style "Normal" resets the style, list "none" ends a list), so leave the rest out — ' +
+    'never fill them with placeholders or defaults.',
   input: {
     documentId,
     target_text: z
@@ -465,12 +482,25 @@ export const applyFormatting = defineCommand({
     },
   ) =>
     withSession(provider, id, async (s) => {
-      const named = [target_text, block_index, from_block].filter(
-        (v) => v !== undefined,
-      ).length;
-      if (named !== 1)
+      const named = Object.entries({
+        target_text,
+        block_index,
+        from_block,
+      }).filter(([, v]) => v !== undefined);
+      if (named.length !== 1)
         return errorText(
-          'Pass exactly one of target_text (exact text), block_index (a whole block) or from_block (a run of blocks).',
+          'Pass exactly one of target_text (exact text), block_index (a whole block) or from_block (a run of blocks).' +
+            // Say what the call carried: a model that filled every field
+            // with a placeholder resends the same call to a bare rule
+            // (D-2610: 100 identical retries).
+            (named.length > 1
+              ? ` This call passed ${named
+                  .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                  .join(
+                    ', ',
+                  )} — keep the one you mean and leave the others out entirely.` +
+                ' Leave out every formatting field you do not want changed too: each one passed is applied.'
+              : ''),
         );
       if (
         (to_block !== undefined || only !== undefined) &&

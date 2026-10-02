@@ -5,7 +5,11 @@
  * its live editor; it must never pull the MCP SDK into the web bundle.
  */
 export * from './lib/contract.js';
-export { PmDocSession, type PmSessionHost } from './lib/pm-session.js';
+export {
+  PmDocSession,
+  selectionBlocks,
+  type PmSessionHost,
+} from './lib/pm-session.js';
 export {
   buildContent,
   contentToNodes,

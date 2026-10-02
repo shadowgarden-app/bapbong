@@ -1929,6 +1929,50 @@ export class PmDocSession implements DocumentSession {
 
 /** All textblocks of `doc` (paragraphs, incl. inside table cells) in reading
  *  order, each knowing which table cell holds it. */
+/**
+ * The blocks a selection `from`–`to` covers, numbered the way get_document
+ * numbers them (0-based, table-cell paragraphs included, reading order) —
+ * the address an agent's tools take. A host names a user's selection with
+ * this rather than by its own counting: top-level paragraph numbers drift
+ * from the tools' numbering at the first table. `partial`: the selection
+ * starts or ends inside a block's text, so block-wide formatting would
+ * reach past it.
+ *
+ * Always a range: a selection that holds no text (a picture between
+ * blocks, a caret) is named by the block it sits at — the one starting
+ * at or before `from`, else the first — so a host never has a pick it
+ * cannot point the agent to.
+ */
+export function selectionBlocks(
+  doc: PMNode,
+  from: number,
+  to: number,
+): { fromBlock: number; toBlock: number; partial: boolean } {
+  let first = -1;
+  let last = -1;
+  let startsInside = false;
+  let endsInside = false;
+  let at = 0;
+  textblocksOf(doc).forEach((b, i) => {
+    if (b.pos <= from) at = i;
+    const start = b.pos + 1;
+    const end = b.pos + b.node.nodeSize - 1;
+    const overlaps =
+      Math.max(start, from) < Math.min(end, to) ||
+      (start === end && from <= start && end <= to);
+    if (!overlaps) return;
+    if (first < 0) {
+      first = i;
+      startsInside = from > start;
+    }
+    last = i;
+    endsInside = to < end;
+  });
+  return first < 0
+    ? { fromBlock: at, toBlock: at, partial: true }
+    : { fromBlock: first, toBlock: last, partial: startsInside || endsInside };
+}
+
 function textblocksOf(doc: PMNode): TextBlock[] {
   const out: TextBlock[] = [];
   let tables = 0;

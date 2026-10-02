@@ -6,6 +6,7 @@ import { exportDocx, schema } from '@shadow-garden/bapbong-headless';
 import type { DocSnapshot } from './contract.js';
 import { documentPage } from './document-commands.js';
 import { HeadlessSession } from './headless-session.js';
+import { selectionBlocks } from './pm-session.js';
 import { createMcpServer } from './server.js';
 
 /** An essay: a title, then chapters of a heading and eight paragraphs. */
@@ -196,6 +197,8 @@ describe('apply_formatting over a run of blocks', () => {
     });
     expect(both.isError).toBe(true);
     expect(both.text).toContain('exactly one');
+    // It names what the call carried, so the model can drop the extras.
+    expect(both.text).toContain('block_index=1, from_block=0');
     const stray = await call('apply_formatting', {
       block_index: 1,
       only: 'body',
@@ -204,5 +207,80 @@ describe('apply_formatting over a run of blocks', () => {
     const out = await call('apply_formatting', { from_block: 99, bold: true });
     expect(out.isError).toBe(true);
     expect(out.text).toContain('out of range');
+  });
+});
+
+describe('a range of blocks: the passage a user selected', () => {
+  it('get_document to_block reads just the range, in pages', async () => {
+    const { call } = await connect(40);
+    const one = JSON.parse(
+      (await call('get_document', { from_block: 10, to_block: 12 })).text,
+    );
+    expect(one.blocks.map((b: { index: number }) => b.index)).toEqual([
+      10, 11, 12,
+    ]);
+    expect(one.nextFromBlock).toBeUndefined();
+    // A long range still pages, and stops at to_block.
+    let from = 0;
+    const seen: number[] = [];
+    for (let i = 0; i < 50; i++) {
+      const page = JSON.parse(
+        (await call('get_document', { from_block: from, to_block: 200 })).text,
+      );
+      seen.push(...page.blocks.map((b: { index: number }) => b.index));
+      if (page.nextFromBlock === undefined) break;
+      from = page.nextFromBlock;
+    }
+    expect(seen).toEqual([...Array(201).keys()]);
+    const backwards = await call('get_document', {
+      from_block: 5,
+      to_block: 4,
+    });
+    expect(backwards.isError).toBe(true);
+  });
+
+  it('selectionBlocks numbers a selection the way the tools do, tables included', () => {
+    const p = (t: string) => schema.node('paragraph', null, [schema.text(t)]);
+    const cell = (t: string) => schema.node('table_cell', null, [p(t)]);
+    const doc = schema.node('doc', null, [
+      p('Intro'),
+      schema.node('table', null, [
+        schema.node('table_row', null, [cell('A'), cell('B')]),
+      ]),
+      p('After the table'),
+      p('End'),
+    ]);
+    // Each textblock's content span, in get_document order.
+    const spans: { start: number; end: number }[] = [];
+    doc.descendants((n, pos) => {
+      if (n.isTextblock)
+        spans.push({ start: pos + 1, end: pos + 1 + n.content.size });
+      return true;
+    });
+    const starts = spans.map((x) => x.start);
+    // "After the table" is block 3 for the tools — the 3rd top-level node.
+    expect(selectionBlocks(doc, spans[3].start, spans[3].end)).toEqual({
+      fromBlock: 3,
+      toBlock: 3,
+      partial: false,
+    });
+    // Whole document: blocks 0–4.
+    expect(selectionBlocks(doc, 0, doc.content.size)).toEqual({
+      fromBlock: 0,
+      toBlock: 4,
+      partial: false,
+    });
+    // A caret holds no text: still a range — the block it sits in.
+    expect(selectionBlocks(doc, spans[2].start, spans[2].start)).toEqual({
+      fromBlock: 2,
+      toBlock: 2,
+      partial: true,
+    });
+    // Starting mid-word in "Intro" and ending inside "End".
+    expect(selectionBlocks(doc, starts[0] + 2, starts[4] + 1)).toEqual({
+      fromBlock: 0,
+      toBlock: 4,
+      partial: true,
+    });
   });
 });
