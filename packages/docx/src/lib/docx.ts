@@ -2751,6 +2751,9 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   // starts, else one it opens itself (resolved after the run loop).
   const fieldAtStart = ctx.openFields[0] ?? null;
   let field: FieldState | null = null;
+  // A TOC that opens AND closes in this paragraph — a one-entry table, as
+  // Word writes it — is still the paragraph's field, not inline output.
+  let ownToc: FieldInfo | null = null;
   // Toggle-valued: w:pageBreakBefore w:val="false" (an override cancelling an
   // inherited break) must count as OFF — presence alone read it backwards.
   const pbLayer = lastWith(pPrChain, 'w:pageBreakBefore');
@@ -2845,6 +2848,9 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
           if (field) {
             const done = field;
             field = done.parent;
+            if (!done.parent && fieldSpanKind(done.instr) === 'toc') {
+              ownToc = { kind: 'toc', instr: done.instr.trim() };
+            }
             const kind = fieldKind(done.instr);
             // PAGE/NUMPAGES: the cached result is recomputed by our layout —
             // only the first result run's formatting is read; everything
@@ -3091,7 +3097,7 @@ function parseParagraph(p: OoxmlNode, ctx: Ctx): PMNode {
   if (bookmarks) attrs.bookmarks = bookmarks;
   // A paragraph that OPENS a spanning field belongs to it as much as the ones
   // that follow (the TOC's first entry is part of the TOC).
-  const fieldForPara = fieldAtStart ?? ctx.openFields[0] ?? null;
+  const fieldForPara = fieldAtStart ?? ctx.openFields[0] ?? ownToc;
   if (fieldForPara) attrs.field = fieldForPara;
   if (pageBreak) attrs.pageBreakBefore = true;
   // Both sides start false: whether a side actually collapses depends on the

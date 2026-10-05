@@ -72,3 +72,31 @@ describe('a table of contents is saved as a field', () => {
     );
   });
 });
+
+describe('a one-entry table of contents', () => {
+  it('survives a round trip: begin and end in one paragraph is still the TOC', async () => {
+    const field = { kind: 'toc', instr: INSTR };
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', { field }, [
+        schema.text('Only\t1', [
+          schema.marks['link'].create({ href: '#_Toc1' }),
+        ]),
+      ]),
+      schema.node('paragraph', { heading: 1, bookmarks: ['_Toc1'] }, [
+        schema.text('Only'),
+      ]),
+    ]);
+    const bytes = await exportDocx(doc);
+    const xml = await documentXml(bytes);
+    const first = (xml.match(/<w:p>[\s\S]*?<\/w:p>/g) ?? [])[0];
+    expect(first).toContain('fldCharType="begin"');
+    expect(first).toContain('fldCharType="end"');
+    const back = (await importDocx(bytes.slice().buffer as ArrayBuffer)).doc;
+    expect(back.child(0).attrs['field']).toMatchObject({
+      kind: 'toc',
+      instr: INSTR,
+    });
+    expect(back.child(0).textContent).toBe('Only\t1');
+    expect(back.child(1).attrs['field']).toBeNull();
+  });
+});
