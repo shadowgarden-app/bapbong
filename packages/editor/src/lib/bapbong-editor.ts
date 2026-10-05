@@ -1,3 +1,4 @@
+import { CORE_KEYBINDINGS } from './core-keybindings';
 import {
   DOMParser as PMDOMParser,
   Node as ProseMirrorNode,
@@ -1284,44 +1285,9 @@ export class BapbongEditor {
       'Extend selection down a line',
       this.verticalCmd(1, true),
     );
-    const bind = (key: string, command: string, when?: string): void => {
-      this.keybindings.add({
-        key,
-        command,
-        source: 'core',
-        ...(when && { when }),
-      });
-    };
-    // Order matters only for the dialog's insertion order (it sorts anyway).
-    bind('Enter', 'paragraph-enter', 'editing text');
-    bind(
-      'Backspace',
-      'backspace-outdent',
-      'at the start of a list or indented paragraph',
-    );
-    bind('Tab', 'list-indent', 'in a list');
-    bind('Shift-Tab', 'list-outdent', 'in a list');
-    bind('ArrowUp', 'caret-up', 'editing text');
-    bind('ArrowDown', 'caret-down', 'editing text');
-    bind('Shift-ArrowUp', 'select-up', 'editing text');
-    bind('Shift-ArrowDown', 'select-down', 'editing text');
-    bind('Mod-z', 'undo');
-    bind('Shift-Mod-z', 'redo');
-    bind('Mod-y', 'redo');
-    // Word's staples. Nothing bound these before; the base keymap has none.
-    bind('Mod-b', 'bold', 'editing text');
-    bind('Mod-i', 'italic', 'editing text');
-    bind('Mod-u', 'underline', 'editing text');
-    // Word's Alt+X: hex before the caret ↔ the character.
     this.commands.add(toggleUnicodeHex());
-    bind(
-      'Alt-x',
-      'toggle-unicode-hex',
-      'hex digits or a character before the caret',
-    );
-    // Word's Alt+=: insert (or convert the selection into) an equation.
     this.commands.add(insertEquation());
-    bind('Alt-=', 'insert-equation', 'editing text');
+    for (const b of CORE_KEYBINDINGS) this.keybindings.add(b);
   }
 
   /** The bridge's live key lookup: a registered chord → the command's run,

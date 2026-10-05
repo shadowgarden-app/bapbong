@@ -1,11 +1,13 @@
-import type {
-  Collection,
-  Command,
-  KeybindingRegistry,
+import {
+  type Collection,
+  type Command,
+  type KeybindingRegistry,
+  keyLabel,
 } from '@shadow-garden/bapbong-contracts';
 import {
   type EditorHandle,
   type EditorStateOf,
+  IS_MAC,
   injectStyle,
   shortcutLabel,
 } from './internal.js';
@@ -397,6 +399,58 @@ export function defaultMenus(commands: Collection<Command>): Menu[] {
     ...aligns.map((command) => ({ command })),
   ];
   return entries.length ? [{ label: 'Format', entries }] : [];
+}
+
+/**
+ * The menus as text, one line per row — `Insert ▸ Break ▸ Page break  (⌘↵)`
+ * — labelled by the same rules `mountMenubar` renders them with. For an
+ * assistant that has to tell a person where something is in THIS app; it
+ * needs no editor and no DOM, so a build step can write it. `keybindings`
+ * are the registries to read shortcuts from (an editor's own + the host's);
+ * `mac` picks the ⌘ notation (default: the platform this runs on). Widget
+ * rows are listed by their label — their content is a picker, not a command.
+ */
+export function describeMenus(
+  menus: readonly Menu[],
+  options: {
+    keybindings?: readonly (KeybindingRegistry | undefined)[];
+    labels?: Record<string, string>;
+    mac?: boolean;
+  } = {},
+): string[] {
+  const labels = { ...DEFAULT_LABELS, ...(options.labels ?? {}) };
+  const mac = options.mac ?? IS_MAC;
+  const keyOf = (command: string): string | undefined => {
+    for (const r of options.keybindings ?? []) {
+      if (!r) continue;
+      for (const b of r) if (b.command === command) return keyLabel(b.key, mac);
+    }
+    return undefined;
+  };
+  const lines: string[] = [];
+  const walk = (entries: readonly MenuEntry[], path: string): void => {
+    for (const e of entries) {
+      if (e === 'separator') continue;
+      if ('submenu' in e) {
+        walk(e.submenu, `${path} ▸ ${e.label}`);
+        continue;
+      }
+      let label: string;
+      let key: string | undefined;
+      if ('command' in e) {
+        label = e.label ?? labels[e.command] ?? e.command;
+        key = keyOf(e.command);
+      } else if ('run' in e) {
+        label = e.label;
+        key = (e.shortcutOf && keyOf(e.shortcutOf)) ?? e.shortcut;
+      } else {
+        label = e.label;
+      }
+      lines.push(`${path} ▸ ${label}${key ? `  (${key})` : ''}`);
+    }
+  };
+  for (const m of menus) walk(m.entries, m.label);
+  return lines;
 }
 
 /**

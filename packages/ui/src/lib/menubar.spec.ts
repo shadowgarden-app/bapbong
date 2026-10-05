@@ -1,6 +1,9 @@
-import { Collection } from '@shadow-garden/bapbong-contracts';
+import {
+  Collection,
+  KeybindingRegistry,
+} from '@shadow-garden/bapbong-contracts';
 import type { Command } from '@shadow-garden/bapbong-contracts';
-import { defaultMenus } from './menubar.js';
+import { defaultMenus, describeMenus } from './menubar.js';
 
 // Dropdown open/close + keyboard nav are verified in-browser (repo convention:
 // package tests run in Node). Here we cover the pure default-menu structure.
@@ -35,6 +38,45 @@ describe('defaultMenus', () => {
         label: 'Format',
         entries: [{ command: 'bold' }, { command: 'underline' }],
       },
+    ]);
+  });
+});
+
+describe('describeMenus', () => {
+  it('lists every row by its menu path, with the label and shortcut the menubar shows', () => {
+    const keys = new KeybindingRegistry(true);
+    keys.add({ key: 'Mod-b', command: 'bold', source: 'core' });
+    const app = new KeybindingRegistry(true);
+    app.add({ key: 'Mod-s', command: 'save', source: 'app' });
+    const lines = describeMenus(
+      [
+        {
+          label: 'File',
+          entries: [
+            { label: 'Save', run: () => undefined, shortcutOf: 'save' },
+            'separator',
+            { label: 'Print', run: () => undefined, shortcut: '⌘P' },
+          ],
+        },
+        {
+          label: 'Format',
+          entries: [
+            {
+              label: 'Text',
+              submenu: [{ command: 'bold' }, { command: 'mystery' }],
+            },
+            { label: 'Margins', widget: () => null as unknown as HTMLElement },
+          ],
+        },
+      ],
+      { keybindings: [keys, app], labels: { mystery: 'Mystery' }, mac: true },
+    );
+    expect(lines).toEqual([
+      'File ▸ Save  (⌘S)',
+      'File ▸ Print  (⌘P)',
+      'Format ▸ Text ▸ Bold  (⌘B)',
+      'Format ▸ Text ▸ Mystery',
+      'Format ▸ Margins',
     ]);
   });
 });
