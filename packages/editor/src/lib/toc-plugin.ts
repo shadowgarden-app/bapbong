@@ -28,7 +28,8 @@ export interface TocPlugin extends EditorPlugin {
   fieldAt(pos?: number): ActiveField | null;
   /** Recompute the page number of every entry in the TOC field covering
    *  `pos` (the caret by default) from the CURRENT layout — Word's "Update
-   *  Field ▸ page numbers only". Returns how many entries changed. */
+   *  Field ▸ page numbers only". Returns how many entries changed. Once
+   *  every entry has a laid-out number the field is no longer `dirty`. */
   updatePageNumbers(pos?: number): number;
 }
 
@@ -63,13 +64,15 @@ function trailingNumber(
     // A page-number tail is digits or a roman numeral (w:pgNumType roman
     // sections put "ii" here). Letters beyond the roman alphabet stay
     // unmatched — a trailing word must never be mistaken for a number.
-    const m = /^(\s*)(\d+|[ivxlcdm]+|[IVXLCDM]+)\s*$/.exec(text);
+    // The number is the whole node ("\t12" split off by the importer) or
+    // follows the node's tab (an entry written here is one "Title\t1" run).
+    const m = /(^|\t)(\s*)(\d+|[ivxlcdm]+|[IVXLCDM]+)\s*$/.exec(text);
     if (m) {
-      const start = paraPos + 1 + offset + m[1].length;
+      const start = paraPos + 1 + offset + m.index + m[1].length + m[2].length;
       hit = {
         from: start,
-        to: start + m[2].length,
-        text: m[2],
+        to: start + m[3].length,
+        text: m[3],
         marks: child.marks,
       };
     } else if (text.trim()) {
@@ -122,26 +125,48 @@ export function tocPlugin(): TocPlugin {
       if (!active || active.field.kind !== 'toc') return 0;
       const { doc } = ctx.state;
       const edits: NumberSpan[] = [];
+      const entries: number[] = [];
+      let unresolved = 0;
       doc.forEach((node, offset) => {
         if (offset < active.from || offset >= active.to) return;
         if (node.type.name !== 'paragraph') return;
+        entries.push(offset);
         const name = entryAnchor(node);
         const tail = trailingNumber(node, offset);
         if (!name || !tail) return;
         const target = findBookmark(doc, name);
         if (target === null) return; // stale entry: leave its number alone
         const page = ctx?.caretRect(target)?.pageIndex;
-        if (page == null) return;
+        if (page == null) {
+          unresolved++;
+          return;
+        }
         // Display number, not physical index — w:pgNumType restart/format
         // (front matter "ii", body restarting at "1") applied by the layout.
         const text = ctx?.layout?.pageLabels?.[page] ?? String(page + 1);
         if (text !== tail.text) edits.push({ ...tail, text });
       });
-      if (edits.length === 0) return 0;
+      // `dirty` makes Word rebuild the TOC while it opens the file — before
+      // it has paginated, so every entry came out "1" (D-2610-T343). With
+      // real numbers in place the field is as fresh as one Word saved itself.
+      // One new object for the whole span: fieldAt groups entries by identity.
+      const clean =
+        active.field.dirty && unresolved === 0
+          ? { ...active.field, dirty: false }
+          : null;
+      if (edits.length === 0 && !clean) return 0;
+      const tr = ctx.state.tr;
+      // Attrs first: they keep every position where it was.
+      if (clean) {
+        for (const pos of entries) {
+          const node = doc.nodeAt(pos);
+          if (node?.attrs['field'] === active.field)
+            tr.setNodeAttribute(pos, 'field', clean);
+        }
+      }
       // Apply back-to-front so earlier edits don't shift later positions.
       // One pass: a changed number can itself repaginate the document, and
       // Word settles that the same way — by updating the field again.
-      const tr = ctx.state.tr;
       for (const e of edits.reverse()) {
         tr.replaceWith(
           e.from,
