@@ -267,6 +267,13 @@ export interface TocOptions {
   title?: string;
 }
 
+/** How update_toc refreshes the document's tables of contents. */
+export interface TocUpdateOptions {
+  /** Also list the headings as they are now (added, renamed, removed) —
+   *  Word's "Update entire table". Default: page numbers only. */
+  rebuild?: boolean;
+}
+
 /** One of the document's paragraph styles, as list_styles reports it. */
 export interface DocStyle {
   id: string;
@@ -456,6 +463,22 @@ export interface DocumentSession {
     opts?: MutationOptions,
   ): Promise<
     MutationResult & { entries: number; pageNumbers: 'updated' | 'pending' }
+  >;
+  /** Every table of contents in the document, brought up to date: page
+   *  numbers from the layout (when the host can lay it out, else
+   *  "pending"), and with `rebuild` the entries from the current headings.
+   *  Throws when the document has none. */
+  updateToc(
+    options: TocUpdateOptions,
+    opts?: MutationOptions,
+  ): Promise<
+    MutationResult & {
+      tables: number;
+      entries: number;
+      changed: number;
+      rebuilt: boolean;
+      pageNumbers: 'updated' | 'pending';
+    }
   >;
   /** The document's paragraph styles (hidden ones only when in use). Only
    *  when capabilities.styles. */

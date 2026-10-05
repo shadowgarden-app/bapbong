@@ -42,6 +42,7 @@ import type {
   PageSetup,
   SessionCapabilities,
   TocOptions,
+  TocUpdateOptions,
 } from './contract.js';
 import { PmDocSession, type PmSessionHost } from './pm-session.js';
 
@@ -286,6 +287,12 @@ export class HeadlessSession implements DocumentSession {
     MutationResult & { entries: number; pageNumbers: 'updated' | 'pending' }
   > {
     return this.inner.insertToc(options, anchor, opts);
+  }
+  updateToc(
+    options: TocUpdateOptions,
+    opts?: MutationOptions,
+  ): ReturnType<DocumentSession['updateToc']> {
+    return this.inner.updateToc(options, opts);
   }
   save(): Promise<void> {
     return this.inner.save();

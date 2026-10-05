@@ -30,6 +30,7 @@ import {
   type PageSetup,
   type SessionCapabilities,
   type TocOptions,
+  type TocUpdateOptions,
 } from './contract.js';
 
 export type SessionOpName =
@@ -48,6 +49,7 @@ export type SessionOpName =
   | 'editChrome'
   | 'listStyles'
   | 'insertToc'
+  | 'updateToc'
   | 'insertFootnote'
   | 'getSelection'
   | 'save'
@@ -188,6 +190,11 @@ function run(
         args[0] as TocOptions,
         args[1] as InsertAnchor,
         args[2] as MutationOptions | undefined,
+      );
+    case 'updateToc':
+      return session.updateToc(
+        args[0] as TocUpdateOptions,
+        args[1] as MutationOptions | undefined,
       );
     case 'editChrome':
       return session.editChrome(
@@ -353,6 +360,12 @@ export class RemoteSession implements DocumentSession {
     return this.call<Awaited<ReturnType<DocumentSession['insertToc']>>>(
       'insertToc',
       [options, anchor, opts],
+    );
+  }
+  updateToc(options: TocUpdateOptions, opts?: MutationOptions) {
+    return this.call<Awaited<ReturnType<DocumentSession['updateToc']>>>(
+      'updateToc',
+      [options, opts],
     );
   }
   listStyles() {

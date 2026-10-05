@@ -103,6 +103,9 @@ export class ReadOnlySession implements DocumentSession {
   > {
     this.refuse('insert a table of contents into this document');
   }
+  updateToc(): ReturnType<DocumentSession['updateToc']> {
+    this.refuse('update the table of contents of this document');
+  }
   save(): Promise<void> {
     this.refuse('save this document');
   }

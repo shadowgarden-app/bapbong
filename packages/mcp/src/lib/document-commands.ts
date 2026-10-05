@@ -1231,6 +1231,39 @@ export const insertToc = defineCommand({
     }),
 });
 
+export const updateToc = defineCommand({
+  name: 'update_toc',
+  title: 'Update the table of contents',
+  description:
+    "Bring the document's table(s) of contents up to date yourself — do not tell the user how to do it by hand. " +
+    'By default only the page numbers are recomputed from the layout (Word: "Update page numbers only"); ' +
+    'rebuild: true also lists the headings as they are now — added, renamed or removed ones (Word: "Update ' +
+    'entire table"). The result says how many tables and entries there are, how many page numbers changed, and ' +
+    'whether they come from the layout ("updated") or wait until the document is open in bapbong ("pending"). ' +
+    'Fails when the document has no table of contents — insert_toc adds one.',
+  input: {
+    documentId,
+    rebuild: z
+      .boolean()
+      .optional()
+      .describe(
+        'Also re-list the entries from the current headings. Default false: page numbers only.',
+      ),
+    expectedVersion,
+  },
+  effect: 'edit',
+  targets: (a) => [a.documentId],
+  run: (provider, a) =>
+    withSession(provider, a.documentId, async (s) =>
+      json(
+        await s.updateToc(
+          { ...(a.rebuild !== undefined ? { rebuild: a.rebuild } : {}) },
+          { expectedVersion: a.expectedVersion },
+        ),
+      ),
+    ),
+});
+
 export const listStyles = defineCommand({
   name: 'list_styles',
   title: "List the document's paragraph styles",
@@ -1294,6 +1327,7 @@ export const documentCommands: readonly AgentCommand<
   insertContent,
   insertFootnote,
   insertToc,
+  updateToc,
   deleteBlock,
   applyFormatting,
   editTable,

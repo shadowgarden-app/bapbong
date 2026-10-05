@@ -295,6 +295,7 @@ describe('createMcpServer (end-to-end over MCP)', () => {
       'replace_text',
       'save_document',
       'update_image',
+      'update_toc',
     ]);
   });
 

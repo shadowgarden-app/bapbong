@@ -38,6 +38,7 @@ import {
   type ChromeEdit,
   type DocStyle,
   type TocOptions,
+  type TocUpdateOptions,
   type PageSetup,
   type PageSetupChange,
   type SessionCapabilities,
@@ -101,9 +102,10 @@ export interface PmSessionHost {
    *  are read. */
   footnotes?(): Record<number, PMNode>;
   /** Lay the document out and fill in the page numbers of the table of
-   *  contents at `pos` (the editor's own "Update table of contents"); true
-   *  when it did. Absent → a new TOC's numbers are left pending. */
-  refreshToc?(pos: number): Promise<boolean>;
+   *  contents at `pos` (the editor's own "Update table of contents"): how
+   *  many entries changed, or null when it could not lay the document out.
+   *  Absent → TOC page numbers are left pending (Word fills them). */
+  refreshToc?(pos: number): Promise<number | null>;
   /** The styles the document's file defines (docx `documentStyles`).
    *  Absent → only Title / Subtitle / Normal, and no list_styles. */
   styles?(): Promise<
@@ -1145,59 +1147,8 @@ export class PmDocSession implements DocumentSession {
       );
     }
 
-    // Every listed heading needs a bookmark for its entry to jump to —
-    // Word's own "_Toc" names, reused when a heading already has one.
-    const taken = new Set<string>();
-    state.doc.descendants((n) => {
-      for (const b of (n.attrs['bookmarks'] as string[] | null) ?? [])
-        taken.add(b);
-      return true;
-    });
-    const mint = () => {
-      let name: string;
-      do name = `_Toc${Math.floor(1e8 + Math.random() * 9e8)}`;
-      while (taken.has(name));
-      taken.add(name);
-      return name;
-    };
     let tr = state.tr;
-    const anchors = headings.map(({ node, pos }) => {
-      const own = (node.attrs['bookmarks'] as string[] | null) ?? [];
-      const existing = own.find((b) => b.startsWith('_Toc'));
-      if (existing) return existing;
-      const name = mint();
-      tr = tr.setNodeMarkup(pos, undefined, {
-        ...node.attrs,
-        bookmarks: [...own, name],
-      });
-      return name;
-    });
-
-    // The entries: one field shared by all of them (it is what makes them
-    // one TOC), a right tab with a dot leader to the page number, and the
-    // whole entry a link to its heading. The number is a placeholder until
-    // something lays the document out; `dirty` asks Word to redo it.
-    const field = {
-      kind: 'toc',
-      instr: `TOC \\o "1-${levels}" \\h \\z \\u`,
-      dirty: true,
-    };
-    const width = Math.round(this.contentWidth());
-    const entries = headings.map(({ node }, i) => {
-      const level = node.attrs['heading'] as number;
-      return schema.nodes['paragraph'].create(
-        {
-          field,
-          styleId: `TOC${level}`,
-          indent: level > 1 ? { left: (level - 1) * 15 } : null,
-          spacing: { after: 7 },
-          tabs: [{ pos: width, val: 'right', leader: 'dot' }],
-        },
-        schema.text(`${node.textContent.trim()}\t1`, [
-          link.create({ href: `#${anchors[i]}` }),
-        ]),
-      );
-    });
+    const entries = this.tocEntries(tr, headings, levels);
     const title = options.title?.trim()
       ? schema.nodes['paragraph'].create({ spacing: { after: 11 } }, [
           schema.text(options.title.trim(), [
@@ -1216,14 +1167,141 @@ export class PmDocSession implements DocumentSession {
     const size = nodes.reduce((n, node) => n + node.nodeSize, 0);
     const firstEntry = insertAt + (title ? title.nodeSize : 0) + 1;
     const updated = this.host.refreshToc
-      ? await this.host.refreshToc(firstEntry).catch(() => false)
-      : false;
+      ? await this.host.refreshToc(firstEntry).catch(() => null)
+      : null;
     return {
       docVersion: this.host.getVersion(),
       range: { from: insertAt, to: insertAt + size },
       entries: entries.length,
-      pageNumbers: updated ? 'updated' : 'pending',
+      pageNumbers: updated === null ? 'pending' : 'updated',
     };
+  }
+
+  async updateToc(
+    options: TocUpdateOptions,
+    opts: MutationOptions = {},
+  ): Promise<
+    MutationResult & {
+      tables: number;
+      entries: number;
+      changed: number;
+      rebuilt: boolean;
+      pageNumbers: 'updated' | 'pending';
+    }
+  > {
+    this.checkVersion(opts.expectedVersion);
+    const spans = tocSpans(this.host.getState().doc);
+    if (spans.length === 0) {
+      throw new ContentError(
+        'This document has no table of contents to update — insert_toc adds one.',
+      );
+    }
+    const rebuilt = !!options.rebuild;
+    if (rebuilt) {
+      // Word's "Update entire table": the entries again from the headings
+      // as they are now (added, renamed, removed), each table keeping its
+      // own levels. Back to front, so earlier spans keep their positions.
+      const state = this.host.getState();
+      let tr = state.tr;
+      for (const span of [...spans].reverse()) {
+        const levels = tocLevels(span.field.instr);
+        // Positions as of `tr`: a later table may already be replaced.
+        const headings = this.textblocks()
+          .filter(({ node }) => {
+            const h = node.attrs['heading'] as number | null;
+            return !!h && h <= levels && node.textContent.trim().length > 0;
+          })
+          .map(({ node, pos }) => ({ node, pos: tr.mapping.map(pos) }));
+        if (headings.length === 0) {
+          throw new ContentError(
+            `There are no headings (levels 1-${levels}) left to list — the table of contents was left as it is.`,
+          );
+        }
+        // Bookmarks first: they change attrs only, so the span's positions
+        // still hold for the replacement.
+        const entries = this.tocEntries(tr, headings, levels, span.field.instr);
+        tr = tr.replaceWith(span.from, span.to, entries);
+      }
+      this.host.apply(tr);
+    }
+    // Page numbers from the layout, table by table (positions re-read: a
+    // rebuild or an earlier refresh may have moved them).
+    const refresh = this.host.refreshToc?.bind(this.host);
+    let changed = 0;
+    let laidOut = !!refresh;
+    const count = tocSpans(this.host.getState().doc).length;
+    for (let i = 0; refresh && i < count && laidOut; i++) {
+      const span = tocSpans(this.host.getState().doc)[i];
+      const n = span ? await refresh(span.from + 1).catch(() => null) : null;
+      if (n === null) laidOut = false;
+      else changed += n;
+    }
+    const after = tocSpans(this.host.getState().doc);
+    return {
+      docVersion: this.host.getVersion(),
+      tables: after.length,
+      entries: after.reduce((n, sp) => n + sp.count, 0),
+      changed,
+      rebuilt,
+      pageNumbers: laidOut ? 'updated' : 'pending',
+    };
+  }
+
+  /** The entries of a table of contents listing `headings`: one field
+   *  shared by all of them (it is what makes them one TOC), a right tab
+   *  with a dot leader to the page number, and the whole entry a link to
+   *  its heading — which gets a bookmark in `tr` when it has none. The
+   *  number is a placeholder until something lays the document out;
+   *  `dirty` asks Word to redo it. */
+  private tocEntries(
+    tr: Transaction,
+    headings: { node: PMNode; pos: number }[],
+    levels: number,
+    instr = `TOC \\o "1-${levels}" \\h \\z \\u`,
+  ): PMNode[] {
+    const { schema } = tr.doc.type;
+    const link = schema.marks['link'];
+    // Every listed heading needs a bookmark for its entry to jump to —
+    // Word's own "_Toc" names, reused when a heading already has one.
+    const taken = new Set<string>();
+    tr.doc.descendants((n) => {
+      for (const b of (n.attrs['bookmarks'] as string[] | null) ?? [])
+        taken.add(b);
+      return true;
+    });
+    const mint = () => {
+      let name: string;
+      do name = `_Toc${Math.floor(1e8 + Math.random() * 9e8)}`;
+      while (taken.has(name));
+      taken.add(name);
+      return name;
+    };
+    const anchors = headings.map(({ node, pos }) => {
+      const cur = tr.doc.nodeAt(pos) ?? node;
+      const own = (cur.attrs['bookmarks'] as string[] | null) ?? [];
+      const existing = own.find((b) => b.startsWith('_Toc'));
+      if (existing) return existing;
+      const name = mint();
+      tr.setNodeAttribute(pos, 'bookmarks', [...own, name]);
+      return name;
+    });
+    const field = { kind: 'toc', instr, dirty: true };
+    const width = Math.round(this.contentWidth());
+    return headings.map(({ node }, i) => {
+      const level = node.attrs['heading'] as number;
+      return schema.nodes['paragraph'].create(
+        {
+          field,
+          styleId: `TOC${level}`,
+          indent: level > 1 ? { left: (level - 1) * 15 } : null,
+          spacing: { after: 7 },
+          tabs: [{ pos: width, val: 'right', leader: 'dot' }],
+        },
+        schema.text(`${node.textContent.trim()}\t1`, [
+          link.create({ href: `#${anchors[i]}` }),
+        ]),
+      );
+    });
   }
 
   async listStyles(): Promise<DocStyle[]> {
@@ -2096,6 +2174,45 @@ function blockImages(block: PMNode): { node: PMNode; offset: number }[] {
     if (child.type.name === 'image') out.push({ node: child, offset });
   });
   return out;
+}
+
+/** Each table of contents in the body: its run of consecutive top-level
+ *  paragraphs sharing one TOC field object (the model's fieldAt rule). */
+function tocSpans(doc: PMNode): {
+  field: { kind: string; instr: string };
+  from: number;
+  to: number;
+  count: number;
+}[] {
+  const spans: {
+    field: { kind: string; instr: string };
+    from: number;
+    to: number;
+    count: number;
+  }[] = [];
+  doc.forEach((node, offset) => {
+    const f = node.attrs['field'] as { kind?: string; instr?: string } | null;
+    const last = spans[spans.length - 1];
+    if (f && last && last.field === f && last.to === offset) {
+      last.to = offset + node.nodeSize;
+      last.count++;
+    } else if (f?.kind === 'toc' && f.instr) {
+      spans.push({
+        field: f as { kind: string; instr: string },
+        from: offset,
+        to: offset + node.nodeSize,
+        count: 1,
+      });
+    }
+  });
+  return spans;
+}
+
+/** The heading levels a TOC instruction lists — `\\o "1-3"` → 3. */
+function tocLevels(instr: string): number {
+  const m = /\\o\s+"\d+-(\d+)"/.exec(instr);
+  const n = m ? Number(m[1]) : 3;
+  return n >= 1 && n <= 9 ? n : 3;
 }
 
 /**
